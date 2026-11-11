@@ -53,7 +53,11 @@ describe('createBailianMcpClient', () => {
     expect(result).toEqual({
       ok: true,
       results: [{ title: '上证指数', url: 'https://a.example/1', snippet: '3663.72' }],
-      source: { name: '百炼联网搜索', at: '2026-11-11T02:30:00.000Z' },
+      source: {
+        name: '百炼联网搜索',
+        nameEn: 'Bailian Web Search',
+        at: '2026-11-11T02:30:00.000Z',
+      },
     });
     expect(server.calls.map((call) => call.body.method)).toEqual([
       'initialize',

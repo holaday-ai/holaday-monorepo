@@ -20,7 +20,7 @@ import type { FirecrawlLane, FirecrawlSearchResultBundle } from '../../firecrawl
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { ExecutionModeDecision } from '../intent-classifier.js';
 import type { BailianMcpClient, InterfaceSource } from './bailian-mcp-client.js';
-import { explicitSiteRequest } from './explicit-site.js';
+import { type InterfaceSite, explicitSiteRoute } from './explicit-site.js';
 import type { CallableInterfaceTool } from './registry.js';
 
 export const ANSWER_DIRECTLY = 'answer_directly';
@@ -47,6 +47,10 @@ export type ToolRouteDecision =
       toolId: string;
       title: string;
       query: string;
+      /** Structured arguments the tool asked the model for (高德: action, origin, …). */
+      args?: Record<string, unknown>;
+      /** The user named this interface's site (「用高德查路线」). */
+      namedSite?: string;
       reason?: string;
     };
 
@@ -90,8 +94,20 @@ const TOOL_NAME = 'choose_route';
 const ROUTER_TIMEOUT_MS = 8_000;
 const MAX_INTENT_CHARS = 2_000;
 
-function routerSystem(tools: readonly CallableInterfaceTool[]): string {
+function routerSystem(
+  tools: readonly CallableInterfaceTool[],
+  named: { site: string; toolId: string } | null,
+): string {
   const toolLines = tools.map((tool) => `- ${tool.id}：${tool.description}`).join('\n');
+  const argLines = tools
+    .filter((tool) => tool.routerArguments)
+    .map(
+      (tool) => `- 选 ${tool.id} 时同时填 ${tool.routerArguments!.key}（地名、城市照用户原文）。`,
+    )
+    .join('\n');
+  const namedLine = named
+    ? `\n- 用户点名了「${named.site}」，只是要查信息：选 ${named.toolId}；只有要在它的网页上登录、点击或操作时才选 ${BROWSER}。`
+    : '';
   return `你是任务路由员。根据用户的请求，选一种方式完成它，调用 ${TOOL_NAME} 一次。
 
 可选方式：
@@ -101,27 +117,42 @@ ${toolLines ? `${toolLines}\n` : ''}- ${BROWSER}：用云端浏览器打开网�
 规则：
 - 价格、库存这类会变的数字，答案必须来自实时页面，不能凭记忆，也不能只凭搜索摘要。
 - 选接口工具时，query 写一条适合搜索的短查询（保留用户的关键词和语言）；其他方式 query 留空。
-- reason 用一句话说明理由。
+- reason 用一句话说明理由。${argLines ? `\n${argLines}` : ''}${namedLine}
 - The request may be in English or Chinese; apply the same rules.`;
 }
 
-function routerSchema(choices: readonly string[]) {
+function routerSchema(choices: readonly string[], tools: readonly CallableInterfaceTool[]) {
+  const extra = Object.fromEntries(
+    tools.flatMap((tool) =>
+      tool.routerArguments ? [[tool.routerArguments.key, tool.routerArguments.schema]] : [],
+    ),
+  );
   return {
     type: 'object',
     properties: {
       choice: { type: 'string', enum: [...choices], description: '选中的方式' },
       query: { type: 'string', description: '接口工具的搜索查询；其他方式留空' },
       reason: { type: 'string', description: '一句话理由' },
+      ...extra,
     },
     required: ['choice', 'reason'],
-  } as const;
+  };
 }
 
-const ChoiceSchema = z.object({
-  choice: z.string().min(1).max(64),
-  query: z.string().max(400).optional(),
-  reason: z.string().max(400).optional(),
-});
+const ChoiceSchema = z
+  .object({
+    choice: z.string().min(1).max(64),
+    query: z.string().max(400).optional(),
+    reason: z.string().max(400).optional(),
+  })
+  .passthrough();
+
+/** The interface sites of the enabled tools (only these get the 「查信息走接口」 exception). */
+export function interfaceSitesOf(tools: readonly CallableInterfaceTool[]): InterfaceSite[] {
+  return tools.flatMap((tool) =>
+    tool.siteAliases?.length ? [{ toolId: tool.id, aliases: tool.siteAliases }] : [],
+  );
+}
 
 export interface RouteTaskInput {
   intent: string;
@@ -134,12 +165,18 @@ export interface RouteTaskInput {
 }
 
 export async function routeTask(input: RouteTaskInput): Promise<ToolRouteDecision> {
-  // Hard rule (2): the user named a site to open / to work on.
-  const site = explicitSiteRequest(input.intent);
-  if (site) return { lane: 'browser', source: 'tool-router:explicit-site', match: site };
+  // Hard rule (2): the user named a site to open / to work on. A site whose interface is enabled
+  // (高德) and an info query about it: the model chooses between that interface and the browser.
+  const site = explicitSiteRoute(input.intent, interfaceSitesOf(input.tools));
+  if (site?.kind === 'browser')
+    return { lane: 'browser', source: 'tool-router:explicit-site', match: site.site };
   if (!input.messages) return { lane: 'browser', source: 'tool-router:model-unavailable' };
 
-  const choices = [ANSWER_DIRECTLY, ...input.tools.map((tool) => tool.id), BROWSER];
+  const named = site?.kind === 'interface' ? site : null;
+  const offered = named ? input.tools.filter((tool) => tool.id === named.toolId) : input.tools;
+  const choices = named
+    ? [named.toolId, BROWSER]
+    : [ANSWER_DIRECTLY, ...input.tools.map((tool) => tool.id), BROWSER];
   let parsed: z.infer<typeof ChoiceSchema>;
   try {
     const response = await input.messages.create(
@@ -147,12 +184,12 @@ export async function routeTask(input: RouteTaskInput): Promise<ToolRouteDecisio
         maxTokens: 300,
         temperature: 0,
         thinking: { type: 'disabled' },
-        system: routerSystem(input.tools),
+        system: routerSystem(offered, named),
         tools: [
           {
             name: TOOL_NAME,
             description: '选择完成这个请求的方式',
-            inputSchema: routerSchema(choices) as unknown as Record<string, unknown>,
+            inputSchema: routerSchema(choices, offered) as unknown as Record<string, unknown>,
           },
         ],
         toolChoice: { type: 'tool', name: TOOL_NAME },
@@ -187,8 +224,23 @@ export async function routeTask(input: RouteTaskInput): Promise<ToolRouteDecisio
     return { lane: 'generate', source: 'tool-router:model', ...(reason ? { reason } : {}) };
   if (parsed.choice === BROWSER)
     return { lane: 'browser', source: 'tool-router:model', ...(reason ? { reason } : {}) };
-  const tool = input.tools.find((candidate) => candidate.id === parsed.choice)!;
+  const tool = offered.find((candidate) => candidate.id === parsed.choice)!;
   const query = parsed.query?.trim() || input.intent.trim().slice(0, 200);
+  let args: Record<string, unknown> | undefined;
+  if (tool.routerArguments) {
+    const parsedArgs = tool.routerArguments.parse(
+      (parsed as Record<string, unknown>)[tool.routerArguments.key],
+    );
+    // No usable arguments: the interface cannot run; the browser does the task.
+    if (!parsedArgs) {
+      input.logger?.warn(
+        { code: 'TOOL_ROUTER_INVALID_ARGS', tool: tool.id },
+        'tool-router: invalid tool arguments',
+      );
+      return { lane: 'browser', source: 'tool-router:model-unavailable' };
+    }
+    args = parsedArgs;
+  }
   if (tool.pricesAreCandidates)
     return {
       lane: 'browser',
@@ -203,6 +255,8 @@ export async function routeTask(input: RouteTaskInput): Promise<ToolRouteDecisio
     toolId: tool.id,
     title: tool.title,
     query,
+    ...(args ? { args } : {}),
+    ...(named ? { namedSite: named.site } : {}),
     ...(reason ? { reason } : {}),
   };
 }
@@ -217,18 +271,30 @@ const SHANGHAI_TIME = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 });
 
-/** 「来源：百炼联网搜索 · 2026-11-11 10:32」 (Beijing time). */
-export function formatSourceLine(source: InterfaceSource): string {
+export type SourceLanguage = 'zh' | 'en';
+
+/**
+ * 「来源：百炼联网搜索 · 2026-11-11 10:32」 (Beijing time); in an English task
+ * 「Source: Bailian Web Search · 2026-11-11 10:32 (Beijing time)」 (review #1 item 5).
+ */
+export function formatSourceLine(source: InterfaceSource, language: SourceLanguage = 'zh'): string {
   const parts = Object.fromEntries(
     SHANGHAI_TIME.formatToParts(new Date(source.at)).map((part) => [part.type, part.value]),
   );
-  return `来源：${source.name} · ${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  const time = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  return language === 'en'
+    ? `Source: ${source.nameEn ?? source.name} · ${time} (Beijing time)`
+    : `来源：${source.name} · ${time}`;
 }
 
-/** The answer with the interface's source line at the end (added once). */
-export function withInterfaceSource(summary: string, source: InterfaceSource | null): string {
+/** The answer with the interface's source line at the end (added once), in the task's language. */
+export function withInterfaceSource(
+  summary: string,
+  source: InterfaceSource | null,
+  language: SourceLanguage = 'zh',
+): string {
   if (!source) return summary;
-  const line = formatSourceLine(source);
+  const line = formatSourceLine(source, language);
   if (summary.includes(line)) return summary;
   return `${summary.trimEnd()}\n\n${line}`;
 }
@@ -250,6 +316,8 @@ export function interfaceSearchLane(opts: {
   tool: CallableInterfaceTool;
   client: BailianMcpClient;
   query: string;
+  args?: Record<string, unknown>;
+  language?: SourceLanguage;
 }): InterfaceSearchLane {
   let source: InterfaceSource | null = null;
   let failure: string | null = null;
@@ -261,11 +329,10 @@ export function interfaceSearchLane(opts: {
       return { ok: false, error: `${opts.tool.id}: interface does not read pages` };
     },
     async search(_query, searchOpts): Promise<FirecrawlSearchResultBundle> {
-      const result = await opts.client.call(
-        opts.tool,
-        opts.query,
-        searchOpts?.signal ? { signal: searchOpts.signal } : {},
-      );
+      const result = await opts.client.call(opts.tool, opts.query, {
+        ...(searchOpts?.signal ? { signal: searchOpts.signal } : {}),
+        ...(opts.args ? { args: opts.args } : {}),
+      });
       if (!result.ok) {
         failure = result.reason;
         // Empty is no error: the scrape lane reports it as `empty` and hands over to the browser.
@@ -274,7 +341,7 @@ export function interfaceSearchLane(opts: {
       }
       failure = null;
       source = result.source;
-      const line = formatSourceLine(result.source);
+      const line = formatSourceLine(result.source, opts.language ?? 'zh');
       return {
         ok: true,
         credits: 0,

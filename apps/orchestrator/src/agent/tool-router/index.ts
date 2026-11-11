@@ -8,7 +8,7 @@ export {
   type InterfaceSource,
   createBailianMcpClient,
 } from './bailian-mcp-client.js';
-export { explicitSiteRequest } from './explicit-site.js';
+export { explicitSiteRequest, explicitSiteRoute } from './explicit-site.js';
 export {
   type CallableInterfaceTool,
   INTERFACE_TOOLS,
@@ -17,10 +17,12 @@ export {
 } from './registry.js';
 export {
   type InterfaceSearchLane,
+  type SourceLanguage,
   type ToolRouteDecision,
   decideExecutionRoute,
   formatSourceLine,
   interfaceSearchLane,
+  interfaceSitesOf,
   routeTask,
   toExecutionModeDecision,
   withInterfaceSource,

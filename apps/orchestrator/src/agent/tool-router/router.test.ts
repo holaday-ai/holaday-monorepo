@@ -273,3 +273,127 @@ describe('interfaceSearchLane (hard rule 1 + source line)', () => {
     expect(withInterfaceSource('answer', null)).toBe('answer');
   });
 });
+
+describe('高德 routing (review #1 item 3)', () => {
+  const WITH_AMAP = enabledInterfaceTools('bailian_web_search,amap_maps');
+  const ROUTE_ARGS = { action: 'route', origin: '杭州东站', destination: '西湖断桥', city: '杭州' };
+
+  it.each([
+    '在高德地图上查从杭州东站到西湖断桥的路线',
+    '用高德查一下杭州东站到断桥怎么走',
+    '上高德查一下杭州东站去断桥',
+    '打开高德地图查杭州东站到断桥的公交',
+    'Use Amap to find the route from Hangzhou East Station to Broken Bridge',
+  ])('%s → the 高德 interface (the model fills its arguments)', async (intent) => {
+    const model = fakeModel({ choice: 'amap_maps', amap: ROUTE_ARGS, reason: '路线' });
+    const decision = await routeTask({ intent, messages: model, tools: WITH_AMAP });
+    expect(decision).toMatchObject({
+      lane: 'interface',
+      toolId: 'amap_maps',
+      title: '高德地图',
+      args: ROUTE_ARGS,
+    });
+    expect(decision).toHaveProperty('namedSite');
+    // Only 高德 or the browser are offered once the user named 高德.
+    const request = model.create.mock.calls[0]?.[0];
+    expect(request.tools[0].inputSchema.properties.choice.enum).toEqual(['amap_maps', 'browser']);
+    expect(request.tools[0].inputSchema.properties.amap.properties.action.enum).toContain('route');
+    expect(request.system).toContain('只有要在它的网页上登录、点击或操作时才选 browser');
+  });
+
+  it.each([
+    ['打开高德地图网页查一下杭州东站到断桥的路线', '高德地图'],
+    ['打开 amap.com 看看杭州东站到断桥', 'amap.com'],
+    ['在高德地图网站上登录我的账号看收藏的地点', '高德地图'],
+    ['用高德地图帮我截图这条路线', '高德地图'],
+    ['open the Amap website and check the route', 'Amap'],
+  ])('%s → browser (the page itself, or operating on it)', async (intent, site) => {
+    const model = fakeModel({ choice: 'amap_maps', amap: ROUTE_ARGS, reason: 'r' });
+    const decision = await routeTask({ intent, messages: model, tools: WITH_AMAP });
+    expect(decision).toEqual({ lane: 'browser', source: 'tool-router:explicit-site', match: site });
+    expect(model.create).not.toHaveBeenCalled();
+  });
+
+  it('without the 高德 tool enabled, naming 高德 is an explicit site (browser)', async () => {
+    const model = fakeModel({ choice: 'bailian_web_search', reason: 'r' });
+    const decision = await routeTask({
+      intent: '在高德地图上查从杭州东站到西湖断桥的路线',
+      messages: model,
+      tools: TOOLS,
+    });
+    expect(decision).toMatchObject({ lane: 'browser', source: 'tool-router:explicit-site' });
+  });
+
+  it('an unnamed route question lets the model pick 高德 among all tools', async () => {
+    const model = fakeModel({ choice: 'amap_maps', amap: ROUTE_ARGS, reason: '路线' });
+    const decision = await routeTask({
+      intent: '杭州东站到西湖断桥坐地铁怎么走',
+      messages: model,
+      tools: WITH_AMAP,
+    });
+    expect(decision).toMatchObject({ lane: 'interface', toolId: 'amap_maps', args: ROUTE_ARGS });
+    expect(decision).not.toHaveProperty('namedSite');
+    const request = model.create.mock.calls[0]?.[0];
+    expect(request.tools[0].inputSchema.properties.choice.enum).toEqual([
+      'answer_directly',
+      'bailian_web_search',
+      'amap_maps',
+      'browser',
+    ]);
+  });
+
+  it('goes to the browser when the model picks 高德 without usable arguments', async () => {
+    for (const amap of [undefined, { action: 'route', origin: '杭州东站' }]) {
+      const decision = await routeTask({
+        intent: '用高德查杭州东站到断桥',
+        messages: fakeModel({ choice: 'amap_maps', amap, reason: 'r' }),
+        tools: WITH_AMAP,
+      });
+      expect(decision).toEqual({ lane: 'browser', source: 'tool-router:model-unavailable' });
+    }
+  });
+
+  it('hands the arguments to the interface and a failed 高德 call stays a failure (→ browser)', async () => {
+    const amap = WITH_AMAP.find((tool) => tool.id === 'amap_maps')!;
+    const client = fakeClient({
+      ok: false,
+      reason: 'quota',
+      detail: 'USER_DAILY_QUERY_OVER_LIMIT',
+    });
+    const lane = interfaceSearchLane({ tool: amap, client, query: 'q', args: ROUTE_ARGS });
+    expect(await lane.search('q')).toEqual({ ok: false, error: 'amap_maps: quota' });
+    expect(client.call).toHaveBeenCalledWith(amap, 'q', { args: ROUTE_ARGS });
+    expect(lane.lastFailure()).toBe('quota');
+  });
+});
+
+describe('source line language (review #1 item 5)', () => {
+  const source = { name: '百炼联网搜索', nameEn: 'Bailian Web Search', at: AT };
+  const EN_LINE = 'Source: Bailian Web Search · 2026-11-11 10:30 (Beijing time)';
+
+  it('is English for an English task, Chinese otherwise', () => {
+    expect(formatSourceLine(source, 'en')).toBe(EN_LINE);
+    expect(formatSourceLine(source, 'zh')).toBe(SOURCE_LINE);
+    expect(formatSourceLine(source)).toBe(SOURCE_LINE);
+    expect(formatSourceLine({ name: '高德地图', at: AT }, 'en')).toBe(
+      'Source: 高德地图 · 2026-11-11 10:30 (Beijing time)',
+    );
+    const answer = withInterfaceSource('The SSE closed at 3663.72.', source, 'en');
+    expect(answer).toBe(`The SSE closed at 3663.72.\n\n${EN_LINE}`);
+    expect(withInterfaceSource(answer, source, 'en')).toBe(answer);
+  });
+
+  it('puts the English line on the rows of an English task', async () => {
+    const client = fakeClient({
+      ok: true,
+      results: [{ title: 'SSE', url: 'https://a.example/1', snippet: '3663.72' }],
+      source,
+    });
+    const lane = interfaceSearchLane({ tool: WEB, client, query: 'q', language: 'en' });
+    const bundle = await lane.search('q');
+    expect(bundle).toMatchObject({
+      ok: true,
+      results: [{ markdown: `# SSE\n\n3663.72\n\n${EN_LINE}` }],
+    });
+  });
+});

@@ -362,8 +362,11 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  /** Interface tools the router may offer (comma list of registry ids); unknown ids ignored. */
-  TOOL_ROUTER_TOOLS: z.string().default('bailian_web_search'),
+  /**
+   * Interface tools the router may offer (comma list of registry ids); unknown ids ignored.
+   * Review #1: 高德 (amap_maps, BOSS enabled it) is on by default with the web search.
+   */
+  TOOL_ROUTER_TOOLS: z.string().default('bailian_web_search,amap_maps'),
   /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])

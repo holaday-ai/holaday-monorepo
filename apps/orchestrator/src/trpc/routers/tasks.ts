@@ -9,6 +9,7 @@ import {
   gateRoleForUser,
   newExternalId,
   normalizeSkillIds,
+  replyLanguage,
   skillById,
   stripToolCallBlocks,
   videoParameterIssue,
@@ -4616,6 +4617,9 @@ export const tasksRouter = router({
                       tool: interfaceTool,
                       client: taskToolRouter.client,
                       query: interfaceRoute.query,
+                      ...(interfaceRoute.args ? { args: interfaceRoute.args } : {}),
+                      // 复审 #1 item 5: the source line follows the task's language.
+                      language: replyLanguage(input.intent, userRow.modelDataRegion),
                     })
                   : null;
               const scrapeSourceLane = interfaceLane ?? ctx.firecrawl;
@@ -4984,6 +4988,7 @@ export const tasksRouter = router({
                           ),
                         ),
                         interfaceLane?.lastSource() ?? null,
+                        replyLanguage(input.intent, userRow.modelDataRegion),
                       ),
                     };
                   } else if (
@@ -5235,6 +5240,7 @@ export const tasksRouter = router({
                           toolRoute: {
                             toolId: interfaceRoute.toolId,
                             query: interfaceRoute.query,
+                            ...(interfaceRoute.args ? { args: interfaceRoute.args } : {}),
                             ...(interfaceLane?.lastSource()
                               ? { source: interfaceLane.lastSource() }
                               : {}),

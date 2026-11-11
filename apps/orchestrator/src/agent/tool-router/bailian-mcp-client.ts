@@ -9,7 +9,16 @@
  * only in the Authorization header; it is never logged, returned or put in a URL. Used only
  * while `TOOL_ROUTER_V2` is on.
  */
-import type { CallableInterfaceTool, InterfaceResult, McpContentItem } from './registry.js';
+import type { CallableInterfaceTool } from './registry.js';
+import {
+  InterfaceCallError,
+  type InterfaceCallFailure,
+  type InterfaceResult,
+  type McpContentItem,
+  type McpSession,
+} from './types.js';
+
+export type { InterfaceCallFailure } from './types.js';
 
 export const BAILIAN_MCP_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1/mcps';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -18,20 +27,11 @@ const PROTOCOL_VERSION = '2025-03-26';
 export interface InterfaceSource {
   /** Interface name shown to the user (registry title). */
   name: string;
+  /** The same name for English tasks (registry titleEn). */
+  nameEn?: string;
   /** When the interface answered (ISO 8601). */
   at: string;
 }
-
-export type InterfaceCallFailure =
-  | 'not_configured'
-  | 'not_enabled'
-  | 'http_error'
-  | 'rpc_error'
-  | 'tool_error'
-  | 'malformed'
-  | 'empty'
-  | 'timeout'
-  | 'network';
 
 export type InterfaceCallResult =
   | { ok: true; results: InterfaceResult[]; source: InterfaceSource }
@@ -49,7 +49,7 @@ export interface BailianMcpClient {
   call(
     tool: CallableInterfaceTool,
     query: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; args?: Record<string, unknown> },
   ): Promise<InterfaceCallResult>;
 }
 
@@ -61,15 +61,6 @@ interface RpcReply {
     error?: { code?: number; message?: string };
   } | null;
   text: string;
-}
-
-class InterfaceCallError extends Error {
-  constructor(
-    readonly reason: InterfaceCallFailure,
-    readonly detail?: string,
-  ) {
-    super(reason);
-  }
 }
 
 /** The JSON-RPC reply from a JSON body or the last JSON `data:` line of an event stream. */
@@ -177,14 +168,33 @@ export function createBailianMcpClient(options: BailianMcpClientOptions): Bailia
         );
         // A notification has no reply body worth reading; its failure is not the call's.
         await rpc('notifications/initialized', {}, true).catch(() => null);
-        const result = expectOk(
-          await rpc('tools/call', { name: tool.mcpTool, arguments: tool.buildArguments(query) }),
-        );
-        if (result.isError === true) throw new InterfaceCallError('tool_error');
-        if (!Array.isArray(result.content)) throw new InterfaceCallError('malformed');
-        const results = tool.readResults(result.content as McpContentItem[]);
+        const session: McpSession = {
+          async callTool(name, args) {
+            const result = expectOk(await rpc('tools/call', { name, arguments: args }));
+            if (!Array.isArray(result.content)) throw new InterfaceCallError('malformed');
+            return {
+              isError: result.isError === true,
+              content: result.content as McpContentItem[],
+            };
+          },
+        };
+        let results: InterfaceResult[];
+        if (tool.run) {
+          // A multi-step plan (高德): it reads its own results and throws its own failures.
+          results = await tool.run(session, { query, ...(opts.args ? { args: opts.args } : {}) });
+        } else if (tool.mcpTool && tool.buildArguments && tool.readResults) {
+          const result = await session.callTool(tool.mcpTool, tool.buildArguments(query));
+          if (result.isError) throw new InterfaceCallError('tool_error');
+          results = tool.readResults(result.content);
+        } else {
+          throw new InterfaceCallError('not_configured');
+        }
         if (results.length === 0) return { ok: false, reason: 'empty' };
-        return { ok: true, results, source: { name: tool.title, at: now().toISOString() } };
+        return {
+          ok: true,
+          results,
+          source: { name: tool.title, nameEn: tool.titleEn, at: now().toISOString() },
+        };
       } catch (error) {
         if (error instanceof InterfaceCallError)
           return {
