@@ -3126,7 +3126,7 @@ export const WRITE_INTENT_RE =
 const READ_VERB_RE =
   /读|阅读|查|看|列出|列一下|列举|搜|检索|找|比较|比一下|比价|对比|获取|提取|抓取|总结|汇总|概括|摘要|告诉我|说说|统计|核对|识别|\b(?:read|look\s+up|check|find|search|list|compare|get|show|tell\s+me|what|which|how\s+(?:much|many))\b/i;
 const QUESTION_RE =
-  /多少|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
+  /多少|多久|多长时间|多远|怎么走|怎么去|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
 /** Opening, visiting or naming the browser — no action of its own. */
 const NAV_ONLY_RE =
   /^(?:请|麻烦|帮我|帮忙|给我|你|使用|用|通过|在|到|去|进入|打开|访问|前往|登上|云端|真实|浏览器|一下|这个|那个|页面|网页|网站|链接|地址|[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*|[\s:：])*$/iu;

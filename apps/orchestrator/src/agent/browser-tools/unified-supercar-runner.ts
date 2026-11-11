@@ -450,6 +450,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
       labelForRef: (ref) => labelForRef(lastSnapshot, ref),
       park: parkForReply,
+      readOnly: isReadOnlyIntent(opts.intent),
       aborted: () => controller.signal.aborted,
       stillLive: async () =>
         !controller.signal.aborted &&
