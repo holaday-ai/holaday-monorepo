@@ -141,7 +141,11 @@ function wiringGateway(wiring: ProductionModelRuntimeWiring): ModelGateway {
       provider: resolution.provider,
       region: resolution.region,
       messages: settings.enabled
-        ? (ref) => normalizeMessagesAdapter(resolution.messages(purposeOf(ref)))
+        ? (ref) =>
+            normalizeMessagesAdapter(
+              resolution.messages(purposeOf(ref)),
+              baseModelRole(ref ?? role),
+            )
         : (ref) => resolution.messages(purposeOf(ref)),
       responses: (ref) => resolution.responses(purposeOf(ref)),
     };
@@ -189,7 +193,8 @@ function coreGateway(deps: CoreModelGatewayDeps): CoreModelGateway {
         kind: 'ready',
         region: runtime.region,
         messages: settings.enabled
-          ? (ref) => normalizeMessagesAdapter(runtime.messages(purposeOf(ref)))
+          ? (ref) =>
+              normalizeMessagesAdapter(runtime.messages(purposeOf(ref)), baseModelRole(ref ?? role))
           : (ref) => runtime.messages(purposeOf(ref)),
         responses: (ref) => runtime.responses(purposeOf(ref)),
       };

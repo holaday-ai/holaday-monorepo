@@ -118,10 +118,11 @@ export type NeutralToolChoice =
 export interface NeutralMessagesRequest {
   maxTokens: number;
   /**
-   * Explicitly disable provider reasoning for short, deterministic output lanes. `enabled` (no
-   * budget) is only sent by the REBUILD-2 gateway to make the endpoint's default explicit.
+   * Explicitly disable provider reasoning for short, deterministic output lanes. `enabled` is
+   * only sent by the REBUILD-2 gateway, with `budgetTokens` (wire `budget_tokens`); the gateway
+   * then sizes `maxTokens` as answer room + budget (DashScope counts thinking in max_tokens).
    */
-  thinking?: { type: 'disabled' } | { type: 'enabled' };
+  thinking?: { type: 'disabled' } | { type: 'enabled'; budgetTokens?: number };
   system?: string | ReadonlyArray<NeutralSystemBlock>;
   messages: ReadonlyArray<NeutralMessage>;
   tools?: ReadonlyArray<NeutralToolDefinition>;
@@ -164,7 +165,7 @@ export interface MessagesAdapter {
 export interface AnthropicCompatibleRequest {
   model: string;
   max_tokens: number;
-  thinking?: { type: 'disabled' } | { type: 'enabled' };
+  thinking?: { type: 'disabled' } | { type: 'enabled'; budget_tokens?: number };
   system?: unknown;
   messages: unknown[];
   tools?: unknown[];
@@ -381,7 +382,7 @@ function toAnthropicCompatibleRequest(
   return {
     model,
     max_tokens: request.maxTokens,
-    ...(request.thinking !== undefined ? { thinking: { type: request.thinking.type } } : {}),
+    ...(request.thinking !== undefined ? { thinking: mapThinking(request.thinking) } : {}),
     ...(request.system !== undefined ? { system: mapSystem(request.system) } : {}),
     messages: request.messages.map((message) => ({
       role: message.role,
@@ -450,6 +451,15 @@ function mapInputContentBlock(block: NeutralInputContentBlock): unknown {
   }
 }
 
+function mapThinking(
+  thinking: NonNullable<NeutralMessagesRequest['thinking']>,
+): NonNullable<AnthropicCompatibleRequest['thinking']> {
+  if (thinking.type === 'disabled') return { type: 'disabled' };
+  return thinking.budgetTokens !== undefined
+    ? { type: 'enabled', budget_tokens: thinking.budgetTokens }
+    : { type: 'enabled' };
+}
+
 function mapToolChoice(choice: NeutralToolChoice): unknown {
   return choice.type === 'tool' ? { type: 'tool', name: choice.name } : { type: choice.type };
 }
@@ -457,6 +467,13 @@ function mapToolChoice(choice: NeutralToolChoice): unknown {
 function validateRequest(request: NeutralMessagesRequest): void {
   if (!Number.isSafeInteger(request.maxTokens) || request.maxTokens <= 0) {
     throw new MessagesAdapterError('INVALID_REQUEST', 'Message request is invalid');
+  }
+  if (request.thinking?.type === 'enabled' && request.thinking.budgetTokens !== undefined) {
+    const budget = request.thinking.budgetTokens;
+    // Thinking counts inside max_tokens: a budget that leaves no answer room is a bug.
+    if (!Number.isSafeInteger(budget) || budget <= 0 || budget >= request.maxTokens) {
+      throw new MessagesAdapterError('INVALID_REQUEST', 'Message request is invalid');
+    }
   }
   if (request.messages.length === 0) {
     throw new MessagesAdapterError('INVALID_REQUEST', 'Message request is invalid');

@@ -55,29 +55,48 @@ describe('normalizeMessagesAdapter', () => {
         stopReason: 'end_turn',
       }),
     );
-    const result = await normalizeMessagesAdapter(adapter).create({
+    const result = await normalizeMessagesAdapter(adapter, 'judge').create({
       ...BASE,
       tools: [TOOL],
       toolChoice: { type: 'tool', name: 'emit' },
     });
     expect(result.stopReason).toBe('tool_use');
-    const plain = await normalizeMessagesAdapter(fakeAdapter(response()).adapter).create(BASE);
+    const plain = await normalizeMessagesAdapter(fakeAdapter(response()).adapter, 'judge').create(
+      BASE,
+    );
     expect(plain.stopReason).toBe('end_turn');
   });
 
-  it('(2) states thinking on every Qwen request, keeping the effective default', async () => {
+  it('(2) states thinking on every Qwen request, per role', async () => {
     const { adapter, create } = fakeAdapter(response());
-    const normalized = normalizeMessagesAdapter(adapter);
-    await normalized.create(BASE);
-    await normalized.create({ ...BASE, tools: [TOOL], toolChoice: { type: 'tool', name: 'emit' } });
-    await normalized.create({ ...BASE, tools: [TOOL], toolChoice: { type: 'any' } });
-    await normalized.create({ ...BASE, thinking: { type: 'disabled' } });
-    expect(create.mock.calls.map(([request]) => request.thinking)).toEqual([
-      { type: 'enabled' }, // endpoint default today
-      { type: 'disabled' }, // the adapter already disables it for a forced tool
-      { type: 'disabled' },
-      { type: 'disabled' }, // caller's explicit choice is kept
+    const thinking = normalizeMessagesAdapter(adapter, 'generate');
+    const ANSWER = { ...BASE, maxTokens: 2_000 };
+    await thinking.create(ANSWER);
+    await thinking.create({ ...ANSWER, tools: [TOOL], toolChoice: { type: 'tool', name: 'emit' } });
+    await thinking.create({ ...ANSWER, tools: [TOOL], toolChoice: { type: 'any' } });
+    await thinking.create({ ...ANSWER, thinking: { type: 'disabled' } });
+    await thinking.create(BASE); // 64 tokens of answer room: a small-budget call
+    await thinking.create({ ...ANSWER, thinking: { type: 'enabled' } });
+    expect(
+      create.mock.calls.map(([request]) => [request.thinking, request.maxTokens] as const),
+    ).toEqual([
+      [{ type: 'enabled', budgetTokens: 2_048 }, 4_048], // answer room kept on top of the budget
+      [{ type: 'disabled' }, 2_000], // forced tool never thinks
+      [{ type: 'disabled' }, 2_000],
+      [{ type: 'disabled' }, 2_000], // caller's explicit choice is kept
+      [{ type: 'disabled' }, 64],
+      [{ type: 'enabled', budgetTokens: 2_048 }, 4_048], // explicit enabled gets the budget
     ]);
+
+    // Small-budget roles always send disabled, whatever the answer room.
+    for (const role of ['judge', 'suggestions', 'plan', 'video_edit_planner', 'vision'] as const) {
+      const small = fakeAdapter(response());
+      await normalizeMessagesAdapter(small.adapter, role).create({ ...BASE, maxTokens: 4_000 });
+      expect(small.create.mock.calls[0]?.[0]).toMatchObject({
+        thinking: { type: 'disabled' },
+        maxTokens: 4_000,
+      });
+    }
 
     // Non-Qwen providers and unvalidated Qwen families get nothing added.
     for (const metadata of [
@@ -85,9 +104,21 @@ describe('normalizeMessagesAdapter', () => {
       { ...QWEN, model: 'qwen3-coder-plus' },
     ]) {
       const other = fakeAdapter(response(), metadata as typeof QWEN);
-      await normalizeMessagesAdapter(other.adapter).create(BASE);
+      await normalizeMessagesAdapter(other.adapter, 'generate').create(ANSWER);
       expect(other.create.mock.calls[0]?.[0].thinking).toBeUndefined();
+      expect(other.create.mock.calls[0]?.[0].maxTokens).toBe(2_000);
     }
+  });
+
+  it('(2) never lets the budget push max_tokens past the output limit', async () => {
+    const { adapter, create } = fakeAdapter(response());
+    const brain = normalizeMessagesAdapter(adapter, 'brain');
+    await brain.create({ ...BASE, maxTokens: 31_000 }); // 1_768 left: the budget shrinks to fit
+    await brain.create({ ...BASE, maxTokens: 32_000 }); // < 1_024 left: no thinking at all
+    expect(create.mock.calls.map(([request]) => [request.thinking, request.maxTokens])).toEqual([
+      [{ type: 'enabled', budgetTokens: 1_768 }, 32_768],
+      [{ type: 'disabled' }, 32_000],
+    ]);
   });
 
   it('(2) sends the explicit switch on the wire', async () => {
@@ -108,8 +139,13 @@ describe('normalizeMessagesAdapter', () => {
       },
       metadata: QWEN,
     });
-    await normalizeMessagesAdapter(adapter).create(BASE);
-    expect(sent[0]).toMatchObject({ thinking: { type: 'enabled' } });
+    await normalizeMessagesAdapter(adapter, 'generate').create({ ...BASE, maxTokens: 2_000 });
+    await normalizeMessagesAdapter(adapter, 'judge').create({ ...BASE, maxTokens: 2_000 });
+    expect(sent[0]).toMatchObject({
+      max_tokens: 4_048,
+      thinking: { type: 'enabled', budget_tokens: 2_048 },
+    });
+    expect(sent[1]).toMatchObject({ max_tokens: 2_000, thinking: { type: 'disabled' } });
   });
 
   it('(3) drops empty thinking blocks that reach the adapter output', async () => {
@@ -121,13 +157,13 @@ describe('normalizeMessagesAdapter', () => {
         ],
       }),
     );
-    const result = await normalizeMessagesAdapter(adapter).create(BASE);
+    const result = await normalizeMessagesAdapter(adapter, 'judge').create(BASE);
     expect(result.content).toEqual([{ type: 'text', text: 'answer' }]);
   });
 
   it('(4) keeps the Anthropic usage split and totals without double counting', async () => {
     const { adapter } = fakeAdapter(response());
-    const result = await normalizeMessagesAdapter(adapter).create(BASE);
+    const result = await normalizeMessagesAdapter(adapter, 'judge').create(BASE);
     // Ledger fields untouched: input excludes the cache read, priced separately.
     expect(result.usage).toMatchObject({ inputTokens: 124, cacheReadInputTokens: 256 });
     // Same figure as the OpenAI channel's prompt_tokens (380, cached 256) in REBUILD-1 D.
@@ -145,7 +181,7 @@ describe('normalizeMessagesAdapter', () => {
     const { adapter } = fakeAdapter(() => {
       throw raw;
     });
-    const error = await normalizeMessagesAdapter(adapter)
+    const error = await normalizeMessagesAdapter(adapter, 'judge')
       .create(BASE)
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(MessagesAdapterError);
@@ -166,7 +202,7 @@ describe('normalizeMessagesAdapter', () => {
       const { adapter } = fakeAdapter(() => {
         throw thrown;
       });
-      await expect(normalizeMessagesAdapter(adapter).create(BASE)).rejects.toBe(thrown);
+      await expect(normalizeMessagesAdapter(adapter, 'judge').create(BASE)).rejects.toBe(thrown);
     }
   });
 
@@ -194,14 +230,20 @@ describe('normalizeMessagesAdapter', () => {
     );
     const verification = fakeAdapter(response());
     const execution = fakeAdapter(response());
-    const normalized = normalizeMessagesAdapter({
-      ...execution.adapter,
-      browserBrain: { planning: planning.adapter, verification: verification.adapter },
-    });
+    const normalized = normalizeMessagesAdapter(
+      {
+        ...execution.adapter,
+        browserBrain: { planning: planning.adapter, verification: verification.adapter },
+      },
+      'brain',
+    );
     expect(normalized.browserBrain).toBeDefined();
     const planned = await normalized.browserBrain?.planning.create(BASE);
     expect(planned?.stopReason).toBe('tool_use');
-    await normalized.browserBrain?.verification.create(BASE);
-    expect(verification.create.mock.calls[0]?.[0].thinking).toEqual({ type: 'enabled' });
+    await normalized.browserBrain?.verification.create({ ...BASE, maxTokens: 1_024 });
+    expect(verification.create.mock.calls[0]?.[0]).toMatchObject({
+      thinking: { type: 'enabled', budgetTokens: 2_048 },
+      maxTokens: 3_072,
+    });
   });
 });

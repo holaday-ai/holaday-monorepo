@@ -368,8 +368,35 @@ describe('model gateway, LLM_GATEWAY_V2 on', () => {
       requestMeta: { lane: 'plan', protocol: 'messages' },
     });
     expect(observations[0]).toMatchObject({ lane: 'plan', purpose: 'fast', inputTokens: 380 });
-    expect(factories.requests[0]?.thinking).toEqual({ type: 'enabled' });
+    expect(factories.requests[0]?.thinking).toEqual({ type: 'disabled' }); // judge: small budget
     expect(result.stopReason).toBe('tool_use');
+  });
+
+  it('sends the role thinking budget: thinking roles get budget + answer room', async () => {
+    const factories = qwenFactories();
+    const wiring = createProductionModelRuntimeWiring(ON, factories);
+    const request = { maxTokens: 2_000, messages: [{ role: 'user' as const, content: 'x' }] };
+    const generate = modelGateway({ wiring }).resolve('generate', CONTEXT);
+    if (generate.kind !== 'ready') throw new Error('expected ready');
+    await generate.messages().create(request);
+    await generate.messages('generate.fast').create(request); // variant: its role's policy
+    const suggestions = modelGateway({ wiring }).messages('suggestions', CONTEXT);
+    if (suggestions.kind !== 'ready') throw new Error('expected ready');
+    await suggestions.adapter.create(request);
+    expect(factories.requests.map((r) => [r.thinking, r.maxTokens])).toEqual([
+      [{ type: 'enabled', budgetTokens: 2_048 }, 4_048],
+      [{ type: 'enabled', budgetTokens: 2_048 }, 4_048],
+      [{ type: 'disabled' }, 2_000],
+    ]);
+
+    // Flag off: the request goes out exactly as the caller wrote it.
+    const off = qwenFactories();
+    const legacy = modelGateway({
+      wiring: createProductionModelRuntimeWiring(ENV, off),
+    }).messages('generate', CONTEXT);
+    if (legacy.kind !== 'ready') throw new Error('expected ready');
+    await legacy.adapter.create(request);
+    expect(off.requests[0]).toEqual(request);
   });
 
   it('keeps an explicit browser-brain model and non-Qwen catalog brains', () => {

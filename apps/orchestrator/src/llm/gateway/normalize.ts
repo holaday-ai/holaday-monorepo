@@ -1,15 +1,15 @@
 import {
   type MessagesAdapter,
   MessagesAdapterError,
-  type NeutralMessagesRequest,
   type NeutralMessagesResponse,
   type NeutralOutputContentBlock,
-  supportsQwenThinkingControl,
 } from '../messages-adapter.js';
 import {
   modelProviderFailureMessage,
   safeProviderDiagnostics,
 } from '../provider-error-diagnostics.js';
+import type { ModelRole } from './model-roles.js';
+import { withRoleThinking } from './thinking.js';
 
 /**
  * REBUILD-2 — the thin layer between our internal (Anthropic Messages) format and DashScope's
@@ -18,8 +18,8 @@ import {
  *
  *   1. forced tool + `end_turn`: a response that carries a tool_use block is a `tool_use` stop.
  *   2. thinking: the endpoint thinks by default (and thinking eats max_tokens), so every Qwen
- *      request states it. Callers that set nothing keep today's effective behaviour: off for a
- *      forced tool (as the adapter already sends), the endpoint default (on) otherwise.
+ *      request states it per role (thinking.ts): small-budget roles `disabled`, thinking roles
+ *      `enabled` + `budget_tokens` with max_tokens = answer room + budget; forced tools off.
  *   3. empty thinking blocks (`{type:"thinking",thinking:""}`) never reach callers.
  *   4. usage stays in Anthropic shape (input excludes cache reads, which the ledger prices
  *      separately); `totalInputTokens` is the one place that adds them up.
@@ -28,13 +28,16 @@ import {
  *
  * Only active behind LLM_GATEWAY_V2. With the flag off no adapter is wrapped.
  */
-export function normalizeMessagesAdapter(adapter: MessagesAdapter): MessagesAdapter {
+export function normalizeMessagesAdapter(
+  adapter: MessagesAdapter,
+  role: ModelRole,
+): MessagesAdapter {
   const wrapped: MessagesAdapter = {
     metadata: adapter.metadata,
     async create(request, options) {
       let response: NeutralMessagesResponse;
       try {
-        response = await adapter.create(withExplicitThinking(request, adapter.metadata), options);
+        response = await adapter.create(withRoleThinking(request, adapter.metadata, role), options);
       } catch (error) {
         throw toMessagesAdapterError(error);
       }
@@ -45,23 +48,10 @@ export function normalizeMessagesAdapter(adapter: MessagesAdapter): MessagesAdap
   return {
     ...wrapped,
     browserBrain: {
-      planning: normalizeMessagesAdapter(adapter.browserBrain.planning),
-      verification: normalizeMessagesAdapter(adapter.browserBrain.verification),
+      planning: normalizeMessagesAdapter(adapter.browserBrain.planning, role),
+      verification: normalizeMessagesAdapter(adapter.browserBrain.verification, role),
     },
   };
-}
-
-/** (2) The thinking switch a Qwen request carries on the wire. */
-export function withExplicitThinking(
-  request: NeutralMessagesRequest,
-  metadata: MessagesAdapter['metadata'],
-): NeutralMessagesRequest {
-  if (request.thinking !== undefined) return request;
-  if (metadata.provider !== 'alibaba-model-studio') return request;
-  // Families we have not validated never get the parameter (the adapter strips it anyway).
-  if (!supportsQwenThinkingControl(metadata.model)) return request;
-  const forcedTool = request.toolChoice?.type === 'any' || request.toolChoice?.type === 'tool';
-  return { ...request, thinking: { type: forcedTool ? 'disabled' : 'enabled' } };
 }
 
 /** (1) + (3) on a finished response. Usage (4) is passed through unchanged. */
