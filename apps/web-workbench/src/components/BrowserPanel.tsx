@@ -1148,6 +1148,9 @@ function CloudBrowserPanel({
   const handleHeldInputDropped = React.useCallback(() => {
     toast.show('已由你操作；刚才那一下没有发出（画面刚刚变了），请再点一次', 'info');
   }, [toast]);
+  const handleKeyRefused = React.useCallback(() => {
+    toast.show('这一下没发出去，请再按一次', 'info');
+  }, [toast]);
   const takeOver = React.useCallback(() => {
     void requestOwnership('takeover').then((granted) => {
       if (granted === false && mountedRef.current)
@@ -1835,6 +1838,7 @@ function CloudBrowserPanel({
                     }
                     replayAfterControl={taskIsTerminal}
                     onHeldInputDropped={handleHeldInputDropped}
+                    onKeyRefused={handleKeyRefused}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}

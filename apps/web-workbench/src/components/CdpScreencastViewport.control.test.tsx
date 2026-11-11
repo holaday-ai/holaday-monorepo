@@ -497,3 +497,39 @@ it('DEPLOY-61 重跑 #2: the server refuses the replayed press as stale — 「�
   expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
   expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
 });
+
+it('FIX-61B P1-5: a key the server refused is said once («请再按一次»), never dropped silently', async () => {
+  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    constructor() {
+      sockets.push(this);
+    }
+    send() {}
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const onKeyRefused = vi.fn();
+  const onHeldInputDropped = vi.fn();
+  render(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
+      viewOnly={false}
+      controlLease="granted"
+      onKeyRefused={onKeyRefused}
+      onHeldInputDropped={onHeldInputDropped}
+    />,
+  );
+  const socket = sockets.at(-1);
+  if (!socket?.onmessage) throw new Error('socket not connected');
+  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
+  receive({ type: 'input-expired', input: 'key' });
+  receive({ type: 'input-expired', input: 'key' });
+  receive({ type: 'input-expired', input: 'pointer' });
+  expect(onKeyRefused).toHaveBeenCalledTimes(1);
+  expect(onHeldInputDropped).not.toHaveBeenCalled();
+});

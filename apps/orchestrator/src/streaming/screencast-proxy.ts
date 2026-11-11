@@ -127,6 +127,9 @@ export interface ScreencastProxy {
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
 }
 
+/** FIX-61B P1-5: how long after typing the focus may let an Enter / Space through. */
+const TYPING_FOCUS_MS = 5_000;
+
 /** FIX-61B P0-3: a screen size not applied because the agent's page changed under it — not a failure. */
 export class BrowserViewportSkippedError extends Error {
   constructor() {
@@ -296,6 +299,46 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return lease !== null && viewportLease === lease;
     };
     const frameGuard = new BrowserFrameGuard();
+    /**
+     * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
+     * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
+     * element the person typed into, and when. An Enter / Space on a frame superseded within the
+     * lenient grace goes through only when the focus is still exactly that element (a page that
+     * moved focus to 「确认支付」 is refused, as before).
+     */
+    let typingFocus: { node: number; at: number } | null = null;
+    const focusedNode = async (): Promise<number | null> => {
+      const session = streamer?.getSession();
+      if (!session) return null;
+      try {
+        const evaluated = (await session.send('Runtime.evaluate', {
+          expression: 'document.activeElement',
+          returnByValue: false,
+        })) as { result?: { objectId?: string } };
+        const objectId = evaluated.result?.objectId;
+        if (!objectId) return null;
+        const described = (await session.send('DOM.describeNode', { objectId })) as {
+          node?: { backendNodeId?: number; nodeName?: string };
+        };
+        void session.send('Runtime.releaseObject', { objectId }).catch(() => {});
+        const node = described.node;
+        if (!node?.backendNodeId || /^(?:BODY|HTML)$/i.test(node.nodeName ?? '')) return null;
+        return node.backendNodeId;
+      } catch {
+        return null;
+      }
+    };
+    /** Read where the keys go just before they are sent (read after, the page may have moved focus). */
+    const noteTyping = async (): Promise<void> => {
+      const node = await focusedNode();
+      typingFocus = node === null ? null : { node, at: Date.now() };
+    };
+    /** The focus is still the element typed into within the lenient grace. */
+    const stillTypingTarget = async (): Promise<boolean> => {
+      const typed = typingFocus;
+      if (!typed || Date.now() - typed.at > TYPING_FOCUS_MS) return false;
+      return (await focusedNode()) === typed.node;
+    };
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
       frameGuard.invalidate();
@@ -354,7 +397,21 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             }
             // FIX-61 复审 #2 #2 / DEPLOY-61 #1: keys, text and the release of a press are lenient;
             // Enter and Space activate the focused element and keep 250ms (frameGraceFor).
-            const inputKind = frameGraceFor(message);
+            let inputKind = frameGraceFor(message);
+            let relaxedForTyping = false;
+            // FIX-61B P1-5: Enter / Space on a frame superseded only within the lenient grace go
+            // through when the focus is still the element the person was typing into.
+            if (
+              inputKind === 'pointer' &&
+              message.type === 'keyDown' &&
+              !viewportPending &&
+              !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
+              frameGuard.validate(envelope.observation, Date.now(), 'lenient') &&
+              (await stillTypingTarget())
+            ) {
+              inputKind = 'lenient';
+              relaxedForTyping = true;
+            }
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
               viewportPending ||
@@ -364,6 +421,15 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               throw new Error('browser_observation_expired');
             }
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
+            // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
+            if (
+              message.type === 'insertText' ||
+              (message.type === 'keyDown' &&
+                typeof message.key === 'string' &&
+                message.key.length === 1 &&
+                message.key !== ' ')
+            )
+              await noteTyping();
             if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
             const result = await opts.beforeViewportAction(
               args.instance,
@@ -374,7 +440,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             // Recheck after the asynchronous policy: resize/navigation may have happened.
             if (
               !streamer.matchesPage(await args.instance.executor.getPage()) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
+              !frameGuard.validate(envelope.observation, Date.now(), inputKind) ||
+              (relaxedForTyping && !(await stillTypingTarget()))
             )
               throw new Error('browser_observation_expired');
             if (
@@ -464,7 +531,15 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           args.ws.readyState === WebSocket.OPEN
         ) {
           try {
-            args.ws.send(JSON.stringify({ type: 'input-expired' }));
+            // FIX-61B P1-5: which kind of input, so a refused key is said too.
+            let kind = 'pointer';
+            try {
+              const sent = JSON.parse(raw.toString()) as { payload?: { type?: string } };
+              if (/^(?:keyDown|keyUp|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
+            } catch {
+              /* unreadable: pointer */
+            }
+            args.ws.send(JSON.stringify({ type: 'input-expired', input: kind }));
           } catch {
             /* socket closed between readyState and send */
           }
