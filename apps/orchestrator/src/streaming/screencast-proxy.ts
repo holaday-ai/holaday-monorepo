@@ -498,6 +498,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             const lease = humanLease();
             return lease !== null && viewportLease === lease;
           },
+          lease: () => viewportLease,
           onAligned: (restore) =>
             browserControlSessions.noteAgentViewportChanged(args.instance, restore),
         },
