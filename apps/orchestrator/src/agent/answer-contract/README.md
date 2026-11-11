@@ -32,8 +32,21 @@ block, so name, variant and price must sit in one contiguous run of page text.
 ## What code does
 
 1. **Check** (`price-verify.ts`) against every read of this run (`contractReads`, kept in the
-   loop's `remember`, 48 reads / 1 MB): the quote occurs in text read; name, variant, every number
-   of the price (whole numbers: 12.4 is not 12.45) and the quote are in the block. First failure:
+   loop's `remember`, 48 reads / 1 MB): the quote occurs in text read; variant, every number
+   of the price (whole numbers: 12.4 is not 12.45) and the quote are in the block; the name is
+   in the block **or in the page's own title** (`标题:` line or a level-1 heading — a detail
+   page's variant item does not repeat the name).
+   **Smallest block (review #1 MUST-fix):** a block that shows 2+ different prices, or 2+
+   variant options, is not accepted — the whole page (`e1` = main), a whole list or the whole
+   colour selector could otherwise pair 「Black」 with White's S$6.86. Prices are counted as
+   entries: a 「from – to」 range on one line counts once; unit (`/count`), list / was / lowest,
+   member (PLUS / 会员 / Prime), savings, coupon, delivery and other-seller amounts and
+   struck-through (`deletion`) prices are left out. Variant options are the short node (≤ 40
+   chars, role button / radio / option / tab / listitem / link …) naming the claimed variant and
+   the same-role, same-depth nodes beside it (rating / 「See options」 / cart furniture excluded);
+   one price for several options passes only when the claimed option is marked
+   `[selected]` / `[pressed]` / `[checked]`. Text mode (`block_ref: "text"`) gets the same price
+   limit and a 300-character cap on the quote. First failure:
    one send-back listing the problems with the block's text as read. Second failure (or the final
    turn): that item moves to `missing`. Missing items are never sent back.
 2. **Render** (`price-render.ts`): zh / en template, one numbered line per item with its link

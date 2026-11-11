@@ -17,9 +17,20 @@ export interface ReadPage {
   sourceURL?: string;
 }
 
+/** One node of a block: its role, visible text, depth and state flags. */
+export interface BlockNode {
+  indent: number;
+  role: string;
+  text: string;
+  /** `[selected]`, `[pressed]`, `[checked]` (also `=true`). */
+  selected: boolean;
+}
+
 export interface ReadBlock {
   /** Visible text of the node and its subtree, one node per line. */
   text: string;
+  /** The head node and every node under it, in order (url lines left out). */
+  nodes: BlockNode[];
   /** The node's own snapshot lines as read (markup kept). */
   raw: string;
   /** Link targets under the node, resolved against the page address. */
@@ -63,10 +74,14 @@ const ROLES = new Set(
 
 interface AriaNode {
   indent: number;
+  role?: string;
   ref?: string;
   text: string;
   url?: string;
+  selected?: boolean;
 }
+
+const SELECTED_ATTR = /^(?:selected|pressed|checked)(?:=true)?$/;
 
 /** Reads a JSON-style quoted string at `at`; returns its value and the index after it. */
 function quotedAt(body: string, at: number): { value: string; end: number } | null {
@@ -112,6 +127,7 @@ function ariaNode(line: string): AriaNode | null {
   let rest = body.slice(role[1]!.length);
   const parts: string[] = [];
   let ref: string | undefined;
+  let selected = false;
   for (;;) {
     rest = rest.replace(/^\s+/, '');
     if (!rest) break;
@@ -131,6 +147,7 @@ function ariaNode(line: string): AriaNode | null {
       const attr = rest.slice(1, end);
       const refAttr = /^ref=((?:f\d+)?e\d+)$/.exec(attr);
       if (refAttr) ref = refAttr[1]!.toLowerCase();
+      if (SELECTED_ATTR.test(attr)) selected = true;
       rest = rest.slice(end + 1);
       continue;
     }
@@ -145,8 +162,21 @@ function ariaNode(line: string): AriaNode | null {
     if (next < 0) break;
     rest = rest.slice(next);
   }
-  return { indent, ...(ref ? { ref } : {}), text: parts.filter(Boolean).join(' ') };
+  return {
+    indent,
+    role: role[1]!,
+    ...(ref ? { ref } : {}),
+    ...(selected ? { selected } : {}),
+    text: parts.filter(Boolean).join(' '),
+  };
 }
+
+const toBlockNode = (node: AriaNode): BlockNode => ({
+  indent: node.indent,
+  role: node.role ?? 'text',
+  text: node.text,
+  selected: node.selected === true,
+});
 
 /** The visible text of a read: aria lines become their names and text, other lines stay. */
 export function plainPageText(text: string): string {
@@ -177,6 +207,7 @@ function blockIn(page: ReadPage, ref: string): ReadBlock | null {
     const head = ariaNode(lines[i]!);
     if (head?.ref !== ref) continue;
     const texts = head.text ? [head.text] : [];
+    const nodes: BlockNode[] = [toBlockNode(head)];
     const links: string[] = [];
     let end = i + 1;
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -190,9 +221,18 @@ function blockIn(page: ReadPage, ref: string): ReadBlock | null {
       if (node.url) {
         const url = resolveUrl(node.url, page.sourceURL);
         if (url) links.push(url);
-      } else if (node.text) texts.push(node.text);
+      } else {
+        if (node.role) nodes.push(toBlockNode(node));
+        if (node.text) texts.push(node.text);
+      }
     }
-    return { text: texts.join('\n'), raw: lines.slice(i, end).join('\n'), links, page };
+    return {
+      text: texts.join('\n'),
+      nodes,
+      raw: lines.slice(i, end).join('\n'),
+      links,
+      page,
+    };
   }
   return null;
 }
@@ -224,4 +264,23 @@ export function pagesQuoting(quote: string, pages: readonly ReadPage[]): ReadPag
       (page) =>
         flatText(page.text).includes(needle) || flatText(plainPageText(page.text)).includes(needle),
     );
+}
+
+/**
+ * Review #1: what a product name may also come from — the page's own title. The `标题:` /
+ * `Title:` line a read starts with, and every level-1 heading of that read.
+ */
+export function pageTitles(page: ReadPage): string[] {
+  const titles: string[] = [];
+  for (const line of page.text.split('\n')) {
+    const titled = /^\s*(?:标题|title)\s*[:：]\s*(.+)$/i.exec(line);
+    if (titled?.[1]) {
+      titles.push(titled[1].trim());
+      continue;
+    }
+    if (!/\[level=1\]/.test(line)) continue;
+    const node = ariaNode(line);
+    if (node?.role === 'heading' && node.text) titles.push(node.text);
+  }
+  return titles;
 }

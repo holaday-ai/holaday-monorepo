@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createPriceContract, priceFinishTool } from './price-contract.js';
 import { renderPriceAnswer } from './price-render.js';
 import { type PriceItem, parsePriceResult } from './price-result.js';
-import { verifyPriceItems } from './price-verify.js';
+import { blockPriceEntries, verifyPriceItems } from './price-verify.js';
 import { type ReadPage, blocksFor, plainPageText } from './read-blocks.js';
 
 /** An amazon.sg search page as the snapshot tree reads it (DEPLOY-59 reg-new-amazon-sg shape). */
@@ -192,6 +192,166 @@ describe('verifier', () => {
       block_ref: 'e5',
     };
     expect(verifyPriceItems([item], serp).passed[0]?.unverified).toBe('search_snippet');
+  });
+});
+
+describe('verifier: the block is the smallest variant item or card (review #1 MUST-fix)', () => {
+  const BELKIN = 'Belkin Eco-Friendly Braided USB-A to USB-C Cable (6.6ft, 15W)';
+  const detailItem = (overrides: Partial<PriceItem>): PriceItem => ({
+    name: BELKIN,
+    variant: 'Black',
+    price: 'S$6.86',
+    currency: 'SGD',
+    source_url: null,
+    quote: 'S$6.86',
+    block_ref: 'e1',
+    ...overrides,
+  });
+
+  it('reviewer case 1: Black + S$6.86 with block_ref e1 (the whole main) is rejected', () => {
+    const out = verifyPriceItems([detailItem({})], PAGES);
+    expect(out.passed).toEqual([]);
+    const problems = out.rejected[0]?.problems.join() ?? '';
+    expect(problems).toMatch(/block_ref「e1」太大：里面有 2 个不同价格（9\.43、6\.86）/);
+    expect(problems).toMatch(/包住了多个规格（Black、White）/);
+  });
+
+  it('reviewer case 2: Black + S$6.86 in text mode with a quote wrapping the whole variant area is rejected', () => {
+    const wide = detailItem({
+      block_ref: 'text',
+      quote: `${BELKIN} Colour Name Black S$9.43 White S$6.86`,
+    });
+    const pages: ReadPage[] = [
+      {
+        text: `${BELKIN}\nColour Name Black S$9.43 White S$6.86\nIn stock`,
+        sourceURL: 'https://www.amazon.sg/dp/B0CCC33333',
+      },
+    ];
+    // Without the limit the quote holds the name, 「Black」 and 6.86, so it used to pass.
+    const out = verifyPriceItems([wide], [...PAGES, ...pages]);
+    expect(out.passed).toEqual([]);
+    expect(out.rejected[0]?.problems.join()).toMatch(/quote 太宽：里面有 2 个不同价格/);
+    // A quote longer than the text-mode limit is rejected on its own.
+    const long = detailItem({ block_ref: 'text', quote: `${BELKIN} ${'x'.repeat(300)} S$6.86` });
+    const longPage: ReadPage = { text: long.quote, sourceURL: 'https://www.amazon.sg/dp/X' };
+    expect(verifyPriceItems([long], [longPage]).rejected[0]?.problems.join()).toMatch(/quote 太长/);
+  });
+
+  it('reviewer case 3: White + S$6.86 with block_ref e44 (the White item) passes; the name is the page title', () => {
+    const out = verifyPriceItems([detailItem({ variant: 'White', block_ref: 'e44' })], PAGES);
+    expect(out.rejected).toEqual([]);
+    expect(out.passed).toHaveLength(1);
+    expect(out.passed[0]?.sourceUrl).toBe('https://www.amazon.sg/dp/B0CCC33333');
+  });
+
+  it('the variant item still has to be the claimed one, and the name still has to be on the page', () => {
+    // Black named on the White item: the variant is not in that block.
+    const crossed = verifyPriceItems([detailItem({ variant: 'Black', block_ref: 'e44' })], PAGES);
+    expect(crossed.rejected[0]?.problems.join()).toMatch(/规格「Black」不在这个区块里/);
+    // Black with White's price on the Black item: the price is not in that block.
+    const wrongPrice = verifyPriceItems([detailItem({ block_ref: 'e41' })], PAGES);
+    expect(wrongPrice.rejected[0]?.problems.join()).toMatch(/价格「S\$6\.86」不在这个区块里/);
+    // A name that is neither in the item nor the page title.
+    const otherName = verifyPriceItems(
+      [detailItem({ name: 'Anker USB C Cable', variant: 'White', block_ref: 'e44' })],
+      PAGES,
+    );
+    expect(otherName.rejected[0]?.problems.join()).toMatch(/名称.*不在这个区块里，也不是本页标题/);
+    // The list of all colours is too wide as well.
+    const list = verifyPriceItems([detailItem({ variant: 'White', block_ref: 'e40' })], PAGES);
+    expect(list.rejected[0]?.problems.join()).toMatch(/太大/);
+  });
+
+  it('a 「标题:」 line counts as the page title for the name', () => {
+    const pages: ReadPage[] = [
+      {
+        text: [
+          `标题: ${BELKIN} : Amazon.sg`,
+          '- list "Colour Name" [ref=e40]:',
+          '  - listitem [ref=e44]:',
+          '    - button "White" [ref=e45]',
+          '    - generic [ref=e46]: S$6.86',
+        ].join('\n'),
+        sourceURL: 'https://www.amazon.sg/dp/B0CCC33333',
+      },
+    ];
+    expect(
+      verifyPriceItems([detailItem({ variant: 'White', block_ref: 'e44' })], pages).passed,
+    ).toHaveLength(1);
+  });
+
+  it('one price for several options passes only when the claimed option is the selected one', () => {
+    const tree = (selected: string) =>
+      [
+        `- heading "${BELKIN}" [level=1] [ref=e2]`,
+        '- group [ref=e50]:',
+        '  - generic [ref=e51]: S$9.43',
+        `  - button "Black"${selected === 'Black' ? ' [pressed]' : ''} [ref=e52]`,
+        `  - button "White"${selected === 'White' ? ' [pressed]' : ''} [ref=e53]`,
+      ].join('\n');
+    const page = (selected: string): ReadPage[] => [
+      { text: tree(selected), sourceURL: 'https://www.amazon.sg/dp/B0CCC33333' },
+    ];
+    const black = detailItem({ price: 'S$9.43', quote: 'S$9.43', block_ref: 'e50' });
+    expect(verifyPriceItems([black], page('Black')).passed).toHaveLength(1);
+    expect(verifyPriceItems([black], page('White')).rejected[0]?.problems.join()).toMatch(
+      /包住了多个规格（Black、White）/,
+    );
+  });
+
+  it('a card with a list price, a unit price or a range is still one price', () => {
+    expect(
+      blockPriceEntries([
+        { text: 'UGREEN USB C Cable' },
+        { text: 'S$10.92' },
+        { text: 'S$5.46/count' },
+        { text: 'List: S$15.99' },
+        { text: 'S$14.99', role: 'deletion' },
+        { text: 'Save S$2.00 with coupon' },
+        { text: 'FREE delivery on orders over S$40' },
+      ]),
+    ).toEqual(['10.92']);
+    expect(blockPriceEntries([{ text: 'from S$8.21 - S$12.45' }])).toEqual(['range:8.21-12.45']);
+    expect(blockPriceEntries([{ text: '¥' }, { text: '7999' }, { text: '￥7,999.00' }])).toEqual([
+      '7999',
+    ]);
+    expect(blockPriceEntries([{ text: 'Black S$9.43' }, { text: 'White S$6.86' }])).toEqual([
+      '9.43',
+      '6.86',
+    ]);
+    // A JD card: the price and the PLUS member price; 「7999元」 is read too.
+    expect(blockPriceEntries([{ text: '￥7999.00' }, { text: 'PLUS ￥7899.00' }])).toEqual([
+      '7999',
+    ]);
+    expect(blockPriceEntries([{ text: '到手价 7999元' }, { text: '6899元' }])).toEqual([
+      '7999',
+      '6899',
+    ]);
+  });
+
+  it('a short title link beside rating / options links is not a variant group (search card)', () => {
+    const card: ReadPage[] = [
+      {
+        text: [
+          '- listitem [ref=e10]:',
+          '  - link "Anker Cable 6ft" [ref=e11]',
+          '  - link "4.5 out of 5 stars" [ref=e12]',
+          '  - link "See options" [ref=e13]',
+          '  - generic [ref=e14]: S$12.45',
+        ].join('\n'),
+        sourceURL: 'https://www.amazon.sg/s?k=anker',
+      },
+    ];
+    const item: PriceItem = {
+      name: 'Anker Cable 6ft',
+      variant: '6ft',
+      price: 'S$12.45',
+      currency: 'SGD',
+      source_url: null,
+      quote: 'S$12.45',
+      block_ref: 'e10',
+    };
+    expect(verifyPriceItems([item], card).passed).toHaveLength(1);
   });
 });
 
