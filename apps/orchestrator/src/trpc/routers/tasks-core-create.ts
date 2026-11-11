@@ -8,6 +8,7 @@ import type { CoreSettlement } from '../../agent/core-task-settlement.js';
 import type { TaskRepository } from '../../agent/task-repository.js';
 import { startOwnedOperation } from '../../execution/owned-operation.js';
 import type { parseFileForPrompt } from '../../files/parsers.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import type { Context } from '../context.js';
 import { withTaskCostContext } from './media-task-background.js';
@@ -95,10 +96,9 @@ export async function createCoreGenerateTask(args: {
     ctx.executionLifetime?.drain.markUnknown(ctx.executionLifetime.owner);
     return unconfirmed;
   }
-  const resolve = (lane: 'generate' | 'verifier') =>
-    args.wiring.resolveCore({
+  const resolve = (role: 'generate' | 'verifier') =>
+    modelGateway({ wiring: args.wiring }).resolve(role, {
       actorExternalId: ctx.userId,
-      lane,
       ownership: { scope: 'personal', userRegion: args.modelDataRegion },
     });
   const generation = resolve('generate');
@@ -118,9 +118,9 @@ export async function createCoreGenerateTask(args: {
       actorExternalId: ctx.userId,
       logger: ctx.logger,
       repo,
-      responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      responsesAdapter: generation.kind === 'ready' ? generation.responses() : null,
       firecrawl: ctx.firecrawl ?? null,
-      semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
+      semanticAdapter: semantic.kind === 'ready' ? semantic.messages() : undefined,
       publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
       ...(args.resultNotice ? { resultNotice: args.resultNotice } : {}),
       ...(args.retryInBrowser

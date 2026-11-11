@@ -4,8 +4,8 @@ import { resolveMediaModelServices, videoModelServicesReady } from './media-mode
 
 function runtime() {
   const messages = vi.fn(
-    (purpose: string): MessagesAdapter => ({
-      metadata: { provider: 'openai', model: purpose },
+    (role?: string): MessagesAdapter => ({
+      metadata: { provider: 'openai', model: role ?? 'own-role' },
       create: vi.fn(),
     }),
   );
@@ -13,11 +13,12 @@ function runtime() {
 }
 
 describe('resolveMediaModelServices', () => {
-  it('uses the generate lane (standard) for scripts and the verifier lane (vision) for QA', () => {
+  it('uses the generate role for scripts and the vision role of the verifier runtime for QA', () => {
     const generate = runtime();
     const verifier = runtime();
     const services = resolveMediaModelServices({ generate, verifier });
-    expect(generate.messages).toHaveBeenCalledWith('standard');
+    // The generate runtime's own role (legacy: generate lane, 'standard').
+    expect(generate.messages).toHaveBeenCalledWith();
     expect(verifier.messages).toHaveBeenCalledWith('vision');
     expect(services.scriptLlm).toBeTypeOf('function');
     expect(services.analyzeVideoQuality).toBeTypeOf('function');

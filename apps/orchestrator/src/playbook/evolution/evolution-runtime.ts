@@ -1,4 +1,5 @@
 import type { DB } from '../../db/client.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { makeDocFirstExploreSite, runExplorerBatch } from '../explorer/explorer.js';
@@ -34,12 +35,11 @@ export function resolveEvolutionGenerateAdapter(input: {
   const actor = env.PLAYBOOK_EVOLUTION_ACTOR_EXTERNAL_ID?.trim();
   const region = env.PLAYBOOK_EVOLUTION_MODEL_REGION?.trim();
   if (!input.wiring || !actor || (region !== 'cn' && region !== 'intl')) return null;
-  const runtime = input.wiring.resolveCore({
+  const runtime = modelGateway({ wiring: input.wiring }).resolve('generate', {
     actorExternalId: actor,
-    lane: 'generate',
     ownership: { scope: 'personal', userRegion: region },
   });
-  return runtime.kind === 'ready' ? runtime.messages('standard') : null;
+  return runtime.kind === 'ready' ? runtime.messages() : null;
 }
 
 /** Isolated canary browser: fresh headless Chromium context, no cookies/profile. */
