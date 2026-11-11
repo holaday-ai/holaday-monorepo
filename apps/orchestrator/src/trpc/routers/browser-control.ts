@@ -14,11 +14,15 @@ import { TaskRepository } from '../../agent/task-repository.js';
 import { browserProfileStore } from '../../browser-profiles/profile-store.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
+import { isTaskTerminalStatus } from '../../task-status.js';
 import type { Context } from '../context.js';
 import { protectedProcedure } from '../trpc.js';
 
 const taskInput = z.object({ taskId: z.string().min(1) });
-const terminal = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+// FIX-61 复审 #2 #2: the same 「已结束」 as everywhere else (the page, checkpointBrowserSession).
+// The old local list missed partial_success, so a 部分完成 task's screen was treated as a run with
+// no runner: every takeover came back 412 browser_runner_unavailable and the page stayed 仅观察.
+const ended = (status: string) => isTaskTerminalStatus(status) || status === 'timeout';
 
 async function ownedBrowser(ctx: Context & { userId: string }, taskId: string) {
   const [row] = await ctx.db
@@ -37,9 +41,9 @@ async function ownedBrowser(ctx: Context & { userId: string }, taskId: string) {
     instance.taskId !== taskId ||
     instance.status !== 'ready'
   ) {
-    return { instance: null, terminal: terminal.has(row.status), userId: row.userId };
+    return { instance: null, terminal: ended(row.status), userId: row.userId };
   }
-  return { instance, terminal: terminal.has(row.status), userId: row.userId };
+  return { instance, terminal: ended(row.status), userId: row.userId };
 }
 
 export const browserControlStateProcedure = protectedProcedure

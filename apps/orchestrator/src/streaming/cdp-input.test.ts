@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 import type { CDPSession, Page } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
+import { BrowserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { BrowserControl } from '../agent/supercar/browser-control.js';
 import { CdpInputHandler } from './cdp-input.js';
 import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
@@ -27,7 +28,9 @@ describe('CdpInputHandler owned cancellation', () => {
   it('releases held keys and mouse buttons before AI can observe the handed-back page', async () => {
     const effects: string[] = [];
     const session = {
-      send: async (_method: string, params: { type?: string }) => {
+      send: async (method: string, params: { type?: string }) => {
+        // FIX-61: the typed-field marker is not an input effect.
+        if (method === 'Runtime.evaluate') return;
         effects.push(params.type ?? 'other');
       },
       detach: async () => undefined,
@@ -349,6 +352,32 @@ describe('CdpInputHandler keyboard input', () => {
     });
   });
 
+  it('DEPLOY-61: Enter (and the numpad one) carries a carriage return so it submits and activates', async () => {
+    const { handler, send } = handlerWithSend();
+    await handler.handle({ type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 });
+    await handler.handle({ type: 'keyDown', key: 'Enter', code: 'NumpadEnter', keyCode: 13 });
+    await handler.handle({
+      type: 'keyDown',
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    });
+    const downs = send.mock.calls
+      .filter(
+        ([method, params]) => method === 'Input.dispatchKeyEvent' && params?.type === 'keyDown',
+      )
+      .map(([, params]) => params);
+    expect(downs[0]).toMatchObject({
+      key: 'Enter',
+      code: 'Enter',
+      text: '\r',
+      unmodifiedText: '\r',
+    });
+    expect(downs[1]).toMatchObject({ code: 'NumpadEnter', text: '\r', unmodifiedText: '\r' });
+    expect(downs[2]).not.toHaveProperty('text');
+  });
+
   it('does not insert text for keyboard shortcuts', async () => {
     const { handler, send } = handlerWithSend();
 
@@ -420,6 +449,8 @@ describe('CdpInputHandler keyboard input', () => {
 
   it('releases a stale Meta modifier before the next plain key when keyup was lost', async () => {
     const { handler, send } = handlerWithSend();
+    // FIX-61: the typed-field marker (Runtime.evaluate) is interleaved; compare input calls only.
+    const inputCalls = () => send.mock.calls.filter(([method]) => method !== 'Runtime.evaluate');
 
     await handler.handle({
       type: 'keyDown',
@@ -449,22 +480,28 @@ describe('CdpInputHandler keyboard input', () => {
       keyCode: 88,
     });
 
-    expect(send).toHaveBeenNthCalledWith(4, 'Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key: 'Meta',
-      code: 'MetaLeft',
-      windowsVirtualKeyCode: 91,
-      modifiers: 0,
-    });
-    expect(send).toHaveBeenNthCalledWith(5, 'Input.dispatchKeyEvent', {
-      type: 'keyDown',
-      key: 'x',
-      code: 'KeyX',
-      windowsVirtualKeyCode: 88,
-      modifiers: 0,
-      text: 'x',
-      unmodifiedText: 'x',
-    });
+    expect(inputCalls()[3]).toEqual([
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyUp',
+        key: 'Meta',
+        code: 'MetaLeft',
+        windowsVirtualKeyCode: 91,
+        modifiers: 0,
+      },
+    ]);
+    expect(inputCalls()[4]).toEqual([
+      'Input.dispatchKeyEvent',
+      {
+        type: 'keyDown',
+        key: 'x',
+        code: 'KeyX',
+        windowsVirtualKeyCode: 88,
+        modifiers: 0,
+        text: 'x',
+        unmodifiedText: 'x',
+      },
+    ]);
   });
 });
 
@@ -570,4 +607,228 @@ it('uses negotiated Retina DPR and retains held buttons through a drag', async (
   send.mockClear();
   await handler.handle({ type: 'viewport', width: 390, height: 600, deviceScaleFactor: 100 });
   expect(send).not.toHaveBeenCalled();
+});
+
+describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under the lease', () => {
+  const evaluateWith = (layout: () => [number, number]) =>
+    vi.fn(async (method: string, params?: { expression?: string }) => {
+      if (method !== 'Runtime.evaluate') return {};
+      return params?.expression?.includes('innerWidth')
+        ? { result: { value: layout() } }
+        : { result: { value: 1 } };
+    });
+  /** The agent's Playwright page: its own viewport decides the layout. */
+  const agentPage = () => {
+    let size = { width: 1280, height: 800 };
+    const page = {
+      viewportSize: () => size,
+      setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
+        size = next;
+      }),
+    };
+    return { page, layout: (): [number, number] => [size.width, size.height] };
+  };
+  const setup = () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'tsk_a', userId: 'usr_a' };
+    const { page, layout } = agentPage();
+    const send = evaluateWith(layout);
+    const human = () =>
+      sessions.get(instance, 'usr_a', 'tsk_a')?.control.snapshot().phase === 'human';
+    const handler = new CdpInputHandler(
+      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      undefined,
+      undefined,
+      true,
+      async () => page as unknown as Page,
+      2400,
+      {
+        mayAlign: human,
+        onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
+      },
+    );
+    return { sessions, instance, page, send, handler };
+  };
+  const phone = { type: 'viewport' as const, width: 390, height: 760, deviceScaleFactor: 2 };
+
+  it('someone only watching a running task never resizes the assistant page', async () => {
+    const { sessions, instance, page, handler } = setup();
+    sessions.start(instance);
+    await handler.handle(phone);
+    expect(page.setViewportSize).not.toHaveBeenCalled();
+    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
+  });
+
+  it('a handler without the lease check never resizes the agent page', async () => {
+    const { page, layout } = agentPage();
+    const send = evaluateWith(layout);
+    const handler = new CdpInputHandler(
+      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+      pino({ level: 'silent' }),
+      undefined,
+      undefined,
+      true,
+      async () => page as unknown as Page,
+      2400,
+    );
+    await handler.handle(phone);
+    expect(page.setViewportSize).not.toHaveBeenCalled();
+  });
+
+  it('aligns after takeover, then puts back 1280x800 at handback before the assistant observes', async () => {
+    const { sessions, instance, page, send, handler } = setup();
+    const { control } = sessions.start(instance);
+    control.requestHuman();
+    const order: string[] = [];
+    const boundary = control.checkpoint(async () => {
+      order.push(`observe@${page.viewportSize().width}x${page.viewportSize().height}`);
+    });
+    await Promise.resolve();
+    const lease = control.snapshot().lease;
+    expect(lease).toBeTruthy();
+
+    // Observed locally: frames 1280x1807 while the page still laid out at 1280x800.
+    await handler.handle({ type: 'viewport', width: 1280, height: 1807, deviceScaleFactor: 2 });
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 1807 });
+    const overrides = send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride');
+    expect(overrides).toHaveLength(2);
+    expect(overrides[1]?.[1]).toEqual(
+      expect.objectContaining({ width: 1280, height: 1807, deviceScaleFactor: 2 }),
+    );
+    // A second resize under the same lease keeps the task's own size to restore.
+    await handler.handle(phone);
+    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
+
+    control.returnToAgent(lease!);
+    await boundary;
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 800 });
+    expect(order).toEqual(['observe@1280x800']);
+  });
+
+  it('a follow-up run restores the size a review lease left behind', async () => {
+    const { sessions, instance, page, handler } = setup();
+    sessions.start(instance).finish();
+    const review = sessions.review(instance);
+    await Promise.resolve();
+    expect(review.control.snapshot().phase).toBe('human');
+    await handler.handle(phone);
+    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
+
+    // The user sends a follow-up without handing back.
+    const { control } = sessions.start(instance);
+    await control.checkpoint(async () => {});
+    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
+  });
+
+  it('leaves the agent page alone when the layout already matches', async () => {
+    const { sessions, instance, page, send, handler } = setup();
+    const { control } = sessions.start(instance);
+    control.requestHuman();
+    void control.checkpoint(async () => {});
+    await Promise.resolve();
+    await handler.handle({ type: 'viewport', width: 1280, height: 800 });
+    expect(page.setViewportSize).not.toHaveBeenCalled();
+    expect(
+      send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride'),
+    ).toHaveLength(1);
+    control.close();
+  });
+
+  describe('DEPLOY-61 重跑 第 0 步 #1: the real size is checked again before the assistant observes', () => {
+    /** The renderer keeps the user's layout until the launch values have been set `fixedAfter` times. */
+    const stickyPage = (fixedAfter: number) => {
+      let size = { width: 1280, height: 800 };
+      let launchSets = 0;
+      const page = {
+        viewportSize: () => size,
+        setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
+          size = next;
+        }),
+        evaluate: vi.fn(async (fn: () => unknown) =>
+          String(fn).includes('innerWidth')
+            ? launchSets >= fixedAfter
+              ? [1280, 800, 1]
+              : [780, 1520, 1]
+            : 1,
+        ),
+      };
+      const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        if (
+          method === 'Emulation.setDeviceMetricsOverride' &&
+          params?.width === 1280 &&
+          params?.height === 800
+        )
+          launchSets++;
+        if (method !== 'Runtime.evaluate') return {};
+        return { result: { value: 1 } };
+      });
+      return { page, send };
+    };
+    const run = async (fixedAfter: number) => {
+      const sessions = new BrowserControlSessions();
+      const instance = { taskId: 'tsk_a1b2c3d4e5', userId: 'usr_a' };
+      const { page, send } = stickyPage(fixedAfter);
+      const logger = pino({ level: 'silent' });
+      const warn = vi.spyOn(logger, 'warn');
+      const handler = new CdpInputHandler(
+        () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+        logger,
+        undefined,
+        undefined,
+        true,
+        async () => page as unknown as Page,
+        2400,
+        {
+          mayAlign: () =>
+            sessions.get(instance, 'usr_a', 'tsk_a1b2c3d4e5')?.control.snapshot().phase === 'human',
+          onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
+          taskRef: instance.taskId.slice(0, 8),
+        },
+      );
+      const { control } = sessions.start(instance);
+      control.requestHuman();
+      let observed = 0;
+      const boundary = control.checkpoint(async () => {
+        observed++;
+      });
+      await Promise.resolve();
+      const lease = control.snapshot().lease;
+      await handler.handle({ type: 'viewport', width: 780, height: 1520, deviceScaleFactor: 1 });
+      control.returnToAgent(lease!);
+      await boundary;
+      const launchSets = send.mock.calls.filter(
+        ([m, p]) =>
+          m === 'Emulation.setDeviceMetricsOverride' &&
+          (p as { width?: number }).width === 1280 &&
+          (p as { height?: number }).height === 800,
+      ).length;
+      return { warn, launchSets, observed };
+    };
+
+    it('still the user size after the first fix → set again once; right then → no warning', async () => {
+      const { warn, launchSets, observed } = await run(2);
+      expect(launchSets).toBe(2);
+      expect(warn).not.toHaveBeenCalled();
+      expect(observed).toBe(1);
+    });
+
+    it('right after the first fix → no second set, no warning', async () => {
+      const { warn, launchSets } = await run(1);
+      expect(launchSets).toBe(1);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('never restored → warn with the first 8 characters of the task id, and the run goes on', async () => {
+      const { warn, launchSets, observed } = await run(Number.POSITIVE_INFINITY);
+      expect(launchSets).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toMatchObject({
+        task: 'tsk_a1b2',
+        expected: [1280, 800, 1],
+        real: [780, 1520, 1],
+      });
+      expect(observed).toBe(1);
+    });
+  });
 });

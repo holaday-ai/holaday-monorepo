@@ -222,6 +222,43 @@ describe('browser control route integration', () => {
   });
 });
 
+describe('FIX-61 复审 #2 #2: every ended status is a terminal review', () => {
+  for (const status of ['completed', 'partial_success', 'failed', 'cancelled']) {
+    it(`${status}: the state reads 'review' and takeover hands the screen to the user`, async () => {
+      const f = fixture();
+      f.row.status = status;
+      expect(await f.caller.browserControlState({ taskId: f.instance.taskId })).toMatchObject({
+        supported: true,
+        mode: 'review',
+        error: null,
+      });
+      const state = await f.caller.browserControl({
+        taskId: f.instance.taskId,
+        action: 'takeover',
+      });
+      expect(state).toMatchObject({ supported: true, phase: 'human' });
+      expect(state.lease).toBeTruthy();
+      await f.caller.browserControl({
+        taskId: f.instance.taskId,
+        action: 'return',
+        controlLease: state.lease ?? '',
+      });
+    });
+  }
+
+  it('awaiting_user is still a run: no review takeover without its runner', async () => {
+    const f = fixture();
+    f.row.status = 'awaiting_user';
+    expect(await f.caller.browserControlState({ taskId: f.instance.taskId })).toMatchObject({
+      supported: false,
+      mode: 'running',
+    });
+    await expect(
+      f.caller.browserControl({ taskId: f.instance.taskId, action: 'takeover' }),
+    ).rejects.toThrow('browser_runner_unavailable');
+  });
+});
+
 it('one cancellation durably cancels awaiting_user even while a runtime handle remains', async () => {
   const f = fixture();
   f.row.status = 'awaiting_user';

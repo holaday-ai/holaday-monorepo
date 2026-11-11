@@ -42,7 +42,18 @@ const normalizePrice = (price: string) =>
 function lineText(line: string): string {
   if (!/^\s*-\s/.test(line)) return line.trim();
   const m = /^\s*-\s+(?:[a-z]+\b)?(?:\s+"([^"]*)")?(?:\s*\[[^\]]*\])*\s*(?::\s*(.*))?$/i.exec(line);
-  return (m?.[2] ?? m?.[1] ?? line.replace(/^\s*-\s+/, '')).trim();
+  const text = (m?.[2] ?? m?.[1] ?? line.replace(/^\s*-\s+/, '')).trim();
+  // FIX-61: the snapshot quotes a text holding 「: 」 (`- text: "Colour Name: White"`); without
+  // unquoting, the variant label was never recognised on a real page.
+  if (/^"[\s\S]*"$/.test(text)) {
+    try {
+      const value: unknown = JSON.parse(text);
+      if (typeof value === 'string') return value.trim();
+    } catch {
+      return text.slice(1, -1).trim();
+    }
+  }
+  return text;
 }
 
 interface Selector {
@@ -360,6 +371,51 @@ export function searchCardPriceMismatches(summary: string, pageTexts: readonly s
       out.push(
         `答案里「${name.trim().slice(0, 40)}」的价格「${shown}」比搜索结果那张卡片上的起价「${from}」还低，又没写是哪个规格：商品页默认选中的规格不一定是搜索到的那一款，请用卡片上的价格，或者写明规格`,
       );
+    }
+  }
+  return out;
+}
+
+/**
+ * FIX-61 P1-6 (DEPLOY-60 reg-new-amazon-sg): with no price on the search card there is nothing to
+ * hold the answer against, and 「S$6.86（详情页当前选中规格为 White / 200 centimeters）」 named a
+ * variant, so it passed — but on the page S$6.86 sits on the Black swatch and White shows
+ * 「2 options from S$8.21」. A price taken from a variant selector, with a colour named beside it,
+ * must sit on a swatch of that colour.
+ */
+export function wrongVariantPrices(summary: string, pageTexts: readonly string[]): string[] {
+  const selectors = pageTexts
+    .map(selectorsOf)
+    .flatMap((page) => page.selectors.filter((s) => s.prices.size > 1));
+  if (!selectors.length) return [];
+  const out: string[] = [];
+  for (const line of summary.split('\n')) {
+    for (const m of line.matchAll(PRICE_RE)) {
+      const price = normalizePrice(m[0]);
+      const said = colours(besidePrice(line, m.index ?? 0));
+      if (!said.size) continue;
+      for (const selector of selectors) {
+        // The swatch a price sits on: its own line, or the name line just above it (a swatch
+        // can be 「Black」 then 「S$6.86」 then the old price).
+        const owners = new Set<string>();
+        const lines = selector.lines;
+        lines.forEach((l, i) => {
+          if (!(l.match(PRICE_RE) ?? []).map(normalizePrice).includes(price)) return;
+          for (const c of colours(l)) owners.add(c);
+          for (let k = i - 1; k >= Math.max(1, i - 2) && !owners.size; k -= 1) {
+            if ((lines[k]!.match(PRICE_RE) ?? []).length) break;
+            for (const c of colours(lines[k]!)) owners.add(c);
+          }
+        });
+        if (!owners.size || [...said].some((c) => owners.has(c))) continue;
+        const named = lines.find((l) => [...said].some((c) => colours(l).has(c)));
+        out.push(
+          `答案说「${m[0]}」是${[...said].join('/')}这一款的价格，但商品页上「${m[0]}」在${[...owners].join('/')}那一项${
+            named ? `，${named.slice(0, 40)}那一项写的是「${named.slice(0, 60)}」` : ''
+          }：请写那一款自己的价格（如「N options from …」），或者如实写没拿到`,
+        );
+        break;
+      }
     }
   }
   return out;

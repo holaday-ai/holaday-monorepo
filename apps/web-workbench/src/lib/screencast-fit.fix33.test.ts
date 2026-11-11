@@ -105,3 +105,53 @@ describe('FIX-33 #4 · the task browser shows the whole page', () => {
     ).toBe(1280);
   });
 });
+
+describe('DEPLOY-61 重跑 #2: a frame showing only the top of the layout', () => {
+  it('maps by the rows the image covers (1280x657 image of a 1280x800 page)', () => {
+    const frame = {
+      frameId: 'f',
+      tabId: 't',
+      viewportRevision: 1,
+      cssWidth: 1280,
+      cssHeight: 800,
+      imageWidth: 1280,
+      imageHeight: 657,
+      pageScaleFactor: 1,
+      offsetTop: 0,
+      scrollOffset: { x: 0, y: 0 },
+      capturedAt: 0,
+    };
+    // Google's search box centre (619.5, 352) shown in a 549x282 canvas.
+    const p = mapClientPointToBrowserFrame({
+      clientX: 619.5 * (549 / 1280),
+      clientY: 352 * (282 / 657),
+      rect: { left: 0, top: 0, width: 549, height: 282 },
+      frame,
+    });
+    expect(p?.x).toBeCloseTo(619.5, 0);
+    expect(p?.y).toBeCloseTo(352, 0);
+  });
+
+  it('a frame covering the whole layout maps exactly as before', () => {
+    const frame = {
+      frameId: 'f',
+      tabId: 't',
+      viewportRevision: 1,
+      cssWidth: 1280,
+      cssHeight: 800,
+      imageWidth: 2560,
+      imageHeight: 1600,
+      pageScaleFactor: 1,
+      offsetTop: 0,
+      scrollOffset: { x: 0, y: 0 },
+      capturedAt: 0,
+    };
+    const p = mapClientPointToBrowserFrame({
+      clientX: 50,
+      clientY: 30,
+      rect: { left: 0, top: 0, width: 100, height: 60 },
+      frame,
+    });
+    expect(p).toEqual({ x: 640, y: 400 });
+  });
+});

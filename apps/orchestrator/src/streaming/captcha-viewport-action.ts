@@ -6,8 +6,15 @@ import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import type { InputEnvelope } from './screencast-input-bridge.js';
 
-/** Narrow manual-input grant. Other V2 writes keep their existing fail-closed policy. */
-export async function authorizeCaptchaViewportInput(
+/**
+ * Manual-input grant for the user who holds the human lease of this task's
+ * browser. FIX-61 P0: this used to require an active CAPTCHA hand-off, so every
+ * other takeover (the user's own 「我来操作」, or pressing the screen) was
+ * silently refused with every click and key dropped. The grant is still bound
+ * to the live lease, the human phase, the current observation and the target
+ * node; AI input never passes here.
+ */
+export async function authorizeHumanViewportInput(
   instance: BrowserInstance,
   envelope: InputEnvelope,
   signal?: AbortSignal,
@@ -23,11 +30,10 @@ export async function authorizeCaptchaViewportInput(
       state?.phase !== 'human' ||
       !envelope.controlLease ||
       state.lease !== envelope.controlLease ||
-      !captchaHandoffs.active(instance.taskId, instance.userId, session.control) ||
       !envelope.observation ||
       !envelope.payload
     )
-      throw new Error('captcha_control_not_owned');
+      throw new Error('browser_control_not_owned');
   };
   requireOwner();
   const page = await instance.executor.getPage();
@@ -56,10 +62,13 @@ export async function authorizeCaptchaViewportInput(
       target = String(node.backendNodeId);
     }
     requireOwner();
+    const binding = browserControlSessions.get(instance, instance.userId, instance.taskId);
+    const captcha =
+      binding !== null && captchaHandoffs.active(instance.taskId, instance.userId, binding.control);
     return {
       request: {
         taskId: instance.taskId,
-        runId: `captcha:${instance.taskId}`,
+        runId: `${captcha ? 'captcha' : 'takeover'}:${instance.taskId}`,
         actor: 'human',
         lane: 'cdp',
         tabId: envelope.observation!.tabId,
@@ -71,7 +80,7 @@ export async function authorizeCaptchaViewportInput(
         lease: envelope.controlLease!,
       },
       // The human controls this lease explicitly. This grants no AI input and
-      // is revoked immediately when the handoff resumes, ends or times out.
+      // is revoked immediately when the user hands back or the session ends.
       decision: { kind: 'allow', sensitive: false },
     };
   } finally {
@@ -80,3 +89,6 @@ export async function authorizeCaptchaViewportInput(
     if (!session) await cdp.detach().catch(() => {});
   }
 }
+
+/** Kept for the e2e scripts that still import the old name. */
+export const authorizeCaptchaViewportInput = authorizeHumanViewportInput;

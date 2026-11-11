@@ -78,8 +78,10 @@ export function useBrowserOwnership(taskId: string | null, connected: boolean) {
       ? valid.lease
       : null;
   const request = React.useCallback(
-    async (action: 'takeover' | 'return') => {
-      if (!taskId || busy.current || (action === 'return' && !lease)) return;
+    // Resolves false when the server refused the request, null when nothing was sent (FIX-61
+    // 复审 #2 #2: a refused takeover used to leave the page on 「仅观察」 without a word).
+    async (action: 'takeover' | 'return'): Promise<boolean | null> => {
+      if (!taskId || busy.current || (action === 'return' && !lease)) return null;
       const requestId = ++sequence.current;
       busy.current = true;
       setPending(true);
@@ -95,18 +97,20 @@ export function useBrowserOwnership(taskId: string | null, connected: boolean) {
           currentTask.current !== taskId ||
           generation !== connection.current.generation
         )
-          return;
+          return true;
         setState({ value: next, generation });
         setError(next.error);
+        return !next.error;
       } catch (cause) {
         if (
           requestId !== sequence.current ||
           currentTask.current !== taskId ||
           generation !== connection.current.generation
         )
-          return;
+          return false;
         setState(null);
         setError(cause instanceof Error ? cause.message : '浏览器交接失败');
+        return false;
       } finally {
         if (requestId === sequence.current) {
           busy.current = false;

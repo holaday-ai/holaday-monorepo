@@ -20,7 +20,7 @@ export interface BrowserPanelHeaderStatus {
 export interface BrowserControlAction {
   nextInteractive: boolean;
   focusFollowUp: boolean;
-  label: '接管' | '交给 AI';
+  label: '我来操作' | '交还给我';
   ariaLabel: string;
   title: string;
 }
@@ -39,26 +39,26 @@ export function browserControlAction(inputs: {
     return {
       nextInteractive: true,
       focusFollowUp: false,
-      label: '接管',
-      ariaLabel: '接管浏览器',
-      title: '接管浏览器 — 你的鼠标键盘直接控制浏览器',
+      label: '我来操作',
+      ariaLabel: '我来操作',
+      title: '我来操作 — 也可以直接点画面，你的鼠标键盘直接操作这个页面',
     };
   }
   if (inputs.taskIsTerminal) {
     return {
       nextInteractive: false,
       focusFollowUp: true,
-      label: '交给 AI',
-      ariaLabel: '交给 AI 继续',
-      title: '交给 AI — 输入下一步指令后从当前页面继续',
+      label: '交还给我',
+      ariaLabel: '交还给我',
+      title: '交还给我 — 输入下一步指令，我从当前页面继续',
     };
   }
   return {
     nextInteractive: false,
     focusFollowUp: false,
-    label: '交给 AI',
-    ariaLabel: '退出浏览器接管',
-    title: '退出接管 — AI 继续当前执行',
+    label: '交还给我',
+    ariaLabel: '交还给我',
+    title: '交还给我 — 我从当前页面接着做这个任务',
   };
 }
 
@@ -313,7 +313,7 @@ export function terminalEvidenceContinuation(
     intent,
     label: '恢复可操作浏览器',
     pendingLabel: '正在恢复浏览器…',
-    description: '在当前任务恢复到最后页面，继续点击、输入或交给 AI。',
+    description: '在当前任务恢复到最后页面，可以直接点击、输入，或交还给我。',
   };
 }
 
@@ -477,8 +477,8 @@ export function browserPanelHeaderStatus(inputs: {
     return {
       label: '接管中',
       tooltip: inputs.taskIsTerminal
-        ? '你正在直接操作浏览器；需要 AI 时点“交给 AI”并输入下一步指令'
-        : '你正在直接操作浏览器，点“交给 AI”可继续当前执行',
+        ? '你在操作这个页面；需要我接着做时，点「交还给我」并输入下一步指令。'
+        : '你在操作，我先停下；需要我继续时点『交还给我』。',
       tone: 'takeover',
       dotStatus: 'live',
       showLabel: true,
@@ -655,13 +655,13 @@ export function browserLiveOverlayCopy(inputs: {
     if (inputs.showReconnect) {
       return {
         title: '浏览器工作区连接较慢',
-        detail: '正在恢复当前任务的浏览器；成功后可以继续点击、输入或交给 AI。',
+        detail: '正在恢复当前任务的浏览器；成功后可以直接点击、输入，或交还给我。',
         reconnectLabel: '重连浏览器',
       };
     }
     return {
       title: '正在连接浏览器工作区',
-      detail: '任务已结束，浏览器仍可接管操作，也可以继续交给 AI。',
+      detail: '任务已结束，浏览器还开着：直接点画面就能操作，也可以让我继续。',
       reconnectLabel: '重连浏览器',
     };
   }

@@ -831,10 +831,14 @@ function CloudBrowserPanel({
         setTerminalConnectTimedOut(false);
         setVncAttemptFails(0);
         setShowReconnect(false);
-        setVncStatus('idle');
         setTerminalRecoveryState('ready');
         setTerminalRecoveryAttempt(0);
+        // FIX-61 复审 #2 #2: only a remounted stream starts over at 「idle」. The CDP screen is
+        // not remounted and reports only changes of its own status: forcing 「idle」 under a
+        // socket that stays connected left the panel 「not connected」 for good — it showed
+        // 「连接恢复较慢…重连」 and ignored the control it had just been given.
         if (shouldRemountBrowserStreamAfterRestore({ usingCdp })) {
+          setVncStatus('idle');
           setReconnectEpoch((epoch) => epoch + 1);
         }
         if (announce) {
@@ -935,39 +939,10 @@ function CloudBrowserPanel({
       startupTargetUrl ??
       'about:blank');
   const displayUrlIsPendingTarget = startupTargetUrl != null && displayUrl === startupTargetUrl;
-  // Request once per browser-wait episode. A stale login banner must not
-  // immediately retake the browser after the user deliberately hands it back.
-  const autoTakeoverEpisode = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!browserAwaiting) {
-      autoTakeoverEpisode.current = null;
-      return;
-    }
-    const episode = `${activeTaskId}:${awaitingKind}`;
-    if (autoTakeoverEpisode.current === episode) return;
-    if (interactive) {
-      autoTakeoverEpisode.current = episode;
-      return;
-    }
-    if (!usingCdp || !browserAwaiting || interactive) return;
-    const hasLiveViewport = useVnc
-      ? vncStatus === 'connected' || vncStatus === 'connecting'
-      : Boolean(frame) && !isBlankUrl(frame?.url);
-    if (hasLiveViewport) {
-      autoTakeoverEpisode.current = episode;
-      setInteractive(true);
-    }
-  }, [
-    usingCdp,
-    browserAwaiting,
-    interactive,
-    activeTaskId,
-    awaitingKind,
-    useVnc,
-    vncStatus,
-    frame,
-    setInteractive,
-  ]);
+  // FIX-61 DEPLOY-61 P0-2: the panel never asks for control by itself. When the assistant
+  // stops to ask (a login, a check, 「确认继续执行吗？」), it asks in the conversation; control is
+  // requested only when the person presses or types on the screen or presses 「我来操作」.
+  // (It used to take over on every browser wait — DEPLOY-61 专项 3: 「正在交接」 with no input.)
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
@@ -1153,7 +1128,9 @@ function CloudBrowserPanel({
     ownership.pending ||
     ownership.state?.phase === 'requested' ||
     ownership.state?.phase === 'resuming' ||
-    (!ownership.supported && !terminalSessionUnavailable) ||
+    (!ownership.supported &&
+      !terminalSessionUnavailable &&
+      !(taskIsTerminal && terminalCanRestore)) ||
     ownership.error === 'input_outcome_unknown' ||
     (ownership.state?.phase === 'closed' && !taskIsTerminal);
   const inputFallbackMode = browserInputFallbackMode({
@@ -1165,33 +1142,94 @@ function CloudBrowserPanel({
     setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
+  // FIX-61 复审 #2 #2: a takeover the server refuses is said out loud, not left as 「仅观察」.
+  // DEPLOY-61: taking control re-laid the page out at the phone's width, so the press that
+  // asked for it was not delivered (it would have hit something else).
+  const handleHeldInputDropped = React.useCallback(() => {
+    toast.show('已由你操作；刚才那一下没有发出（画面刚刚变了），请再点一次', 'info');
+  }, [toast]);
+  const takeOver = React.useCallback(() => {
+    void requestOwnership('takeover').then((granted) => {
+      if (granted === false && mountedRef.current)
+        toast.show('没能接管浏览器，请稍后再点一次画面或「我来操作」', 'error');
+    });
+  }, [requestOwnership, toast]);
+  // FIX-61 P0: a released / expired browser is reopened on the same task and
+  // page, then handed to the user. If that fails the panel says so in plain
+  // words and offers 「重新打开这个页面」.
+  const [screenReopenFailed, setScreenReopenFailed] = React.useState(false);
+  React.useEffect(() => {
+    setScreenReopenFailed(false);
+  }, [activeTaskId]);
+  const reopenAndTakeOver = React.useCallback(() => {
+    setScreenReopenFailed(false);
+    void restoreTerminalSession(true).then((restored) => {
+      if (!mountedRef.current) return;
+      if (!restored) {
+        setScreenReopenFailed(true);
+        return;
+      }
+      setInteractive(true);
+      previousIntent.current = true;
+      takeOver();
+    });
+  }, [takeOver, restoreTerminalSession, setInteractive]);
   const handleUserTakeoverClick = React.useCallback(() => {
     if (controlDisabled) return;
     const next = browserControl.nextInteractive;
     if (next) {
       // If a terminal process was released, takeover first restores the same
       // task's browser. Static evidence never receives interactive controls.
-      if (terminalSessionUnavailable) {
-        void restoreTerminalSession(true).then((restored) => {
-          if (!restored || !mountedRef.current) return;
-          setInteractive(true);
-          void requestOwnership('takeover');
-        });
+      if (terminalSessionUnavailable || (taskIsTerminal && !ownership.supported)) {
+        reopenAndTakeOver();
         return;
       }
     }
     setInteractive(next);
     previousIntent.current = next;
-    void requestOwnership(next ? 'takeover' : 'return');
+    if (next) takeOver();
+    else void requestOwnership('return');
     if (browserControl.focusFollowUp) onRequestAgentHelp?.();
   }, [
     browserControl,
     onRequestAgentHelp,
-    restoreTerminalSession,
+    reopenAndTakeOver,
     terminalSessionUnavailable,
+    taskIsTerminal,
+    ownership.supported,
     setInteractive,
     controlDisabled,
     requestOwnership,
+    takeOver,
+  ]);
+  // FIX-61 P0: pressing or typing on the screen IS the takeover. The viewport
+  // holds the pressed point / keys until control is granted, then delivers them.
+  const screenControlAvailable =
+    usingCdp &&
+    !workspaceIdle &&
+    !evidenceHeaderActive &&
+    Boolean(activeTaskId) &&
+    !interactive &&
+    !ownership.pending &&
+    ownership.state?.phase !== 'requested' &&
+    ownership.state?.phase !== 'resuming' &&
+    ownership.error !== 'input_outcome_unknown' &&
+    (ownership.supported || (taskIsTerminal && terminalCanRestore));
+  const handleScreenControlRequest = React.useCallback(() => {
+    if (taskIsTerminal && (!ownership.supported || terminalSessionUnavailable)) {
+      reopenAndTakeOver();
+      return;
+    }
+    setInteractive(true);
+    previousIntent.current = true;
+    takeOver();
+  }, [
+    ownership.supported,
+    reopenAndTakeOver,
+    takeOver,
+    setInteractive,
+    taskIsTerminal,
+    terminalSessionUnavailable,
   ]);
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
@@ -1594,8 +1632,7 @@ function CloudBrowserPanel({
                     aria-label={browserControl.ariaLabel}
                     aria-pressed={interactive}
                     className={cn(
-                      'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border transition-colors',
-                      taskIsTerminal && !isNarrow && !isSheet ? 'px-2.5' : 'w-8',
+                      'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border px-2.5 transition-colors',
                       interactive
                         ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
                         : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
@@ -1606,9 +1643,10 @@ function CloudBrowserPanel({
                     ) : (
                       <MousePointerClick className="h-3.5 w-3.5" />
                     )}
-                    {taskIsTerminal && !isNarrow && !isSheet && (
-                      <span className="text-[11px] font-medium">{browserControl.label}</span>
-                    )}
+                    {/* FIX-61: the control always says what it does, at every width. */}
+                    <span className="whitespace-nowrap text-[11px] font-medium">
+                      {browserControl.label}
+                    </span>
                   </button>
                 )}
                 {/* Fullscreen toggle is a power-user feature; hide on
@@ -1705,6 +1743,37 @@ function CloudBrowserPanel({
               </div>
             </div>
           )}
+          {usingCdp && interactive && !taskIsTerminal && !evidenceHeaderActive && (
+            <div
+              role="status"
+              className={cn(
+                'border-b border-[#FF0061]/15 bg-[#FF0061]/[0.06] text-[#B8004A] dark:text-[#FF7AAE]',
+                isSheet ? 'px-2 py-1.5 text-[11px]' : 'px-3 py-2 text-xs',
+              )}
+            >
+              你在操作，我先停下；需要我继续时点『交还给我』。
+            </div>
+          )}
+          {screenReopenFailed && taskIsTerminal && (
+            <div
+              role="alert"
+              className={cn(
+                'flex flex-wrap items-center gap-2 border-b bg-white text-[#595757] dark:bg-card/85 dark:text-foreground',
+                isSheet ? 'px-2 py-1.5 text-[11px]' : 'px-3 py-2 text-xs',
+              )}
+            >
+              <span className="min-w-0 flex-1">这个页面的浏览器已经关掉了，刚才没能重新打开。</span>
+              {terminalCanRestore && (
+                <button
+                  type="button"
+                  onClick={reopenAndTakeOver}
+                  className="inline-flex h-7 shrink-0 items-center rounded-md border border-[#FF0061]/35 px-2.5 text-[11px] font-medium text-[#FF0061] hover:bg-[#FF0061]/10"
+                >
+                  重新打开这个页面
+                </button>
+              )}
+            </div>
+          )}
           <div
             ref={screencastHostRef}
             className={cn(
@@ -1761,6 +1830,11 @@ function CloudBrowserPanel({
                     reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
                     controlLease={ownership.lease}
+                    onRequestControl={
+                      screenControlAvailable ? handleScreenControlRequest : undefined
+                    }
+                    replayAfterControl={taskIsTerminal}
+                    onHeldInputDropped={handleHeldInputDropped}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}
@@ -3396,11 +3470,12 @@ function FullscreenFloatingToolbar({
           title={controlAction.title}
           aria-label={controlAction.ariaLabel}
           className={cn(
-            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/85 transition-colors hover:bg-white/10',
+            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-white/85 transition-colors hover:bg-white/10',
             interactive && 'bg-[#FF0061]/35 text-white',
           )}
         >
           {interactive ? <Bot className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
+          <span className="whitespace-nowrap text-[11px] font-medium">{controlAction.label}</span>
         </button>
       )}
     </div>

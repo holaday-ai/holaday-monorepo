@@ -69,7 +69,7 @@ describe('browser ownership UI', () => {
       initialProps: { task: 'one' },
     });
     await waitFor(() => expect(result.current.supported).toBe(true));
-    let request!: Promise<void>;
+    let request!: Promise<unknown>;
     act(() => {
       request = result.current.request('takeover');
     });
@@ -92,7 +92,7 @@ describe('browser ownership UI', () => {
     );
     const { result } = renderHook(() => useBrowserOwnership('one', true));
     await waitFor(() => expect(result.current.supported).toBe(true));
-    let request!: Promise<void>;
+    let request!: Promise<unknown>;
     act(() => {
       request = result.current.request('takeover');
     });

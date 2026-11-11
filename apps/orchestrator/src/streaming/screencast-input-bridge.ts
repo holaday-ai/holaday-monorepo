@@ -15,7 +15,7 @@ interface DeferredScreencastInputBridgeOptions {
   runWithStableViewport?: (action: () => Promise<void>) => Promise<void>;
   maxViewportHeight?: number;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
-  onViewportRequested?: () => void;
+  onViewportRequested?: (envelope: InputEnvelope) => void;
   beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   /** Optional until the session/route and frontend negotiate owner leases. */
   runOwnedInput?: (
@@ -45,7 +45,7 @@ export class DeferredScreencastInputBridge {
   private sink: ScreencastInputSink | null = null;
   private readonly runWithStableViewport?: DeferredScreencastInputBridgeOptions['runWithStableViewport'];
   private readonly maxViewportHeight: number;
-  private readonly onViewportRequested?: () => void;
+  private readonly onViewportRequested?: (envelope: InputEnvelope) => void;
   private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions['beforeDispatch'];
   private sinkGeneration = 0;
   private latestViewport: Extract<InputMessage, { type: 'viewport' }> | null = null;
@@ -87,7 +87,7 @@ export class DeferredScreencastInputBridge {
         height > this.maxViewportHeight
       )
         return;
-      this.onViewportRequested?.();
+      this.onViewportRequested?.(envelope);
       this.latestViewport = envelope.payload;
     }
 

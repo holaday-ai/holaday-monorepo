@@ -81,6 +81,13 @@ export function collectSensitiveFieldValues(): string[] {
       const field = el as HTMLInputElement | HTMLTextAreaElement;
       if (field.value && isSensitive(field)) values.add(field.value);
     }
+    // FIX-61: whatever the user typed while operating the browser (marked by
+    // the screencast input path) is never read back by the agent.
+    for (const el of Array.from(root.querySelectorAll('[data-hd-human-typed]'))) {
+      const field = el as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+      const value = 'value' in field ? field.value : field.innerText;
+      if (typeof value === 'string' && value) values.add(value);
+    }
     for (const host of Array.from(root.querySelectorAll('*'))) {
       if (host.shadowRoot) visit(host.shadowRoot);
     }

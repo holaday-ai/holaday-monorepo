@@ -58,6 +58,7 @@ import {
   detectPermissionWall,
 } from '../login-detector.js';
 import { translateNavError } from '../nav-error-translator.js';
+import type { AskedFieldJudge } from '../scrape-field-judge.js';
 import { applySiteConfigPostNavigation, matchSiteConfig } from '../site-configs/index.js';
 import { classifyTaskType, filterTools } from '../tool-registry.js';
 import {
@@ -794,6 +795,11 @@ export interface RunSupercarOptions {
     rule: string;
   }) => Promise<void>;
   browserControlFactory?: () => { control: BrowserControl; finish: () => void };
+  /**
+   * FIX-61 复审 #1 #3: the small model that reads whether a browser answer gives each asked
+   * field's value (FIX-60's judge). Called only when a named count looks left out.
+   */
+  askedFieldJudge?: AskedFieldJudge;
   /** External task id (task_…). Correlates hooks and WS frames. */
   taskId: string;
   /** Free-form user intent — the first user message. */

@@ -21,6 +21,7 @@ import {
 } from '../../llm/model-call-retry.js';
 import { asksForToolCallExample } from '../generate-answer-guard.js';
 import { stripInternalRefs } from '../internal-refs.js';
+import type { AskedFieldJudge } from '../scrape-field-judge.js';
 import { namedAddressHosts } from '../scrape-runner.js';
 import { SEARCH_RESULTS_ORIGIN } from '../search-fallback/search-results-page.js';
 import { humanizeToolMentions } from '../text-sanitizer.js';
@@ -48,10 +49,12 @@ import {
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
   type ObservedEvidence,
+  absentExplainedByPage,
   assessCompletionFacts,
   declaredAbsentFields,
   fieldLabel,
   includesWhole,
+  missingAskedFields,
   observedEvidence,
   sameSource,
   unescapeLiteralBreaks,
@@ -321,6 +324,12 @@ export interface UnifiedBrowserLoopInput {
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<boolean>;
   maxSteps?: number;
+  /**
+   * FIX-61 DEPLOY-61 P1-3: true once about 80% of the task's time is used. The run stops
+   * exploring and the next turn may only finish with what it already has (partial if need be),
+   * instead of being cut off by the time limit with nothing.
+   */
+  wrapUp?: () => boolean;
   /** How many latest page-sized tool results stay in full (default 1). */
   fullPageResults?: number;
   signal?: AbortSignal;
@@ -359,6 +368,12 @@ export interface UnifiedBrowserLoopInput {
    * page itself has (「价格：未获取到（仅显示 See options）」), or null.
    */
   partialNote?: (summary: string, pageText?: string) => string | null;
+  /**
+   * FIX-61 复审 #1 #3: FIX-60's small-model field reading. Asked only when a named count looks
+   * left out; it can clear that doubt (「12.3万赞」 is the likes), never add one. Null keeps the
+   * previous verdict.
+   */
+  fieldJudge?: AskedFieldJudge;
   /**
    * Offline audits only: named sites are served from a loopback fixture, so the site lock
    * lets local test hosts through. Production never sets it (PR #295 review).
@@ -455,6 +470,7 @@ export async function runUnifiedBrowserLoop(
           rescueState,
           input.currentPageUrl?.(),
           isEnglishIntent(input.userIntent ?? input.intent),
+          requestNamesSite(input.userIntent ?? input.intent, rescueState.blockedUrl),
         )
       : looped;
   if (outcome.status === 'failed') logger.warn({ steps: steps.slice(-120) }, 'browser loop failed');
@@ -920,8 +936,16 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   /** What the model is told when a handed-over wall is gone. */
   const afterWall = (handed: 'resumed' | 'cleared' | 'alternate', resumed: string) =>
     handed === 'alternate' ? ALTERNATE : handed === 'cleared' ? WALL_CLEARED_ITSELF : resumed;
+  let wrappedUp = false;
+  /** concludeNow was set by something other than the wrap-up (reads with nothing new, rescue). */
+  let concludedOtherwise = false;
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
+    if (!wrappedUp && step > 0 && input.wrapUp?.()) {
+      wrappedUp = true;
+      concludeNow = true;
+      messages.push({ role: 'user', content: WRAP_UP_NOTE });
+    }
     if (input.captchaHandoff && !captchaDeclined) {
       const wall = await checkBlocker();
       // FIX-29 (local f29a jd): JD sent the item page on to passport.jd.com after the
@@ -1118,6 +1142,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           continue;
         }
         hostNavigate = blankTarget;
+      }
+      // FIX-61 DEPLOY-61 P1-3: finish-only because the time is nearly used, not because reading
+      // went nowhere: another tool is refused (the time limit still ends the run), not failed.
+      if (concludeNow && call.name !== 'finish' && wrappedUp && !concludedOtherwise) {
+        results.push(toolResult(call.id, `未执行：${WRAP_UP_NOTE}`, true));
+        continue;
       }
       if (concludeNow && call.name !== 'finish')
         return {
@@ -1770,7 +1800,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               const kept = [
                 summary,
                 fieldLines(args.fields, summary),
-                unverifiedNote(facts.unverified),
+                unverifiedNote(facts.unverified, {
+                  english: isEnglishIntent(input.userIntent ?? input.intent),
+                }),
               ]
                 .filter(Boolean)
                 .join('\n\n');
@@ -1830,7 +1862,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
-          const note = unverifiedNote(facts.unverified);
+          const note = unverifiedNote(facts.unverified, {
+            english: isEnglishIntent(input.userIntent ?? input.intent),
+          });
           // Fields are part of the answer: show the ones the summary leaves out.
           const listed = fieldLines(args.fields, summary);
           let answer = [summary, listed, note].filter(Boolean).join('\n\n');
@@ -1839,16 +1873,44 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const saysPartial = /^\s*(?:部分完成|partially completed)/i.test(summary);
           // FIX-35 0b (Deploy-35 dy-2): a field the user named, written as 「页面未显示」, is
           // looked for once on a screenshot; still absent, the answer is 部分完成.
-          const absent = declaredAbsentFields(
+          const declaredAbsent = declaredAbsentFields(
             input.userIntent ?? input.intent,
             summary,
             args.fields,
             pageEvidence.map((page) => page.text),
           );
+          // FIX-61 (local dy-1 run): the answer gave title, author and likes and left out the
+          // comments, favourites and shares the user named — and went as 完成. A named field the
+          // answer does not give at all is treated like one written as 页面未显示.
+          // Only counts (评论数 / 收藏数 …) the answer never mentions: a title or price written
+          // naturally (「Apple iPhone 16 Pro，价格 ¥7999」) is a value, label or not.
+          const leftOutDoubt = missingAskedFields(input.userIntent ?? input.intent, summary).filter(
+            (field) =>
+              !declaredAbsent.includes(field) &&
+              /数$/.test(field) &&
+              !summary.includes(field.replace(/数$/, '')),
+          );
+          // 复审 #1 #3: the field name minus 「数」 is only a doubt — 「12.3万赞」「获赞 12.3 万」 give
+          // the likes. The small model reads the answer once; a failed call keeps the doubt.
+          const leftOut = await confirmLeftOut(
+            input.fieldJudge,
+            input.userIntent ?? input.intent,
+            summary,
+            leftOutDoubt,
+          );
+          const absent = [...declaredAbsent, ...leftOut];
           // The page itself confirms the gap (a listed item showing only 「See options」):
           // an honest 部分完成, not a second look (FIX-35 0a).
           const listGap = input.partialNote?.(summary, observedText) ?? null;
-          if (absent.length && !listGap && !absentLooked && !concludeNow) {
+          // FIX-61 P1-5: a gap the answer explains with the page's own words is honest — no
+          // second look (it pushed reg-new-amazon-sg into another variant's price).
+          const absentExplained =
+            absent.length > 0 &&
+            absentExplainedByPage(
+              summary,
+              pageEvidence.map((page) => page.text),
+            );
+          if (absent.length && !listGap && !absentLooked && !absentExplained && !concludeNow) {
             absentLooked = true;
             // FIX-43 (Deploy-43 reg-dy-2): the run had a screenshot showing 「小喵麻麻」 top right and
             // still wrote 作者「页面未显示」 — the login popup hid the rest of the page from the read.
@@ -1861,7 +1923,11 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const readText = textRead
               ? ''
               : '请先 get_page_text 读一次页面正文（弹窗挡住时 snapshot 读不到它后面的页面，正文读取不受影响）；';
-            await rejected(summary, given, `点名字段写成了页面未显示：${absent.join('、')}`);
+            await rejected(
+              summary,
+              given,
+              `点名字段写成了页面未显示或没写出来：${absent.join('、')}`,
+            );
             // The second look is optional: if it never ends in a finish (steps, model), this
             // answer is still delivered, as the 部分完成 it would have been.
             const lead = absentLead(absent, answer);
@@ -1875,9 +1941,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             results.push(
               toolResult(
                 call.id,
-                shot
-                  ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。${readText}${textRead ? '请' : '仍读不到再'}点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
-                  : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。${readText}${textRead ? '请先' : '仍读不到再'} screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`,
+                (leftOut.length
+                  ? `答案里没有写出 ${leftOut.join('、')}（用户点名要的）：先在页面里找到它们照原样写；确实没有再写「页面未显示」。`
+                  : '') +
+                  (shot
+                    ? `${absent.join('、')} 写成了页面未显示，但登录弹窗打开时，弹窗后面的页面常读不到（名字常在页面右上角或标题旁）。${readText}${textRead ? '请' : '仍读不到再'}点弹窗自己的关闭按钮（×，不要按 Esc）关掉它，再 snapshot 重读；仍读不到就再 screenshot，截图里看得到就照截图原样写（注明「截图读取」），确实看不到再写「页面未显示」。其余内容不变，再 finish。`
+                    : `${absent.join('、')} 写成了页面未显示，但还没看过页面截图（登录弹窗等可能挡住了文字，名字常在页面角落）。${readText}${textRead ? '请先' : '仍读不到再'} screenshot 看一眼：截图里看得到就照截图原样写（注明「截图读取」）；确实看不到再写「页面未显示」。其余内容不变，再 finish。`),
                 true,
               ),
             );
@@ -2093,7 +2162,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             const answer = [
               summary,
               fieldLines(args.fields, summary),
-              unverifiedNote(facts.unverified),
+              unverifiedNote(facts.unverified, {
+                english: isEnglishIntent(input.userIntent ?? input.intent),
+              }),
             ]
               .filter(Boolean)
               .join('\n\n');
@@ -2468,6 +2539,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (seenReads.size > 64) seenReads.delete(seenReads.values().next().value!);
         if (repeatedReads >= 5) {
           concludeNow = true;
+          concludedOtherwise = true;
           outcome.text +=
             '\n连续5轮读取没有新信息。下一轮必须基于现有证据 finish，或者如实报告未完成；禁止继续空转读取。';
         }
@@ -2517,6 +2589,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         const site = host ? (siteOf(host) ?? host) : undefined;
         if (site && site !== rescueWallSite && !rescueAllows(now)) {
           concludeNow = true;
+          concludedOtherwise = true;
           results.push(
             toolResult(
               call.id,
@@ -2657,11 +2730,20 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       }
       if (outcome.ok && action.tool === 'sections') outline = outlineFrom(outcome.text) ?? outline;
       if (outcome.ok && action.tool === 'list_tabs') noteListedTabs(outcome.text);
-      const staleRedo =
+      const staleAction =
         ['stale_ref', 'stale_context'].includes(outcome.errorCode ?? '') &&
-        ['type', 'select', 'click'].includes(action.tool)
-          ? `\n页面已变化，这个 ref 失效了：先 snapshot，再用新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要改用别的方式代替。`
-          : '';
+        ['type', 'select', 'click'].includes(action.tool);
+      // FIX-61 P1-4 (local b-m01): told to snapshot first, the run clicked the same stale ref three
+      // times behind 高德's login popup and gave up. The host reads the page itself now and hands
+      // over the fresh refs with the same instruction.
+      const fresh = staleAction
+        ? await input.execute({ tool: 'snapshot' } as UnifiedBrowserAction).catch(() => null)
+        : null;
+      const staleRedo = staleAction
+        ? fresh?.ok
+          ? `\n页面已变化，这个 ref 失效了。宿主刚重新读了页面（下面是新的 snapshot）：用里面的新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要再用旧 ref。登录提示弹窗挡住时，点弹窗自己的关闭按钮（×）关掉它，不要登录、不要碰验证码。\n\n${fresh.text}`
+          : `\n页面已变化，这个 ref 失效了：先 snapshot，再用新 ref 重做这次 ${action.tool}（同一个元素${action.tool === 'click' ? '' : '、同一个值'}），不要改用别的方式代替。`
+        : '';
       const hostNote = hostNavigate
         ? `你还没有打开任何网页就要结束；宿主先按任务打开了目标网站 ${hostNavigate}。请读取页面后继续原任务。\n`
         : '';
@@ -3066,7 +3148,7 @@ export const WRITE_INTENT_RE =
 const READ_VERB_RE =
   /读|阅读|查|看|列出|列一下|列举|搜|检索|找|比较|比一下|比价|对比|获取|提取|抓取|总结|汇总|概括|摘要|告诉我|说说|统计|核对|识别|\b(?:read|look\s+up|check|find|search|list|compare|get|show|tell\s+me|what|which|how\s+(?:much|many))\b/i;
 const QUESTION_RE =
-  /多少|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
+  /多少|多久|多长时间|多远|怎么走|怎么去|几[点元块个天次岁]|什么|哪[个些里家款]|是否|怎么样|如何|价格|价钱|报价|行情|点位|评分|[吗呢][？?]?$/;
 /** Opening, visiting or naming the browser — no action of its own. */
 const NAV_ONLY_RE =
   /^(?:请|麻烦|帮我|帮忙|给我|你|使用|用|通过|在|到|去|进入|打开|访问|前往|登上|云端|真实|浏览器|一下|这个|那个|页面|网页|网站|链接|地址|[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*|[\s:：])*$/iu;
@@ -3100,6 +3182,9 @@ export function isReadOnlyIntent(intent: string): boolean {
       (READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part)),
   );
 }
+/** FIX-61 DEPLOY-61 P1-3: what the model is told when the time is nearly used. */
+export const WRAP_UP_NOTE =
+  '时间快用完了（已用掉约八成）。不要再打开新页面、不要再做新动作，这一轮直接 finish：用户要的都拿到了就照常写；没拿全就用 finish(status=completed)，summary 以「部分完成：」开头，先写已经确认的结论（例如「官网已不再直接销售这款」「京东要登录才显示价格」），再写还缺什么、卡在哪一步。只写已读页面上有的内容，不要猜价格或数字。';
 /** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
 export const RESCUE_SITES = 2;
 /** FIX-57 #5: public search pages a rescue may open to find a route (not counted as routes). */
@@ -3174,16 +3259,18 @@ export function rescuedAnswer(
   rescue: RescueState,
   finalUrl: string | undefined,
   en = false,
+  /** FIX-61: the request names the blocked page's site; otherwise it is not 「你给的」 page. */
+  userGave = true,
 ): Extract<UnifiedBrowserOutcome, { status: 'completed' }> {
   const from = en ? rescueSiteNameEn(finalUrl) : rescueSiteName(finalUrl);
   const link = finalUrl && /^https?:\/\//.test(finalUrl) ? `[${from}](${finalUrl})` : from;
   const given = en ? rescueSiteNameEn(rescue.blockedUrl) : rescueSiteName(rescue.blockedUrl);
   const why = rescue.why ?? 'login';
   const lead = en
-    ? `部分完成：I got this from ${link} (the ${given} page you gave ${
+    ? `部分完成：I got this from ${link} (the ${given} page${userGave ? ' you gave' : ''} ${
         why === 'login' ? 'needs a login' : why === 'blocked' ? 'was blocked' : "didn't open"
       }), so it's only part of what you asked:`
-    : `部分完成：这是从${link}查到的（你给的${given}页面${
+    : `部分完成：这是从${link}查到的（${userGave ? '你给的' : ''}${given}页面${
         why === 'login' ? '要登录' : why === 'blocked' ? '被拦下了' : '没打开'
       }），只拿到了一部分：`;
   const body = withoutSourceLines(
@@ -3606,13 +3693,17 @@ function withoutDroppedUnverified(lines: string[], dropped: readonly string[]): 
   if (!dropped.length) return lines;
   const keys = dropped.map((value) => tightForm(value));
   return lines.flatMap((line) => {
-    const m = /^(\s*(?:未核实|译述，未逐字核对)[^—\n]*——)(.+)$/u.exec(line);
+    const m =
+      /^(\s*(?:未核实|译述，未逐字核对)[^—\n]*——|\s*(?:Not verified|Paraphrased, not checked word for word):[^—\n]* — )(.+)$/u.exec(
+        line,
+      );
     if (!m) return [line];
-    const kept = m[2]!.split('；').filter((item) => {
+    const sep = m[1]!.includes('——') ? '；' : '; ';
+    const kept = m[2]!.split(sep).filter((item) => {
       const quoted = /「([\s\S]*)」\s*$/u.exec(item)?.[1];
       return !quoted || !keys.includes(tightForm(quoted));
     });
-    return kept.length ? [`${m[1]}${kept.join('；')}`] : [];
+    return kept.length ? [`${m[1]}${kept.join(sep)}`] : [];
   });
 }
 
@@ -4039,5 +4130,36 @@ function withoutPageContent(messages: NeutralMessage[], scope: 'last' | 'all'): 
           block.type === 'tool_result' ? { ...block, content: REMOVED_PAGE_CONTENT } : block,
         ),
     };
+  });
+}
+
+/** FIX-61: whether the request itself names the site of `url` (its address or its domain). */
+export function requestNamesSite(intent: string, url: string | undefined): boolean {
+  const host = hostOf(url)?.replace(/^www\./, '');
+  if (!host) return false;
+  const base = host.split('.').slice(-2).join('.');
+  return intent.toLowerCase().includes(base.toLowerCase());
+}
+
+/**
+ * FIX-61 复审 #1 #3 / 复审 #2 #1: the named counts the answer really leaves out. `doubt` comes
+ * from the field-name rule and is only a doubt: a field counts as left out only when the judge
+ * (FIX-60's `{field, has_value}` reading) says plainly that the answer gives no value for it.
+ * No judge, an empty reading, a failed call (欠费, timeout), or no verdict on that field: the
+ * doubt is dropped, as before FIX-61 — the judge never adds a field the rule did not doubt.
+ */
+export async function confirmLeftOut(
+  judge: AskedFieldJudge | undefined,
+  request: string,
+  answer: string,
+  doubt: readonly string[],
+): Promise<string[]> {
+  if (!doubt.length || !judge) return [];
+  const verdicts = await judge({ request, answer }).catch(() => null);
+  if (!verdicts?.length) return [];
+  const key = (field: string) => field.replace(/[\s「」『』"“”'‘’]/g, '').replace(/数$/, '');
+  return doubt.filter((field) => {
+    const said = verdicts.find((v) => key(v.field) === key(field));
+    return said !== undefined && !said.hasValue;
   });
 }

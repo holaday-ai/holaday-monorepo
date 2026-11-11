@@ -794,7 +794,17 @@ export interface UnifiedActionGateOptions {
   stillLive?: () => Promise<boolean>;
   onConfirmed?: (descriptor: RuntimeActionDescriptor) => void;
   onVetoed?: (descriptor: RuntimeActionDescriptor, reason: string | undefined) => void;
+  /**
+   * FIX-61 DEPLOY-61 P1-2: a read-only task (isReadOnlyIntent). A target that cannot be read is
+   * then not clicked and not asked about — the assistant re-reads the page, closes what covers
+   * it or takes another route. A transactional context is still confirmed.
+   */
+  readOnly?: boolean;
 }
+
+/** FIX-61 DEPLOY-61 P1-2: what a read-only task is told instead of a confirmation. */
+export const UNREADABLE_READONLY_MESSAGE =
+  '这个元素读不出来（可能被弹窗或遮罩挡住，或者没有显示出来），没有点它。只读任务不要点读不出来的元素：先 snapshot 重读页面；有弹窗或遮罩就点它的关闭按钮（×、关闭、我知道了、稍后再说），不要登录、不要做验证；关不掉就换一条路（直接打开结果页的网址、用页面上别的入口或换一个公开页面）；都不行就如实 finish：拿到了什么、缺什么、卡在哪一步。';
 
 /** Comparable identity of the targets a confirmation was given for. */
 function targetSignature(description: UnifiedActionDescription): string {
@@ -948,10 +958,14 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
         },
       };
     }
-    if (failClosed)
+    if (failClosed) {
+      if (unreadableOnly && options.readOnly)
+        return { kind: 'skip', message: UNREADABLE_READONLY_MESSAGE };
       return confirm(`${failClosed}，它可能是付款、下单、删除或发送等操作。确认继续执行吗？`, item);
+    }
     return 'proceed';
   };
+  let unreadableOnly = false;
 
   return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
     const description = await options.describe(action, phase);
@@ -968,6 +982,7 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
       // ask once, on its final (submitting) descriptor.
       const failClosed =
         index === last && !confirmed ? (description.transactional ?? description.unverified) : null;
+      unreadableOnly = !description.transactional && failClosed === description.unverified;
       const decision = await judge(item, failClosed);
       if (decision === 'confirmed') confirmed = true;
       else if (decision !== 'proceed') return decision;

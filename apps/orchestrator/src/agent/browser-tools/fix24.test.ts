@@ -179,9 +179,11 @@ describe('core-08: a stale ref is redone after a fresh snapshot', () => {
       execute: browser.execute as never,
       currentPageUrl: browser.currentPageUrl,
     });
+    // FIX-61 P1-4: the host reads the page itself and hands over the fresh refs.
     expect(seen.join('\n')).toContain(
-      '先 snapshot，再用新 ref 重做这次 type（同一个元素、同一个值）',
+      '宿主刚重新读了页面（下面是新的 snapshot）：用里面的新 ref 重做这次 type（同一个元素、同一个值）',
     );
+    expect(seen.join('\n')).toContain('不要登录、不要碰验证码');
     expect(outcome).toMatchObject({ status: 'completed' });
   });
 });
