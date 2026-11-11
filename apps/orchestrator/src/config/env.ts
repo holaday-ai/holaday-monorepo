@@ -367,6 +367,16 @@ const baseEnvSchema = z.object({
    * Review #1: 高德 (amap_maps, BOSS enabled it) is on by default with the web search.
    */
   TOOL_ROUTER_TOOLS: z.string().default('bailian_web_search,amap_maps'),
+  /**
+   * REBUILD-3 answer contract for price / price-comparison browser tasks (agent/answer-contract).
+   * Off: the browser loop's finish path is unchanged. On: a price task hands in a structured
+   * `price_result`; code checks every quote against the text read in the run (name, variant and
+   * price from one block) and renders the answer, instead of the price post-processing rules.
+   */
+  ANSWER_CONTRACT_PRICE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])
