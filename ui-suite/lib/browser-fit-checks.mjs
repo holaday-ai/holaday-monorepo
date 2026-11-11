@@ -151,7 +151,7 @@ export async function browserPanelFitChecks(page, server, width, out) {
 
     step = 'takeover';
     // Takeover: a click on the scaled page lands on the same page pixel.
-    const takeover = page.getByRole('button', { name: '接管浏览器', exact: true });
+    const takeover = page.getByRole('button', { name: /^(?:我来操作|接管浏览器)$/ });
     if (await takeover.count()) {
       await takeover.click({ timeout: 10_000 });
       await page.waitForTimeout(300);
