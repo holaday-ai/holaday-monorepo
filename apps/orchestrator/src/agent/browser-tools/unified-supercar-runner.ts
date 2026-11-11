@@ -376,13 +376,16 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   /** FIX-61B P1-4: whether this pause passes for a read-only task; logged when it does. */
   const passReadOnlyEffect = async (
     interruption: { reason: string; message: string },
-    triggers: ReadonlyArray<{ branch: string; url: string }>,
+    triggers: ReadonlyArray<{ branch: string; url: string; bodyShape?: string; action?: string }>,
   ): Promise<boolean> => {
+    // 复审 #1: what is pending now is judged too, in the same synchronous step as the clearing —
+    // a write that arrived after the action's own snapshot is never cleared unjudged.
+    const judged = [...triggers, ...(tools.observation?.pendingEffect()?.triggers ?? [])];
     const pass = readOnlyEffectMayPass({
       readOnly: isReadOnlyIntent(opts.intent),
       reason: interruption.reason,
       action: lastActed,
-      triggers,
+      triggers: judged,
     });
     if (!pass) return false;
     tools.observation?.acknowledgeEffect();
@@ -836,7 +839,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const id = `action-${++replayActionId}`;
         const targetPage = tools.page;
         await replay?.capture(targetPage, id, 'before');
-        if (['click', 'type', 'select', 'navigate'].includes(action.tool))
+        // FIX-61B 复审 #1: every step that may act is the one judged (click_at, upload… never pass).
+        if (!READ_TOOLS.has(action.tool))
           lastActed = {
             tool: action.tool,
             label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
@@ -847,6 +851,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const result = await tools.execute(action);
         page = tools.page;
         lastTriggers = result.effect?.triggers ?? [];
+        // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
+        // logged and passed (read-only-effect-policy); anything that may change something asks.
+        if (result.interruption && (await passReadOnlyEffect(result.interruption, lastTriggers))) {
+          delete result.interruption;
+          result.text = `${result.text}\n（页面在后台发了一个请求，判断为浏览产生的统计类请求，已记录并继续只读查看。）`;
+        }
         // FIX-61B P1-6: a read of a page with boxes the person typed into says which (names only,
         // never the text): the assistant cannot see their contents and must not call them empty.
         if (result.ok && READ_TOOLS.has(action.tool)) {
@@ -854,12 +864,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           if (typed.length)
             result.text = `${result.text}\n（页面上「${typed.join('」「')}」是用户自己填写的输入框，内容你看不到：被问到时回答「这是你自己填的内容，我看不到」，不要说为空或没有填写。）`;
         }
-        // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
-        // logged and passed (read-only-effect-policy); anything that may change something asks.
-        if (result.interruption && (await passReadOnlyEffect(result.interruption, lastTriggers))) {
-          delete result.interruption;
-          result.text = `${result.text}\n（页面在后台发了一个请求，判断为浏览产生的统计类请求，已记录并继续只读查看。）`;
-        }
+
         if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,

@@ -6,10 +6,13 @@ import { type EffectAction, readOnlyEffectMayPass } from './read-only-effect-pol
  * FIX-61B P1-4 (Deploy-61 online b-m01 / new-bestbuy): a read-only task's 「后台请求」 pause after an
  * ordinary step passes; anything that may change something still asks.
  */
-const BACKGROUND = [{ branch: 'unknown_post' }];
+/** A log endpoint every check places (BestBuy's logger, as seen online). */
+const BACKGROUND = [
+  { branch: 'unknown_post', url: 'https://upa-logger.x1.aws.openshift.bestbuy.com/log-events' },
+];
 const pass = (
   action: EffectAction | null,
-  triggers: ReadonlyArray<{ branch: string }> = BACKGROUND,
+  triggers: ReadonlyArray<{ branch: string; url: string; action?: string }> = BACKGROUND,
   readOnly = true,
   reason = 'unexpected_effect',
 ) => readOnlyEffectMayPass({ readOnly, reason, action, triggers });
@@ -44,6 +47,12 @@ describe('FIX-61B P1-4: read-only background-request pauses', () => {
     ['a password', { tool: 'type', label: '密码', role: 'textbox' }],
     ['a phone number', { tool: 'type', label: '手机号', role: 'textbox' }],
     ['choosing an option', { tool: 'select', label: '尺寸' }],
+    ['预定', { tool: 'click', label: '立即预定', role: 'button' }],
+    ['抢票', { tool: 'click', label: '马上抢票', role: 'button' }],
+    ['add to wishlist', { tool: 'click', label: 'Add to Wishlist', role: 'button' }],
+    ['a menu checkbox', { tool: 'click', label: '订阅提醒', role: 'menuitemcheckbox' }],
+    ['a coupon box', { tool: 'type', label: '优惠码', role: 'textbox' }],
+    ['a click by coordinates', { tool: 'click_at' }],
   ])('still asks: %s', (_, action) => {
     expect(pass(action)).toBe(false);
   });
@@ -57,12 +66,10 @@ describe('FIX-61B P1-4: read-only background-request pauses', () => {
     'new_transaction_receipt',
     'intercepted_submit',
   ])('still asks when the request is %s (even after a plain link)', (branch) => {
-    expect(pass({ tool: 'click', label: '公交', role: 'link' }, [{ branch }])).toBe(false);
+    const url = 'https://www.example.com/api/x';
+    expect(pass({ tool: 'click', label: '公交', role: 'link' }, [{ branch, url }])).toBe(false);
     expect(
-      pass({ tool: 'click', label: '公交', role: 'link' }, [
-        { branch: 'unknown_post' },
-        { branch },
-      ]),
+      pass({ tool: 'click', label: '公交', role: 'link' }, [...BACKGROUND, { branch, url }]),
     ).toBe(false);
   });
 
@@ -71,6 +78,22 @@ describe('FIX-61B P1-4: read-only background-request pauses', () => {
     expect(pass(null)).toBe(false);
     expect(pass({ tool: 'navigate' }, [])).toBe(false);
     expect(pass({ tool: 'navigate' }, BACKGROUND, true, 'captcha')).toBe(false);
+  });
+
+  it('复审 #1: an unplaced POST (addToCart, a like, a login) asks — even after a plain link', () => {
+    for (const url of [
+      'https://www.bestbuy.com/cart/api/v1/addToCart',
+      'https://edith.xiaohongshu.com/api/sns/web/v1/note/like',
+      'https://passport.example.com/passport/login',
+    ])
+      expect(
+        pass({ tool: 'click', label: '公交', role: 'link' }, [{ branch: 'unknown_post', url }]),
+      ).toBe(false);
+  });
+
+  it('复审 #1: a request set off by another step than the one judged asks', () => {
+    expect(pass({ tool: 'navigate' }, [{ ...BACKGROUND[0]!, action: 'click' }])).toBe(false);
+    expect(pass({ tool: 'navigate' }, [{ ...BACKGROUND[0]!, action: 'navigate' }])).toBe(true);
   });
 
   it('reads a control role from the snapshot', () => {
