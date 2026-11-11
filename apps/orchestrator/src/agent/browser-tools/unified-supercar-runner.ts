@@ -301,6 +301,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     if (activeRemaining !== undefined)
       activeRemaining = Math.max(1, activeRemaining - (Date.now() - activeSince));
   };
+  // FIX-61 DEPLOY-61 P1-3: wrap up once 80% of the active time (waits for the user excluded)
+  // is used, so a long search ends as an honest partial answer, not a bare timeout.
+  const wrapUp = () => {
+    if (!budgetMs || activeRemaining === undefined) return false;
+    const left = suspended > 0 ? activeRemaining : activeRemaining - (Date.now() - activeSince);
+    return budgetMs - left >= budgetMs * WRAP_UP_AT;
+  };
   const resumeTimeout = () => {
     if (suspended === 0 || --suspended > 0) return;
     activeSince = Date.now();
@@ -599,6 +606,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     };
     const outcome = await runUnifiedBrowserLoop({
+      wrapUp,
       ...(control
         ? {
             // A search wall the fallback can answer is not the user's job.
@@ -990,6 +998,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
 }
 
 const READ_ONE_PAGE_TIMEOUT_MS = 300_000;
+/** FIX-61 DEPLOY-61 P1-3: the share of the time limit after which the run wraps up. */
+const WRAP_UP_AT = 0.8;
 /** A read of one page: no form, file, search, scroll, tab or multi-item work. */
 export function readsOnePage(intent: string): boolean {
   return (

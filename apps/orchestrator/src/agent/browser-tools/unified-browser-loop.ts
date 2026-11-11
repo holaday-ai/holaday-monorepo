@@ -324,6 +324,12 @@ export interface UnifiedBrowserLoopInput {
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<boolean>;
   maxSteps?: number;
+  /**
+   * FIX-61 DEPLOY-61 P1-3: true once about 80% of the task's time is used. The run stops
+   * exploring and the next turn may only finish with what it already has (partial if need be),
+   * instead of being cut off by the time limit with nothing.
+   */
+  wrapUp?: () => boolean;
   /** How many latest page-sized tool results stay in full (default 1). */
   fullPageResults?: number;
   signal?: AbortSignal;
@@ -930,8 +936,16 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   /** What the model is told when a handed-over wall is gone. */
   const afterWall = (handed: 'resumed' | 'cleared' | 'alternate', resumed: string) =>
     handed === 'alternate' ? ALTERNATE : handed === 'cleared' ? WALL_CLEARED_ITSELF : resumed;
+  let wrappedUp = false;
+  /** concludeNow was set by something other than the wrap-up (reads with nothing new, rescue). */
+  let concludedOtherwise = false;
   for (let step = 0; step < maxSteps; step += 1) {
     if (input.signal?.aborted) return cancelled(step);
+    if (!wrappedUp && step > 0 && input.wrapUp?.()) {
+      wrappedUp = true;
+      concludeNow = true;
+      messages.push({ role: 'user', content: WRAP_UP_NOTE });
+    }
     if (input.captchaHandoff && !captchaDeclined) {
       const wall = await checkBlocker();
       // FIX-29 (local f29a jd): JD sent the item page on to passport.jd.com after the
@@ -1128,6 +1142,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           continue;
         }
         hostNavigate = blankTarget;
+      }
+      // FIX-61 DEPLOY-61 P1-3: finish-only because the time is nearly used, not because reading
+      // went nowhere: another tool is refused (the time limit still ends the run), not failed.
+      if (concludeNow && call.name !== 'finish' && wrappedUp && !concludedOtherwise) {
+        results.push(toolResult(call.id, `未执行：${WRAP_UP_NOTE}`, true));
+        continue;
       }
       if (concludeNow && call.name !== 'finish')
         return {
@@ -2519,6 +2539,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (seenReads.size > 64) seenReads.delete(seenReads.values().next().value!);
         if (repeatedReads >= 5) {
           concludeNow = true;
+          concludedOtherwise = true;
           outcome.text +=
             '\n连续5轮读取没有新信息。下一轮必须基于现有证据 finish，或者如实报告未完成；禁止继续空转读取。';
         }
@@ -2568,6 +2589,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         const site = host ? (siteOf(host) ?? host) : undefined;
         if (site && site !== rescueWallSite && !rescueAllows(now)) {
           concludeNow = true;
+          concludedOtherwise = true;
           results.push(
             toolResult(
               call.id,
@@ -3160,6 +3182,9 @@ export function isReadOnlyIntent(intent: string): boolean {
       (READ_VERB_RE.test(part) || QUESTION_RE.test(part) || NAV_ONLY_RE.test(part)),
   );
 }
+/** FIX-61 DEPLOY-61 P1-3: what the model is told when the time is nearly used. */
+export const WRAP_UP_NOTE =
+  '时间快用完了（已用掉约八成）。不要再打开新页面、不要再做新动作，这一轮直接 finish：用户要的都拿到了就照常写；没拿全就用 finish(status=completed)，summary 以「部分完成：」开头，先写已经确认的结论（例如「官网已不再直接销售这款」「京东要登录才显示价格」），再写还缺什么、卡在哪一步。只写已读页面上有的内容，不要猜价格或数字。';
 /** FIX-57 #5: at most this many sites besides the walled one during a rescue. */
 export const RESCUE_SITES = 2;
 /** FIX-57 #5: public search pages a rescue may open to find a route (not counted as routes). */
