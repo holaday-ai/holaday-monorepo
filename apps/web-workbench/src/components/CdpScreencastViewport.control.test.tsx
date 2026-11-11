@@ -475,8 +475,9 @@ it('DEPLOY-61 重跑 #2: a taller desktop panel (the centred Google box would mo
 
 it('DEPLOY-61 重跑 #2: the press is mapped on the layout seen (same point as before the re-layout)', async () => {
   const { pointer } = await heldPressAcrossTakeover({ width: 640, height: 420, mobile: false });
-  // 20,30 on a 100x60 canvas showing 1280x800 → 256,400 on the page the user saw.
-  expect(pointer[0]?.payload).toMatchObject({ x: 256, y: 400 });
+  // 20,30 on a 100x60 image of the 1280x800 page the user saw: at the image's own scale
+  // (12.8 px per image px) it covers the top 768 rows → 256,384, the point shown under the press.
+  expect(pointer[0]?.payload).toMatchObject({ x: 256, y: 384 });
 });
 
 it('DEPLOY-61 重跑 #2: the page moved before the press could go out — not delivered, 「请再点一次」', async () => {

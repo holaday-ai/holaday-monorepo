@@ -285,7 +285,15 @@ export function mapClientPointToBrowserFrame(input: {
   // Screencast pixels include compositor page scale. Input coordinates are
   // unscaled viewport CSS coordinates. Scroll belongs only to document refs.
   const x = (u * frame.cssWidth) / frame.pageScaleFactor;
-  const y = (v * frame.cssHeight - frame.offsetTop) / frame.pageScaleFactor;
+  // DEPLOY-61 重跑 #2: an image may show only the top of the layout at the same scale (seen: a
+  // 1280x657 frame of a 1280x800 page before a watcher's size is applied). Map by the rows the
+  // image really covers, or a press on Google's box at y=352 lands on its button at y=428.
+  const coveredHeight = (frame.imageHeight * frame.cssWidth) / frame.imageWidth;
+  const height =
+    Math.abs(coveredHeight - frame.cssHeight) > frame.cssHeight * 0.01
+      ? Math.min(frame.cssHeight, coveredHeight)
+      : frame.cssHeight;
+  const y = (v * height - frame.offsetTop) / frame.pageScaleFactor;
   return y < 0 ? null : { x, y };
 }
 export function mapClientPointToFramebuffer(input: {
