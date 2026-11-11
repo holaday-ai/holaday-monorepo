@@ -734,4 +734,101 @@ describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under
     ).toHaveLength(1);
     control.close();
   });
+
+  describe('DEPLOY-61 重跑 第 0 步 #1: the real size is checked again before the assistant observes', () => {
+    /** The renderer keeps the user's layout until the launch values have been set `fixedAfter` times. */
+    const stickyPage = (fixedAfter: number) => {
+      let size = { width: 1280, height: 800 };
+      let launchSets = 0;
+      const page = {
+        viewportSize: () => size,
+        setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
+          size = next;
+        }),
+        evaluate: vi.fn(async (fn: () => unknown) =>
+          String(fn).includes('innerWidth')
+            ? launchSets >= fixedAfter
+              ? [1280, 800, 1]
+              : [780, 1520, 1]
+            : 1,
+        ),
+      };
+      const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        if (
+          method === 'Emulation.setDeviceMetricsOverride' &&
+          params?.width === 1280 &&
+          params?.height === 800
+        )
+          launchSets++;
+        if (method !== 'Runtime.evaluate') return {};
+        return { result: { value: 1 } };
+      });
+      return { page, send };
+    };
+    const run = async (fixedAfter: number) => {
+      const sessions = new BrowserControlSessions();
+      const instance = { taskId: 'tsk_a1b2c3d4e5', userId: 'usr_a' };
+      const { page, send } = stickyPage(fixedAfter);
+      const logger = pino({ level: 'silent' });
+      const warn = vi.spyOn(logger, 'warn');
+      const handler = new CdpInputHandler(
+        () => ({ send, detach: async () => {} }) as unknown as CDPSession,
+        logger,
+        undefined,
+        undefined,
+        true,
+        async () => page as unknown as Page,
+        2400,
+        {
+          mayAlign: () =>
+            sessions.get(instance, 'usr_a', 'tsk_a1b2c3d4e5')?.control.snapshot().phase === 'human',
+          onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
+          taskRef: instance.taskId.slice(0, 8),
+        },
+      );
+      const { control } = sessions.start(instance);
+      control.requestHuman();
+      let observed = 0;
+      const boundary = control.checkpoint(async () => {
+        observed++;
+      });
+      await Promise.resolve();
+      const lease = control.snapshot().lease;
+      await handler.handle({ type: 'viewport', width: 780, height: 1520, deviceScaleFactor: 1 });
+      control.returnToAgent(lease!);
+      await boundary;
+      const launchSets = send.mock.calls.filter(
+        ([m, p]) =>
+          m === 'Emulation.setDeviceMetricsOverride' &&
+          (p as { width?: number }).width === 1280 &&
+          (p as { height?: number }).height === 800,
+      ).length;
+      return { warn, launchSets, observed };
+    };
+
+    it('still the user size after the first fix → set again once; right then → no warning', async () => {
+      const { warn, launchSets, observed } = await run(2);
+      expect(launchSets).toBe(2);
+      expect(warn).not.toHaveBeenCalled();
+      expect(observed).toBe(1);
+    });
+
+    it('right after the first fix → no second set, no warning', async () => {
+      const { warn, launchSets } = await run(1);
+      expect(launchSets).toBe(1);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('never restored → warn with the first 8 characters of the task id, and the run goes on', async () => {
+      const { warn, launchSets, observed } = await run(Number.POSITIVE_INFINITY);
+      expect(launchSets).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toMatchObject({
+        task: 'tsk_a1b2',
+        expected: [1280, 800, 1],
+        real: [780, 1520, 1],
+      });
+      expect(observed).toBe(1);
+    });
+  });
 });

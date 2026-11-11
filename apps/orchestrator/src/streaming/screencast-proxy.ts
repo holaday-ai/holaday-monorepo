@@ -277,6 +277,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ?.control.snapshot();
       return control?.phase === 'human' ? control.lease : null;
     };
+    /**
+     * DEPLOY-61 P0-1: only a size sent with the current lease changes the assistant's page (the
+     * input handler's mayAlign). DEPLOY-61 重跑 第 0 步 #2: so only such a size makes the frames
+     * shown so far stale; a watcher's size changes nothing and must not hold every input back
+     * (on a finished task it was never applied at all, so input stayed refused until the size).
+     */
+    const viewportWillApply = (): boolean => {
+      const lease = humanLease();
+      return lease !== null && viewportLease === lease;
+    };
     const frameGuard = new BrowserFrameGuard();
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
@@ -300,7 +310,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
       onViewportRequested: (envelope) => {
         if (typeof envelope.controlLease === 'string') viewportLease = envelope.controlLease;
-        if (!args.viewportV2) return;
+        if (!args.viewportV2 || !viewportWillApply()) return;
         viewportPending = true;
         invalidate();
         streamer?.invalidateObservation();
@@ -314,6 +324,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
             if (message.type === 'viewport') {
+              if (!viewportWillApply()) return;
               viewportPending = true;
               invalidate();
               streamer?.invalidateObservation();
@@ -423,6 +434,19 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
+        // DEPLOY-61 重跑 第 0 步 #2: the checks are unchanged; this screen is only told that its
+        // input named a frame no longer current, so a replayed first press can say 「请再点一次」.
+        if (
+          args.viewportV2 &&
+          errMsg(err) === 'browser_observation_expired' &&
+          args.ws.readyState === WebSocket.OPEN
+        ) {
+          try {
+            args.ws.send(JSON.stringify({ type: 'input-expired' }));
+          } catch {
+            /* socket closed between readyState and send */
+          }
+        }
       });
     });
 
@@ -494,11 +518,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           // FIX-61 复审 #1 / DEPLOY-61 P0-1: only the lease holder's screen — the one whose
           // viewport message carried the current lease — may change the assistant's page. While
           // a phone holds control, another screen that only watches still changes nothing.
-          mayAlign: () => {
-            const lease = humanLease();
-            return lease !== null && viewportLease === lease;
-          },
+          mayAlign: viewportWillApply,
           lease: () => viewportLease,
+          taskRef: args.instance.taskId.slice(0, 8),
           onAligned: (restore) =>
             browserControlSessions.noteAgentViewportChanged(args.instance, restore),
         },

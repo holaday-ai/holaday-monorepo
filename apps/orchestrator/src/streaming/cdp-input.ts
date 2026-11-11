@@ -208,6 +208,8 @@ export class CdpInputHandler {
       onAligned: (restore: () => Promise<void>) => void;
       /** The lease the screen's size came with; once restored for, it applies nothing more. */
       lease?: () => string | null;
+      /** First 8 characters of the task id, for the restore-failed warning. */
+      taskRef?: string;
     },
   ) {}
 
@@ -303,7 +305,8 @@ export class CdpInputHandler {
         await new Promise((r) => setTimeout(r, 100));
         real = await readReal();
       }
-      if (session && !this.interruptedSessions.has(session) && !matches(real))
+      const setLaunchValues = async (): Promise<void> => {
+        if (!session || this.interruptedSessions.has(session)) return;
         await session
           .send('Emulation.setDeviceMetricsOverride', {
             width: from.size.width,
@@ -314,6 +317,25 @@ export class CdpInputHandler {
           .catch((err: unknown) => {
             this.logger.debug({ err }, 'cdp-input: agent viewport launch values not restored');
           });
+      };
+      if (!matches(real)) await setLaunchValues();
+      // DEPLOY-61 重跑 第 0 步 #1: this restore is the last handback action — the assistant's first
+      // observation comes right after it. Read the page's real size once more; not the launch
+      // size → set it again once. Still wrong → warn (with the task), never silently.
+      real = await readReal();
+      if (!matches(real)) {
+        await setLaunchValues();
+        real = await readReal();
+      }
+      if (!matches(real))
+        this.logger.warn(
+          {
+            task: this.agentViewport?.taskRef,
+            expected: [from.size.width, from.size.height, from.deviceScaleFactor],
+            real,
+          },
+          'cdp-input: agent viewport not restored before the assistant observes',
+        );
     });
   }
 
