@@ -14,6 +14,16 @@ export interface PausedAction {
   label?: string | null;
   /** A select's chosen value. */
   value?: string | null;
+  /** FIX-61B P1-4: typing pressed Enter afterwards. */
+  submit?: boolean;
+  /** FIX-61B P1-4: the control's role from the snapshot (button, link, textbox…). */
+  role?: string | null;
+}
+
+/** FIX-61B P1-4: the role of a ref in a snapshot (「- link "导览" [ref=e5]」 → link), when given. */
+export function refRole(snapshot: string, ref: string): string | null {
+  const line = snapshot.split('\n').find((l) => l.includes(`[ref=${ref}]`));
+  return line?.match(/^\s*-\s+([a-z]+)\b/i)?.[1]?.toLowerCase() ?? null;
 }
 
 /** The visible name of a ref in a snapshot: 「- link "导览" [ref=e5]」, 「- generic [ref=e5]: 导览」, or its first child's text. */

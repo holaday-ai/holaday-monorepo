@@ -32,6 +32,7 @@ import {
   type PausedAction,
   effectPauseQuestion,
   refName,
+  refRole,
   siteCalled,
 } from './effect-pause-copy.js';
 import { CAPTCHA_SCREENSHOT_STYLE, captchaHandoffEvidence } from './full-page-read.js';
@@ -39,6 +40,7 @@ import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
 } from './playwright-unified-executor.js';
+import { readOnlyEffectMayPass } from './read-only-effect-policy.js';
 import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import {
@@ -342,6 +344,31 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let lastActed: PausedAction | null = null;
   /** DEPLOY-58 第 0 步 2: what the last action set off, to tell a real submit. */
   let lastTriggers: ReadonlyArray<{ branch: string; url: string }> = [];
+  /** FIX-61B P1-4: whether this pause passes for a read-only task; logged when it does. */
+  const passReadOnlyEffect = async (
+    interruption: { reason: string; message: string },
+    triggers: ReadonlyArray<{ branch: string; url: string }>,
+  ): Promise<boolean> => {
+    const pass = readOnlyEffectMayPass({
+      readOnly: isReadOnlyIntent(opts.intent),
+      reason: interruption.reason,
+      action: lastActed,
+      triggers,
+    });
+    if (!pass) return false;
+    tools.observation?.acknowledgeEffect();
+    logger.info(
+      {
+        taskId: opts.taskId,
+        tool: lastActed?.tool,
+        role: lastActed?.role ?? null,
+        triggers: triggers.map((t) => t.branch),
+      },
+      'supercar: read-only background request passed',
+    );
+    await recordDiagnostic('browser_effect_passed', interruption.reason, interruption.message);
+    return true;
+  };
   // FIX-BATCH-A — the contract the verifier will enforce is also the model's
   // output requirement, and the loop gets one remediation turn when a
   // completed list answer misses per-item sources or key fields.
@@ -733,8 +760,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       onRescue: (message) => recordDiagnostic('browser_rescue', undefined, message),
       playbackReceipt: () => tools.playbackReceipt(),
       checkInterruption: async () => {
-        const interruption =
-          tools.observation?.interruption() ?? egress.interruption() ?? undefined;
+        const observed = tools.observation?.interruption();
+        if (
+          observed &&
+          (await passReadOnlyEffect(observed, tools.observation?.pendingEffect()?.triggers ?? []))
+        )
+          return egress.interruption() ?? undefined;
+        const interruption = observed ?? egress.interruption() ?? undefined;
         if (interruption)
           await recordDiagnostic(
             'browser_effect',
@@ -780,10 +812,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             tool: action.tool,
             label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
             value: action.tool === 'select' ? action.value : null,
+            submit: action.tool === 'type' && action.submit === true,
+            role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
           };
         const result = await tools.execute(action);
         page = tools.page;
         lastTriggers = result.effect?.triggers ?? [];
+        // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
+        // logged and passed (read-only-effect-policy); anything that may change something asks.
+        if (result.interruption && (await passReadOnlyEffect(result.interruption, lastTriggers))) {
+          delete result.interruption;
+          result.text = `${result.text}\n（页面在后台发了一个请求，判断为浏览产生的统计类请求，已记录并继续只读查看。）`;
+        }
         if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,
