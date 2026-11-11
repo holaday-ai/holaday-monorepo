@@ -302,7 +302,10 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
  * assistant's 1280x800 page is shown). The user presses on it; taking control applies this
  * screen's size, then a fresh frame comes and the held press is delivered or not.
  */
-async function heldPressAcrossTakeover(host: { width: number; height: number; mobile: boolean }) {
+async function heldPressAcrossTakeover(
+  host: { width: number; height: number; mobile: boolean },
+  afterScrollY = 0,
+) {
   const sent: Array<{
     type?: string;
     payload?: { type: string; width?: number; height?: number };
@@ -361,7 +364,7 @@ async function heldPressAcrossTakeover(host: { width: number; height: number; mo
   const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
   receive({ type: 'viewport-v2-ready', controlReady: true });
   let n = 0;
-  const frame = (cssWidth: number, cssHeight: number) => {
+  const frame = (cssWidth: number, cssHeight: number, scrollY = 0) => {
     n++;
     receive({
       type: 'frame',
@@ -377,7 +380,7 @@ async function heldPressAcrossTakeover(host: { width: number; height: number; mo
         imageHeight: 60,
         pageScaleFactor: 1,
         offsetTop: 0,
-        scrollOffset: { x: 0, y: 0 },
+        scrollOffset: { x: 0, y: scrollY },
         capturedAt: Date.now(),
       },
     });
@@ -410,7 +413,7 @@ async function heldPressAcrossTakeover(host: { width: number; height: number; mo
   await vi.waitFor(() => expect(viewports().length).toBe(2));
   const size = viewports()[1]?.payload;
   receive({ type: 'viewport-applied', width: size?.width, height: size?.height });
-  frame(size?.width ?? 0, size?.height ?? 0);
+  frame(size?.width ?? 0, size?.height ?? 0, afterScrollY);
   return {
     size,
     pointer: sent.filter((m) => /^mouse/.test(m.payload?.type ?? '')),
@@ -429,13 +432,34 @@ it('DEPLOY-61: the press that asked for control is not delivered once the page w
   expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
 });
 
-it('DEPLOY-61: at the same page width (desktop: only the height follows the panel) it is delivered', async () => {
+it('DEPLOY-61 P1-1: a desktop panel only taller than 1280x800 (the centred Google box moves) is not delivered either', async () => {
   const { size, pointer, onHeldInputDropped } = await heldPressAcrossTakeover({
     width: 640,
     height: 420,
     mobile: false,
   });
-  expect(size?.width).toBe(1280);
+  expect(size).toMatchObject({ width: 1280, height: 840 });
+  expect(pointer).toEqual([]);
+  expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
+});
+
+it('DEPLOY-61 P1-1: the same size but another scroll position is not delivered', async () => {
+  const { size, pointer, onHeldInputDropped } = await heldPressAcrossTakeover(
+    { width: 640, height: 400, mobile: false },
+    120,
+  );
+  expect(size).toMatchObject({ width: 1280, height: 800 });
+  expect(pointer).toEqual([]);
+  expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
+});
+
+it('DEPLOY-61 P1-1: only an unchanged layout (1280x800, same scroll) gets the held press delivered', async () => {
+  const { size, pointer, onHeldInputDropped } = await heldPressAcrossTakeover({
+    width: 640,
+    height: 400,
+    mobile: false,
+  });
+  expect(size).toMatchObject({ width: 1280, height: 800 });
   expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
   expect(onHeldInputDropped).not.toHaveBeenCalled();
 });

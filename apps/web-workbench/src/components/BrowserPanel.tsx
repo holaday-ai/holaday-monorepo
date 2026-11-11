@@ -1146,7 +1146,7 @@ function CloudBrowserPanel({
   // DEPLOY-61: taking control re-laid the page out at the phone's width, so the press that
   // asked for it was not delivered (it would have hit something else).
   const handleHeldInputDropped = React.useCallback(() => {
-    toast.show('已由你操作；页面按你的屏幕重新排版了，刚才那一下没有发出，请再点一次', 'info');
+    toast.show('已由你操作；页面跟着你的屏幕重新排了版，刚才那一下没有发出，请再点一次', 'info');
   }, [toast]);
   const takeOver = React.useCallback(() => {
     void requestOwnership('takeover').then((granted) => {

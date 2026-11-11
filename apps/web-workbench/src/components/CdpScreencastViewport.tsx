@@ -62,8 +62,13 @@ export type CdpScreencastStatus = 'idle' | 'connecting' | 'connected' | 'disconn
 interface DeferredInput {
   at: number;
   build: () => InputPayload | null;
-  /** DEPLOY-61: the page width (CSS px) of the frame the user acted on, when known. */
-  layoutWidth?: number;
+  /** DEPLOY-61 P1-1: the layout (CSS size + scroll) of the frame the user acted on, when known. */
+  layout?: string;
+}
+/** DEPLOY-61 P1-1: what decides where a point on the screen lands on the page. */
+function layoutKey(g: BrowserFrameGeometry | null | undefined): string | undefined {
+  if (!g?.cssWidth) return undefined;
+  return `${g.cssWidth}x${g.cssHeight}@${g.scrollOffset?.x ?? 0},${g.scrollOffset?.y ?? 0}`;
 }
 const GEOMETRY_FRESH_MS = 5000;
 const DEFERRED_INPUT_MS = 4000;
@@ -199,9 +204,9 @@ export function CdpScreencastViewport({
   onRequestControlRef.current = onRequestControl;
   const onHeldInputDroppedRef = React.useRef(onHeldInputDropped);
   onHeldInputDroppedRef.current = onHeldInputDropped;
-  // DEPLOY-61: the page width of the newest painted frame, even while its geometry is not yet
+  // DEPLOY-61: the layout of the newest painted frame, even while its geometry is not yet
   // accepted for input (a view-only screen whose size the server has not applied).
-  const paintedLayoutWidthRef = React.useRef<number | undefined>(undefined);
+  const paintedLayoutRef = React.useRef<string | undefined>(undefined);
   const replayAfterControlRef = React.useRef(replayAfterControl);
   replayAfterControlRef.current = replayAfterControl;
   const lastControlRequestRef = React.useRef(0);
@@ -358,17 +363,17 @@ export function CdpScreencastViewport({
     const now = Date.now();
     const pending = deferredInputsRef.current;
     deferredInputsRef.current = [];
-    // DEPLOY-61: held input is mapped against the frame current when sent. When taking control
-    // re-laid the page out at another width (a phone screen), that point now shows something
-    // else: deliver nothing rather than press it, and let the user press again.
-    const width = geometryRef.current?.cssWidth;
+    // DEPLOY-61 P1-1: held input is mapped against the frame current when sent. Delivered only
+    // when the layout is exactly the one the user acted on; taking control re-laid it out (a
+    // phone width, a taller panel that moved Google's centred search box 50px down, a scroll):
+    // that point now shows something else, so deliver nothing and let the user press again.
+    const current = layoutKey(geometryRef.current);
     if (
-      width !== undefined &&
+      viewportV2 &&
       pending.some(
         (item) =>
           now - item.at <= DEFERRED_INPUT_MS &&
-          item.layoutWidth !== undefined &&
-          item.layoutWidth !== width,
+          (item.layout === undefined || current === undefined || item.layout !== current),
       )
     ) {
       onHeldInputDroppedRef.current?.();
@@ -379,7 +384,7 @@ export function CdpScreencastViewport({
       const payload = item.build();
       if (payload) sendInput(payload);
     }
-  }, [canDeliverNow, sendInput]);
+  }, [canDeliverNow, sendInput, viewportV2]);
   const flushDeferredRef = React.useRef(flushDeferred);
   flushDeferredRef.current = flushDeferred;
   const deliverInput = React.useCallback(
@@ -408,7 +413,7 @@ export function CdpScreencastViewport({
           {
             at: now,
             build,
-            layoutWidth: geometryRef.current?.cssWidth ?? paintedLayoutWidthRef.current,
+            layout: layoutKey(geometryRef.current) ?? paintedLayoutRef.current,
           },
         ].slice(-DEFERRED_INPUT_LIMIT);
       }
@@ -871,7 +876,7 @@ export function CdpScreencastViewport({
       if (canvas.width !== img.width) canvas.width = img.width;
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
-      if (viewportV2 && geometry?.cssWidth) paintedLayoutWidthRef.current = geometry.cssWidth;
+      if (viewportV2 && geometry?.cssWidth) paintedLayoutRef.current = layoutKey(geometry);
       if (viewportV2) {
         geometryRef.current =
           observationEpoch === observationEpochRef.current &&

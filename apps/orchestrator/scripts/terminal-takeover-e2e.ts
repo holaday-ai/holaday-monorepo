@@ -7,7 +7,8 @@
  * canvas: the panel reopens the browser on the task's page, takes control by itself, and the
  * link click and the search-box typing land on the page.
  *
- * The click that asks for control must itself land (one click, no retry) on a still page.
+ * The click that asks for control lands by itself only on an unchanged layout; when taking
+ * control re-laid the page out, the panel says 「请再点一次」 and the next click lands.
  *
  * Run from apps/orchestrator (the config loader needs these three set; nothing connects to them):
  *   DATABASE_URL=mysql://fixture@127.0.0.1:1/none REDIS_URL=redis://127.0.0.1:1 \
@@ -247,13 +248,36 @@ try {
   await ui.screenshot({ path: `${out}/1-reopened-${tag}.png` });
   if (!blip) assert.ok(effects.includes('ensure'), 'the released browser was not reopened');
 
-  // 2. Click the 「iPhone」 link on the screen once: control is taken by itself and that same
-  // click lands (the page is still: no frame comes by itself after the takeover).
+  // 2. Click the 「iPhone」 link on the screen once: control is taken by itself. That same click
+  // lands only when taking control left the layout exactly as seen (DEPLOY-61 P1-1); when the
+  // page was re-laid out for this screen it is not sent, the panel says 「请再点一次」, and the
+  // second click lands. Never a click on a moved page.
+  const sizeBefore = await page!.evaluate(() => `${innerWidth}x${innerHeight}`);
   await clickOnScreen('#iphone');
-  await page!.waitForURL(/\/iphone$/, { timeout: 8000 }).catch(() => {});
+  // Whichever comes first: the click lands, or the panel says to press again (a toast that
+  // goes away by itself after a few seconds).
+  const outcome = await Promise.race([
+    page!.waitForURL(/\/iphone$/, { timeout: 8000 }).then(() => 'landed'),
+    ui
+      .getByText('请再点一次')
+      .first()
+      .waitFor({ timeout: 8000 })
+      .then(() => 'press-again'),
+  ]).catch(() => 'nothing');
+  let clicks = 1;
+  if (outcome !== 'landed') {
+    assert.equal(outcome, 'press-again', 'the first click neither landed nor was announced');
+    await ui.screenshot({ path: `${out}/2a-press-again-${tag}.png` });
+    const sizeAfter = await page!.evaluate(() => `${innerWidth}x${innerHeight}`);
+    assert.notEqual(sizeAfter, sizeBefore, 'the first click was held back on an unchanged layout');
+    await ui.waitForTimeout(600);
+    await clickOnScreen('#iphone');
+    clicks = 2;
+    await page!.waitForURL(/\/iphone$/, { timeout: 8000 }).catch(() => {});
+  }
   assert.ok(page!.url().endsWith('/iphone'), `the link click did not land: ${page!.url()}`);
   await ui.waitForTimeout(800);
-  const afterClick = { header: await header(), url: page!.url() };
+  const afterClick = { header: await header(), url: page!.url(), clicks, sizeBefore };
   await ui.screenshot({ path: `${out}/2-link-clicked-${tag}.png` });
   const session = browserControlSessions.get(instance!, 'usr_fixture', taskId);
   assert.equal(session?.control.snapshot().phase, 'human', 'the user does not hold control');
@@ -300,3 +324,6 @@ try {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
+
+// Teardown sometimes leaves a handle open (seen once in --blip); the verdict is already written.
+process.exit(process.exitCode ?? 0);
