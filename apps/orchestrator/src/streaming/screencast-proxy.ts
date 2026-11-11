@@ -128,7 +128,20 @@ export interface ScreencastProxy {
 }
 
 /** FIX-61B P1-5: how long after typing the focus may let an Enter / Space through. */
-const TYPING_FOCUS_MS = 5_000;
+const TYPING_FOCUS_MS = 1_500;
+/** 复审 #1: the text box that really has the focus (through shadow roots); null in a frame or elsewhere. */
+const FOCUSED_TEXT_BOX_EXPRESSION = `(() => {
+  let e = document.activeElement;
+  while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+  if (!e || /^(?:IFRAME|FRAME|BODY|HTML)$/.test(e.tagName)) return null;
+  const type = (e.getAttribute('type') || 'text').toLowerCase();
+  const editable = e.isContentEditable || e.tagName === 'TEXTAREA' ||
+    (e.tagName === 'INPUT' && /^(?:text|search|email|url|tel|number)$/.test(type));
+  return editable ? e : null;
+})()`;
+/** 复审 #1: dialogs open on the page (a new one may confirm on Enter). */
+const OPEN_DIALOGS_EXPRESSION =
+  "document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]').length";
 
 /** FIX-61B P0-3: a screen size not applied because the agent's page changed under it — not a failure. */
 export class BrowserViewportSkippedError extends Error {
@@ -306,41 +319,54 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
      * lenient grace goes through only when the focus is still exactly that element (a page that
      * moved focus to 「确认支付」 is refused, as before).
      */
-    let typingFocus: { node: number; at: number } | null = null;
-    const focusedNode = async (): Promise<number | null> => {
+    let typingFocus: { node: number; dialogs: number; at: number } | null = null;
+    /**
+     * The element keys go to, as a stable node id, and how many dialogs are open — or null when it
+     * cannot be told for sure (复审 #1): focus inside a frame, or on anything but a text box.
+     * Shadow roots are walked down to the element that really has the focus.
+     */
+    const focusedNode = async (): Promise<{ node: number; dialogs: number } | null> => {
       const session = streamer?.getSession();
       if (!session) return null;
       try {
         const evaluated = (await session.send('Runtime.evaluate', {
-          expression: 'document.activeElement',
+          expression: FOCUSED_TEXT_BOX_EXPRESSION,
           returnByValue: false,
         })) as { result?: { objectId?: string } };
         const objectId = evaluated.result?.objectId;
         if (!objectId) return null;
         const described = (await session.send('DOM.describeNode', { objectId })) as {
-          node?: { backendNodeId?: number; nodeName?: string };
+          node?: { backendNodeId?: number };
         };
         void session.send('Runtime.releaseObject', { objectId }).catch(() => {});
-        const node = described.node;
-        if (!node?.backendNodeId || /^(?:BODY|HTML)$/i.test(node.nodeName ?? '')) return null;
-        return node.backendNodeId;
+        const node = described.node?.backendNodeId;
+        if (!node) return null;
+        const counted = (await session.send('Runtime.evaluate', {
+          expression: OPEN_DIALOGS_EXPRESSION,
+          returnByValue: true,
+        })) as { result?: { value?: unknown } };
+        const dialogs = typeof counted.result?.value === 'number' ? counted.result.value : -1;
+        return { node, dialogs };
       } catch {
         return null;
       }
     };
     /** Read where the keys go just before they are sent (read after, the page may have moved focus). */
     const noteTyping = async (): Promise<void> => {
-      const node = await focusedNode();
-      typingFocus = node === null ? null : { node, at: Date.now() };
+      const focus = await focusedNode();
+      typingFocus = focus === null ? null : { ...focus, at: Date.now() };
     };
     /** The focus is still the element typed into within the lenient grace. */
     const stillTypingTarget = async (): Promise<boolean> => {
       const typed = typingFocus;
       if (!typed || Date.now() - typed.at > TYPING_FOCUS_MS) return false;
-      return (await focusedNode()) === typed.node;
+      // 复审 #1: the same text box, and no dialog opened since (「按回车确认」 on a new modal).
+      const now = await focusedNode();
+      return !!now && now.node === typed.node && now.dialogs === typed.dialogs && now.dialogs >= 0;
     };
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
+      typingFocus = null;
       frameGuard.invalidate();
       confirmations.invalidate();
       if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
@@ -535,7 +561,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             let kind = 'pointer';
             try {
               const sent = JSON.parse(raw.toString()) as { payload?: { type?: string } };
-              if (/^(?:keyDown|keyUp|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
+              if (/^(?:keyDown|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
             } catch {
               /* unreadable: pointer */
             }
