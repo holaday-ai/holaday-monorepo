@@ -1,5 +1,7 @@
+import type { LlmCallRecord } from '../agent/llm-call-recorder.js';
 import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
+import { totalInputTokens } from './gateway/normalize.js';
 import { MessagesAdapterError } from './messages-adapter.js';
 import {
   type MessagesAdapter,
@@ -89,6 +91,17 @@ type ResponsesFactory = (input: {
   route: ReturnType<typeof resolveQwenRoute>;
 }) => ResponsesAdapter;
 
+/**
+ * REBUILD-2 (LLM_GATEWAY_V2 on only): the model gateway's per-role choices, applied once the
+ * region is known. Absent, the runtime behaves exactly as before.
+ */
+export interface CoreModelGatewayHook {
+  /** The model for this purpose in this region; null keeps the environment's route model. */
+  modelFor(region: 'cn' | 'intl', purpose: QwenPurpose): string | null;
+  /** The `llm_calls.purpose` written for calls made with this purpose. */
+  callPurposeFor(purpose: QwenPurpose): LlmCallRecord['purpose'];
+}
+
 export interface CoreModelRuntimeInput {
   environment: CoreModelRuntimeEnvironment;
   actorExternalId: string;
@@ -98,6 +111,7 @@ export interface CoreModelRuntimeInput {
   createResponses?: ResponsesFactory;
   observe?: (observation: CoreModelObservation) => void;
   now?: () => number;
+  gateway?: CoreModelGatewayHook;
 }
 
 const RESPONSES_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
@@ -158,20 +172,62 @@ function createReadyRuntime(
   const observe = input.observe ?? recordCoreModelObservation;
   const now = input.now ?? Date.now;
 
+  const gateway = input.gateway;
+  const environmentFor = (purpose: QwenPurpose): CoreModelRuntimeEnvironment => {
+    const model = gateway?.modelFor(region, purpose);
+    return model ? withQwenModel(input.environment, model) : input.environment;
+  };
+  const recording = (purpose: QwenPurpose): CallRecording =>
+    gateway
+      ? { callPurpose: gateway.callPurposeFor(purpose), observeTotalInput: true }
+      : LEGACY_RECORDING;
+
   return {
     kind: 'ready',
     region,
     messages(purpose) {
-      const adapter = createMessages({ environment: input.environment, region, purpose });
+      const adapter = createMessages({ environment: environmentFor(purpose), region, purpose });
       assertQwenAdapterMetadata(adapter.metadata, region, 'messages');
-      return observeMessagesAdapter(adapter, input.lane, purpose, observe, now);
+      return observeMessagesAdapter(adapter, input.lane, purpose, observe, now, recording(purpose));
     },
     responses(purpose) {
-      const route = resolveQwenRoute(input.environment, region, purpose, 'responses');
+      const route = resolveQwenRoute(environmentFor(purpose), region, purpose, 'responses');
       const adapter = createResponses({ route });
       assertQwenAdapterMetadata(adapter.metadata, region, 'responses');
-      return observeResponsesAdapter(adapter, input.lane, purpose, observe, now);
+      return observeResponsesAdapter(
+        adapter,
+        input.lane,
+        purpose,
+        observe,
+        now,
+        recording(purpose),
+      );
     },
+  };
+}
+
+interface CallRecording {
+  callPurpose: LlmCallRecord['purpose'];
+  /** Observation input = input + cache (the Responses figure); the ledger keeps the split. */
+  observeTotalInput: boolean;
+}
+const LEGACY_RECORDING: CallRecording = { callPurpose: 'supercar.turn', observeTotalInput: false };
+
+/** Every route purpose resolves to the gateway's model (the same rule as a catalog lane). */
+function withQwenModel(
+  environment: CoreModelRuntimeEnvironment,
+  model: string,
+): CoreModelRuntimeEnvironment {
+  return {
+    ...environment,
+    QWEN_REASONING_MODEL: model,
+    QWEN_STANDARD_MODEL: model,
+    QWEN_FAST_MODEL: model,
+    QWEN_CODING_MODEL: model,
+    QWEN_VERIFIER_MODEL: model,
+    QWEN_VERIFY_FAST_MODEL: model,
+    QWEN_VERIFY_STRICT_MODEL: model,
+    QWEN_VISION_MODEL: model,
   };
 }
 
@@ -181,6 +237,7 @@ function observeMessagesAdapter(
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
+  recording: CallRecording = LEGACY_RECORDING,
 ): MessagesAdapter {
   return {
     metadata: adapter.metadata,
@@ -194,7 +251,7 @@ function observeMessagesAdapter(
             provider: adapter.metadata.provider,
             model: adapter.metadata.model,
             region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-            purpose: 'supercar.turn',
+            purpose: recording.callPurpose,
             ...result.usage,
             cacheMode:
               Array.isArray(request.system) &&
@@ -211,7 +268,9 @@ function observeMessagesAdapter(
           lane,
           protocol: 'messages',
           outcome: 'success',
-          inputTokens: result.usage.inputTokens,
+          inputTokens: recording.observeTotalInput
+            ? totalInputTokens(result.usage)
+            : result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
           latencyMs,
         });
@@ -223,7 +282,7 @@ function observeMessagesAdapter(
             provider: adapter.metadata.provider,
             model: adapter.metadata.model,
             region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-            purpose: 'supercar.turn',
+            purpose: recording.callPurpose,
             inputTokens: null,
             outputTokens: null,
             latencyMs,
@@ -265,6 +324,7 @@ function observeResponsesAdapter(
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
+  recording: CallRecording = LEGACY_RECORDING,
 ): ResponsesAdapter {
   return {
     metadata: adapter.metadata,
@@ -279,7 +339,7 @@ function observeResponsesAdapter(
             provider: adapter.metadata.provider,
             model: adapter.metadata.model,
             region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-            purpose: 'supercar.turn',
+            purpose: recording.callPurpose,
             inputTokens:
               cached === null ? result.usage.inputTokens : result.usage.inputTokens - cached,
             outputTokens: result.usage.outputTokens,
@@ -307,7 +367,7 @@ function observeResponsesAdapter(
             provider: adapter.metadata.provider,
             model: adapter.metadata.model,
             region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-            purpose: 'supercar.turn',
+            purpose: recording.callPurpose,
             inputTokens: null,
             outputTokens: null,
             latencyMs,

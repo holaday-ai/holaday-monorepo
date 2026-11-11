@@ -4,6 +4,7 @@ import type { DB } from '../db/client.js';
 import { llmCalls } from '../db/schema/llm-calls.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import type { ModelRoleCallPurpose } from '../llm/gateway/model-roles.js';
 import {
   type MediaUsage,
   type ModelPriceCatalog,
@@ -58,7 +59,9 @@ export interface LlmCallRecord {
     | 'browser.verification'
     | 'media.image'
     | 'media.video'
-    | 'media.tts';
+    | 'media.tts'
+    /** REBUILD-2: a core-runtime call made through the model gateway with LLM_GATEWAY_V2 on. */
+    | ModelRoleCallPurpose;
   mediaUsage?: MediaUsage;
   cacheMode?: 'implicit' | 'explicit';
   inputTokens: number | null;

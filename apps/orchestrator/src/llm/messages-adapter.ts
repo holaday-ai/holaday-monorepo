@@ -117,8 +117,11 @@ export type NeutralToolChoice =
 
 export interface NeutralMessagesRequest {
   maxTokens: number;
-  /** Explicitly disable provider reasoning for short, deterministic output lanes. */
-  thinking?: { type: 'disabled' };
+  /**
+   * Explicitly disable provider reasoning for short, deterministic output lanes. `enabled` (no
+   * budget) is only sent by the REBUILD-2 gateway to make the endpoint's default explicit.
+   */
+  thinking?: { type: 'disabled' } | { type: 'enabled' };
   system?: string | ReadonlyArray<NeutralSystemBlock>;
   messages: ReadonlyArray<NeutralMessage>;
   tools?: ReadonlyArray<NeutralToolDefinition>;
@@ -161,7 +164,7 @@ export interface MessagesAdapter {
 export interface AnthropicCompatibleRequest {
   model: string;
   max_tokens: number;
-  thinking?: { type: 'disabled' };
+  thinking?: { type: 'disabled' } | { type: 'enabled' };
   system?: unknown;
   messages: unknown[];
   tools?: unknown[];
@@ -333,7 +336,7 @@ export function createQwenMessagesAdapter(input: {
  * thinking control to model families we have validated; unknown and dedicated
  * non-thinking families fail safe by omitting the unsupported parameter.
  */
-function supportsQwenThinkingControl(model: string): boolean {
+export function supportsQwenThinkingControl(model: string): boolean {
   return /^qwen3(?:\.\d+)?-(?:max|plus|flash)(?:$|-)/i.test(model.trim());
 }
 
