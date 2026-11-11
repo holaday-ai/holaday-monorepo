@@ -127,6 +127,14 @@ export interface ScreencastProxy {
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
 }
 
+/** FIX-61B P0-3: a screen size not applied because the agent's page changed under it — not a failure. */
+export class BrowserViewportSkippedError extends Error {
+  constructor() {
+    super('browser_viewport_skipped');
+    this.name = 'BrowserViewportSkippedError';
+  }
+}
+
 export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastProxy {
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
@@ -317,12 +325,26 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       },
       beforeDispatch: args.viewportV2
         ? async (envelope, signal) => {
-            if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
-              invalidate();
-              throw new Error('browser_tab_changed');
-            }
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
+            // FIX-61B P0-3: a size that changes nothing (sent while only watching) never fails —
+            // whichever page the agent is on now. Online, such a size queued for a running task
+            // met a new tab, failed as browser_tab_changed and the task with it.
+            if (message.type === 'viewport' && !viewportWillApply()) return;
+            if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
+              invalidate();
+              if (message.type === 'viewport') {
+                // The lease holder's size, for a page the agent has left: drop it, follow the
+                // agent's page, and the size is applied there afresh (onViewportMayReset).
+                void streamer
+                  ?.followCurrentPage()
+                  .catch((err: unknown) =>
+                    userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
+                  );
+                throw new BrowserViewportSkippedError();
+              }
+              throw new Error('browser_tab_changed');
+            }
             if (message.type === 'viewport') {
               if (!viewportWillApply()) return;
               viewportPending = true;

@@ -670,6 +670,15 @@ export class CdpStreamer {
     }
   }
 
+  /**
+   * FIX-61B P0-3: the agent moved to another page (a new tab) under this stream. Bind to the page
+   * it is on now — at once, not when the watchdog finds a stall — and re-apply the screen's size.
+   */
+  async followCurrentPage(): Promise<void> {
+    if (!this.streaming) return;
+    await this.restartAfterStall();
+  }
+
   private async restartAfterStall(): Promise<void> {
     if (this.restartInFlight) return;
     this.restartInFlight = true;

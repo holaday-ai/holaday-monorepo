@@ -69,6 +69,15 @@ export function createOwnedScreencastInputBridge(options: {
           if (!allowed() || current() !== session) return;
           await input(() => action(signal));
         } catch (err) {
+          // FIX-61B P0-3: a size skipped because the agent's page changed is no failure — the
+          // stream follows the page and the size is applied there; control stays, the run goes on.
+          if (err instanceof Error && err.message === 'browser_viewport_skipped') {
+            logger.debug(
+              { taskId: instance.taskId },
+              'screencast: queued viewport skipped (page changed)',
+            );
+            return;
+          }
           // FIX-29 (Deploy-29 fc-jd): a failed resize closes the runner's control.
           logger.warn(
             { taskId: instance.taskId, err: err instanceof Error ? err.message : String(err) },
