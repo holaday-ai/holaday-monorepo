@@ -37,7 +37,6 @@ export function isPriceTask(intent: string): boolean {
   if (!PRICE_ZH_RE.test(text) && !PRICE_EN_RE.test(text)) return false;
   if (MARKET_RE.test(text) && !/商品|产品|手机|电脑|耳机|product|phone|laptop/iu.test(text))
     return false;
-  if (WRITING_RE.test(text) || ARITHMETIC_RE.test(text) || OTHER_FIELDS_RE.test(text))
-    return false;
+  if (WRITING_RE.test(text) || ARITHMETIC_RE.test(text) || OTHER_FIELDS_RE.test(text)) return false;
   return true;
 }
