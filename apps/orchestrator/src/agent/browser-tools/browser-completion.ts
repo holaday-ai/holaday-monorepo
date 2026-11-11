@@ -133,6 +133,14 @@ export function completionGap(
     )
       return '用户要求视频，结果中仍有播放列表或课程合集；请只保留实际视频条目。';
   }
+  // FIX-61B P1-8 (Deploy-61 online core-03): 「YouTube 公开视频页读标题/频道/播放量/发布日期」 was
+  // answered from a search results page (8 cards, no video page opened) and judged complete. A task
+  // that asks to read a video page completes only from one; an honest 「部分完成：」 still may end.
+  if (asksForVideoPage(intent) && !/^\s*部分完成/.test(summary)) {
+    const onVideo = successful.some((entry) => entry.url && VIDEO_PAGE_URL_RE.test(entry.url));
+    if (!onVideo)
+      return '任务要读一个视频页（标题、频道、播放量、发布日期等），但这次没有进入任何视频页，只读了搜索结果或列表；请点进一个视频页读取。实在进不去就如实说明缺什么，以「部分完成：」开头交付。';
+  }
   // AP3 core-10: "JavaScript alerts" asks for native dialogs; an in-page
   // notice closed by a button is not one.
   if (
@@ -343,4 +351,15 @@ export function asksToFillForm(requested: string): boolean {
     )
     .replace(/(?:don'?t|do not|without|no need to|never)\s+fill(?:ing)?\b[^.。;；]*/gi, ' ');
   return /(?:填表|填写|填入|fill.*form)/i.test(asked);
+}
+
+/** FIX-61B P1-8: a single video page (YouTube watch / shorts, 哔哩哔哩 /video/, 抖音 /video/). */
+const VIDEO_PAGE_URL_RE =
+  /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com\/(?:watch\b|shorts\/)|youtu\.be\/|bilibili\.com\/video\/|douyin\.com\/video\/)/i;
+/** FIX-61B P1-8: the task asks to read one video page — not a search or a list of videos. */
+export function asksForVideoPage(intent: string): boolean {
+  return (
+    /(?:视频页|视频页面|video page)/i.test(intent) &&
+    !/搜索|搜一下|前\s*\d|search|列表|榜单|list\b|top\s*\d/i.test(intent)
+  );
 }
