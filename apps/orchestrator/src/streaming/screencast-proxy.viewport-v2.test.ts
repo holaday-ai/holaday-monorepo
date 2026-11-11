@@ -143,16 +143,32 @@ it.each([false, true])(
       await vi.waitFor(async () =>
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(1),
       );
+      // DEPLOY-61 重跑 #2: a size sent without the lease (someone only watching) changes nothing
+      // on the page (P0-1), so the frame shown stays valid for the lease holder's input.
+      ws.send(
+        JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 800, height: 600 } }),
+      );
+      send('mouseDown');
+      send('mouseUp');
+      await vi.waitFor(async () =>
+        expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(2),
+      );
+      expect(await page.evaluate(() => innerWidth)).toBe(1280);
+      // A size sent with the lease re-lays the page out: input naming the frame before it is refused.
       const previous = currentFrame();
       const beforeResizeCalls = calls;
       ws.send(
-        JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 800, height: 600 } }),
+        JSON.stringify({
+          type: 'input',
+          controlLease: lease,
+          payload: { type: 'viewport', width: 800, height: 600 },
+        }),
       );
       send('mouseDown', previous);
       send('mouseUp', previous);
       await new Promise((r) => setTimeout(r, 350));
       expect(calls).toBe(beforeResizeCalls);
-      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(1);
+      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(2);
     } finally {
       ws.close();
       await once(ws, 'close');

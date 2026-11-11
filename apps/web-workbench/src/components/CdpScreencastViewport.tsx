@@ -207,6 +207,69 @@ export function CdpScreencastViewport({
   // DEPLOY-61: the layout of the newest painted frame, even while its geometry is not yet
   // accepted for input (a view-only screen whose size the server has not applied).
   const paintedLayoutRef = React.useRef<string | undefined>(undefined);
+  /**
+   * DEPLOY-61 重跑 第 0 步 #2: the newest painted frame exactly as the user saw it (its geometry
+   * matches the image), even while it is not accepted for input because this screen's own size
+   * has not been applied yet (a view-only screen of a finished task).
+   */
+  const paintedGeometryRef = React.useRef<{ geometry: BrowserFrameGeometry; at: number } | null>(
+    null,
+  );
+  /**
+   * Set from the moment control arrives on a finished task with held input until this screen's
+   * size is sent: the held press (and its release) go to the page laid out as the user saw it,
+   * then the page is aligned to this screen. The server still checks lease and freshness.
+   */
+  const replayOnPaintedRef = React.useRef(false);
+  /** A press delivered on the painted layout whose release has not been sent yet. */
+  const paintedPressDownRef = React.useRef(false);
+  /**
+   * When the replay began: the server only accepts a frame captured in the last 5 seconds, and a
+   * still page sends none by itself — the replay waits for a frame painted after this (asked for).
+   */
+  const replaySinceRef = React.useRef(0);
+  /** When held input was last sent on the painted layout (a refusal then says 「请再点一次」). */
+  const replayedAtRef = React.useRef(0);
+  /**
+   * When the server last confirmed this screen's size message; the replay uses only frames
+   * painted after it (the server refuses input while a size is being applied).
+   */
+  const viewportAppliedAtRef = React.useRef(0);
+  /**
+   * The lease this screen's newest size message carried. One sent while only watching changes
+   * nothing on the page and the server does not wait for it, so it does not hold the replay back.
+   */
+  const viewportSentLeaseRef = React.useRef<string | null>(null);
+  /** This screen's size is being applied: input now would name a frame about to be replaced. */
+  const sizeSettling = React.useCallback(
+    (): boolean =>
+      viewportPendingRef.current &&
+      (!replayOnPaintedRef.current || viewportSentLeaseRef.current !== null),
+    [],
+  );
+  /** Held input on a finished task that is still to go out on the layout the user saw. */
+  const replayPossible = React.useCallback(
+    (now: number): boolean =>
+      replayAfterControlRef.current &&
+      deferredInputsRef.current.some((item) => now - item.at <= DEFERRED_INPUT_MS),
+    [],
+  );
+  /** The geometry input is mapped against and named by: the painted frame while replaying. */
+  const inputFrame = React.useCallback((): {
+    geometry: BrowserFrameGeometry;
+    at: number;
+  } | null => {
+    if (replayOnPaintedRef.current) {
+      const painted = paintedGeometryRef.current;
+      if (sizeSettling() || !painted) return null;
+      return painted.at >= Math.max(replaySinceRef.current, viewportAppliedAtRef.current)
+        ? painted
+        : null;
+    }
+    return geometryRef.current
+      ? { geometry: geometryRef.current, at: geometryReceivedAtRef.current }
+      : null;
+  }, [sizeSettling]);
   const replayAfterControlRef = React.useRef(replayAfterControl);
   replayAfterControlRef.current = replayAfterControl;
   const lastControlRequestRef = React.useRef(0);
@@ -214,6 +277,7 @@ export function CdpScreencastViewport({
     lastControlRequestRef.current > 0 && now - lastControlRequestRef.current <= DEFERRED_INPUT_MS;
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
+    paintedGeometryRef.current = null;
     observationEpochRef.current++;
     if (canvasRef.current) delete canvasRef.current.dataset.frameId;
   }, []);
@@ -305,17 +369,20 @@ export function CdpScreencastViewport({
         !writeReadyRef.current
       )
         return false;
-      const geometry = geometryRef.current;
+      const frame = inputFrame();
+      const geometry = frame?.geometry ?? null;
       if (
         viewportV2 &&
         payload.type !== 'viewport' &&
-        (!geometry ||
-          viewportPendingRef.current ||
-          Date.now() - geometryReceivedAtRef.current > GEOMETRY_FRESH_MS)
+        (!frame || sizeSettling() || Date.now() - frame.at > GEOMETRY_FRESH_MS)
       ) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'observe' }));
         return false;
       }
+      if (replayOnPaintedRef.current) replayedAtRef.current = Date.now();
+      if (replayOnPaintedRef.current && payload.type === 'mouseDown')
+        paintedPressDownRef.current = true;
+      if (payload.type === 'mouseUp') paintedPressDownRef.current = false;
       try {
         ws.send(
           JSON.stringify({
@@ -339,7 +406,7 @@ export function CdpScreencastViewport({
         return false;
       }
     },
-    [viewportV2],
+    [inputFrame, sizeSettling, viewportV2],
   );
 
   // FIX-61 P0: inputs that cannot be delivered yet (no control, or the frame
@@ -351,13 +418,14 @@ export function CdpScreencastViewport({
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     if (viewOnlyRef.current || !controlLeaseRef.current) return false;
     if (!viewportV2) return true;
+    const frame = inputFrame();
     return (
       writeReadyRef.current &&
-      Boolean(geometryRef.current) &&
-      !viewportPendingRef.current &&
-      Date.now() - geometryReceivedAtRef.current <= GEOMETRY_FRESH_MS
+      Boolean(frame) &&
+      !sizeSettling() &&
+      Date.now() - (frame?.at ?? 0) <= GEOMETRY_FRESH_MS
     );
-  }, [viewportV2]);
+  }, [inputFrame, sizeSettling, viewportV2]);
   const flushDeferred = React.useCallback(() => {
     if (deferredInputsRef.current.length === 0 || !canDeliverNow()) return;
     const now = Date.now();
@@ -367,7 +435,7 @@ export function CdpScreencastViewport({
     // when the layout is exactly the one the user acted on; taking control re-laid it out (a
     // phone width, a taller panel that moved Google's centred search box 50px down, a scroll):
     // that point now shows something else, so deliver nothing and let the user press again.
-    const current = layoutKey(geometryRef.current);
+    const current = layoutKey(inputFrame()?.geometry);
     if (
       viewportV2 &&
       pending.some(
@@ -384,7 +452,7 @@ export function CdpScreencastViewport({
       const payload = item.build();
       if (payload) sendInput(payload);
     }
-  }, [canDeliverNow, sendInput, viewportV2]);
+  }, [canDeliverNow, inputFrame, sendInput, viewportV2]);
   const flushDeferredRef = React.useRef(flushDeferred);
   flushDeferredRef.current = flushDeferred;
   const deliverInput = React.useCallback(
@@ -452,12 +520,22 @@ export function CdpScreencastViewport({
   // Control just arrived (or was lost): deliver what waited, or ask for a frame.
   React.useEffect(() => {
     if (viewOnly || !controlLease) {
+      replayOnPaintedRef.current = false;
       if (!onRequestControl && !controlRequestInFlight(Date.now())) deferredInputsRef.current = [];
       return;
     }
+    // DEPLOY-61 重跑 第 0 步 #2: a finished task — first deliver the held press on the layout the
+    // user saw, named by a frame painted after this moment (asked for below; the server takes
+    // only frames from the last 5 seconds), and only then is this screen's size sent (the
+    // viewport effect waits for it). It goes out only if that frame's layout is the one pressed
+    // on (flushDeferred). A running task keeps no held input to replay.
+    if (viewportV2 && !replayOnPaintedRef.current && replayPossible(Date.now())) {
+      replayOnPaintedRef.current = true;
+      replaySinceRef.current = Date.now();
+    }
     flushDeferredRef.current();
     askFrameForDeferredRef.current();
-  }, [viewOnly, controlLease, onRequestControl]);
+  }, [viewOnly, controlLease, onRequestControl, viewportV2, replayPossible]);
 
   const lastDprRef = React.useRef(0);
   const lastViewportRef = React.useRef<BrowserViewportSize | null>(null);
@@ -500,13 +578,47 @@ export function CdpScreencastViewport({
       ) {
         return;
       }
-      if (viewportV2) {
+      const markPending = (): void => {
+        if (!viewportV2) return;
         invalidateGeometry();
         viewportPendingRef.current = true;
         requestedViewportRef.current = next;
-      }
+      };
+      // DEPLOY-61 重跑 #2: held input waiting to be replayed on the painted layout (a finished
+      // task; the panel may hand over the lease and lift view-only in separate renders) keeps
+      // that frame as the one input is named by until this size is actually sent.
+      const holdsReplay = (): boolean =>
+        replayOnPaintedRef.current || (viewportV2 && replayPossible(Date.now()));
+      const deferred = holdsReplay();
+      if (!deferred) markPending();
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
+      const waitSince = Date.now();
+      const send = (): void => {
+        // Held input still to go out on the painted layout, or a press sent there whose release
+        // has not: wait (bounded, like any held input) before the page is re-laid out.
+        if (
+          Date.now() - waitSince < DEFERRED_INPUT_MS &&
+          ((viewportV2 && replayPossible(Date.now())) ||
+            (replayOnPaintedRef.current && paintedPressDownRef.current))
+        ) {
+          timer = setTimeout(send, 50);
+          return;
+        }
+        // Held input that could not go out on the layout seen in time: say so, never silently.
+        if (
+          (deferred || replayOnPaintedRef.current) &&
+          deferredInputsRef.current.length > 0 &&
+          replayAfterControlRef.current &&
+          controlLeaseRef.current &&
+          !viewOnlyRef.current
+        ) {
+          deferredInputsRef.current = [];
+          onHeldInputDroppedRef.current?.();
+        }
+        if (deferred || replayOnPaintedRef.current) markPending();
+        replayOnPaintedRef.current = false;
+        paintedPressDownRef.current = false;
+        viewportSentLeaseRef.current = controlLeaseRef.current;
         if (
           sendInput({
             type: 'viewport',
@@ -518,7 +630,8 @@ export function CdpScreencastViewport({
           lastViewportRef.current = next;
           lastDprRef.current = deviceScaleFactor;
         }
-      }, 100);
+      };
+      timer = setTimeout(send, 100);
     };
     publish();
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
@@ -539,6 +652,7 @@ export function CdpScreencastViewport({
     desktopHeight,
     mobileViewport,
     invalidateGeometry,
+    replayPossible,
   ]);
   React.useEffect(() => {
     lastViewportRef.current = null;
@@ -724,6 +838,15 @@ export function CdpScreencastViewport({
           writeReadyRef.current = msg.controlReady === true;
           return;
         }
+        // DEPLOY-61 重跑 #2: the server refused input as stale. Right after a held press was sent
+        // on the layout the user saw, say so (「请再点一次」) instead of nothing happening.
+        if (viewportV2 && msg.type === 'input-expired') {
+          if (Date.now() - replayedAtRef.current <= DEFERRED_INPUT_MS) {
+            replayedAtRef.current = 0;
+            onHeldInputDroppedRef.current?.();
+          }
+          return;
+        }
         if (viewportV2 && msg.type === 'observation-invalidated') {
           invalidateGeometry();
           return;
@@ -732,6 +855,7 @@ export function CdpScreencastViewport({
           const pending = requestedViewportRef.current;
           if (pending && pending.width === msg.width && pending.height === msg.height) {
             viewportPendingRef.current = false;
+            viewportAppliedAtRef.current = Date.now();
             askFrameForDeferredRef.current();
           }
           return;
@@ -877,6 +1001,14 @@ export function CdpScreencastViewport({
       if (canvas.height !== img.height) canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
       if (viewportV2 && geometry?.cssWidth) paintedLayoutRef.current = layoutKey(geometry);
+      if (
+        viewportV2 &&
+        geometry &&
+        observationEpoch === observationEpochRef.current &&
+        geometry.imageWidth === img.width &&
+        geometry.imageHeight === img.height
+      )
+        paintedGeometryRef.current = { geometry, at: Date.now() };
       if (viewportV2) {
         geometryRef.current =
           observationEpoch === observationEpochRef.current &&
@@ -938,7 +1070,7 @@ export function CdpScreencastViewport({
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     if (viewportV2) {
-      const frame = geometryRef.current;
+      const frame = inputFrame()?.geometry;
       const point = frame
         ? mapClientPointToBrowserFrame({
             clientX: clampDrag

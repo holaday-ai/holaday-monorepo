@@ -7,8 +7,9 @@
  * canvas: the panel reopens the browser on the task's page, takes control by itself, and the
  * link click and the search-box typing land on the page.
  *
- * The click that asks for control lands by itself only on an unchanged layout; when taking
- * control re-laid the page out, the panel says 「请再点一次」 and the next click lands.
+ * DEPLOY-61 重跑 第 0 步 #2: the first click (the one that asks for control) lands on the layout
+ * the user saw — a Google-style search box centred vertically gets focus on that first click,
+ * although taking control then re-lays the page out for this screen. Never 「请再点一次」 here.
  *
  * Run from apps/orchestrator (the config loader needs these three set; nothing connects to them):
  *   DATABASE_URL=mysql://fixture@127.0.0.1:1/none REDIS_URL=redis://127.0.0.1:1 \
@@ -53,7 +54,7 @@ const browser = await chromium.launch({ headless: true });
 const capabilities = { viewportV2: true, observationV2: true, replayV1: false, routingV2: false };
 
 const PAGE_STYLE =
-  '<style>body{font:22px system-ui;margin:0}a,input{position:absolute;font:22px system-ui}a{left:60px;top:160px;padding:12px 20px;background:#eef}input{left:60px;top:300px;width:420px;height:44px}</style>';
+  '<style>body{font:22px system-ui;margin:0}a,input{position:absolute;font:22px system-ui}a{left:60px;top:160px;padding:12px 20px;background:#eef}input{left:60px;top:300px;width:420px;height:44px}#g{left:560px;top:50%;transform:translateY(-50%)}</style>';
 async function routeFixture(page: Page) {
   await page.route('https://compare.holaday-fixture.test/**', (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -61,7 +62,7 @@ async function routeFixture(page: Page) {
       contentType: 'text/html; charset=utf-8',
       body:
         path === '/iphone/compare'
-          ? `<!doctype html>${PAGE_STYLE}<h1 style="margin:40px 60px">机型比较（本地固定页）</h1><a id="iphone" href="/iphone">iPhone</a>`
+          ? `<!doctype html>${PAGE_STYLE}<h1 style="margin:40px 60px">机型比较（本地固定页）</h1><a id="iphone" href="/iphone">iPhone</a><input id="g" aria-label="居中搜索框" placeholder="像 Google 一样垂直居中">`
           : `<!doctype html>${PAGE_STYLE}<h1 style="margin:40px 60px">iPhone（本地固定页）</h1><input id="q" aria-label="搜索" placeholder="搜索">`,
     });
   });
@@ -248,36 +249,46 @@ try {
   await ui.screenshot({ path: `${out}/1-reopened-${tag}.png` });
   if (!blip) assert.ok(effects.includes('ensure'), 'the released browser was not reopened');
 
-  // 2. Click the 「iPhone」 link on the screen once: control is taken by itself. That same click
-  // lands only when taking control left the layout exactly as seen (DEPLOY-61 P1-1); when the
-  // page was re-laid out for this screen it is not sent, the panel says 「请再点一次」, and the
-  // second click lands. Never a click on a moved page.
+  // 2. DEPLOY-61 重跑 #2: the first click on the vertically centred search box (where the user
+  // sees it) takes control and focuses that box at once; the page is aligned to this screen only
+  // afterwards. No 「请再点一次」, no second click.
   const sizeBefore = await page!.evaluate(() => `${innerWidth}x${innerHeight}`);
-  await clickOnScreen('#iphone');
-  // Whichever comes first: the click lands, or the panel says to press again (a toast that
-  // goes away by itself after a few seconds).
+  await clickOnScreen('#g');
   const outcome = await Promise.race([
-    page!.waitForURL(/\/iphone$/, { timeout: 8000 }).then(() => 'landed'),
+    page!
+      .waitForFunction(() => document.activeElement?.id === 'g', undefined, { timeout: 8000 })
+      .then(() => 'focused'),
     ui
       .getByText('请再点一次')
       .first()
       .waitFor({ timeout: 8000 })
       .then(() => 'press-again'),
   ]).catch(() => 'nothing');
-  let clicks = 1;
-  if (outcome !== 'landed') {
-    assert.equal(outcome, 'press-again', 'the first click neither landed nor was announced');
-    await ui.screenshot({ path: `${out}/2a-press-again-${tag}.png` });
-    const sizeAfter = await page!.evaluate(() => `${innerWidth}x${innerHeight}`);
-    assert.notEqual(sizeAfter, sizeBefore, 'the first click was held back on an unchanged layout');
-    await ui.waitForTimeout(600);
-    await clickOnScreen('#iphone');
-    clicks = 2;
-    await page!.waitForURL(/\/iphone$/, { timeout: 8000 }).catch(() => {});
-  }
+  assert.equal(outcome, 'focused', `the first click did not focus the centred box: ${outcome}`);
+  await ui.waitForTimeout(800);
+  const sizeAfter = await page!.evaluate(() => `${innerWidth}x${innerHeight}`);
+  await ui.keyboard.type('hola', { delay: 40 });
+  await page!.waitForFunction(
+    () => (document.querySelector('#g') as HTMLInputElement).value === 'hola',
+    undefined,
+    { timeout: 8000 },
+  );
+  const firstClick = {
+    outcome,
+    sizeBefore,
+    sizeAfter,
+    value: await page!.$eval('#g', (el) => (el as HTMLInputElement).value),
+    pressAgainShown: await ui.getByText('请再点一次').count(),
+  };
+  assert.equal(firstClick.pressAgainShown, 0, '「请再点一次」 was shown');
+  await ui.screenshot({ path: `${out}/2a-first-click-focused-${tag}.png` });
+
+  // Then, under the lease, the 「iPhone」 link on the (now aligned) screen.
+  await clickOnScreen('#iphone');
+  await page!.waitForURL(/\/iphone$/, { timeout: 8000 }).catch(() => {});
   assert.ok(page!.url().endsWith('/iphone'), `the link click did not land: ${page!.url()}`);
   await ui.waitForTimeout(800);
-  const afterClick = { header: await header(), url: page!.url(), clicks, sizeBefore };
+  const afterClick = { header: await header(), url: page!.url(), firstClick };
   await ui.screenshot({ path: `${out}/2-link-clicked-${tag}.png` });
   const session = browserControlSessions.get(instance!, 'usr_fixture', taskId);
   assert.equal(session?.control.snapshot().phase, 'human', 'the user does not hold control');
