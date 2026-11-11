@@ -143,6 +143,14 @@ import {
   stripStopReasonMarkers,
 } from '../../agent/text-sanitizer.js';
 import {
+  decideExecutionRoute,
+  interfaceSearchLane,
+  routeTask,
+  toolRouterSettings,
+  toolsForRegion,
+  withInterfaceSource,
+} from '../../agent/tool-router/index.js';
+import {
   injectResolvedUrl,
   resolveIntentUrl,
   toSafeUrlResolutionLog,
@@ -621,6 +629,11 @@ const modelRuntimeWiring = createProductionModelRuntimeWiring(
 
 /** REBUILD-2: every model call in this router asks the gateway by role. */
 const tasksModelGateway = modelGateway({ wiring: modelRuntimeWiring });
+
+/** REBUILD-2 part 2: interface-tool routing, only while TOOL_ROUTER_V2 is on (default off). */
+const taskToolRouter = toolRouterSettings(appEnv, (message) =>
+  console.warn(`[tool-router] ${message}`),
+);
 
 function personalModelContext(actorExternalId: string, modelDataRegion: unknown) {
   return {
@@ -1857,16 +1870,40 @@ export const tasksRouter = router({
             // skill-hint + keyword fast paths inside the classifier short-
             // circuit most cases for free.
             // The decision keeps its reason (rule source + match) for task metadata.
-            const executionModeDecision = retryCore
+            // REBUILD-2 part 2: with TOOL_ROUTER_V2 on, the tool router decides generate /
+            // interface / browser instead of the keyword rules (media and file lanes keep theirs).
+            // A forced browser (scrape retry, local Chrome) needs no routing turn.
+            const routedExecution = retryCore
               ? null
-              : await explainExecutionMode({
-                  intent: input.intent,
-                  skillId: taskSkillId,
-                  // §5 fileIds-aware soft template-fill: an attachment + a fill clue
-                  // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
-                  hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
-                  logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+              : await decideExecutionRoute({
+                  enabled: taskToolRouter.enabled && !ctx.scrapeBrowserRetry && !input.localChrome,
+                  legacy: () =>
+                    explainExecutionMode({
+                      intent: input.intent,
+                      skillId: taskSkillId,
+                      // §5 fileIds-aware soft template-fill: an attachment + a fill clue
+                      // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
+                      hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
+                      logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+                    }),
+                  route: async () => {
+                    const judge = tasksModelGateway.resolve(
+                      'judge',
+                      personalModelContext(ctx.userId, userRow.modelDataRegion),
+                    );
+                    return routeTask({
+                      intent: input.intent,
+                      messages: judge.kind === 'ready' ? judge.messages() : null,
+                      tools:
+                        judge.kind === 'ready'
+                          ? toolsForRegion(taskToolRouter.tools, judge.region)
+                          : [],
+                      logger: ctx.logger.child({ userId: ctx.userId, stage: 'tool-router' }),
+                    });
+                  },
                 });
+            const executionModeDecision = routedExecution?.decision ?? null;
+            const toolRoute = routedExecution?.toolRoute ?? null;
             const classifiedExecutionMode = executionModeDecision?.mode ?? ('generate' as const);
             // Phase 2b — typed expert workflow lane override. When the new
             // typed matcher (content-topic / ecom-daily / douyin-review)
@@ -4568,6 +4605,20 @@ export const tasksRouter = router({
             // classifier explicitly avoided routing to).
             if (executionMode === 'scrape') {
               const taskId = newExternalId('task');
+              // REBUILD-2 part 2: the router chose an interface tool; it is this lane's source.
+              const interfaceRoute = toolRoute?.lane === 'interface' ? toolRoute : null;
+              const interfaceTool = interfaceRoute
+                ? (taskToolRouter.tools.find((tool) => tool.id === interfaceRoute.toolId) ?? null)
+                : null;
+              const interfaceLane =
+                interfaceRoute && interfaceTool
+                  ? interfaceSearchLane({
+                      tool: interfaceTool,
+                      client: taskToolRouter.client,
+                      query: interfaceRoute.query,
+                    })
+                  : null;
+              const scrapeSourceLane = interfaceLane ?? ctx.firecrawl;
               const scrapeRuntime = resolveScrapeRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
@@ -4633,7 +4684,7 @@ export const tasksRouter = router({
               // Defensive — if the adapter wasn't configured at boot, fail
               // loudly with the exact reason. SPA / translateError surfaces
               // a clear "Firecrawl 未配置" instead of "服务繁忙".
-              if (!ctx.firecrawl) {
+              if (!scrapeSourceLane) {
                 let missingFirecrawlPersisted = false;
                 try {
                   const persisted = await repo.persistVisionOutcome(taskId, {
@@ -4683,7 +4734,7 @@ export const tasksRouter = router({
               // Codex Pack B1 — planning chip (scrape lane).
               broadcastSubStatus(ctx.userId, taskId, 'planning');
 
-              const firecrawl = ctx.firecrawl;
+              const firecrawl = scrapeSourceLane;
               const scrapeStartedAt = Date.now();
               void runMediaTaskBackground(ctx, taskId, async (ctx) =>
                 (async () => {
@@ -4751,6 +4802,7 @@ export const tasksRouter = router({
                           ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                           ...(executionPlan ? { executionPlan } : {}),
                           firecrawl,
+                          ...(interfaceRoute ? { searchLabel: interfaceRoute.title } : {}),
                           logger: ctx.logger,
                           // FIX-36 (Deploy-36 b-n06): trading days come from the
                           // exchange calendar, not from the model's arithmetic.
@@ -4838,7 +4890,7 @@ export const tasksRouter = router({
                           scrapeBrowserRetry: {
                             taskId,
                             reason,
-                            ...(scrapeOutcome.firecrawl
+                            ...(scrapeOutcome.firecrawl && !interfaceRoute
                               ? { firecrawl: scrapeOutcome.firecrawl }
                               : {}),
                             ...(scrapeOutcome.partialAnswer
@@ -4859,6 +4911,18 @@ export const tasksRouter = router({
                       return false;
                     }
                   };
+                  // REBUILD-2 part 2 hard rule (1): an interface that failed, came back empty or
+                  // whose answer did not hold goes to the browser — never to generate.
+                  const interfaceFailed =
+                    Boolean(interfaceRoute) && scrapeOutcome.status === 'failed';
+                  if (
+                    interfaceFailed &&
+                    (await handOverToBrowser(
+                      `${interfaceRoute?.title ?? '接口'}没有拿到可用结果，已自动改用云端浏览器去页面上查`,
+                    ))
+                  ) {
+                    return;
+                  }
                   const pageUnreadable =
                     scrapeOutcome.status === 'failed' &&
                     (scrapeOutcome.failureKind === 'firecrawl' ||
@@ -4867,6 +4931,7 @@ export const tasksRouter = router({
                       scrapeOutcome.failureKind === 'facts');
                   if (
                     pageUnreadable &&
+                    !interfaceFailed &&
                     (await handOverToBrowser(
                       `${scrapeOutcome.reason}，已自动改用云端浏览器重试一次`,
                     ))
@@ -4876,7 +4941,9 @@ export const tasksRouter = router({
                   // FIX-58 P0: a live fact (price, stock, ranking…) is never answered from
                   // memory — a lookup that found nothing goes to the browser, not generate.
                   const liveFactLookup =
-                    scrapeOutcome.status === 'failed' && !!matchLiveFact(input.intent);
+                    !interfaceRoute &&
+                    scrapeOutcome.status === 'failed' &&
+                    !!matchLiveFact(input.intent);
                   if (
                     liveFactLookup &&
                     !pageUnreadable &&
@@ -4909,18 +4976,22 @@ export const tasksRouter = router({
                       // FIX-58 P1-2: the same 「原样 / 原文」 cleanup as a browser answer.
                       // FIX-58 P1-10: a market answer's table is said as a sentence.
                       // 复审 #1: a source link is set apart from the sentence before it.
-                      summary: withSourceLinksApart(
-                        marketTableAsText(
-                          withoutVerbatimNotes(scrapeOutcome.summary),
-                          input.intent,
+                      summary: withInterfaceSource(
+                        withSourceLinksApart(
+                          marketTableAsText(
+                            withoutVerbatimNotes(scrapeOutcome.summary),
+                            input.intent,
+                          ),
                         ),
+                        interfaceLane?.lastSource() ?? null,
                       ),
                     };
                   } else if (
                     (pageUnreadable &&
                       (scrapeOutcome.source === 'scrape' ||
                         scrapeOutcome.failureKind === 'blocked')) ||
-                    liveFactLookup
+                    liveFactLookup ||
+                    interfaceFailed
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
                     // search whose every result was a wall (FIX-32).
@@ -5159,7 +5230,20 @@ export const tasksRouter = router({
                     ...(scrapeOutcome.failureKind
                       ? { scrapeFailureKind: scrapeOutcome.failureKind }
                       : {}),
-                    firecrawl: firecrawlUsage(scrapeOutcome.firecrawl),
+                    ...(interfaceRoute
+                      ? {
+                          toolRoute: {
+                            toolId: interfaceRoute.toolId,
+                            query: interfaceRoute.query,
+                            ...(interfaceLane?.lastSource()
+                              ? { source: interfaceLane.lastSource() }
+                              : {}),
+                            ...(interfaceLane?.lastFailure()
+                              ? { failure: interfaceLane.lastFailure() }
+                              : {}),
+                          },
+                        }
+                      : { firecrawl: firecrawlUsage(scrapeOutcome.firecrawl) }),
                     elapsedMs,
                   };
                   ctx.logger.info(

@@ -129,6 +129,11 @@ export interface RunScrapeOpts {
   /** FIX-36: the exchange calendar (akshare is_trading_day); null = could not tell. */
   tradingDay?: (iso: string) => Promise<boolean | null>;
   now?: () => Date;
+  /**
+   * REBUILD-2 part 2: the name of the search source in failure copy when `firecrawl` is an
+   * interface tool (`agent/tool-router`), e.g. 「百炼联网搜索」. Default 「Firecrawl」.
+   */
+  searchLabel?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -403,7 +408,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       log.warn({ code: 'FIRECRAWL_SEARCH_FAILED' }, 'scrape-runner: Firecrawl search failed');
       return failed({
         start,
-        reason: `网络搜索（Firecrawl）失败：${firecrawlReason(result.error)}`,
+        reason: `网络搜索（${opts.searchLabel ?? 'Firecrawl'}）失败：${firecrawlReason(result.error)}`,
         kind: 'firecrawl',
         source: scrapeSource,
         firecrawl: usage,
@@ -421,7 +426,7 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
         reason:
           result.results.length === 0
             ? '搜索没有结果，换个关键词试试。'
-            : '网络搜索（Firecrawl）拿到的结果页都是验证、登录或报错页',
+            : `网络搜索（${opts.searchLabel ?? 'Firecrawl'}）拿到的结果页都是验证、登录或报错页`,
         kind: result.results.length === 0 ? 'empty' : 'blocked',
         source: scrapeSource,
         firecrawl: usage,
