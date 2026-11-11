@@ -65,9 +65,23 @@ moving it to `judge` would change its model).
 
 1. Forced tool + `end_turn` with a `tool_use` block → `tool_use` (the adapter already did this
    for our transport; the wrapper keeps it true for every adapter).
-2. `thinking` is sent on every Qwen request that supports it: `disabled` for a forced tool (as
-   before), `enabled` otherwise (the endpoint default). `enabled` is sent without
-   `budget_tokens`; verify once against the live endpoint before benchmarking.
+2. `thinking` is stated on every Qwen request, per role (`thinking.ts`, review #1). DashScope
+   thinks by default and counts thinking inside `max_tokens` (REBUILD-1 D §3.1/§3.4):
+   - small-budget roles (`judge`, `suggestions`, `plan`, `video_edit_planner`, `vision`) send
+     `thinking: disabled`;
+   - thinking roles (`brain`, `generate`, `verifier`) send `enabled` + `budget_tokens: 2048`, and
+     the wire `max_tokens` = the caller's `maxTokens` (answer room) + the budget, so thinking can
+     no longer eat the answer;
+   - a call with < 1024 tokens of answer room, a forced tool (`any` / `tool`) or an explicit
+     caller `disabled` sends `disabled`; an explicit caller `enabled` gets the role budget;
+   - wire `max_tokens` is capped at 32768: the budget shrinks first, below 1024 thinking is off.
+
+   In practice the browser loop always forces a tool (`toolChoice: any`), so `brain` does not
+   think; the budget applies to `generate` (generate-runner, video script, template fill, expert
+   workflows) and a `verifier` call that does not disable it. Probed 2026-11-11 against the live
+   endpoint (qwen3.8-max, qwen3.7-plus, one call each, `budget_tokens: 2048`, `max_tokens: 3072`):
+   both 200 with a non-empty answer; qwen3.7-plus used 1071 output tokens on a 1024-token answer
+   room, i.e. the old sizing would have left it no room.
 3. Empty `thinking` blocks are dropped (the transport already skips them).
 4. Usage keeps the Anthropic split (input excludes cache reads; the ledger prices the cache
    separately). `totalInputTokens` sums them; the `qwen.core.call` observation uses the total
@@ -78,13 +92,24 @@ moving it to `judge` would change its model).
 
 The Responses (streaming, OpenAI-compatible) channel is not normalised.
 
-## Not migrated
+## Not migrated (未迁移清单)
 
-- `self-check/self-check.ts`: probes every lane by design (lane-level diagnostic).
-- Legacy / dormant: supercar `agent-loop.ts` raw Anthropic fallback, `agent/vision-loop/commander.ts`
-  Anthropic path, `agent/planners/anthropic.ts`, `response-layer/openai-verifier-fallback.ts`,
-  `agent/model-selector.ts` + `prompt-layers.ts` Claude routing labels, `visual-verifier.ts`,
-  the legacy client fallbacks in `video-quality-verifier.ts` and `ota-user-browser-runner.ts`.
-- Not chat models: image / video / TTS / voice-clone / lip-sync / Wanxiang media clients,
-  Gemini AV sync (`agent/video/video-av-sync-audit.ts`).
-- `qwen-shadow-evaluator.ts` and `eval/` runners (synthetic benchmark lanes).
+`model-name-scan.test.ts` now scans **every non-test .ts file in `src`** (review #1). Model
+literals may only live in `config/env.ts`, `llm/model-catalog.ts`, `llm/model-price-catalog.ts`
+and the legacy price table `agent/llm-call-recorder.ts`; everything else must be on the list
+below (the test's `NOT_MIGRATED`) or it fails.
+
+**Migrated this week: none beyond this PR.** Every Qwen chat call on the production path already
+goes through a role. What is left is not a chat role on the Qwen table:
+
+| What | Literals | Migrate this week? | Why |
+|---|---|---|---|
+| Search fallback `search-provider.ts` | `qwen-flash` | No | DashScope native `enable_search` call used only to get search sources (`max_tokens: 16`, text discarded); already overridable by env; the router's interface search lane (REBUILD-2 part 2) is its successor. |
+| Video / image / voice clients (`wanxiang-client`, `wan-animate-mix-client`, `veo-client`, `video-lane-simple`, `video-pet-i2v`, `video-confirm`, `fal-lipsync-client`, `gemini-tts-client`, `qwen-voice-clone-client`, `image/model-router`, `tasks.ts` TTS / i2v defaults) | `wan*`, `veo-*`, `fal-ai/*`, `gemini-*-image`, `gemini-*-tts`, `qwen3-tts-*`, `qwen-voice-enrollment` | No | Not chat models: media generation with their own env overrides and price rows; a media-model config is a separate item. |
+| Gemini AV-sync verifier `video-av-sync-verifier.ts` | `gemini-3.6-flash` | No | Gemini, not Qwen; the role table is Qwen-only; env `GEMINI_VIDEO_REVIEW_MODEL` already names it. |
+| Dormant Claude paths: supercar `agent-loop.ts` raw Anthropic fallback, `vision-loop/commander.ts`, `planners/anthropic.ts`, `model-selector.ts` + `prompt-layers.ts` routing labels, `visual-verifier.ts`, legacy client fallbacks in `video-quality-verifier.ts`, `image-subject-verifier.ts`, `ota-user-browser-runner.ts`, the Opus quota label in `tasks.ts` | `claude-*` | No | Never run on the Qwen-only runtime (no Anthropic key; we do not call Claude). Removing them is deletion work, not migration; touching them now risks the legacy path the flag-off promise covers. |
+| OpenAI verifier fallback `response-layer/openai-verifier-fallback.ts` | `gpt-4o-mini` | No | Dormant (`OPENAI_RESPONSE_LAYER_ENABLED` off). |
+| `self-check/self-check.ts`, `qwen-shadow-evaluator.ts`, `eval/` | (no literals; read env) | No | Lane-level diagnostics and synthetic benchmark lanes probe lanes by design. |
+
+Not a model (allowed): `qwen.core.call` (log event), `qwen-av-sync-pending` (status),
+`qwen-cn` (search provider id).
