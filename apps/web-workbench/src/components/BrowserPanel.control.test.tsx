@@ -189,11 +189,18 @@ it('uses confirmed ownership for both normal and fullscreen controls', async () 
   });
 });
 
-it('does not automatically retake control while the login banner awaits its status update', async () => {
+it('FIX-61 DEPLOY-61 P0-2: a login wait does not take control by itself; 「我来操作」 does, once', async () => {
   api.mutate.mockImplementation(async ({ action }: { action: string }) =>
     action === 'takeover' ? control('human', 'login') : control('agent'),
   );
   render(<BrowserPanel {...base} awaitingUser awaitingKind="login" />);
+  const takeover = await screen.findByRole('button', { name: '我来操作' });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(0);
+  await waitFor(() => expect(takeover.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(takeover);
   await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('login'));
   fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
   await waitFor(() =>
@@ -207,6 +214,17 @@ it('does not automatically retake control while the login banner awaits its stat
     await Promise.resolve();
   });
   expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(1);
+  expect(screen.getByTestId('viewport').dataset.lease).toBe('');
+});
+
+it('FIX-61 DEPLOY-61 P0-2: the assistant asking 「确认继续执行吗？」 never takes control for the person', async () => {
+  api.mutate.mockResolvedValue(control('human', 'auto'));
+  render(<BrowserPanel {...base} awaitingUser awaitingKind="browser_action" />);
+  await screen.findByRole('button', { name: '我来操作' });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 100));
+  });
+  expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(0);
   expect(screen.getByTestId('viewport').dataset.lease).toBe('');
 });
 

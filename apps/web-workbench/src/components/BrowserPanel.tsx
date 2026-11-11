@@ -939,39 +939,10 @@ function CloudBrowserPanel({
       startupTargetUrl ??
       'about:blank');
   const displayUrlIsPendingTarget = startupTargetUrl != null && displayUrl === startupTargetUrl;
-  // Request once per browser-wait episode. A stale login banner must not
-  // immediately retake the browser after the user deliberately hands it back.
-  const autoTakeoverEpisode = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!browserAwaiting) {
-      autoTakeoverEpisode.current = null;
-      return;
-    }
-    const episode = `${activeTaskId}:${awaitingKind}`;
-    if (autoTakeoverEpisode.current === episode) return;
-    if (interactive) {
-      autoTakeoverEpisode.current = episode;
-      return;
-    }
-    if (!usingCdp || !browserAwaiting || interactive) return;
-    const hasLiveViewport = useVnc
-      ? vncStatus === 'connected' || vncStatus === 'connecting'
-      : Boolean(frame) && !isBlankUrl(frame?.url);
-    if (hasLiveViewport) {
-      autoTakeoverEpisode.current = episode;
-      setInteractive(true);
-    }
-  }, [
-    usingCdp,
-    browserAwaiting,
-    interactive,
-    activeTaskId,
-    awaitingKind,
-    useVnc,
-    vncStatus,
-    frame,
-    setInteractive,
-  ]);
+  // FIX-61 DEPLOY-61 P0-2: the panel never asks for control by itself. When the assistant
+  // stops to ask (a login, a check, 「确认继续执行吗？」), it asks in the conversation; control is
+  // requested only when the person presses or types on the screen or presses 「我来操作」.
+  // (It used to take over on every browser wait — DEPLOY-61 专项 3: 「正在交接」 with no input.)
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
