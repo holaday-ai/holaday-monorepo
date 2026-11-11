@@ -209,6 +209,79 @@ export class CdpInputHandler {
     },
   ) {}
 
+  /** The assistant page's own size before a lease holder's screen was applied. */
+  private appliedFrom: {
+    page: Page;
+    size: { width: number; height: number };
+    deviceScaleFactor: number;
+  } | null = null;
+  private restoreRegistered = false;
+
+  /**
+   * FIX-61 DEPLOY-61 P0-1: whatever a lease holder's screen applied is undone at handback,
+   * before the assistant observes: our device-metrics override is cleared (not only the
+   * Playwright size put back), then an aligned page gets its own size again.
+   */
+  private async registerViewportRestore(agentPage: Page | undefined): Promise<void> {
+    if (!this.agentViewport) return;
+    if (agentPage && !this.appliedFrom) {
+      const ratio = await Promise.resolve()
+        .then(() => agentPage.evaluate(() => window.devicePixelRatio))
+        .catch(() => 1);
+      this.appliedFrom = {
+        page: agentPage,
+        size: agentPage.viewportSize() ?? AGENT_LAUNCH_VIEWPORT,
+        deviceScaleFactor: Number.isFinite(ratio) && ratio > 0 ? ratio : 1,
+      };
+    }
+    if (this.restoreRegistered) return;
+    this.restoreRegistered = true;
+    this.agentViewport.onAligned(async () => {
+      this.restoreRegistered = false;
+      const session = this.getSession();
+      if (session && !this.interruptedSessions.has(session))
+        await session.send('Emulation.clearDeviceMetricsOverride').catch((err: unknown) => {
+          this.logger.debug({ err }, 'cdp-input: device metrics not cleared');
+        });
+      const from = this.appliedFrom;
+      this.appliedFrom = null;
+      if (!from) return;
+      await from.page.setViewportSize(from.size).catch((err: unknown) => {
+        this.logger.debug({ err }, 'cdp-input: agent viewport not restored');
+      });
+      // Clearing ours does not always bring back the assistant's own emulation (seen: the page
+      // fell back to 780x1520, and Playwright's setViewportSize to the same size is a no-op).
+      // Then put the launch values back explicitly on this session.
+      const real = await Promise.resolve()
+        .then(() =>
+          from.page.evaluate(() => [
+            window.innerWidth,
+            window.innerHeight,
+            window.devicePixelRatio,
+          ]),
+        )
+        .catch(() => null);
+      if (
+        session &&
+        !this.interruptedSessions.has(session) &&
+        (!real ||
+          real[0] !== from.size.width ||
+          real[1] !== from.size.height ||
+          real[2] !== from.deviceScaleFactor)
+      )
+        await session
+          .send('Emulation.setDeviceMetricsOverride', {
+            width: from.size.width,
+            height: from.size.height,
+            deviceScaleFactor: from.deviceScaleFactor,
+            mobile: false,
+          })
+          .catch((err: unknown) => {
+            this.logger.debug({ err }, 'cdp-input: agent viewport launch values not restored');
+          });
+    });
+  }
+
   /**
    * Dispatch a single input message. Per-message errors are logged
    * + swallowed so one malformed event from the SPA can't kill the
@@ -265,6 +338,12 @@ export class CdpInputHandler {
           }
           const width = Math.round(msg.width);
           const height = Math.round(msg.height);
+          // FIX-61 DEPLOY-61 P0-1: without the lease nothing here may touch the assistant's
+          // page. `Emulation.setDeviceMetricsOverride` on this session changes the page's real
+          // layout (a phone watching a running task laid it out at 380x480 and the assistant
+          // stopped). A watcher's screen only scales the frames it gets; its size is applied
+          // when it takes control (the screen re-sends it then).
+          if (this.agentViewport && !this.agentViewport.mayAlign()) return;
           const requestedRatio = msg.deviceScaleFactor;
           if (
             requestedRatio !== undefined &&
@@ -302,6 +381,11 @@ export class CdpInputHandler {
             screenWidth: width,
             screenHeight: height,
           };
+          // Remember the assistant's own size before ours is applied (restored at handback).
+          await this.registerViewportRestore(
+            page ??
+              (this.agentViewport ? await this.getPage?.().catch(() => undefined) : undefined),
+          );
           await send('Emulation.setDeviceMetricsOverride', override);
           // FIX-61 P0: right after a task the agent's own Playwright emulation
           // (1280x800) still decides the page layout, so the frames were 1807
@@ -315,7 +399,6 @@ export class CdpInputHandler {
           ) {
             const agentPage = page ?? (await this.getPage().catch(() => undefined));
             if (agentPage && this.agentViewport.mayAlign()) {
-              const original = agentPage.viewportSize() ?? AGENT_LAUNCH_VIEWPORT;
               const aligned = await agentPage.setViewportSize({ width, height }).then(
                 () => true,
                 (err: unknown) => {
@@ -323,13 +406,7 @@ export class CdpInputHandler {
                   return false;
                 },
               );
-              if (aligned) {
-                this.agentViewport.onAligned(async () => {
-                  await agentPage.setViewportSize(original).catch((err: unknown) => {
-                    this.logger.debug({ err }, 'cdp-input: agent viewport not restored');
-                  });
-                });
-              }
+              if (!aligned) this.logger.debug('cdp-input: agent viewport alignment skipped');
               await send('Emulation.setDeviceMetricsOverride', override);
             }
           }

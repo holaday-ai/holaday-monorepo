@@ -70,15 +70,6 @@ export type RoutePickResult =
   | { kind: 'no-active'; reason: string };
 
 const TASK_ID_PREFIX = 'tsk_';
-/** How often a live screen checks whether its user just took control. */
-const LEASE_WATCH_MS = 300;
-/**
- * DEPLOY-61 第 0 步 #2: the screen re-sends its size itself once it learns its lease. Applying it
- * a second time from the watch below put a second 「尺寸待定」 window right where the click that
- * asked for control is delivered, and that click was refused as stale (first click only took
- * over). The watch is now a fallback for a screen that did not re-send within this long.
- */
-const LEASE_VIEWPORT_FALLBACK_MS = 1_000;
 
 export function pickInstanceForRoute(args: {
   urlArg: string;
@@ -500,39 +491,20 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         () => executor.getPage(),
         args.viewportV2 ? 2400 : 1600,
         {
-          // FIX-61 复审 #1: only the lease holder's screen may resize the
-          // assistant's page; a viewer only gets frames.
-          mayAlign: () => humanLease() !== null,
+          // FIX-61 复审 #1 / DEPLOY-61 P0-1: only the lease holder's screen — the one whose
+          // viewport message carried the current lease — may change the assistant's page. While
+          // a phone holds control, another screen that only watches still changes nothing.
+          mayAlign: () => {
+            const lease = humanLease();
+            return lease !== null && viewportLease === lease;
+          },
           onAligned: (restore) =>
             browserControlSessions.noteAgentViewportChanged(args.instance, restore),
         },
       );
       await inputBridge.attach(inputHandler);
-      // When the user takes control, apply their screen size once so the page
-      // they are about to press lays out like the frames they see.
-      // A screen that re-sends its size with the new lease (the workbench does) is not applied
-      // twice; the watch only steps in when none arrived within LEASE_VIEWPORT_FALLBACK_MS.
-      let seenLease = humanLease();
-      let awaitingLease: { lease: string; since: number } | null = null;
-      const leaseWatch = setInterval(() => {
-        if (stopped) {
-          clearInterval(leaseWatch);
-          return;
-        }
-        const lease = humanLease();
-        if (lease && lease !== seenLease) awaitingLease = { lease, since: Date.now() };
-        seenLease = lease;
-        if (!awaitingLease) return;
-        if (lease !== awaitingLease.lease || viewportLease === awaitingLease.lease) {
-          awaitingLease = null;
-          return;
-        }
-        if (Date.now() - awaitingLease.since < LEASE_VIEWPORT_FALLBACK_MS) return;
-        awaitingLease = null;
-        void inputBridge.reapplyViewport().catch(() => {});
-      }, LEASE_WATCH_MS);
-      leaseWatch.unref?.();
-      args.ws.once('close', () => clearInterval(leaseWatch));
+      // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the
+      // workbench does); only that message may change the assistant's page (mayAlign above).
 
       // Keep the pool's idle GC happy — every active screencast
       // counts as activity on its bound task even when the agent
