@@ -152,6 +152,12 @@ describe('FIX-61B P0-2: a model reasoning never reaches the user', () => {
     expect(hasReasoningTag(sanitizeFinalText(leaked))).toBe(false);
   });
 
+  it('复审 #3: a reasoning block in the middle of an answer goes', () => {
+    const mid =
+      '好的。<think>用户要价格，我需要先确认页面上显示的是哪一个规格，再决定怎么回答这个问题比较稳妥。</think>价格是 ¥199。';
+    expect(stripReasoning(mid)).toBe('好的。价格是 ¥199。');
+  });
+
   it('复审 #2: prose that names both tags is left as written', () => {
     const prose = 'DeepSeek 会用 <think> 和 </think> 把推理包起来。';
     expect(stripReasoning(prose)).toBe(prose);

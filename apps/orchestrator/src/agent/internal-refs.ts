@@ -186,6 +186,11 @@ export function stripReasoning(text: string): string {
     code.push(block);
     return `\uE000${code.length - 1}\uE000`;
   });
+  // 复审 #3 建议: a reasoning block in the middle of an answer goes when it spans lines or is
+  // longer than a short mention (「会用 <think> 和 </think>」 stays).
+  out = out.replace(/<think>([\s\S]*?)<\/think>/gi, (block, inner: string, at: number) =>
+    at > 0 && (inner.includes('\n') || inner.length > 40) ? '' : block,
+  );
   if (/^\s*<think>/i.test(out)) {
     // Reasoning opens the text: it ends at its first </think>; never closed, nothing is an answer.
     const close = out.search(/<\/think>/i);
