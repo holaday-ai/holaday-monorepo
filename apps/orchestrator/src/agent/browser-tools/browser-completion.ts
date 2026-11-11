@@ -353,9 +353,12 @@ export function asksToFillForm(requested: string): boolean {
   return /(?:填表|填写|填入|fill.*form)/i.test(asked);
 }
 
-/** FIX-61B P1-8: a single video page (YouTube watch / shorts, 哔哩哔哩 /video/, 抖音 /video/). */
+/**
+ * FIX-61B P1-8: a single video page — told by its path (YouTube watch / shorts, youtu.be, any
+ * /video/ page: 哔哩哔哩, 抖音, an offline fixture's /video). A results or list page is none.
+ */
 const VIDEO_PAGE_URL_RE =
-  /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com\/(?:watch\b|shorts\/)|youtu\.be\/|bilibili\.com\/video\/|douyin\.com\/video\/)/i;
+  /^https?:\/\/[^/?#]+(?:\/[^?#]*)?\/(?:watch\b|shorts\/|video\b)|^https?:\/\/youtu\.be\//i;
 /** FIX-61B P1-8: the task asks to read one video page — not a search or a list of videos. */
 export function asksForVideoPage(intent: string): boolean {
   return (
