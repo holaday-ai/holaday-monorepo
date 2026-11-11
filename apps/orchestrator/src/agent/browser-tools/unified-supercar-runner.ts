@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import { egressBlockLearner } from '../../browser-pool/egress-learning.js';
 import {
   browserProfileStore,
@@ -128,6 +129,34 @@ async function safeTitle(page: { title(): Promise<string> }): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/** FIX-61B P1-6: the tools that read the page for the assistant. */
+const READ_TOOLS = new Set(['snapshot', 'read_page', 'extract', 'get_page_text', 'read_section']);
+
+/** FIX-61B P1-6: the names (never the values) of the boxes the person typed into. */
+export async function humanTypedFieldNames(page: Page): Promise<string[]> {
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('[data-hd-human-typed]'))
+        .map((el) => {
+          const field = el as HTMLInputElement;
+          const label = field.labels?.[0]?.textContent ?? '';
+          return (
+            field.getAttribute('aria-label') ||
+            label ||
+            field.getAttribute('placeholder') ||
+            field.getAttribute('name') ||
+            '输入框'
+          )
+            .replace(/\s+/g, ' ')
+            .replace(/[:：]\s*$/, '')
+            .trim()
+            .slice(0, 30);
+        })
+        .slice(0, 5),
+    )
+    .catch(() => []);
 }
 
 function describe(action: UnifiedBrowserAction, label: string | null): string {
@@ -818,6 +847,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const result = await tools.execute(action);
         page = tools.page;
         lastTriggers = result.effect?.triggers ?? [];
+        // FIX-61B P1-6: a read of a page with boxes the person typed into says which (names only,
+        // never the text): the assistant cannot see their contents and must not call them empty.
+        if (result.ok && READ_TOOLS.has(action.tool)) {
+          const typed = await humanTypedFieldNames(tools.page);
+          if (typed.length)
+            result.text = `${result.text}\n（页面上「${typed.join('」「')}」是用户自己填写的输入框，内容你看不到：被问到时回答「这是你自己填的内容，我看不到」，不要说为空或没有填写。）`;
+        }
         // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
         // logged and passed (read-only-effect-policy); anything that may change something asks.
         if (result.interruption && (await passReadOnlyEffect(result.interruption, lastTriggers))) {

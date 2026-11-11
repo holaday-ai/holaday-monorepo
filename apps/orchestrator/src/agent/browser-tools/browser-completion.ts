@@ -269,7 +269,9 @@ export function completionGap(
   )
     return '无限滚动没有加载新增内容，任务未完成；请检查滚动目标与站点加载状态。';
   const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
-  if (/(?:填表|填写|填入|fill.*form)/i.test(requested) && !forms.some((f) => f.filled))
+  // FIX-61B P1-6 (Deploy-61 单列 5): 「只打开，不要填写」 then 「读一下…输入框现在填的是什么，只读不改」 is
+  // no request to fill — its answer 「没有填写」 was refused twice as a claim of a filled form.
+  if (asksToFillForm(requested) && !forms.some((f) => f.filled))
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
@@ -330,4 +332,15 @@ function browserTabWords(text: string): boolean {
   return /标签页|新标签|原标签|源标签|起始|初始|第一个|第\s*[一二三四五六七八九十\d]+\s*个|tab_|\b(?:new|first|original|previous|browser|other|last|second|third)\s+tabs?\b|\btab\s*#?\d|\b\d+(?:st|nd|rd|th)\s+tab\b/i.test(
     text,
   );
+}
+
+/** FIX-61B P1-6: the request asks to fill a form — not 「不要填写」, not a read of what a box holds. */
+export function asksToFillForm(requested: string): boolean {
+  const asked = requested
+    .replace(
+      /(?:不要|不用|无需|无须|不必|别|勿|不|没有|未)\s*(?:去)?\s*(?:填表|填写|填入|填)/g,
+      ' ',
+    )
+    .replace(/(?:don'?t|do not|without|no need to|never)\s+fill(?:ing)?\b[^.。;；]*/gi, ' ');
+  return /(?:填表|填写|填入|fill.*form)/i.test(asked);
 }

@@ -2751,7 +2751,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         ? `${hostNote}${outcome.text} (${outcome.errorCode}: ${outcome.errorMessage ?? ''})${staleRedo}`
         : hostNote + [outcome.text, ...localNotices].join('\n\n') + backNote;
       seenTool(resultText);
-      results.push(toolResult(call.id, resultText, !outcome.ok));
+      results.push(toolResult(call.id, withHiddenValueNote(resultText), !outcome.ok));
       if (outcome.image)
         images.push({
           type: 'image',
@@ -4162,4 +4162,15 @@ export async function confirmLeftOut(
     const said = verdicts.find((v) => key(v.field) === key(field));
     return said !== undefined && !said.hasValue;
   });
+}
+
+/**
+ * FIX-61B P1-6 (Deploy-61 单列 5: the assistant read a box the user had typed into — masked as
+ * [REDACTED] — and told the user it was 「为空，没有填写任何文字」). A masked value is not empty: it is
+ * what the person typed, or a secret, and the assistant cannot see it. Said once per read.
+ */
+export const HIDDEN_VALUE_NOTE =
+  '（说明：快照里的 [REDACTED] 不是空值，是用户自己填写、你看不到的内容。被问到这个输入框时回答「这是你自己填的内容，我看不到」，不要说为空或没有填写。）';
+export function withHiddenValueNote(text: string): string {
+  return /: \[REDACTED\]/.test(text) ? `${text}\n${HIDDEN_VALUE_NOTE}` : text;
 }
