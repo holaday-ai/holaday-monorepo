@@ -9,6 +9,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { MessagesAdapter, NeutralOutputContentBlock } from '../../llm/messages-adapter.js';
 import type { UnifiedToolResult } from '../browser-tools/playwright-unified-executor.js';
 import { type BenchFixture, listFixtureDirs, readFixture } from './fixture.js';
+import {
+  MODEL_REPLIES_FILE,
+  readModelReplies,
+  recordingModel,
+  replayingModel,
+  writeModelReplies,
+} from './model-replies.js';
 import { benchRecorderFromEnv, createBenchRecorder } from './recorder.js';
 import { NOT_IN_FIXTURE, createReplayExecutor } from './replay-executor.js';
 import { replayFixture } from './replay.js';
@@ -231,5 +238,55 @@ describe('replay of one fixture (scripted model)', () => {
     expect(result.outcome.status).toBe('completed');
     if (result.outcome.status === 'completed')
       expect(result.outcome.answerContract).toBeUndefined();
+  });
+  it('offline mode: replies recorded from a live replay replay with no model call and the same answer', async () => {
+    const dir = await recordSynthetic(tempRoot());
+    const live = recordingModel(adapter());
+    const first = await replayFixture({
+      fixture: readFixture(dir),
+      dir,
+      adapter: live.adapter,
+      answerContract: true,
+    });
+    writeModelReplies(dir, live.replies(), 'scripted', () => new Date('2026-11-11T00:00:00Z'));
+    expect(existsSync(join(dir, MODEL_REPLIES_FILE))).toBe(true);
+
+    const recorded = readModelReplies(dir)!;
+    expect(recorded.replies).toHaveLength(3);
+    expect(recorded.replies[0]?.request.toolChoice).toBe('any');
+    const offline = replayingModel(recorded);
+    const second = await replayFixture({
+      fixture: readFixture(dir),
+      dir,
+      adapter: offline.adapter,
+      answerContract: true,
+    });
+    expect(second.outcome).toEqual(first.outcome);
+    expect(offline.served()).toBe(3);
+    expect(offline.diverged()).toEqual([]);
+    expect(offline.exhausted()).toBe(false);
+  });
+
+  it('offline mode: a turn past the recorded replies fails and is reported (rule-change regression)', async () => {
+    const dir = await recordSynthetic(tempRoot());
+    const live = recordingModel(adapter());
+    await replayFixture({
+      fixture: readFixture(dir),
+      dir,
+      adapter: live.adapter,
+      answerContract: true,
+    });
+    // Keep only the first two turns: the replay asks for a third it never got.
+    writeModelReplies(dir, live.replies().slice(0, 2), 'scripted');
+    const offline = replayingModel(readModelReplies(dir)!);
+    const result = await replayFixture({
+      fixture: readFixture(dir),
+      dir,
+      adapter: offline.adapter,
+      answerContract: true,
+    });
+    expect(result.outcome.status).not.toBe('completed');
+    expect(offline.exhausted()).toBe(true);
+    expect(readModelReplies(tempRoot())).toBeNull();
   });
 });

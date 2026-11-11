@@ -97,4 +97,18 @@ scrape / search lanes still produce free-text price answers.
 `fixture.json` (intent, every tool call and the result the loop received, final URL / title,
 recorded outcome) plus `step-<n>.jpg` screenshots. `scripts/replay-bench.ts` replays fixtures
 (default `test-fixtures/bench60/`) through the real loop with a replay executor (unknown calls get
-`not_in_fixture`) and the gateway's `brain` model, 60 s cap per item.
+`not_in_fixture`), 60 s cap per item, in one of two model modes (`bench-replay/model-replies.ts`):
+
+| Mode | Model | Use |
+|---|---|---|
+| `--models live` (default) | the gateway's `brain` role — real calls, spends quota, not reproducible | does a prompt / contract change help the model? `--record-models` also writes each run's replies to `<fixture>/model-replies.json` |
+| `--models recorded` | the replies in `model-replies.json` — no model call, same input → same output | regression check for rule / checker / renderer changes |
+
+In recorded mode replies are served in order; a request whose tool list / tool choice differs
+from the recorded one is still served and listed as `diverged`, and a turn past the last reply
+fails (`exhausted`) — e.g. a checker change that now sends back where the recording did not.
+Fixtures without `model-replies.json` are skipped in recorded mode. The script loads the
+orchestrator env (the loop imports it) but resolves no model in recorded mode.
+
+Not done yet: recording the bench60 fixtures themselves (`test-fixtures/bench60/` holds only
+`.gitkeep`); that needs real runs with `BENCH_RECORD_DIR` and happens in acceptance.
