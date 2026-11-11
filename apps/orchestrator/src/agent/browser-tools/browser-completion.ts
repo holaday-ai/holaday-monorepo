@@ -112,6 +112,8 @@ export function completionGap(
   summary: string,
   trace: readonly BrowserTrace[],
   requireBrowser: boolean,
+  /** FIX-61B P1-6: the user's own words (the loop's intent also carries host guidance). */
+  userIntent?: string,
 ): string | null {
   const successful = trace.filter((entry) => entry.ok);
   const claimed = positiveActionText(summary);
@@ -279,7 +281,9 @@ export function completionGap(
   const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
   // FIX-61B P1-6 (Deploy-61 单列 5): 「只打开，不要填写」 then 「读一下…输入框现在填的是什么，只读不改」 is
   // no request to fill — its answer 「没有填写」 was refused twice as a claim of a filled form.
-  if (asksToFillForm(requested) && !forms.some((f) => f.filled))
+  // Only the user's own words ask to fill — host guidance that mentions 填写 asks nothing (local
+  // self-test: 「…输入框现在填的是什么，只读不改」 was still refused).
+  if (asksToFillForm(positiveActionText(userIntent ?? intent)) && !forms.some((f) => f.filled))
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
@@ -346,7 +350,7 @@ function browserTabWords(text: string): boolean {
 export function asksToFillForm(requested: string): boolean {
   const asked = requested
     .replace(
-      /(?:不要|不用|无需|无须|不必|别|勿|不|没有|未)\s*(?:去)?\s*(?:填表|填写|填入|填)/g,
+      /(?:不要|不用|无需|无须|不必|别|勿|不|没有|没|未|并未)\s*(?:去|进行|做)?\s*(?:任何)?\s*(?:的)?\s*(?:填表|填写|填入|填)/g,
       ' ',
     )
     .replace(/(?:don'?t|do not|without|no need to|never)\s+fill(?:ing)?\b[^.。;；]*/gi, ' ');

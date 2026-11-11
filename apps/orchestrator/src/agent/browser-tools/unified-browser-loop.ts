@@ -1514,7 +1514,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           // Integrity: claimed actions need host receipts, a page must have been
           // read, and hard facts must not contradict what was read.
           const blocking =
-            completionGap(input.intent, summary, trace, input.requireBrowserEvidence ?? false) ??
+            completionGap(
+              input.intent,
+              summary,
+              trace,
+              input.requireBrowserEvidence ?? false,
+              input.userIntent,
+            ) ??
             (!hostProof && !observedText
               ? '没有成功读取的页面内容；导航回执、标签列表或加载失败的页面都不能作为结果。请先 read_page/get_page_text 读取目标页面。'
               : null) ??

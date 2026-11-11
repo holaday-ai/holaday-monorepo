@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
-import { asksToFillForm } from './browser-completion.js';
+import { asksToFillForm, completionGap } from './browser-completion.js';
 import { HIDDEN_VALUE_NOTE, withHiddenValueNote } from './unified-browser-loop.js';
 import { humanTypedFieldNames } from './unified-supercar-runner.js';
 
@@ -17,6 +17,15 @@ describe('FIX-61B P1-6: a hidden user input is not empty', () => {
     ).toBe(false);
     expect(asksToFillForm("open the form but don't fill it in")).toBe(false);
     expect(asksToFillForm('无需填写，只看表单有哪些字段')).toBe(false);
+  });
+
+  it('self-test: the form rule reads only the user words, not host guidance that says 填写', () => {
+    const user = '读一下当前页面表单里 Customer name 输入框现在填的是什么，只读不改';
+    const withGuidance = `${user}\n\n【结果要求】\n按页面上的表单字段填写结果`;
+    const answer = 'Customer name 输入框当前有内容，但这是你自己填写的内容，我看不到。';
+    const trace = [{ tool: 'snapshot', ok: true, url: 'https://httpbin.org/forms/post' }];
+    expect(completionGap(withGuidance, answer, trace, true, user)).toBeNull();
+    expect(asksToFillForm('已成功打开页面，未进行任何填写或提交操作')).toBe(false);
   });
 
   it('a real request to fill still needs a fill receipt', () => {
