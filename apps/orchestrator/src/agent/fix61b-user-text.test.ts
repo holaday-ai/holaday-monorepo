@@ -70,6 +70,19 @@ describe('FIX-61B P0-1: snapshot syntax never reaches the user', () => {
     expect(refName(snapshot, 'e10')).toBe('加入购物车');
   });
 
+  it('复审 #1: Markdown lists that look like roles are ordinary text', () => {
+    for (const text of [
+      '推荐资源：\n- Document [PDF](https://a.com/x.pdf)\n- Video [YouTube](https://y.com)',
+      '- Link [GitHub](https://github.com/x)',
+      '- Status [Open]',
+    ]) {
+      expect(hasSnapshotSyntax(text)).toBe(false);
+      expect(sanitizeFinalText(text)).toContain(text.split('\n').at(-1)!.slice(2, 10));
+    }
+    expect(cleanElementName('Search')).toBe('Search');
+    expect(cleanElementName('Menu')).toBe('Menu');
+  });
+
   it('real names, URLs and ordinary prose are left alone', () => {
     expect(cleanElementName('Search products')).toBe('Search products');
     expect(cleanElementName('搜索框')).toBe('搜索框');
@@ -101,6 +114,21 @@ describe('FIX-61B P0-2: a model reasoning never reaches the user', () => {
     expect(out.startsWith('中国最高的山是**珠穆朗玛峰**')).toBe(true);
     expect(out).not.toContain('用户问的是');
     expect(hasReasoningTag(out)).toBe(false);
+  });
+
+  it('复审 #1: code answers that mention the tags keep every line', () => {
+    const js =
+      "用下面的代码去掉推理标签：\n```js\nconst out = text.split('</think>').pop();\n```\n这样即可。";
+    const py =
+      "Example:\n```python\ns = s.replace('<think>', '').replace('</think>', '')\n```\nDone.";
+    const inline = '用 `</think>` 作分隔符即可。';
+    expect(stripReasoning(js)).toBe(js);
+    expect(stripReasoning(py)).toBe(py);
+    expect(stripReasoning(inline)).toBe(inline);
+  });
+
+  it('复审 #1: a reasoning cut off before it closed leaves nothing', () => {
+    expect(stripReasoning('<think>用户想要…（被截断）')).toBe('');
   });
 
   it('a whole <think>…</think> block goes; text without tags is unchanged', () => {

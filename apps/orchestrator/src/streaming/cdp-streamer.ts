@@ -676,8 +676,14 @@ export class CdpStreamer {
    */
   async followCurrentPage(): Promise<void> {
     if (!this.streaming) return;
+    // 复审 #1: a restart already under way may have bound the old page — follow once more after it.
+    if (this.restartInFlight) {
+      this.followPending = true;
+      return;
+    }
     await this.restartAfterStall();
   }
+  private followPending = false;
 
   private async restartAfterStall(): Promise<void> {
     if (this.restartInFlight) return;
@@ -691,6 +697,10 @@ export class CdpStreamer {
       // Reset the frame counter so we don't loop into another
       // restart 1s later if the new arm is still warming up.
       this.lastFrameAt = Date.now();
+      if (this.followPending) {
+        this.followPending = false;
+        void this.followCurrentPage();
+      }
     }
   }
 

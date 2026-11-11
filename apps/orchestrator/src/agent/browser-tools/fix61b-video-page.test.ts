@@ -41,5 +41,8 @@ describe('FIX-61B P1-8: a video-page task completes only from a video page', () 
     ).toBe(false);
     expect(asksForVideoPage('B站热门榜前 10 个视频')).toBe(false);
     expect(asksForVideoPage(CORE_03)).toBe(true);
+    // 复审 #1: other sites' video pages are not judged by address here.
+    expect(asksForVideoPage('打开 https://v.qq.com/x/cover/abc.html 这个视频页读标题')).toBe(false);
+    expect(asksForVideoPage('打开这个视频页 https://vimeo.com/123')).toBe(false);
   });
 });

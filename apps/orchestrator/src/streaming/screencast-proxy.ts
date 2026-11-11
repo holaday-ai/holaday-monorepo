@@ -412,6 +412,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
                   );
                 throw new BrowserViewportSkippedError();
               }
+              // 复审 #1 建议: the lease holder's other input meets the same new page — follow it too
+              // (a screen that did not re-send its size would otherwise stay on the old tab).
+              if (viewportWillApply())
+                void streamer
+                  ?.followCurrentPage()
+                  .catch((err: unknown) =>
+                    userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
+                  );
               throw new Error('browser_tab_changed');
             }
             if (message.type === 'viewport') {

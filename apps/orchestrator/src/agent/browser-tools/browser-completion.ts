@@ -360,6 +360,8 @@ const VIDEO_PAGE_URL_RE =
 export function asksForVideoPage(intent: string): boolean {
   return (
     /(?:视频页|视频页面|video page)/i.test(intent) &&
+    // 复审 #1: only where a video page is told by its address (other sites are not judged here).
+    /youtube|youtu\.be|油管|bilibili|哔哩|b站|抖音|douyin/i.test(intent) &&
     !/搜索|搜一下|前\s*\d|search|列表|榜单|list\b|top\s*\d/i.test(intent)
   );
 }
