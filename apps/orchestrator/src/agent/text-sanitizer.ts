@@ -14,7 +14,7 @@
  */
 
 import { stripToolCallMarkup } from '@holaday/shared-types';
-import { stripInternalRefs } from './internal-refs.js';
+import { stripInternalRefs, stripReasoning, stripSnapshotSyntax } from './internal-refs.js';
 
 /**
  * Massive base64 blobs (e.g. inline screenshots the model occasionally
@@ -515,7 +515,8 @@ export function sanitizeFinalText(input: string | null | undefined): string {
   for (const re of CLAUDE_SIGNATURE_PATTERNS) text = text.replace(re, '');
   for (const re of CLAUDE_FOOTER_LINE_RE) text = text.replace(re, '');
   // 11. FIX-38: the browser's element refs and tab / frame ids are not the user's business.
-  text = stripInternalRefs(text);
+  //     FIX-61B P0-1/P0-2: nor snapshot syntax, nor the model's reasoning.
+  text = stripInternalRefs(stripSnapshotSyntax(stripReasoning(text)));
   // FIX-40: HTML entities copied from a page read as the characters they stand for.
   text = decodeHtmlEntities(text);
   text = plainInternalWords(text);

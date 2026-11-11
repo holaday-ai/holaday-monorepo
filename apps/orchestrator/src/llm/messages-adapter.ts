@@ -1,3 +1,5 @@
+import { stripReasoning } from '../agent/internal-refs.js';
+import { logger } from '../config/logger.js';
 import {
   type InvalidResponseForensics,
   type InvalidResponseKind,
@@ -487,11 +489,17 @@ function normalizeAnthropicCompatibleResponse(
   if (!Array.isArray(rawResponse.content)) throw new InvalidShapeError('no_content_array');
 
   const content: NeutralOutputContentBlock[] = [];
+  let inlineReasoningStripped = 0;
   for (const rawBlock of rawResponse.content) {
     if (!isRecord(rawBlock)) continue;
     if (rawBlock.type === 'text') {
       if (typeof rawBlock.text !== 'string') throw new InvalidShapeError('bad_text_block');
-      content.push({ type: 'text', text: rawBlock.text });
+      // FIX-61B P0-2: reasoning belongs in a thinking block (dropped above). Seen once in production
+      // (qwen3.7-plus, generate): it came inline in the text, closed by 「</think>」, and reached the
+      // user. It is cut here, for every channel; not reproduced in 10 direct calls.
+      const text = stripReasoning(rawBlock.text);
+      if (text !== rawBlock.text) inlineReasoningStripped += 1;
+      if (text.trim() || !rawBlock.text.trim()) content.push({ type: 'text', text });
       continue;
     }
     if (rawBlock.type === 'tool_use') {
@@ -511,6 +519,12 @@ function normalizeAnthropicCompatibleResponse(
     }
   }
   if (content.length === 0) throw new InvalidShapeError('empty_content');
+  if (inlineReasoningStripped > 0)
+    // Counted, never the text (it may quote the user).
+    logger.warn(
+      { model: metadata.model, blocks: inlineReasoningStripped },
+      'llm: inline reasoning stripped',
+    );
 
   const inputTokens = readTokenCount(rawResponse.usage, 'input_tokens');
   const outputTokens = readTokenCount(rawResponse.usage, 'output_tokens');

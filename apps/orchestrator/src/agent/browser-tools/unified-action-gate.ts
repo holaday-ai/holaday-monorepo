@@ -5,6 +5,7 @@ import {
   readLoginContext,
 } from '@holaday/shared-types';
 import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
+import { stripInternalRefs, stripSnapshotSyntax } from '../internal-refs.js';
 import { buildAuthParkQuestion } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
@@ -19,6 +20,8 @@ export type RuntimeActionDescriptor = Parameters<BeforeAction>[0];
 
 const DESCRIBE_TIMEOUT_MS = 2_000;
 const MAX_FRAME_DEPTH = 5;
+/** FIX-61B P0-1: every question parked for the user — no snapshot syntax, no element handle. */
+const userFacing = (text: string): string => stripInternalRefs(stripSnapshotSyntax(text));
 const CONFIRM_DEFAULT_QUESTION = '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
 const NOT_CONFIRMED_REASON = '用户未确认不可逆操作，本次任务已停止，页面进度已保留。';
 const TAKEOVER_RESUME_MESSAGE =
@@ -917,7 +920,7 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
     question: string,
     descriptor: RuntimeActionDescriptor,
   ): Promise<'confirmed' | ActionGateDecision> => {
-    const reply = await options.park(question, 'browser_action');
+    const reply = await options.park(userFacing(question), 'browser_action');
     if (reply === null) return parkEnded(question);
     if (options.aborted()) return cancelled;
     if (isAffirmativeActionConfirmation(reply)) {
@@ -941,7 +944,7 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
     if (!verdict.allowed && verdict.requiresTakeover) {
       const kind = verdict.awaitingKind ?? 'login';
       const question = buildAuthParkQuestion(kind, where);
-      const reply = await options.park(question, kind);
+      const reply = await options.park(userFacing(question), kind);
       if (reply === null) return parkEnded(question);
       return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
     }
@@ -971,7 +974,7 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
     const description = await options.describe(action, phase);
     if (phase === 'before' && description.verification) {
       const question = buildAuthParkQuestion('captcha', description.verification);
-      const reply = await options.park(question, 'captcha');
+      const reply = await options.park(userFacing(question), 'captcha');
       if (reply === null) return parkEnded(question);
       return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
     }

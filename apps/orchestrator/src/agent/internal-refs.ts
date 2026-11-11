@@ -121,3 +121,68 @@ export function stripInternalRefs(text: string, seen: ReadonlySet<string> = new 
 export function hasInternalRef(text: string, seen?: ReadonlySet<string>): boolean {
   return stripInternalRefs(text, seen) !== text;
 }
+
+/**
+ * FIX-61B P0-1 (Deploy-61 new-bestbuy 「我在Best Buy在「- generic [ref=e6]:」里输入了内容」): accessibility
+ * snapshot syntax — a line 「- generic [ref=e6]:」, a bare role word 「generic」 — is never shown to the
+ * user, and is never a control's name.
+ */
+const SNAPSHOT_ROLE =
+  'generic|button|link|textbox|searchbox|combobox|checkbox|radio|option|listbox|list|listitem|img|image|heading|paragraph|region|group|navigation|main|banner|contentinfo|complementary|form|search|dialog|alertdialog|menu|menubar|menuitem|tab|tablist|tabpanel|table|row|cell|gridcell|columnheader|rowheader|article|section|figure|separator|iframe|document|text|status|alert|tooltip|switch|slider|spinbutton|progressbar|term|definition|code|strong|emphasis|blockquote|caption|time|mark|superscript|subscript|insertion|deletion|log|marquee|timer|toolbar|tree|treeitem|grid|application|note|math|meter|LabelText|StaticText|none|presentation';
+/** 「- generic [ref=e6]:」「- button "OK" [ref=e7] [cursor=pointer]:」 — a snapshot line, anywhere. */
+const SNAPSHOT_LINE_RE = new RegExp(
+  String.raw`(?:^|\s)-\s+(?:${SNAPSHOT_ROLE})\b(?:\s+"[^"\n]{0,120}")?(?:\s*\[[a-z]+(?:=[^\]\n]*)?\])+\s*:?`,
+  'giu',
+);
+const REF_MARK_RE =
+  /\s*\[(?:ref|cursor|active|level|checked|selected|expanded|disabled|pressed)(?:=[^\]\n]*)?\]/giu;
+const BARE_ROLE_RE = new RegExp(String.raw`^(?:${SNAPSHOT_ROLE})$`, 'iu');
+
+/** Whether user-facing text still carries snapshot syntax (`[ref=…]`, 「- generic …:」). */
+export function hasSnapshotSyntax(text: string): boolean {
+  if (!text) return false;
+  SNAPSHOT_LINE_RE.lastIndex = 0;
+  return /\[ref=[^\]\n]*\]/i.test(text) || SNAPSHOT_LINE_RE.test(text);
+}
+
+/** User-facing text with snapshot lines and `[ref=…]` marks taken out (other text as written). */
+export function stripSnapshotSyntax(text: string): string {
+  if (!hasSnapshotSyntax(text)) return text;
+  return text
+    .replace(SNAPSHOT_LINE_RE, ' ')
+    .replace(REF_MARK_RE, '')
+    .replace(/「\s*」/g, '')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+/**
+ * A control's name for the user, or null when what we have is snapshot syntax, a bare role word
+ * (「generic」「button」) or an element handle — the caller then says 「这个按钮」「输入框」.
+ */
+export function cleanElementName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const name = stripInternalRefs(stripSnapshotSyntax(raw))
+    .replace(/^[\s:：\-–—]+|[\s:：\-–—]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!name || BARE_ROLE_RE.test(name) || /^e\d{1,6}$/i.test(name)) return null;
+  return name;
+}
+
+/**
+ * FIX-61B P0-2 (Deploy-61 as-shan: the answer opened with the model's reasoning and a 「</think>」):
+ * a model's reasoning never reaches the user. A `<think>…</think>` block goes whole; a lone closing
+ * `</think>` takes everything before it with it. Other text is left as written.
+ */
+export function stripReasoning(text: string): string {
+  if (!text || !/<\/?think>/i.test(text)) return text;
+  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const close = out.search(/<\/think>/i);
+  if (close >= 0) out = out.slice(close + '</think>'.length);
+  return out.replace(/<\/?think>/gi, '').replace(/^\s+/, '');
+}
+
+/** Whether user-facing text still carries reasoning tags. */
+export function hasReasoningTag(text: string): boolean {
+  return /<\/?think>/i.test(text ?? '');
+}

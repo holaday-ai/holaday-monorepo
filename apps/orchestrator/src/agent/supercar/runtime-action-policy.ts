@@ -1,3 +1,4 @@
+import { cleanElementName } from '../internal-refs.js';
 export interface RuntimeAction {
   kind: 'click' | 'navigate' | 'type';
   label?: string | null;
@@ -125,9 +126,11 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
 
   if (!matchedSignal && !neutralTransactionSubmit) return { allowed: true };
 
+  // FIX-61B P0-1: the question is shown to the user — snapshot syntax is no name.
   const label =
-    [action.label, action.ariaLabel, action.title].find((value) => value?.trim())?.trim() ??
-    '当前操作';
+    [action.label, action.ariaLabel, action.title]
+      .map((value) => cleanElementName(value))
+      .find((value) => value) ?? '当前操作';
   return {
     allowed: false,
     requiresConfirmation: true,

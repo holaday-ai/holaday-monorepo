@@ -10,6 +10,7 @@ import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifi
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { cleanElementName } from '../internal-refs.js';
 import type {
   RunSupercarOptions,
   SupercarAwaitingKind,
@@ -131,12 +132,14 @@ function describe(action: UnifiedBrowserAction, label: string | null): string {
   switch (action.tool) {
     case 'navigate':
       return `打开 ${action.url}`;
+    // FIX-61B P0-1: the step line is shown in 「查看过程」 — a nameless control is 「页面上的…」,
+    // never its handle (「点击 e12」) or role word (「点击 generic」).
     case 'click':
-      return `点击 ${label ?? action.ref}`;
+      return `点击 ${cleanElementName(label) ?? '页面上的一个元素'}`;
     case 'type':
-      return `在 ${label ?? action.ref} 输入`;
+      return `在 ${cleanElementName(label) ?? '页面上的输入框'} 输入`;
     case 'select':
-      return `在 ${label ?? action.ref} 选择「${action.value}」`;
+      return `在 ${cleanElementName(label) ?? '页面上的选择框'} 选择「${action.value}」`;
     default:
       return action.tool;
   }
