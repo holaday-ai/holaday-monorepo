@@ -371,6 +371,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let lastSnapshot = '';
   /** FIX-58 复审 #2 第 4 项: the last action on the page, for the pause wording. */
   let lastActed: PausedAction | null = null;
+  /** FIX-61B 复审 #2: the last step that may act, judged by the read-only pass. */
+  let lastStep: PausedAction | null = null;
   /** DEPLOY-58 第 0 步 2: what the last action set off, to tell a real submit. */
   let lastTriggers: ReadonlyArray<{ branch: string; url: string }> = [];
   /** FIX-61B P1-4: whether this pause passes for a read-only task; logged when it does. */
@@ -384,7 +386,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     const pass = readOnlyEffectMayPass({
       readOnly: isReadOnlyIntent(opts.intent),
       reason: interruption.reason,
-      action: lastActed,
+      action: lastStep,
       triggers: judged,
     });
     if (!pass) return false;
@@ -392,8 +394,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     logger.info(
       {
         taskId: opts.taskId,
-        tool: lastActed?.tool,
-        role: lastActed?.role ?? null,
+        tool: lastStep?.tool,
+        role: lastStep?.role ?? null,
         triggers: triggers.map((t) => t.branch),
       },
       'supercar: read-only background request passed',
@@ -839,8 +841,21 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const id = `action-${++replayActionId}`;
         const targetPage = tools.page;
         await replay?.capture(targetPage, id, 'before');
-        // FIX-61B 复审 #1: every step that may act is the one judged (click_at, upload… never pass).
+        // FIX-61B 复审 #2: the read-only pass judges the last step that may act (click_at, wait_for,
+        // upload… never pass); lastActed keeps naming the last control acted on, for the pause copy
+        // (「可能已经生成订单」 after 「立即预约」 then wait_for).
         if (!READ_TOOLS.has(action.tool))
+          lastStep = {
+            tool: action.tool,
+            label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
+            submit: action.tool === 'type' && action.submit === true,
+            role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
+          };
+        if (
+          ['click', 'type', 'select', 'navigate', 'click_at', 'download', 'upload'].includes(
+            action.tool,
+          )
+        )
           lastActed = {
             tool: action.tool,
             label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,

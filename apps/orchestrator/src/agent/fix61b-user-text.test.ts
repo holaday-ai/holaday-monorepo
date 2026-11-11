@@ -83,6 +83,24 @@ describe('FIX-61B P0-1: snapshot syntax never reaches the user', () => {
     expect(cleanElementName('Menu')).toBe('Menu');
   });
 
+  it('复审 #2: a ref inside a frame (「[ref=f1e6]」) is snapshot syntax too', () => {
+    expect(hasSnapshotSyntax('- button "OK" [ref=f2e13]')).toBe(true);
+    expect(cleanElementName('- generic [ref=f1e6]:')).toBeNull();
+    const copy = effectPauseQuestion({
+      english: false,
+      site: 'Best Buy',
+      action: { tool: 'type', label: '- generic [ref=f1e6]:' },
+      readOnly: true,
+      background: false,
+    });
+    expect(hasSnapshotSyntax(copy)).toBe(false);
+    expect(copy).toContain('在一个输入框里输入了内容');
+    const out = sanitizeFinalText('结果：- generic [ref=f1e6]: 价格 ¥199');
+    expect(hasSnapshotSyntax(out)).toBe(false);
+    expect(out).toContain('¥199');
+    expect(out).not.toContain('generic');
+  });
+
   it('real names, URLs and ordinary prose are left alone', () => {
     expect(cleanElementName('Search products')).toBe('Search products');
     expect(cleanElementName('搜索框')).toBe('搜索框');
@@ -125,6 +143,18 @@ describe('FIX-61B P0-2: a model reasoning never reaches the user', () => {
     expect(stripReasoning(js)).toBe(js);
     expect(stripReasoning(py)).toBe(py);
     expect(stripReasoning(inline)).toBe(inline);
+  });
+
+  it('复审 #2: reasoning that mentions code still goes with its </think>', () => {
+    const leaked = '用户问 `ls` 命令，我应该简单回答。</think>`ls` 用于列出目录内容。';
+    expect(stripReasoning(leaked)).toBe('`ls` 用于列出目录内容。');
+    expect(sanitizeFinalText(leaked)).not.toContain('用户问');
+    expect(hasReasoningTag(sanitizeFinalText(leaked))).toBe(false);
+  });
+
+  it('复审 #2: prose that names both tags is left as written', () => {
+    const prose = 'DeepSeek 会用 <think> 和 </think> 把推理包起来。';
+    expect(stripReasoning(prose)).toBe(prose);
   });
 
   it('复审 #1: a reasoning cut off before it closed leaves nothing', () => {

@@ -699,7 +699,11 @@ export class CdpStreamer {
       this.lastFrameAt = Date.now();
       if (this.followPending) {
         this.followPending = false;
-        void this.followCurrentPage();
+        // 复审 #2: only when the restart bound another page than the agent's (no needless restart).
+        void this.opts
+          .getPage()
+          .then((page) => (this.matchesPage(page) ? undefined : this.followCurrentPage()))
+          .catch(() => {});
       }
     }
   }

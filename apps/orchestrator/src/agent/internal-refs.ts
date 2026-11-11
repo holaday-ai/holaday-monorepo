@@ -135,10 +135,10 @@ const SNAPSHOT_ROLE =
  * or after a space / quote, the space before it kept.
  */
 const SNAPSHOT_LINE_RE = new RegExp(
-  String.raw`(?<=^|[\s「"'(（])-\s+(?:${SNAPSHOT_ROLE})\b(?:\s+"[^"\n]{0,120}")?(?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*?\s*\[ref=e?\d{1,6}\](?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*\s*:?`,
+  String.raw`(?<=^|[^\p{L}\p{N}_])-\s+(?:${SNAPSHOT_ROLE})\b(?:\s+"[^"\n]{0,120}")?(?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*?\s*\[ref=(?:f\d+)?e\d{1,6}\](?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*\s*:?`,
   'giu',
 );
-const REF_MARK_RE = /\s*\[ref=e?\d{1,6}\]/giu;
+const REF_MARK_RE = /\s*\[ref=(?:f\d+)?e\d{1,6}\]/giu;
 /** Role words a snapshot gives a nameless control (复审 #1: 「Search」「Menu」 are real names). */
 const BARE_ROLE_RE =
   /^(?:generic|none|presentation|group|region|img|image|listitem|paragraph|separator|iframe|document|button|link|textbox|searchbox|combobox|heading|LabelText|StaticText)$/iu;
@@ -146,7 +146,7 @@ const BARE_ROLE_RE =
 /** Whether user-facing text still carries snapshot syntax (`[ref=…]`, 「- generic …:」). */
 export function hasSnapshotSyntax(text: string): boolean {
   if (!text) return false;
-  return /\[ref=e?\d{1,6}\]/i.test(text);
+  return /\[ref=(?:f\d+)?e\d{1,6}\]/i.test(text);
 }
 
 /** User-facing text with snapshot lines and `[ref=…]` marks taken out (other text as written). */
@@ -186,14 +186,18 @@ export function stripReasoning(text: string): string {
     code.push(block);
     return `\uE000${code.length - 1}\uE000`;
   });
-  out = out.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  const close = out.search(/<\/think>/i);
-  // A lone closing tag ends a reasoning that opened before the text: cut only when no code
-  // stands before it (the reasoning comes first, never inside an answer's code).
-  if (close >= 0 && !out.slice(0, close).includes('\uE000'))
-    out = out.slice(close + '</think>'.length);
-  // A reasoning cut off before it closed: nothing of it is an answer.
-  if (/^\s*<think>/i.test(out) && !/<\/think>/i.test(out)) out = '';
+  if (/^\s*<think>/i.test(out)) {
+    // Reasoning opens the text: it ends at its first </think>; never closed, nothing is an answer.
+    const close = out.search(/<\/think>/i);
+    out = close >= 0 ? out.slice(close + '</think>'.length) : '';
+  } else {
+    // 复审 #2: a lone </think> (its <think> before the text) ends the reasoning wherever it is —
+    // code before it is the reasoning's own. Prose that names both tags (no leading <think>, an
+    // opening one before the closing one) is left as written.
+    const close = out.search(/<\/think>/i);
+    if (close >= 0 && !/<think>/i.test(out.slice(0, close)))
+      out = out.slice(close + '</think>'.length);
+  }
   return out
     .replace(/\uE000(\d+)\uE000/g, (_, i: string) => code[Number(i)] ?? '')
     .replace(/^\s+/, '');
