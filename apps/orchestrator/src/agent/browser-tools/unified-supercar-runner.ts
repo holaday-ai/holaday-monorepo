@@ -6,11 +6,14 @@ import {
   saveBrowserProfile,
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { markAnswerContract } from '../answer-contract/handled.js';
+import { isPriceTask } from '../answer-contract/price-task.js';
 import { cleanElementName } from '../internal-refs.js';
 import type {
   RunSupercarOptions,
@@ -669,6 +672,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         await opts.onCaptchaEvidence?.({ jpeg, url, at: new Date(), rule });
       });
     };
+    const loopIntent = [
+      opts.intent,
+      guidance ? `【结果要求】\n${guidance}` : '',
+      siteHint ? `【站点提示】\n${siteHint}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     const outcome = await runUnifiedBrowserLoop({
       wrapUp,
       ...(control
@@ -813,14 +823,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return interruption;
       },
       userIntent: opts.intent,
-      intent: [
-        opts.intent,
-        guidance ? `【结果要求】\n${guidance}` : '',
-        siteHint ? `【站点提示】\n${siteHint}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+      intent: loopIntent,
       ...(opts.askedFieldJudge ? { fieldJudge: opts.askedFieldJudge } : {}),
+      // REBUILD-3: price tasks answer through the price contract while the flag is on.
+      ...(env.ANSWER_CONTRACT_PRICE && isPriceTask(opts.intent)
+        ? { answerContract: 'price' as const }
+        : {}),
       ...(contract && guidance
         ? {
             reviewFinish: (summary: string, pageText?: string) =>
@@ -979,12 +987,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             confidence: 'observed',
           }),
         );
+        // REBUILD-3: downstream checks the contract replaces skip this task's answer.
+        if (outcome.answerContract) markAnswerContract(opts.taskId, outcome.answerContract);
         return {
           status: 'completed',
           summary: withAlternateNotice(outcome.summary),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
           ...(outcome.partial ? { partial: outcome.partial } : {}),
+          ...(outcome.answerContract ? { answerContract: outcome.answerContract } : {}),
         };
       case 'awaiting_user':
         return {

@@ -36,6 +36,7 @@ import { and, eq, inArray } from 'drizzle-orm';
  * the spec language to the actual symbol names.
  */
 import type { Logger } from 'pino';
+import { answerContractOf, clearAnswerContract } from '../agent/answer-contract/handled.js';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { tasks as tasksTable } from '../db/schema/tasks.js';
@@ -776,6 +777,21 @@ function verificationWorkflow(contract: ExecutionContract, context?: TaskVerific
   return contract.expertWorkflowId ? getExpertWorkflowById(contract.expertWorkflowId) : null;
 }
 
+/**
+ * REBUILD-3: an answer the price contract checked (quotes in the text read, name / variant /
+ * price from one block) and rendered skips the ecommerce row check over its text — the
+ * contract replaces it (rules R456–R459, R462, R463). Every other criterion still runs.
+ */
+export function contractChecks(taskId: string, contract: ExecutionContract): ExecutionContract {
+  if (answerContractOf(taskId) !== 'price') return contract;
+  return {
+    ...contract,
+    successCriteria: contract.successCriteria.filter(
+      (criterion) => criterion.type !== 'ecommerce_rows',
+    ),
+  };
+}
+
 async function verifyResolvedExecution(
   inputs: VerifyInputs,
   { contract, ledger }: Pick<CoreExecutionState, 'contract' | 'ledger'>,
@@ -788,7 +804,7 @@ async function verifyResolvedExecution(
 
   // Layer 1 — deterministic.
   let det = verifyDeterministic({
-    contract,
+    contract: contractChecks(inputs.taskId, contract),
     ledger,
     verificationContext: inputs.verificationContext,
     answerText: inputs.answerText,
@@ -1239,5 +1255,6 @@ export async function persistExecution(inputs: PersistInputs): Promise<boolean> 
  */
 export function disposeExecution(taskId: string): void {
   contracts.delete(taskId);
+  clearAnswerContract(taskId);
   disposeLedger(taskId);
 }

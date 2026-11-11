@@ -8105,8 +8105,11 @@ export const tasksRouter = router({
                           });
                         }
                         // FIX-58 P1-2: search answers get the browser answer's 「原样」 cleanup.
+                        // REBUILD-3: a price-contract answer is rendered by code (no 原样 notes).
                         const answerSummary = appendSearchSourceReferences(
-                          withoutVerbatimNotes(outcome.summary),
+                          outcome.answerContract
+                            ? outcome.summary
+                            : withoutVerbatimNotes(outcome.summary),
                           terminalSearchSources,
                         );
                         browserOriginalAnswer = answerSummary;
