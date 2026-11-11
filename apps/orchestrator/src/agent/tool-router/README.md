@@ -18,14 +18,27 @@ lane keeps Firecrawl and its `matchLiveFact` hand-over. Nothing is deleted.
    - **Hard rule 2** — `explicit-site.ts`: 「打开/访问/进入/登录 X」, 「在 X 上/里 …」 or 「在 X站 搜…」,
      「去/到/上 <known site> 搜/看…」, English `open/visit/go to X`, `on <domain|known site>`,
      `on/at … website/site/store` → browser. X is a domain/URL, a brand from
-     `named-site-search.ts`, or a word ending in 网站/官网/站/商城/App. Negated clauses do not count.
+     `named-site-search.ts`, a general search engine (百度/必应/Bing/搜狗/360搜索/夸克/…), or a word
+     ending in 网站/官网/站/商城/App. Review #1 item 4: 「上百度搜一下」「去百度上查」「去 Bing 上查」
+     and 「去 <any short name> 上/里 查/搜/看…」 (「去什么值得买上查」) count too; 「去网上查」「上网查」
+     「到家里查」 do not. Negated clauses do not count.
+   - **Sites with an enabled interface** (review #1 item 3; today only 高德, `siteAliases` in the
+     registry): an info query naming the site — 「在高德地图上查…路线」「用高德查路线」「上高德查一下」
+     「打开高德地图查…」「check the route on Amap」 — goes to the model with only `[that tool, browser]`
+     offered. Only 「打开高德地图网页/网站/官网」, `amap.com`, `Amap website`, or an operation on the
+     page (登录/点击/收藏/截图/下载/上传/评论/发布/下单…) is hard rule 2 → browser. With the tool not
+     enabled, naming 高德 is an ordinary explicit site → browser.
    - Otherwise one model turn, gateway role `judge` (small model), forced tool `choose_route`
      with an enum of `answer_directly` + enabled interface ids + `browser`, and a search `query`.
+     A tool with `routerArguments` (高德: `amap: {action, origin, destination, mode, city, keywords}`)
+     adds its property to the schema; picking it without usable arguments → browser.
    - Model unavailable / failing / invalid choice → browser (never answered from memory).
    - A `pricesAreCandidates` tool never answers: decision is browser (`candidateToolId` kept).
 3. Decision → execution mode: `generate`, `browser`, or interface → `scrape` lane with
    `interfaceSearchLane` as its source instead of Firecrawl. Each row given to the answer step
-   ends with 「来源：<interface> · <Beijing time>」, and the delivered answer gets the same line.
+   ends with 「来源：<interface> · <Beijing time>」, and the delivered answer gets the same line. The
+   line follows the task's language (review #1 item 5, `replyLanguage(intent, region)`): English
+   tasks get 「Source: <titleEn> · 2026-11-11 10:30 (Beijing time)」.
 4. **Hard rule 1** — in the scrape lane, an interface route that fails for any reason (error,
    empty, wall, answer that does not hold) hands the task to the browser (`handOverToBrowser`);
    if that cannot start the task fails — it is never answered in generate. `matchLiveFact` is not
@@ -38,8 +51,10 @@ failure) instead of Firecrawl usage. A forced browser (scrape retry, local Chrom
 
 ## Registry and config
 
-`registry.ts` — one entry per interface. `TOOL_ROUTER_TOOLS` (default `bailian_web_search`) lists
-the enabled ids; unknown ids and entries without a call shape are ignored with a warning.
+`registry.ts` — one entry per interface. `TOOL_ROUTER_TOOLS` (default
+`bailian_web_search,amap_maps` since review #1) lists the enabled ids; unknown ids and entries
+without a call shape are ignored with a warning. An entry is a single `tools/call`
+(`mcpTool` + `buildArguments` + `readResults`) or a multi-step `run` over one MCP session.
 Interfaces are offered only to `cn` model-data-region users and only when `DASHSCOPE_CN_API_KEY`
 is set (the Bailian MCP services are on the China site).
 
@@ -47,11 +62,34 @@ is set (the Bailian MCP services are on the China site).
 |---|---|---|---|
 | `bailian_web_search` | search | `WebSearch` / `bailian_web_search(query,count)` | usable (default) |
 | `bailian_search_pro` | search | `EnhancedSearch` / `search_pro(query)` | usable, off by default |
-| `amap_maps` | map | `amap-maps` | BOSS must enable; tool names TBD |
+| `amap_maps` | map | `amap-maps` | usable (default); plan in `amap.ts` |
 | `kuaidi100` | express | `kuaidi100-mcp` | BOSS must enable (maybe own key) |
 | `zhidemai` | price, candidates | `zhidemai` | BOSS must enable |
 | `manmanbuy` | price, candidates | unknown | service code not found |
 | `web_parser` | page | `WebParser` | BOSS must enable |
+
+### 高德 (`amap.ts`)
+
+BOSS enabled `amap-maps` (platform trial key) after REBUILD-1 G had reported it 「未开通」. Probed
+2026-11-11: initialize 200, `tools/list` = 15 tools (`maps_geo`, `maps_direction_{driving,walking,
+bicycling,transit_integrated}`, `maps_text_search`, `maps_around_search`, `maps_search_detail`,
+`maps_weather`, …), all taking coordinates rather than free text. So the router model fills
+`amap.{action, origin, destination, mode, city, keywords}` and `runAmap` runs a fixed plan:
+
+| action | calls |
+|---|---|
+| `route` | `maps_geo` × 2 → `maps_direction_<mode>` (default `transit`; `city`/`cityd` from the geocode) |
+| `place` | `maps_text_search` |
+| `around` | `maps_geo` → `maps_around_search` (radius 1000 m) |
+| `weather` | `maps_weather` |
+
+A geocode coarser than a POI (区县 / 市 / 省 …: 「西湖断桥」 came back as 西湖区) is never used as a
+route end; the plan looks the name up as a POI (`maps_text_search` → `maps_search_detail`) and
+fails as `imprecise` when that gives no point. The trial key's `maps_text_search` already returned
+`USER_DAILY_QUERY_OVER_LIMIT` on the probe day; that is `quota`. **Every failure (quota,
+imprecise, invalid arguments, tool error, empty) hands the task to the browser** (hard rule 1).
+Rows: one route row (summary of up to 3 plans, link `uri.amap.com/navigation`), POI rows (link
+`amap.com/place/<id>`), or a weather row.
 
 Enabling one of the pending entries: enable it in the Bailian console, run `tools/list` once,
 fill `mcpTool` / `buildArguments` / `readResults`, then add its id to `TOOL_ROUTER_TOOLS`.
