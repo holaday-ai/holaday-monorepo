@@ -72,8 +72,10 @@ export function freshnessProblem(input: {
   answer: string;
   results: string;
   now?: Date;
+  /** Check even when the wording is not time-sensitive (a live-fact question: 「…多少钱」). */
+  force?: boolean;
 }): FreshnessProblem | null {
-  if (!isTimeSensitive(input.intent)) return null;
+  if (!input.force && !isTimeSensitive(input.intent)) return null;
   const now = input.now ?? new Date();
   const data = input.results.replace(RETRIEVAL_LINE_RE, '');
   const today = beijingDate(now);

@@ -306,6 +306,8 @@ export interface InterfaceSearchLane extends FirecrawlLane {
   lastText(): string;
   /** Why the last call failed; null when it succeeded or none ran. */
   lastFailure(): string | null;
+  /** The last successful call's rows (the wall fallback checks its prices against them). */
+  lastRows(): ReadonlyArray<{ url: string; title: string; snippet: string }>;
 }
 
 /**
@@ -324,9 +326,11 @@ export function interfaceSearchLane(opts: {
   let source: InterfaceSource | null = null;
   let failure: string | null = null;
   let text = '';
+  let rows: Array<{ url: string; title: string; snippet: string }> = [];
   return {
     lastSource: () => source,
     lastText: () => text,
+    lastRows: () => rows,
     lastFailure: () => failure,
     async scrape() {
       failure = 'page_not_supported';
@@ -351,13 +355,18 @@ export function interfaceSearchLane(opts: {
         (opts.language ?? 'zh') === 'en'
           ? `${formatSourceLine(result.source, 'en')} — retrieval time, not the data's time`
           : `${formatSourceLine(result.source, 'zh').replace('来源：', '检索于：')}（这是检索时间，不是数据本身的时间）`;
-      const rows = result.results.map((row) => ({
+      rows = result.results.map((row) => ({
+        url: row.url,
+        title: row.title,
+        snippet: row.snippet,
+      }));
+      const found = result.results.map((row) => ({
         url: row.url,
         title: row.title,
         markdown: `# ${row.title || row.host || row.url}\n\n${row.snippet}\n\n${line}`,
       }));
-      text = rows.map((row) => row.markdown).join('\n\n');
-      return { ok: true, credits: 0, results: rows };
+      text = found.map((row) => row.markdown).join('\n\n');
+      return { ok: true, credits: 0, results: found };
     },
   };
 }

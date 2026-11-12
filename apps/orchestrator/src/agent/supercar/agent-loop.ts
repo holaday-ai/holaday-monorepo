@@ -769,6 +769,11 @@ export interface RunSupercarOptions {
    */
   searchWallReplaceable?: (url: string) => boolean;
   /**
+   * REBUILD-2 协调方决定 (TOOL_ROUTER_V2): a read task the caller answers from public sources
+   * when the browser ends on a wall; its verification page is not handed to the user.
+   */
+  wallFallback?: boolean;
+  /**
    * FIX-57 #5 (unified runner): a read task stopped by a login wall first tries other
    * public routes before the handover. Default on; tests of the park itself turn it off.
    */

@@ -112,23 +112,40 @@ malformed | empty | timeout | network`).
 - The routing turn and the interface call add latency to `tasks.create` (router ≤ 8 s timeout;
   one real WebSearch call took 3.5 s end to end).
 
-## Public sources after a wall (协调方决定 2026-11-12, `wall-fallback.ts`)
+## Public sources after a wall (协调方决定 2026-11-12, 复审 #2 / 协调方判定 2026-11-13; `wall-fallback.ts`, `wall-checks.ts`)
 
 With the flag on, a **read-only** browser task that ended on a wall — paused at a login /
 verification page, failed with a block / login reason, or a partial answer whose data is masked or
 login-only (「¥7??9」「登录后可查看」) — gets one more try from public sources:
 
-1. `wallEnd(outcome, intent)` decides it is a wall. Not for writes (`isReadOnlyIntent`, plus an
-   English 「Open X and tell me …」 read rule), data only the signed-in user has (我的/订单/购物车/
-   账户/…), or payment pages. Nothing is solved, retried or disguised; the browser is not used again.
-2. The first enabled `search` interface for the user's region runs `fallbackQuery` (the name the
-   browser read, else the address, plus the request); the scrape lane answers from those rows
-   with `fallbackIntent`: the request without addresses (or the lane would try to fetch them), told
-   that the site was walled, to name the site behind every fact, never to pass another site's data
-   off as the walled site's, and to say what it did not find.
-3. Delivered as `completed` (a partial browser answer stays partial): first the wall line
-   (「京东要登录才能看，没能直接读到页面。以下是从公开来源查到的（不是京东页面上的数据）：」) or,
-   for a partial answer, what the browser did read followed by 「另外从公开来源补查…」; then the
-   answer and the interface source line. The result URLs are recorded as evidence for the
-   browser lane's verifier. If the search finds nothing usable the browser outcome is kept as it was.
-4. Logged as `WALL_PUBLIC_FALLBACK` (wall, tool, query, status).
+1. `wallFallbackAllowed(intent)` / `wallEnd(outcome, intent)` decide it may. Never for writes
+   (`isReadOnlyIntent`, plus an English 「Open X and tell me …」 read rule), payment pages, data only
+   the signed-in user has (我的/订单/购物车/物流/快递/白条/发票/会员/收藏/wishlist/内网/私有…), or a request
+   about the user's own things (「我在京东买的」「我京东的」「my …」「I bought」; 「告诉我/帮我」 only
+   address the assistant). A login wall on a site that is neither a known public site nor an address
+   the request gave (site 「原网站」) stays the user's. Nothing is solved, retried or disguised.
+2. Such a task's **verification page is not handed over** (`wallFallback` on the run options turns
+   `captchaHandoffWanted` off): the run ends at the wall at once instead of a 10-minute wait. If the
+   public sources then have nothing, it fails saying so and how to retry with the verification. A
+   login wall still pauses for the user as before when nothing is found. A cancelled task is never
+   routed.
+3. The first enabled `search` interface for the user's region runs `fallbackQuery`; the scrape lane
+   answers from those rows with `fallbackIntent` (no addresses; every figure written as
+   「我在 XX 查到的是 ¥X（日期、链接）」, 「日期不明」 without one; never 「京东价」 for another site's).
+4. `composeFallback` checks the answer in code before delivery:
+   - every price line's amounts must occur in this call's rows, else the line is removed (and the
+     count said); a line naming the walled site's price (「京东售价 ¥X」) whose row is another site is
+     rewritten as that site's finding unless it already names it; the walled site's own row is
+     labelled a search snippet; each price line gets its row's link and 「日期不明」 when undated;
+   - a time-sensitive or live-fact question runs `freshnessProblem` (forced): results without
+     today's date are delivered only behind 「…仅供参考，不是实时数据」; an answer stating a time the
+     results do not have is not delivered at all;
+   - the closing line is 「检索于：<interface> · <time>（检索时间，不是数据时间）」.
+5. Delivered as `completed` (a partial browser answer stays partial): the wall line
+   (「京东要登录才能看价格，没能直接读到页面；以下是我在公开来源查到的（不是京东页面上的数据）：」) or, for a
+   partial answer, what the browser did read followed by 「另外从公开来源补查…」; the checked answer;
+   the takeover line (「需要京东页面上的准确价格，可以登录后让我再读一次。」); the retrieval line. Result
+   URLs are recorded as evidence for the browser lane's verifier.
+6. The task's `result.metadata.wall_fallback` = `{ from, kind, site, tool, removedPrices,
+   rewrittenSites, freshness }`, so a bench counts 含墙成功 apart from a real success. Logged as
+   `WALL_PUBLIC_FALLBACK` (wall, tool, query, status, delivered, checks).

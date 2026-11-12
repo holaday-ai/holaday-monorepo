@@ -17,6 +17,9 @@ import {
   isReadOnlyIntent,
   rescueSiteName,
 } from '../browser-tools/unified-browser-loop.js';
+import { matchLiveFact } from '../live-fact.js';
+import { freshnessProblem, isTimeSensitive } from './freshness.js';
+import { type FallbackRow, checkFallbackPrices } from './wall-checks.js';
 
 export type WallKind = 'login' | 'blocked';
 
@@ -41,7 +44,24 @@ export interface BrowserEnd {
 
 /** Data only the signed-in user has: never fetched from elsewhere. */
 const PERSONAL_RE =
-  /我的|订单|购物车|账户|帐户|账号|帐号|余额|私信|站内信|收货地址|积分|优惠券|关注列表|浏览记录|my\s+(?:orders?|cart|account|messages?|profile)|order\s+history/iu;
+  /我的|订单|购物车|账户|帐户|账号|帐号|余额|私信|站内信|收货地址|积分|优惠券|关注列表|浏览记录|物流|快递|白条|发票|会员|收藏(?!数|量|人数)|心愿单|内网|内部系统|私有|my\s+(?:orders?|cart|account|messages?|profile)|order\s+history|wish\s*list|intranet|private/iu;
+/**
+ * 复审 #2-1: the request is about the user's own things (「我在京东买的」「我京东的物流」「check my
+ * amazon wishlist」「what I bought」). 「告诉我」「帮我」「给我」 only address the assistant.
+ */
+const FIRST_PERSON_RE =
+  /(?<!告诉|帮|给|让|替|为|教|跟|问)我(?:在|们的|自己|家|京东|淘宝|天猫|拼多多|亚马逊|买|下的?单|上周|上个?月|昨天|前天|最近|刚|之前|账|帐|收藏|关注|购|订|发的|收到|付)|\bmy\b|\bmine\b|\bI\s+(?:bought|ordered|purchased|paid|saved|follow(?:ed)?)\b|\bI've\s+(?:bought|ordered)\b/iu;
+
+/** 复审 #2-1: whether a request may ever be answered from public sources after a wall. */
+export function wallFallbackAllowed(intent: string): boolean {
+  const reading = intent.replace(/^\s*(?:open|visit|go\s+to)\s+\S+\s+(?:and\s+)?/iu, '');
+  return (
+    (isReadOnlyIntent(reading) || englishRead(reading)) &&
+    !PERSONAL_RE.test(intent) &&
+    !FIRST_PERSON_RE.test(intent) &&
+    !PAYMENT_RE.test(intent)
+  );
+}
 /** A payment / checkout page is not a wall to route around. */
 const PAYMENT_RE = /支付|付款|结算|收银|payment|checkout/iu;
 /** The ending says something stood in the way: login, verification, a block or masked data. */
@@ -105,8 +125,7 @@ function siteOf(intent: string, url: string | null): string {
  */
 export function wallEnd(outcome: BrowserEnd, intent: string): WallEnd | null {
   // 「Open <address> and tell me …」: opening the page the task names is part of reading it.
-  const reading = intent.replace(/^\s*(?:open|visit|go\s+to)\s+\S+\s+(?:and\s+)?/iu, '');
-  if (!(isReadOnlyIntent(reading) || englishRead(reading)) || PERSONAL_RE.test(intent)) return null;
+  if (!wallFallbackAllowed(intent)) return null;
   let said: string;
   let from: WallEnd['from'];
   if (outcome.status === 'awaiting_user') {
@@ -122,14 +141,13 @@ export function wallEnd(outcome: BrowserEnd, intent: string): WallEnd | null {
     from = 'partial';
   } else return null;
   if (!said || PAYMENT_RE.test(said) || !WALL_RE.test(said)) return null;
-  const kind = giveUpKind(said);
+  const kind = giveUpKind(said) === 'login' ? 'login' : 'blocked';
   const url = intent.match(URL_RE)?.[0] ?? null;
-  return {
-    kind: kind === 'login' ? 'login' : 'blocked',
-    site: siteOf(intent, url),
-    url,
-    from,
-  };
+  const site = siteOf(intent, url);
+  // 复审 #2-1: a login wall on a site that is neither a known public site nor an address the
+  // request gave (「公司内网 wiki」) is the user's to sign in to.
+  if (kind === 'login' && site === '原网站') return null;
+  return { kind, site, url, from };
 }
 
 /** The request without addresses or domains (the scrape lane would try to fetch them). */
@@ -162,29 +180,58 @@ export function fallbackQuery(intent: string, wall: WallEnd, browserSummary?: st
   return parts.join(' ').slice(0, 160).trim();
 }
 
+/** What the request asked for, for the wall line: 「价格」 for a price question, else the page. */
+function asked(intent: string, english: boolean): string {
+  const price = /价格|多少钱|售价|报价|卖多少|价位|\bprices?\b|\bcosts?\b|how\s+much/iu.test(
+    intent,
+  );
+  if (english) return price ? 'the price' : 'the page';
+  return price ? '价格' : '页面内容';
+}
+
 /** The request the scrape lane answers from the search rows. */
 export function fallbackIntent(intent: string, wall: WallEnd): string {
   const ask = withoutAddresses(intent, wall.site);
   if (isEnglishIntent(intent)) {
-    return `${ask}\n\n(${wall.site} ${wall.kind === 'login' ? 'requires sign-in' : 'blocked the visit with a verification check'}, so its page could not be read. Answer only from the search results below. Say which site each figure or fact comes from; data in the search results is not what ${wall.site}'s page shows unless the result is that page itself, and then say it is a search snippet. If the results do not have it, say so — do not guess.)`;
+    return `${ask}\n\n(${wall.site} ${wall.kind === 'login' ? 'requires sign-in' : 'blocked the visit with a verification check'}, so its page could not be read. Answer only from the search results below. Write each figure as 「I found X at <site> (<date>, <link>)」: the site and link of the search result it is in, and the date that result states — write 「date unknown」 when it states none. Data in the search results is not what ${wall.site}'s page shows unless the result is that page itself, and then say it is a search snippet. If the results do not have it, say so — do not guess.)`;
   }
-  return `${ask}\n\n（${wall.site}${wall.kind === 'login' ? '要登录才能看' : '要做验证、把访问拦下了'}，没能直接读到页面。只用下面的搜索结果回答题目要的内容，每个数字或信息都写明来自哪个网站（如「据什么值得买…」）。搜索结果里别的网站的数据不是${wall.site}页面上显示的，不要说成是${wall.site}上的；结果本身就是${wall.site}的页面时，写明是搜索结果里的摘要。搜索结果里没有的就如实说没查到，不要猜。）`;
+  return `${ask}\n\n（${wall.site}${wall.kind === 'login' ? '要登录才能看' : '要做验证、把访问拦下了'}，没能直接读到页面。只用下面的搜索结果回答题目要的内容。每个数字或信息按「我在 XX 查到的是 ¥X（日期、链接）」写：XX 是那条搜索结果所在的网站，链接是那条结果的链接，日期是那条结果里写的日期，没写日期就写「日期不明」。搜索结果里别的网站的数据不是${wall.site}页面上显示的，不要说成「${wall.site}价」「${wall.site}上显示」；结果本身就是${wall.site}的页面时，写明是搜索结果里的页面摘要。搜索结果里没有的就如实说没查到，不要猜。）`;
 }
 
 /** The plain line said first: what stood in the way, and that what follows is from elsewhere. */
-export function wallLine(wall: WallEnd, english: boolean): string {
+export function wallLine(wall: WallEnd, english: boolean, intent = ''): string {
+  const what = asked(intent, english);
   if (english)
     return wall.kind === 'login'
-      ? `${wall.site} requires sign-in, so its page could not be read. Here is what public sources show (not ${wall.site}'s page):`
-      : `${wall.site} blocked the visit with a verification check, so its page could not be read. Here is what public sources show (not ${wall.site}'s page):`;
+      ? `${wall.site} requires sign-in to see ${what}, so its page could not be read. Here is what I found in public sources (not ${wall.site}'s page):`
+      : `${wall.site} blocked the visit with a verification check, so its page could not be read. Here is what I found in public sources (not ${wall.site}'s page):`;
   return wall.kind === 'login'
-    ? `${wall.site}要登录才能看，没能直接读到页面。以下是从公开来源查到的（不是${wall.site}页面上的数据）：`
-    : `${wall.site}要做验证、把访问拦下了，没能直接读到页面。以下是从公开来源查到的（不是${wall.site}页面上的数据）：`;
+    ? `${wall.site}要登录才能看${what}，没能直接读到页面；以下是我在公开来源查到的（不是${wall.site}页面上的数据）：`
+    : `${wall.site}要做验证、把访问拦下了，没能直接读到页面；以下是我在公开来源查到的（不是${wall.site}页面上的数据）：`;
+}
+
+/** 复审 #2 建议: the user keeps the way back to the site itself. */
+export function takeoverLine(wall: WallEnd, english: boolean, intent = ''): string {
+  const what = asked(intent, english);
+  if (english)
+    return `If you need ${what} exactly as ${wall.site} shows it, ${wall.kind === 'login' ? 'sign in' : 'complete the verification'} and ask me to read it again.`;
+  return `需要${wall.site}页面上的准确${what}，可以${wall.kind === 'login' ? '登录' : '完成验证'}后让我再读一次。`;
+}
+
+/**
+ * 协调方判定: the closing line is the retrieval time, said as such (not the data's time).
+ * `line` is the interface's 「来源：<name> · <time>」 / 「Source: … · …」 line.
+ */
+export function retrievalLine(line: string, english: boolean): string {
+  return english
+    ? `${line.replace(/^Source:\s*/u, 'Retrieved via ')} (retrieval time, not the data's time)`
+    : `${line.replace(/^来源：\s*/u, '检索于：')}（检索时间，不是数据时间）`;
 }
 
 /**
  * The delivered answer. A partial browser answer keeps what it did read and adds the public
- * sources below it; a pause or failure is replaced by the wall line and the public answer.
+ * sources below it; a pause or failure is replaced by the wall line and the public answer. The
+ * takeover line ends it.
  */
 export function fallbackAnswer(opts: {
   wall: WallEnd;
@@ -200,6 +247,82 @@ export function fallbackAnswer(opts: {
             ? `Also checked public sources (not ${opts.wall.site}'s page):`
             : `另外从公开来源补查（不是${opts.wall.site}页面上的数据）：`
         }`
-      : wallLine(opts.wall, english);
-  return `${head}\n\n${opts.answer.trim()}`;
+      : wallLine(opts.wall, english, opts.intent);
+  return `${head}\n\n${opts.answer.trim()}\n\n${takeoverLine(opts.wall, english, opts.intent)}`;
+}
+
+export interface ComposedFallback {
+  /** False: nothing to deliver (an answer stating a time no result has); keep the browser end. */
+  deliver: boolean;
+  summary: string;
+  /** What the checks did, for the task record. */
+  checks: { removedPrices: number; rewrittenSites: number; freshness: string | null };
+}
+
+/**
+ * 复审 #2 必须修 2 + 3, 协调方判定: the public-source answer as delivered.
+ *  - Prices: each must occur in this call's rows; another site's price is not said to be the
+ *    walled site's; each price line has a date (or 「日期不明」) and a link.
+ *  - Time: a time-sensitive or live-fact question runs the freshness check. Results without
+ *    today's date are delivered only as 「仅供参考，不是实时数据」; an answer stating a time the
+ *    results do not have is not delivered.
+ *  - The closing line is the retrieval time, named as such.
+ */
+export function composeFallback(opts: {
+  wall: WallEnd;
+  intent: string;
+  answer: string;
+  browserSummary?: string;
+  rows: readonly FallbackRow[];
+  /** The rows' text as the answer step saw it. */
+  resultsText: string;
+  /** The interface's 「来源：… · …」 line, if it gave one. */
+  sourceLine: string | null;
+  now?: Date;
+}): ComposedFallback {
+  const english = isEnglishIntent(opts.intent);
+  const priced = checkFallbackPrices({
+    answer: opts.answer,
+    rows: opts.rows,
+    site: opts.wall.site,
+    english,
+  });
+  let body = priced.answer;
+  const timed = isTimeSensitive(opts.intent) || !!matchLiveFact(opts.intent);
+  const problem = timed
+    ? freshnessProblem({
+        intent: opts.intent,
+        answer: body,
+        results: opts.resultsText,
+        force: true,
+        ...(opts.now ? { now: opts.now } : {}),
+      })
+    : null;
+  const checks = {
+    removedPrices: priced.removed,
+    rewrittenSites: priced.rewritten,
+    freshness: problem?.kind ?? null,
+  };
+  if (problem?.kind === 'unsupported_time') return { deliver: false, summary: '', checks };
+  if (problem?.kind === 'stale') {
+    const latest = problem.latest;
+    const note = english
+      ? latest
+        ? `(The newest date in these public sources is ${latest}; for reference only, not live data.)`
+        : '(These public sources carry no date for today; for reference only, date unknown, not live data.)'
+      : latest
+        ? `（公开来源里最新的日期是 ${Number(latest.slice(5, 7))} 月 ${Number(latest.slice(8, 10))} 日，以下仅供参考，不是实时数据。）`
+        : '（公开来源没有当天的时间戳，以下仅供参考（日期不明），不是实时数据。）';
+    body = `${note}\n\n${body.trim()}`;
+  }
+  const composed = fallbackAnswer({
+    wall: opts.wall,
+    intent: opts.intent,
+    answer: body,
+    ...(opts.browserSummary ? { browserSummary: opts.browserSummary } : {}),
+  });
+  const summary = opts.sourceLine
+    ? `${composed.trimEnd()}\n\n${retrievalLine(opts.sourceLine, english)}`
+    : composed;
+  return { deliver: true, summary, checks };
 }

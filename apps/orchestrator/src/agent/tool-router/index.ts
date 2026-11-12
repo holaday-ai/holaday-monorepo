@@ -19,12 +19,18 @@ export {
   type BrowserEnd,
   type WallEnd,
   type WallKind,
+  type ComposedFallback,
+  composeFallback,
   fallbackAnswer,
   fallbackIntent,
   fallbackQuery,
+  retrievalLine,
+  takeoverLine,
   wallEnd,
+  wallFallbackAllowed,
   wallLine,
 } from './wall-fallback.js';
+export { type FallbackRow, checkFallbackPrices, rowSiteName } from './wall-checks.js';
 export {
   type CallableInterfaceTool,
   INTERFACE_TOOLS,

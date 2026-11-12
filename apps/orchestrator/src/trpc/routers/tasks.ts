@@ -144,10 +144,11 @@ import {
   stripStopReasonMarkers,
 } from '../../agent/text-sanitizer.js';
 import {
+  composeFallback,
   decideExecutionRoute,
-  fallbackAnswer,
   fallbackIntent,
   fallbackQuery,
+  formatSourceLine,
   freshnessHandover,
   freshnessProblem,
   interfaceSearchLane,
@@ -155,6 +156,7 @@ import {
   toolRouterSettings,
   toolsForRegion,
   wallEnd,
+  wallFallbackAllowed,
   withInterfaceSource,
 } from '../../agent/tool-router/index.js';
 import {
@@ -6313,6 +6315,18 @@ export const tasksRouter = router({
                 let captchaNeedsRelease = false;
                 let pauseCaptchaWatchdog = () => {};
                 let resumeCaptchaWatchdog = () => {};
+                // REBUILD-2 协调方决定: a read task whose wall the public sources can answer (the
+                // router on, a search interface for the user's region, a ready answer runtime).
+                const wallFallbackRun =
+                  taskToolRouter.enabled &&
+                  wallFallbackAllowed(input.intent) &&
+                  toolsForRegion(
+                    taskToolRouter.tools,
+                    userRow.modelDataRegion === 'cn' || userRow.modelDataRegion === 'intl'
+                      ? userRow.modelDataRegion
+                      : null,
+                  ).some((tool) => tool.kind === 'search') &&
+                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion).kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
@@ -6347,6 +6361,9 @@ export const tasksRouter = router({
                       }
                     : {}),
                   isTaskCancelled: () => repo.isTaskCancelled(taskId),
+                  // REBUILD-2 协调方决定: a read task's verification wall is answered from public
+                  // sources after the run, not handed over for a 10-minute wait (TOOL_ROUTER_V2).
+                  ...(wallFallbackRun ? { wallFallback: true } : {}),
                   // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
                   // loop (recorder + the external user id llm_calls.user_id needs).
                   recorder: llmCallRecorder,
@@ -7359,6 +7376,7 @@ export const tasksRouter = router({
                   )
                     .then(async (rawOutcome) => {
                       let outcome = rawOutcome;
+                      let wallFallbackMark: Record<string, unknown> | null = null;
                       // FIX-36 复审 #1 #3: the browser retry did not complete — deliver what the
                       // scrape did get, as 部分完成 naming what is missing.
                       if (
@@ -7389,7 +7407,11 @@ export const tasksRouter = router({
                       // public sources through the search interface, says the wall plainly and
                       // where each fact came from. Writes and personal data still go to the user;
                       // the browser is not used again. TOOL_ROUTER_V2 only.
-                      const wall = taskToolRouter.enabled ? wallEnd(outcome, input.intent) : null;
+                      // 复审 #2: nothing runs for a task the user cancelled.
+                      const wall =
+                        taskToolRouter.enabled && !(await repo.isTaskCancelled(taskId))
+                          ? wallEnd(outcome, input.intent)
+                          : null;
                       const wallSearchTool = wall
                         ? (toolsForRegion(
                             taskToolRouter.tools,
@@ -7439,6 +7461,19 @@ export const tasksRouter = router({
                             );
                             return null;
                           });
+                        const source = lane.lastSource();
+                        const composed =
+                          fallback?.status === 'completed' && fallback.summary.trim()
+                            ? composeFallback({
+                                wall,
+                                intent: input.intent,
+                                answer: fallback.summary,
+                                ...(browserSummary ? { browserSummary } : {}),
+                                rows: lane.lastRows(),
+                                resultsText: lane.lastText(),
+                                sourceLine: source ? formatSourceLine(source, language) : null,
+                              })
+                            : null;
                         ctx.logger.info(
                           {
                             taskId,
@@ -7447,11 +7482,13 @@ export const tasksRouter = router({
                             tool: wallSearchTool.id,
                             query,
                             status: fallback?.status ?? 'error',
+                            delivered: composed?.deliver ?? false,
+                            checks: composed?.checks ?? null,
                             laneFailure: lane.lastFailure(),
                           },
                           'tool-router: read task ended on a wall, tried public sources',
                         );
-                        if (fallback?.status === 'completed' && fallback.summary.trim()) {
+                        if (fallback && composed?.deliver) {
                           for (const url of fallback.sources) {
                             recordEvidence(taskId, {
                               fact: `web_search_url=${url}`,
@@ -7460,19 +7497,17 @@ export const tasksRouter = router({
                               confidence: 'observed',
                             });
                           }
-                          const summary = withInterfaceSource(
-                            fallbackAnswer({
-                              wall,
-                              intent: input.intent,
-                              answer: fallback.summary,
-                              ...(browserSummary ? { browserSummary } : {}),
-                            }),
-                            lane.lastSource(),
-                            language,
-                          );
+                          // 协调方判定: marked, so the bench counts 含墙成功 apart from 真成功.
+                          wallFallbackMark = {
+                            from: wall.from,
+                            kind: wall.kind,
+                            site: wall.site,
+                            tool: wallSearchTool.id,
+                            ...composed.checks,
+                          };
                           outcome = {
                             status: 'completed',
-                            summary,
+                            summary: composed.summary,
                             iterations: outcome.iterations,
                             toolsUsed: [...(outcome.toolsUsed ?? []), wallSearchTool.id],
                             ...(outcome.status === 'completed' && outcome.partial
@@ -7480,6 +7515,25 @@ export const tasksRouter = router({
                               : {}),
                           };
                         }
+                      }
+                      if (
+                        wallFallbackRun &&
+                        outcome.status === 'awaiting_user' &&
+                        wall?.from === 'awaiting' &&
+                        wall.kind === 'blocked'
+                      ) {
+                        // The verification was not handed over (the public sources were to
+                        // answer it); with nothing from them the task ends saying so.
+                        const english =
+                          replyLanguage(input.intent, userRow.modelDataRegion) === 'en';
+                        outcome = {
+                          status: 'failed',
+                          reason: english
+                            ? `${wall.site} blocked the visit with a verification check and public sources did not have the answer. Run the task again and complete the verification in the browser if you want me to read the page.`
+                            : `${wall.site}要做验证、把访问拦下了，公开来源也没查到题目要的内容。需要的话请重新发起任务，在浏览器里完成验证后让我再读。`,
+                          iterations: outcome.iterations,
+                          toolsUsed: outcome.toolsUsed ?? [],
+                        };
                       }
                       if (browserRoute.limitation && outcome.status === 'completed') {
                         outcome = {
@@ -7766,6 +7820,7 @@ export const tasksRouter = router({
                         ...(browserRoute.limitation
                           ? { browserLimitation: browserRoute.limitation }
                           : {}),
+                        ...(wallFallbackMark ? { wall_fallback: wallFallbackMark } : {}),
                         ...(identityDecision ? { identityDecision } : {}),
                         browserSessionPolicy: taskSessionPolicy,
                         ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
