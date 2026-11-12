@@ -89,28 +89,115 @@ const SECONDARY_ROLES = new Set(['deletion']);
  * line counts once; unit / list / was / savings / delivery amounts and struck-through prices are
  * left out. A currency mark on its own line belongs to the next line (「¥」「7999」).
  */
-export function blockPriceEntries(lines: ReadonlyArray<{ text: string; role?: string }>): string[] {
+export function blockPriceEntries(
+  lines: ReadonlyArray<{ text: string; role?: string; indent?: number }>,
+): string[] {
+  return pricedLines(lines).primary;
+}
+
+/**
+ * Bench a1 (b-p02, new-amazon-sg): a label on a line of its own — 「Was:」「List:」「Typical
+ * price」「原价」 — marks the amount on the next line as that kind of price, not the card's.
+ */
+const LABEL_ONLY_SECONDARY =
+  /^\s*(?:list(?:\s*price)?|was|typical(?:\s*price)?|rrp|m\.?r\.?p\.?|lowest(?:\s*price)?|原价|划线价|参考价|市场价|历史价|吊牌价|定价)\s*[:：]?\s*$/i;
+/** A whole-number price split from its cents across nodes: 「$9」 then 「99」 / 「.99」. */
+const WHOLE_PRICE_LINE = /^\s*((?:[A-Z]{1,3})?\$|RM|¥|￥|€|£)\s?(\d[\d,]*)\s*$/u;
+const CENTS_LINE = /^\s*\.?(\d{2})\s*$/;
+
+/** The block's primary prices (entries) and the amounts it shows only as secondary prices. */
+export function pricedLines(
+  lines: ReadonlyArray<{ text: string; role?: string; indent?: number }>,
+): {
+  primary: string[];
+  secondary: Set<number>;
+} {
   const entries = new Set<string>();
+  const secondary = new Set<number>();
+  const amountsOf = (text: string) =>
+    [...text.matchAll(AMOUNT_RE)].map((m) => Number((m[1] ?? m[2] ?? '').replace(/,/g, '')));
+  const bare = (text: string) =>
+    text
+      .normalize('NFKC')
+      .replace(/^\s*["']|["']\s*$/g, '')
+      .trim();
+  // A 「Was:」 label's scope: the lines after it at its depth or deeper (its subtree and the
+  // sibling group holding the struck amount), until a shallower line. No indent: the next line.
+  let labelIndent: number | null = null;
+  let labelNextOnly = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
-    if (line.role && SECONDARY_ROLES.has(line.role)) continue;
-    let text = line.text.normalize('NFKC');
-    if (/^\s*(?:(?:[A-Z]{1,3})?\$|RM|¥|€|£)\s*$/u.test(text) && lines[i + 1]) {
-      text = `${text}${lines[i + 1]!.text}`;
-      i += 1;
+    let text = bare(line.text);
+    if (labelIndent !== null && line.indent !== undefined && line.indent < labelIndent)
+      labelIndent = null;
+    if (LABEL_ONLY_SECONDARY.test(text)) {
+      if (line.indent !== undefined) labelIndent = line.indent;
+      else labelNextOnly = true;
+      continue;
     }
-    if (SECONDARY_PRICE_LINE.test(text)) continue;
-    const amounts = [...text.matchAll(AMOUNT_RE)].map((m) =>
-      Number((m[1] ?? m[2] ?? '').replace(/,/g, '')),
-    );
+    // A price split over nodes: 「S$」「10」「.」「92」, or 「$9」「99」.
+    const currencyOnly = /^\s*(?:(?:[A-Z]{1,3})?\$|RM|¥|￥|€|£)\s*$/u.test(text);
+    const whole = WHOLE_PRICE_LINE.exec(text);
+    if (currencyOnly || whole) {
+      let k = i + 1;
+      let joined = text;
+      while (k < lines.length && k <= i + 3 && /^[\d.,]+$/.test(bare(lines[k]!.text))) {
+        const piece = bare(lines[k]!.text);
+        const cents = /\d$/.test(joined) && !joined.includes('.') && /^\d{2}$/.test(piece);
+        joined += cents && (whole || k > i + 1) ? `.${piece}` : piece;
+        k += 1;
+      }
+      if (k > i + 1) {
+        text = joined;
+        i = k - 1;
+      }
+    }
+    const amounts = amountsOf(text);
     if (!amounts.length) continue;
+    const inLabel = labelIndent !== null || labelNextOnly;
+    labelNextOnly = false;
+    const isSecondary =
+      inLabel ||
+      (line.role !== undefined && SECONDARY_ROLES.has(line.role)) ||
+      (SECONDARY_PRICE_LINE.test(text) && !LEADING_PRICE_THEN_LABEL.test(text));
+    if (isSecondary) {
+      for (const amount of amounts) if (Number.isFinite(amount)) secondary.add(amount);
+      continue;
+    }
+    // 「S$10.92 Was: S$17.42」 on one line: the amount before the label is the price.
+    const lead = LEADING_PRICE_THEN_LABEL.exec(text);
+    if (lead) {
+      const [first, ...rest] = amountsOf(lead[1]!);
+      if (first !== undefined && Number.isFinite(first)) entries.add(String(first));
+      for (const amount of [...rest, ...amountsOf(text.slice(lead[1]!.length))])
+        if (Number.isFinite(amount)) secondary.add(amount);
+      continue;
+    }
     if (amounts.length >= 2 && RANGE_RE.test(text)) {
       entries.add(`range:${amounts.join('-')}`);
       continue;
     }
     for (const amount of amounts) if (Number.isFinite(amount)) entries.add(String(amount));
   }
-  return [...entries];
+  return { primary: [...entries], secondary };
+}
+
+/** 「S$10.92 Was: S$17.42」「$9.99 List: $14.99」「¥7999 原价 ¥8999」: a price, then a labelled one. */
+const LEADING_PRICE_THEN_LABEL =
+  /^(\s*(?:(?:[A-Z]{1,3})?\$|RM|¥|￥|€|£)\s?\d[\d,]*(?:\.\d+)?\s*)(?=(?:was|list(?:\s*price)?|typical(?:\s*price)?|rrp|原价|划线价|参考价|市场价)\b|(?:原价|划线价|参考价|市场价))/i;
+
+/**
+ * Product titles in a block: long link / heading names that are not card furniture. Two or more
+ * mean the block holds several cards (a list, the whole page), not one item.
+ */
+function productTitles(nodes: readonly BlockNode[]): number {
+  const titles = new Set<string>();
+  for (const node of nodes) {
+    if (node.role !== 'link' && node.role !== 'heading') continue;
+    if (node.text.length < 15 || NOT_A_VARIANT.test(node.text)) continue;
+    titles.add(flatText(node.text));
+  }
+  return titles.size;
 }
 
 const OPTION_ROLES = new Set([
@@ -161,29 +248,45 @@ function variantOptions(
 
 const SMALLEST_HINT = '用只包住这一款（这一个规格项或这一张商品卡片）的最小节点的 ref';
 
-/** Review #1: a block or quote is the item's own only when it shows one price and one option. */
+/**
+ * Review #1: a block or quote is the item's own only when it shows one price and one option.
+ * Bench a1 (coordinator): one product card is one block — its current price beside a was / list /
+ * 「from」 price is still one item. Two or more prices are refused only when the block holds
+ * several cards (two or more product titles), several variants, or is a text-mode quote.
+ */
 function sizeProblems(
   item: PriceItem,
   where: string,
-  lines: ReadonlyArray<{ text: string; role?: string }>,
+  lines: ReadonlyArray<{ text: string; role?: string; indent?: number }>,
   nodes: readonly BlockNode[] | null,
 ): string[] {
   const problems: string[] = [];
-  const prices = blockPriceEntries(lines);
-  if (prices.length >= 2)
+  const { primary: prices, secondary } = pricedLines(lines);
+  const options = nodes ? variantOptions(nodes, item.variant) : null;
+  const ambiguous = !nodes || productTitles(nodes) >= 2 || (options?.others.length ?? 0) > 0;
+  if (prices.length >= 2 && ambiguous)
     problems.push(
       `${where}太大：里面有 ${prices.length} 个不同价格（${prices
         .slice(0, 4)
         .map((p) => p.replace(/^range:/, ''))
         .join('、')}），分不清哪个价格属于这一款；${SMALLEST_HINT}`,
     );
-  const options = nodes ? variantOptions(nodes, item.variant) : null;
   // One price for several options is fine only when the page marks the claimed one selected.
   if (options?.others.length && !(options.claimed.selected && prices.length <= 1))
     problems.push(
       `${where}包住了多个规格（${[options.claimed.text, ...options.others]
         .slice(0, 4)
         .join('、')}），分不清价格属于哪一个；${SMALLEST_HINT}`,
+    );
+  // The card's price is its current one, never the was / list / struck price beside it.
+  const claimed = priceNumbers(item.price).map(Number);
+  if (
+    claimed.length &&
+    prices.length &&
+    claimed.every((n) => secondary.has(n) && !prices.includes(String(n)))
+  )
+    problems.push(
+      `价格「${item.price}」在${where.trim()}里是划线价 / 原价 / 参考价，不是这一款的现价；写卡片上的现价`,
     );
   return problems;
 }
@@ -196,7 +299,14 @@ function nameInTitle(name: string, page: ReadPage | undefined): boolean {
   return pageTitles(page).some((title) => flatText(title).includes(name));
 }
 
-function blockProblems(item: PriceItem, flat: string, flatRaw: string, page?: ReadPage): string[] {
+function blockProblems(
+  item: PriceItem,
+  flat: string,
+  flatRaw: string,
+  page?: ReadPage,
+  /** Prices the block shows split over nodes (「$」「9」「99」), joined. */
+  joined: readonly string[] = [],
+): string[] {
   const problems: string[] = [];
   const quote = flatText(item.quote);
   if (quote && !flat.includes(quote) && !flatRaw.includes(quote))
@@ -213,7 +323,11 @@ function blockProblems(item: PriceItem, flat: string, flatRaw: string, page?: Re
   }
   const numbers = priceNumbers(item.price);
   if (!numbers.length) problems.push(`价格「${item.price}」里没有数字（拿不到就写进 missing）`);
-  else if (!numbers.every((n) => hasNumber(flat, n) || hasNumber(flatRaw, n)))
+  else if (
+    !numbers.every(
+      (n) => hasNumber(flat, n) || hasNumber(flatRaw, n) || joined.includes(String(Number(n))),
+    )
+  )
     problems.push(`价格「${item.price}」不在这个区块里`);
   return problems;
 }
@@ -298,7 +412,13 @@ function verifyItem(
   let first: string[] | null = null;
   for (const block of blocks) {
     const problems = [
-      ...blockProblems(item, flatText(block.text), flatText(block.raw), block.page),
+      ...blockProblems(
+        item,
+        flatText(block.text),
+        flatText(block.raw),
+        block.page,
+        pricedLines(block.nodes).primary,
+      ),
       ...sizeProblems(item, `block_ref「${item.block_ref}」`, block.nodes, block.nodes),
     ];
     if (!problems.length && !quoteProblem.length)

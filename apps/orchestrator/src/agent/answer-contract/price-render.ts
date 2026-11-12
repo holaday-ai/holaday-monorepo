@@ -5,6 +5,7 @@
  * repeated price / note / list lines, 「部分完成」 lead stitching, the 未核实 line): each value
  * appears once, in a fixed template per language, with its source link.
  */
+import { stripInternalRefs, stripSnapshotSyntax } from '../internal-refs.js';
 import type { PriceLanguage, PriceMissing } from './price-result.js';
 import type { VerifiedPriceItem } from './price-verify.js';
 
@@ -75,6 +76,40 @@ function withoutAmounts(text: string, language: PriceLanguage): string {
   );
 }
 
+/** Element ids as the snapshot writes them: e31, f1e5. */
+const ELEMENT_ID_RE = /(?<![\p{L}\p{N}_])(?:f\d+)?e\d{1,6}(?![\p{L}\p{N}_])/giu;
+/**
+ * Bench a1 (wall-jd, dm-jd-mobile, reg-new-amazon-sg): a reason talking about the checks' own
+ * machinery — snapshot nodes, blocks, block_ref, 「最小节点」 — is no reason a person can use.
+ */
+const MACHINERY_RE =
+  /节点|区块|block_?ref|\bref\b|快照|snapshot|最小(?:规格项|节点|区块)|\bnode\b|\bblock\b/iu;
+
+/**
+ * A missing item's reason as the person reads it (coordinator ruling #2): no snapshot syntax, no
+ * element ids (the FIX-61B filters), no clause about nodes / blocks; amounts not checked are
+ * left out. Empty when nothing usable is left.
+ */
+export function userReason(text: string, language: PriceLanguage): string {
+  if (MACHINERY_RE.test(text))
+    return language === 'en'
+      ? 'the page did not tie the name, variant and price to one item'
+      : '页面上没能把名称、规格和价格对应到同一款商品';
+  const ids = new Set([...text.matchAll(ELEMENT_ID_RE)].map((m) => m[0]!.toLowerCase()));
+  const cleaned = stripInternalRefs(stripSnapshotSyntax(text), ids)
+    .replace(ELEMENT_ID_RE, '')
+    .replace(/[（(]\s*[）)]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned ? withoutAmounts(cleaned, language) : '';
+}
+
+function reasonSuffix(reason: string | null | undefined, language: PriceLanguage): string {
+  const text = reason ? userReason(reason, language) : '';
+  if (!text) return '';
+  return language === 'en' ? ` (${text})` : `（${text}）`;
+}
+
 function lead(missing: readonly PriceMissing[], language: PriceLanguage): string {
   const named = missing
     .slice(0, 3)
@@ -111,13 +146,10 @@ export function renderPriceAnswer(input: PriceRenderInput): { summary: string; p
         en ? 'Not obtained:' : '没有拿到：',
         ...input.missing.map(
           (m) =>
-            `- ${shortName(m.item)}${en ? ': ' : '：'}${fieldName(m.field, input.language)}${
-              m.reason
-                ? en
-                  ? ` (${withoutAmounts(m.reason, 'en')})`
-                  : `（${withoutAmounts(m.reason, 'zh')}）`
-                : ''
-            }`,
+            `- ${shortName(m.item)}${en ? ': ' : '：'}${fieldName(m.field, input.language)}${reasonSuffix(
+              m.reason,
+              input.language,
+            )}`,
         ),
       ].join('\n'),
     );
@@ -149,13 +181,10 @@ export function renderPriceFailure(
   const en = language === 'en';
   const lines = missing.map(
     (m) =>
-      `- ${shortName(m.item)}${en ? ': ' : '：'}${fieldName(m.field, language)}${
-        m.reason
-          ? en
-            ? ` (${withoutAmounts(m.reason, 'en')})`
-            : `（${withoutAmounts(m.reason, 'zh')}）`
-          : ''
-      }`,
+      `- ${shortName(m.item)}${en ? ': ' : '：'}${fieldName(m.field, language)}${reasonSuffix(
+        m.reason,
+        language,
+      )}`,
   );
   return [
     en ? 'No price could be obtained from the pages read.' : '没能从读到的页面上拿到价格。',
