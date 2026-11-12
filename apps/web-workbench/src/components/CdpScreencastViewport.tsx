@@ -101,6 +101,8 @@ interface Props {
    * another width (a phone screen) — the same point would now hit something else.
    */
   onHeldInputDropped?: () => void;
+  /** FIX-61B P1-5: the server refused a key (the screen changed under it): ask to press again. */
+  onKeyRefused?: () => void;
   onStatusChange?: (status: CdpScreencastStatus) => void;
   /** Fired after the first real frame is painted for the current viewport. */
   onFrameReady?: () => void;
@@ -165,6 +167,7 @@ export function CdpScreencastViewport({
   controlLease = null,
   onRequestControl,
   onHeldInputDropped,
+  onKeyRefused,
   replayAfterControl = true,
   onStatusChange,
   onFrameReady,
@@ -204,6 +207,9 @@ export function CdpScreencastViewport({
   onRequestControlRef.current = onRequestControl;
   const onHeldInputDroppedRef = React.useRef(onHeldInputDropped);
   onHeldInputDroppedRef.current = onHeldInputDropped;
+  const onKeyRefusedRef = React.useRef(onKeyRefused);
+  onKeyRefusedRef.current = onKeyRefused;
+  const keyRefusedAtRef = React.useRef(0);
   // DEPLOY-61: the layout of the newest painted frame, even while its geometry is not yet
   // accepted for input (a view-only screen whose size the server has not applied).
   const paintedLayoutRef = React.useRef<string | undefined>(undefined);
@@ -827,6 +833,8 @@ export function CdpScreencastViewport({
           width?: number;
           height?: number;
           controlReady?: boolean;
+          /** FIX-61B P1-5: which kind of input the server refused. */
+          input?: string;
         } | null = null;
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
@@ -844,6 +852,14 @@ export function CdpScreencastViewport({
           if (Date.now() - replayedAtRef.current <= DEFERRED_INPUT_MS) {
             replayedAtRef.current = 0;
             onHeldInputDroppedRef.current?.();
+          } else if (msg.input === 'key') {
+            // FIX-61B P1-5: a key the server refused (Enter / Space on a screen that changed) is
+            // said — never dropped without a word. One notice per burst of keys.
+            const now = Date.now();
+            if (now - keyRefusedAtRef.current > 2000) {
+              keyRefusedAtRef.current = now;
+              onKeyRefusedRef.current?.();
+            }
           }
           return;
         }

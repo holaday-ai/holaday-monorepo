@@ -1634,6 +1634,14 @@ export class CloudObservation {
       : undefined;
   }
   private requestWindows = new Map<Request, ActionWindow>();
+  /**
+   * FIX-61B P1-4: a pending pause the read-only policy let pass (logged by the caller): it is no
+   * longer pending. Only the late background-request pause; nothing else is touched.
+   */
+  acknowledgeEffect(): void {
+    this.pendingWrite = false;
+    this.pendingTriggers = [];
+  }
   interruption(): { reason: string; message: string } | undefined {
     return this.pendingWrite
       ? {

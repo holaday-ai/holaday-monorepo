@@ -112,6 +112,8 @@ export function completionGap(
   summary: string,
   trace: readonly BrowserTrace[],
   requireBrowser: boolean,
+  /** FIX-61B P1-6: the user's own words (the loop's intent also carries host guidance). */
+  userIntent?: string,
 ): string | null {
   const successful = trace.filter((entry) => entry.ok);
   const claimed = positiveActionText(summary);
@@ -132,6 +134,14 @@ export function completionGap(
       )
     )
       return '用户要求视频，结果中仍有播放列表或课程合集；请只保留实际视频条目。';
+  }
+  // FIX-61B P1-8 (Deploy-61 online core-03): 「YouTube 公开视频页读标题/频道/播放量/发布日期」 was
+  // answered from a search results page (8 cards, no video page opened) and judged complete. A task
+  // that asks to read a video page completes only from one; an honest 「部分完成：」 still may end.
+  if (asksForVideoPage(intent) && !/^\s*部分完成/.test(summary)) {
+    const onVideo = successful.some((entry) => entry.url && VIDEO_PAGE_URL_RE.test(entry.url));
+    if (!onVideo)
+      return '任务要读一个视频页（标题、频道、播放量、发布日期等），但这次没有进入任何视频页，只读了搜索结果或列表；请点进一个视频页读取。实在进不去就如实说明缺什么，以「部分完成：」开头交付。';
   }
   // AP3 core-10: "JavaScript alerts" asks for native dialogs; an in-page
   // notice closed by a button is not one.
@@ -269,7 +279,11 @@ export function completionGap(
   )
     return '无限滚动没有加载新增内容，任务未完成；请检查滚动目标与站点加载状态。';
   const forms = successful.flatMap((t) => (t.form ? [t.form] : []));
-  if (/(?:填表|填写|填入|fill.*form)/i.test(requested) && !forms.some((f) => f.filled))
+  // FIX-61B P1-6 (Deploy-61 单列 5): 「只打开，不要填写」 then 「读一下…输入框现在填的是什么，只读不改」 is
+  // no request to fill — its answer 「没有填写」 was refused twice as a claim of a filled form.
+  // Only the user's own words ask to fill — host guidance that mentions 填写 asks nothing (local
+  // self-test: 「…输入框现在填的是什么，只读不改」 was still refused).
+  if (asksToFillForm(positiveActionText(userIntent ?? intent)) && !forms.some((f) => f.filled))
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&
@@ -329,5 +343,32 @@ export function receiptEvidence(intent: string, trace: readonly BrowserTrace[]):
 function browserTabWords(text: string): boolean {
   return /标签页|新标签|原标签|源标签|起始|初始|第一个|第\s*[一二三四五六七八九十\d]+\s*个|tab_|\b(?:new|first|original|previous|browser|other|last|second|third)\s+tabs?\b|\btab\s*#?\d|\b\d+(?:st|nd|rd|th)\s+tab\b/i.test(
     text,
+  );
+}
+
+/** FIX-61B P1-6: the request asks to fill a form — not 「不要填写」, not a read of what a box holds. */
+export function asksToFillForm(requested: string): boolean {
+  const asked = requested
+    .replace(
+      /(?:不要|不用|无需|无须|不必|别|勿|不|没有|没|未|并未)\s*(?:去|进行|做)?\s*(?:任何)?\s*(?:的)?\s*(?:填表|填写|填入|填)/g,
+      ' ',
+    )
+    .replace(/(?:don'?t|do not|without|no need to|never)\s+fill(?:ing)?\b[^.。;；]*/gi, ' ');
+  return /(?:填表|填写|填入|fill.*form)/i.test(asked);
+}
+
+/**
+ * FIX-61B P1-8: a single video page — told by its path (YouTube watch / shorts, youtu.be, any
+ * /video/ page: 哔哩哔哩, 抖音, an offline fixture's /video). A results or list page is none.
+ */
+const VIDEO_PAGE_URL_RE =
+  /^https?:\/\/[^/?#]+(?:\/[^?#]*)?\/(?:watch\b|shorts\/|video\b)|^https?:\/\/youtu\.be\//i;
+/** FIX-61B P1-8: the task asks to read one video page — not a search or a list of videos. */
+export function asksForVideoPage(intent: string): boolean {
+  return (
+    /(?:视频页|视频页面|video page)/i.test(intent) &&
+    // 复审 #1: only where a video page is told by its address (other sites are not judged here).
+    /youtube|youtu\.be|油管|bilibili|哔哩|b站|抖音|douyin/i.test(intent) &&
+    !/搜索|搜一下|前\s*\d|search|列表|榜单|list\b|top\s*\d/i.test(intent)
   );
 }

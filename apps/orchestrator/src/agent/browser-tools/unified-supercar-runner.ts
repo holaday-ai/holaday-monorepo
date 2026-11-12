@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import { egressBlockLearner } from '../../browser-pool/egress-learning.js';
 import {
   browserProfileStore,
@@ -10,6 +11,7 @@ import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifi
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { cleanElementName } from '../internal-refs.js';
 import type {
   RunSupercarOptions,
   SupercarAwaitingKind,
@@ -31,6 +33,7 @@ import {
   type PausedAction,
   effectPauseQuestion,
   refName,
+  refRole,
   siteCalled,
 } from './effect-pause-copy.js';
 import { CAPTCHA_SCREENSHOT_STYLE, captchaHandoffEvidence } from './full-page-read.js';
@@ -38,6 +41,7 @@ import {
   type UnifiedToolResult,
   createPlaywrightUnifiedExecutor,
 } from './playwright-unified-executor.js';
+import { readOnlyEffectMayPass } from './read-only-effect-policy.js';
 import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import {
@@ -127,16 +131,46 @@ async function safeTitle(page: { title(): Promise<string> }): Promise<string> {
   }
 }
 
+/** FIX-61B P1-6: the tools that read the page for the assistant. */
+const READ_TOOLS = new Set(['snapshot', 'read_page', 'extract', 'get_page_text', 'read_section']);
+
+/** FIX-61B P1-6: the names (never the values) of the boxes the person typed into. */
+export async function humanTypedFieldNames(page: Page): Promise<string[]> {
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('[data-hd-human-typed]'))
+        .map((el) => {
+          const field = el as HTMLInputElement;
+          const label = field.labels?.[0]?.textContent ?? '';
+          return (
+            field.getAttribute('aria-label') ||
+            label ||
+            field.getAttribute('placeholder') ||
+            field.getAttribute('name') ||
+            '输入框'
+          )
+            .replace(/\s+/g, ' ')
+            .replace(/[:：]\s*$/, '')
+            .trim()
+            .slice(0, 30);
+        })
+        .slice(0, 5),
+    )
+    .catch(() => []);
+}
+
 function describe(action: UnifiedBrowserAction, label: string | null): string {
   switch (action.tool) {
     case 'navigate':
       return `打开 ${action.url}`;
+    // FIX-61B P0-1: the step line is shown in 「查看过程」 — a nameless control is 「页面上的…」,
+    // never its handle (「点击 e12」) or role word (「点击 generic」).
     case 'click':
-      return `点击 ${label ?? action.ref}`;
+      return `点击 ${cleanElementName(label) ?? '页面上的一个元素'}`;
     case 'type':
-      return `在 ${label ?? action.ref} 输入`;
+      return `在 ${cleanElementName(label) ?? '页面上的输入框'} 输入`;
     case 'select':
-      return `在 ${label ?? action.ref} 选择「${action.value}」`;
+      return `在 ${cleanElementName(label) ?? '页面上的选择框'} 选择「${action.value}」`;
     default:
       return action.tool;
   }
@@ -337,8 +371,38 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let lastSnapshot = '';
   /** FIX-58 复审 #2 第 4 项: the last action on the page, for the pause wording. */
   let lastActed: PausedAction | null = null;
+  /** FIX-61B 复审 #2: the last step that may act, judged by the read-only pass. */
+  let lastStep: PausedAction | null = null;
   /** DEPLOY-58 第 0 步 2: what the last action set off, to tell a real submit. */
   let lastTriggers: ReadonlyArray<{ branch: string; url: string }> = [];
+  /** FIX-61B P1-4: whether this pause passes for a read-only task; logged when it does. */
+  const passReadOnlyEffect = async (
+    interruption: { reason: string; message: string },
+    triggers: ReadonlyArray<{ branch: string; url: string; bodyShape?: string; action?: string }>,
+  ): Promise<boolean> => {
+    // 复审 #1: what is pending now is judged too, in the same synchronous step as the clearing —
+    // a write that arrived after the action's own snapshot is never cleared unjudged.
+    const judged = [...triggers, ...(tools.observation?.pendingEffect()?.triggers ?? [])];
+    const pass = readOnlyEffectMayPass({
+      readOnly: isReadOnlyIntent(opts.intent),
+      reason: interruption.reason,
+      action: lastStep,
+      triggers: judged,
+    });
+    if (!pass) return false;
+    tools.observation?.acknowledgeEffect();
+    logger.info(
+      {
+        taskId: opts.taskId,
+        tool: lastStep?.tool,
+        role: lastStep?.role ?? null,
+        triggers: triggers.map((t) => t.branch),
+      },
+      'supercar: read-only background request passed',
+    );
+    await recordDiagnostic('browser_effect_passed', interruption.reason, interruption.message);
+    return true;
+  };
   // FIX-BATCH-A — the contract the verifier will enforce is also the model's
   // output requirement, and the loop gets one remediation turn when a
   // completed list answer misses per-item sources or key fields.
@@ -730,8 +794,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       onRescue: (message) => recordDiagnostic('browser_rescue', undefined, message),
       playbackReceipt: () => tools.playbackReceipt(),
       checkInterruption: async () => {
-        const interruption =
-          tools.observation?.interruption() ?? egress.interruption() ?? undefined;
+        const observed = tools.observation?.interruption();
+        if (
+          observed &&
+          (await passReadOnlyEffect(observed, tools.observation?.pendingEffect()?.triggers ?? []))
+        )
+          return egress.interruption() ?? undefined;
+        const interruption = observed ?? egress.interruption() ?? undefined;
         if (interruption)
           await recordDiagnostic(
             'browser_effect',
@@ -772,15 +841,45 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         const id = `action-${++replayActionId}`;
         const targetPage = tools.page;
         await replay?.capture(targetPage, id, 'before');
-        if (['click', 'type', 'select', 'navigate'].includes(action.tool))
+        // FIX-61B 复审 #2: the read-only pass judges the last step that may act (click_at, wait_for,
+        // upload… never pass); lastActed keeps naming the last control acted on, for the pause copy
+        // (「可能已经生成订单」 after 「立即预约」 then wait_for).
+        if (!READ_TOOLS.has(action.tool))
+          lastStep = {
+            tool: action.tool,
+            label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
+            submit: action.tool === 'type' && action.submit === true,
+            role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
+          };
+        if (
+          ['click', 'type', 'select', 'navigate', 'click_at', 'download', 'upload'].includes(
+            action.tool,
+          )
+        )
           lastActed = {
             tool: action.tool,
             label: 'ref' in action && action.ref ? refName(lastSnapshot, action.ref) : null,
             value: action.tool === 'select' ? action.value : null,
+            submit: action.tool === 'type' && action.submit === true,
+            role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
           };
         const result = await tools.execute(action);
         page = tools.page;
         lastTriggers = result.effect?.triggers ?? [];
+        // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
+        // logged and passed (read-only-effect-policy); anything that may change something asks.
+        if (result.interruption && (await passReadOnlyEffect(result.interruption, lastTriggers))) {
+          delete result.interruption;
+          result.text = `${result.text}\n（页面在后台发了一个请求，判断为浏览产生的统计类请求，已记录并继续只读查看。）`;
+        }
+        // FIX-61B P1-6: a read of a page with boxes the person typed into says which (names only,
+        // never the text): the assistant cannot see their contents and must not call them empty.
+        if (result.ok && READ_TOOLS.has(action.tool)) {
+          const typed = await humanTypedFieldNames(tools.page);
+          if (typed.length)
+            result.text = `${result.text}\n（页面上「${typed.join('」「')}」是用户自己填写的输入框，内容你看不到：被问到时回答「这是你自己填的内容，我看不到」，不要说为空或没有填写。）`;
+        }
+
         if (result.ok) opts.executor?.selectTaskPage?.(page);
         await replay?.capture(
           page,

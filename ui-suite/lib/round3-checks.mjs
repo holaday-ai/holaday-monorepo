@@ -245,7 +245,8 @@ export async function planningInteractionChecks(page,route,width,out) {
 export async function browserInputOverlayChecks(page, route, width, out) {
   const log = page.getByRole('button', { name: '显示操作日志', exact: true });
   await page.locator('button[data-sidebar="trigger"]').click();
-  const takeover = page.getByRole('button', { name: '接管浏览器', exact: true });
+  // FIX-61B P1-7: FIX-61 renamed the button 「我来操作」.
+  const takeover = page.getByRole('button', { name: /^(?:我来操作|接管浏览器)$/ });
   if (await takeover.count()) await takeover.click();
   await page.getByRole('button', { name: '打开文字输入辅助', exact: true }).click();
   const input = page.getByPlaceholder('中文 / 任意文本输入（先点击页面上的输入框获得焦点）');

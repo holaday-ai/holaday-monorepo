@@ -1,3 +1,4 @@
+import { cleanElementName, stripInternalRefs, stripSnapshotSyntax } from '../internal-refs.js';
 /**
  * FIX-58 复审 #2 第 4 项: the pause after an action the page answered with a request it may have
  * written was 「检测到写请求或交易状态变化，已暂停后续操作。第一次副作用无法事前阻止，请核对结果后确认如何
@@ -13,10 +14,27 @@ export interface PausedAction {
   label?: string | null;
   /** A select's chosen value. */
   value?: string | null;
+  /** FIX-61B P1-4: typing pressed Enter afterwards. */
+  submit?: boolean;
+  /** FIX-61B P1-4: the control's role from the snapshot (button, link, textbox…). */
+  role?: string | null;
+}
+
+/** FIX-61B P1-4: the role of a ref in a snapshot (「- link "导览" [ref=e5]」 → link), when given. */
+export function refRole(snapshot: string, ref: string): string | null {
+  const line = snapshot.split('\n').find((l) => l.includes(`[ref=${ref}]`));
+  return line?.match(/^\s*-\s+([a-z]+)\b/i)?.[1]?.toLowerCase() ?? null;
 }
 
 /** The visible name of a ref in a snapshot: 「- link "导览" [ref=e5]」, 「- generic [ref=e5]: 导览」, or its first child's text. */
 export function refName(snapshot: string, ref: string): string | null {
+  const name = refNameRaw(snapshot, ref);
+  // FIX-61B P0-1: a nameless control's own snapshot line (「- generic [ref=e6]:」) is no name.
+  const clean = cleanElementName(name);
+  // Already one tidied line when nothing was taken out (tidying twice would lose its 「…」).
+  return clean === name ? name : clean ? tidy(clean) : null;
+}
+function refNameRaw(snapshot: string, ref: string): string | null {
   const lines = snapshot.split('\n');
   const at = lines.findIndex((line) => line.includes(`[ref=${ref}]`));
   if (at < 0) return null;
@@ -222,7 +240,7 @@ export function looksSubmitted(
   return triggers.some((trigger) => SUBMIT_TRIGGER_BRANCHES.has(trigger.branch));
 }
 
-export function effectPauseQuestion(input: {
+function effectPauseQuestionText(input: {
   english: boolean;
   site: string;
   action: PausedAction | null;
@@ -236,7 +254,9 @@ export function effectPauseQuestion(input: {
   pageTitle?: string | null;
 }): string {
   const { english, site, readOnly, background } = input;
-  const raw = input.action?.label ? tidy(input.action.label) : '';
+  // FIX-61B P0-1: whatever the label's source, snapshot syntax and handles never reach the user.
+  const cleaned = cleanElementName(input.action?.label);
+  const raw = cleaned ? tidy(cleaned) : '';
   const label =
     raw && !labelIsPageTitle(raw, input.pageTitle) && !labelLooksLikeTitle(raw, site)
       ? raw
@@ -245,7 +265,7 @@ export function effectPauseQuestion(input: {
   // FIX-60 P2: whether it submits is read from the whole name — cut at 20, 「Reserve a table guide」
   // lost its 「guide」 and read as the booking itself.
   const submitted = looksSubmitted(
-    action && label ? { ...action, label: oneLine(input.action!.label!) } : action,
+    action && label ? { ...action, label: oneLine(cleaned ?? '') } : action,
     input.triggers,
   );
   if (english) {
@@ -257,7 +277,7 @@ export function effectPauseQuestion(input: {
         : action?.tool === 'type'
           ? label
             ? `typed into “${label}”`
-            : 'typed into the page'
+            : 'typed into a box on the page'
           : action?.tool === 'select'
             ? `chose “${action.value ?? label ?? ''}”`
             : action?.tool === 'navigate'
@@ -282,7 +302,7 @@ export function effectPauseQuestion(input: {
       : action?.tool === 'type'
         ? label
           ? `在「${label}」里输入了内容`
-          : '输入了内容'
+          : '在一个输入框里输入了内容'
         : action?.tool === 'select'
           ? `选了「${action.value ?? label ?? ''}」`
           : action?.tool === 'navigate'
@@ -296,4 +316,12 @@ export function effectPauseQuestion(input: {
     ? '你看一下右侧画面有没有生成预约或订单；没有的话回复「继续」，我接着只读查看。'
     : '你看一下右侧画面，结果符合预期的话回复「继续」，我接着往下做。';
   return `我${where}${did}，${what}，我先停下了。${next}`;
+}
+
+/**
+ * The pause question for the user. FIX-61B P0-1: the last guard — whatever went into it, no
+ * snapshot syntax or element handle leaves here.
+ */
+export function effectPauseQuestion(input: Parameters<typeof effectPauseQuestionText>[0]): string {
+  return stripInternalRefs(stripSnapshotSyntax(effectPauseQuestionText(input)));
 }

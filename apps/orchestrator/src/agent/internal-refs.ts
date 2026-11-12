@@ -121,3 +121,94 @@ export function stripInternalRefs(text: string, seen: ReadonlySet<string> = new 
 export function hasInternalRef(text: string, seen?: ReadonlySet<string>): boolean {
   return stripInternalRefs(text, seen) !== text;
 }
+
+/**
+ * FIX-61B P0-1 (Deploy-61 new-bestbuy 「我在Best Buy在「- generic [ref=e6]:」里输入了内容」): accessibility
+ * snapshot syntax — a line 「- generic [ref=e6]:」, a bare role word 「generic」 — is never shown to the
+ * user, and is never a control's name.
+ */
+const SNAPSHOT_ROLE =
+  'generic|button|link|textbox|searchbox|combobox|checkbox|radio|option|listbox|list|listitem|img|image|heading|paragraph|region|group|navigation|main|banner|contentinfo|complementary|form|search|dialog|alertdialog|menu|menubar|menuitem|tab|tablist|tabpanel|table|row|cell|gridcell|columnheader|rowheader|article|section|figure|separator|iframe|document|text|status|alert|tooltip|switch|slider|spinbutton|progressbar|term|definition|code|strong|emphasis|blockquote|caption|time|mark|insertion|deletion|log|timer|toolbar|tree|treeitem|grid|application|note|math|meter|LabelText|StaticText|none|presentation';
+/**
+ * 「- generic [ref=e6]:」「- button "OK" [ref=e7] [cursor=pointer]:」 — a snapshot line, only with its
+ * `[ref=…]` (复审 #1: 「- Link [GitHub](url)」「- Status [Open]」 are ordinary lists), starting a line
+ * or after a space / quote, the space before it kept.
+ */
+const SNAPSHOT_LINE_RE = new RegExp(
+  String.raw`(?<=^|[^\p{L}\p{N}_])-\s+(?:${SNAPSHOT_ROLE})\b(?:\s+"[^"\n]{0,120}")?(?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*?\s*\[ref=(?:f\d+)?e\d{1,6}\](?:\s*\[[a-z]+(?:=[^\]\n]*)?\])*\s*:?`,
+  'giu',
+);
+const REF_MARK_RE = /\s*\[ref=(?:f\d+)?e\d{1,6}\]/giu;
+/** Role words a snapshot gives a nameless control (复审 #1: 「Search」「Menu」 are real names). */
+const BARE_ROLE_RE =
+  /^(?:generic|none|presentation|group|region|img|image|listitem|paragraph|separator|iframe|document|button|link|textbox|searchbox|combobox|heading|LabelText|StaticText)$/iu;
+
+/** Whether user-facing text still carries snapshot syntax (`[ref=…]`, 「- generic …:」). */
+export function hasSnapshotSyntax(text: string): boolean {
+  if (!text) return false;
+  return /\[ref=(?:f\d+)?e\d{1,6}\]/i.test(text);
+}
+
+/** User-facing text with snapshot lines and `[ref=…]` marks taken out (other text as written). */
+export function stripSnapshotSyntax(text: string): string {
+  if (!hasSnapshotSyntax(text)) return text;
+  return text
+    .replace(SNAPSHOT_LINE_RE, '')
+    .replace(REF_MARK_RE, '')
+    .replace(/「\s*」/g, '')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+/**
+ * A control's name for the user, or null when what we have is snapshot syntax, a bare role word
+ * (「generic」「button」) or an element handle — the caller then says 「这个按钮」「输入框」.
+ */
+export function cleanElementName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const name = stripInternalRefs(stripSnapshotSyntax(raw))
+    .replace(/^[\s:：\-–—]+|[\s:：\-–—]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!name || BARE_ROLE_RE.test(name) || /^e\d{1,6}$/i.test(name)) return null;
+  return name;
+}
+
+/**
+ * FIX-61B P0-2 (Deploy-61 as-shan: the answer opened with the model's reasoning and a 「</think>」):
+ * a model's reasoning never reaches the user. A `<think>…</think>` block goes whole; a lone closing
+ * `</think>` takes everything before it with it. Other text is left as written.
+ */
+export function stripReasoning(text: string): string {
+  if (!text || !/<\/?think>/i.test(text)) return text;
+  // 复审 #1: tags inside code are code (「text.split('</think>')」), never reasoning.
+  const code: string[] = [];
+  let out = text.replace(/```[\s\S]*?```|`[^`\n]*`/g, (block) => {
+    code.push(block);
+    return `\uE000${code.length - 1}\uE000`;
+  });
+  // 复审 #3 建议: a reasoning block in the middle of an answer goes when it spans lines or is
+  // longer than a short mention (「会用 <think> 和 </think>」 stays).
+  out = out.replace(/<think>([\s\S]*?)<\/think>/gi, (block, inner: string, at: number) =>
+    at > 0 && (inner.includes('\n') || inner.length > 40) ? '' : block,
+  );
+  if (/^\s*<think>/i.test(out)) {
+    // Reasoning opens the text: it ends at its first </think>; never closed, nothing is an answer.
+    const close = out.search(/<\/think>/i);
+    out = close >= 0 ? out.slice(close + '</think>'.length) : '';
+  } else {
+    // 复审 #2: a lone </think> (its <think> before the text) ends the reasoning wherever it is —
+    // code before it is the reasoning's own. Prose that names both tags (no leading <think>, an
+    // opening one before the closing one) is left as written.
+    const close = out.search(/<\/think>/i);
+    if (close >= 0 && !/<think>/i.test(out.slice(0, close)))
+      out = out.slice(close + '</think>'.length);
+  }
+  return out
+    .replace(/\uE000(\d+)\uE000/g, (_, i: string) => code[Number(i)] ?? '')
+    .replace(/^\s+/, '');
+}
+
+/** Whether user-facing text still carries reasoning tags. */
+export function hasReasoningTag(text: string): boolean {
+  return /<\/?think>/i.test(text ?? '');
+}
