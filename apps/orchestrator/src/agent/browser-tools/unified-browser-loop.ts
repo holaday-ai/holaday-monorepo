@@ -75,7 +75,7 @@ import {
   claimsNoPlayback,
 } from './playback-guard.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
-import { withoutUnmatchedPrices } from './spec-price-pairing.js';
+import { partialAnswerPrices, withoutUnmatchedPrices } from './spec-price-pairing.js';
 import {
   UNIFIED_BROWSER_TOOLS,
   type UnifiedBrowserAction,
@@ -505,17 +505,20 @@ export async function runUnifiedBrowserLoop(
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
-    case 'completed':
+    case 'completed': {
+      const summary = strip(
+        plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+        outcome.summary,
+      );
       return {
         ...outcome,
-        summary: strip(
-          plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
-          outcome.summary,
-        ),
+        // FIX-62 P0-3 (f62k2): a partial answer explains what is missing — its prices too.
+        summary: outcome.partial ? partialAnswerPrices(summary, readTexts, intentText) : summary,
         ...(outcome.partial?.missing
           ? { partial: { ...outcome.partial, missing: explain(outcome.partial.missing) } }
           : {}),
       };
+    }
     case 'failed':
       return { ...outcome, reason: explain(outcome.reason) };
     case 'awaiting_user':

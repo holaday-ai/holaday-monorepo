@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   unsupportedSpecPricePairings as check,
+  partialAnswerPrices,
   withoutUnmatchedPrices,
 } from './spec-price-pairing.js';
 
@@ -360,5 +361,39 @@ describe('FIX-62 f62j2: a model named in the task is priced from its own column 
     expect(withoutUnmatchedPrices(`没拿到准确价格；${ANSWER}`, [page], INTENT_16)).not.toMatch(
       /10,999/,
     );
+  });
+});
+
+// FIX-62 iPhone run f62k2 (部分完成): the answer's own text named a refurbished price no read page
+// was shown to give, with only a 未核实 line under it.
+describe('FIX-62 P0-3 f62k2: a partial answer’s prices are checked like an explanation', () => {
+  const K2 = [
+    '部分完成：Apple 官网已不再直接销售 iPhone 16 Pro Max 256GB，因此无法从官网获取全新机售价。在 Apple 官方翻新商店页面读到的同款翻新机价格为 $929.00（Refurbished iPhone 16 Pro Max 256GB）。',
+    '',
+    '- Apple 官网全新机售价：官网已下架，未读到',
+    '',
+    '未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$929.00（Refurbished iPhone 16 Pro Max 256GB）」',
+  ].join('\n');
+  const INTENT = 'iPhone 16 Pro Max 256GB 多少钱';
+  it('a price no read page shows goes from the text; the 未核实 line stays as written', () => {
+    const out = partialAnswerPrices(
+      K2,
+      [['iPhone 16 Pro Max', '于授权经销商处有售'].join('\n')],
+      INTENT,
+    );
+    const [body] = out.split('\n');
+    expect(body).not.toMatch(/929/);
+    expect(body).toContain('（没读到准确价格）');
+    expect(out).toContain('未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$929.00');
+  });
+  it('the price the refurbished page gives this model is kept', () => {
+    const page = [
+      'Refurbished iPhone 16 Pro Max 256GB - Black Titanium (Unlocked)',
+      '$929.00',
+    ].join('\n');
+    expect(partialAnswerPrices(K2, [page], INTENT)).toBe(K2);
+  });
+  it('a task naming no model is left alone (list answers keep their own checks)', () => {
+    expect(partialAnswerPrices(K2, [], '帮我找 3 款 USB-C 数据线的价格')).toBe(K2);
   });
 });

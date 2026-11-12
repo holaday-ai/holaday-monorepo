@@ -373,3 +373,24 @@ export function withoutUnmatchedPrices(
     })
     .join('');
 }
+
+/**
+ * FIX-62 P0-3 (iPhone run f62k2): a 「部分完成」 answer's own text explained what was not found and
+ * named a price — 「…翻新机价格为 $929.00…」 — with only a 未核实 line under it. When the task names a
+ * model, a price in a partial answer goes through the same check as a failure explanation; the 未核实
+ * lines are left as they are (they already say what was not found word for word).
+ */
+export function partialAnswerPrices(text: string, pages: readonly string[], intent = ''): string {
+  const taskModels = modelsOf(intent);
+  if (!/标准版|标准款|base model/iu.test(intent))
+    for (const m of [...taskModels]) if (m.endsWith('|base')) taskModels.delete(m);
+  if (!taskModels.size) return text;
+  return text
+    .split('\n')
+    .map((line) =>
+      /^\s*(?:未核实：|Not verified:|译述，未逐字核对：|Paraphrased, not checked)/u.test(line)
+        ? line
+        : withoutUnmatchedPrices(line, pages, intent),
+    )
+    .join('\n');
+}
