@@ -40,9 +40,9 @@ export function datesIn(text: string, now: Date): Set<string> {
   const add = (y: number, m: number, d: number) => {
     if (m >= 1 && m <= 12 && d >= 1 && d <= 31) out.add(`${y}-${pad(m)}-${pad(d)}`);
   };
-  for (const m of text.matchAll(/(20\d{2})[-/.年]\s?(\d{1,2})[-/.月]\s?(\d{1,2})日?/gu))
+  for (const m of text.matchAll(/(20\d{2})\s?[-/.年]\s?(\d{1,2})\s?[-/.月]\s?(\d{1,2})\s?日?/gu))
     add(Number(m[1]), Number(m[2]), Number(m[3]));
-  for (const m of text.matchAll(/(?<![\d年/.-])(\d{1,2})月(\d{1,2})[日号]/gu))
+  for (const m of text.matchAll(/(?<![\d年/.-]\s?)(\d{1,2})\s?月\s?(\d{1,2})\s?[日号]/gu))
     add(year, Number(m[1]), Number(m[2]));
   for (const m of text.matchAll(/(?<![\d/.-])(\d{1,2})\/(\d{1,2})(?![\d/])/gu))
     add(year, Number(m[1]), Number(m[2]));

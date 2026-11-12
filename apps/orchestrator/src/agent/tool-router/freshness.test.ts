@@ -70,4 +70,16 @@ describe('REBUILD-2 ruling: a time-sensitive interface answer is current or goes
       freshnessProblem({ intent: '中国最高的山是哪座', answer: '珠峰', results: '', now: NOW }),
     ).toBeNull();
   });
+
+  it('spaced dates are read too: an answer naming another day than the data is refused', () => {
+    const results = ['2026-11-12 11:30 上证指数报 3688.05 点', RETRIEVAL].join('\n\n');
+    expect(
+      freshnessProblem({
+        intent: '上证指数现在多少',
+        answer: '截至 11 月 10 日 11:30，上证指数报 3688.05 点。',
+        results,
+        now: NOW,
+      }),
+    ).toMatchObject({ kind: 'unsupported_time', stated: '2026-11-10' });
+  });
 });
