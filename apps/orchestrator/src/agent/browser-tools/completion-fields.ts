@@ -589,8 +589,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
     // FIX-47 (Deploy-47 b-p02 「… — S$12.81（从该商品详情页读取）」): a note after the price says where
     // it was read; the name and the price are still the facts. DEPLOY-48 复审 #2: a note with a number
     // or a currency in it (「（原价 S$30）」) states facts of its own, checked below.
+    // FIX-62 P1-6 (DEPLOY-61 第三次 单列 2): 「A Light in the Attic — £51.77，In stock (22 available)」 —
+    // what follows the price after a comma is one more fact of its own, not part of a line that
+    // must appear verbatim (all five correct books were labelled 未核实).
     const priced = listed?.match(
-      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d[\d,]*(?:\.\d+)?)\s*(?:[（(]([^（）()\n]{1,40})[)）])?\s*$/iu,
+      /^(.+?)\s+[—–-]{1,2}\s+((?:s\$|us\$|\$|¥|￥|€|£|sgd|usd|rmb|cny)\s*\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:[（(]([^（）()\n]{1,40})[)）])?\s*(?:[，,；;]\s*([^\n]{1,80}?))?\s*$/iu,
     );
     // …and 「sample.json，大小 95 bytes」 a file name and its size (local core-09).
     const sized = listed?.match(
@@ -612,6 +615,9 @@ function answerFacts(summary: string, intent = ''): Fact[] {
       for (const piece of (priced[3] ?? '').split(/[，；;、]|,(?!\d{3}\b)/))
         for (const price of notePrices(piece))
           add({ name: '价格（括注）', value: clean(price), listItem: true });
+      // Checked like a single labelled value (not a list item): 「In stock (99 available)」 beside
+      // the page's 「In stock (22 available)」 is a contradiction, not a list's repeated shape.
+      if (priced[4]) add({ name: '条目', value: clean(priced[4]) });
       continue;
     }
     // FIX-41 (local f41a core-07): 「Safari (web browser) → 新标签，标题为“Safari (web browser) -
