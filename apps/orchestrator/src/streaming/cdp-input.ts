@@ -62,6 +62,10 @@ export interface InputDocumentGuard {
   loader(): string;
   /** The document read from the browser now; null when it cannot be read in time. */
   freshLoader(): Promise<string | null>;
+  /** The current history entry (pushState makes a new one); null when not known. */
+  entry(): number | null;
+  /** A same-document navigation whose kind (push or replace) is not known yet. */
+  pending(): boolean;
 }
 
 /** Error for an input refused because the page changed under it (the screen asks again). */
@@ -481,6 +485,10 @@ export class CdpInputHandler {
       return;
     }
     if (this.interruptedSessions.has(session)) throw new BrowserInputOutcomeUnknownError();
+    if (session !== this.activeSession) {
+      this.activeSession = session;
+      this.activeModifiers = 0;
+    }
     // FIX-62 P0-1: the input's page must still be the one in the browser when it is sent. The
     // waits (fresh document read, target for the log) come first and are bounded; then one
     // synchronous check: a navigation that committed meanwhile has bumped the revision or
@@ -505,7 +513,8 @@ export class CdpInputHandler {
       const now = guard.loader();
       const refused =
         !!expected &&
-        (guard.revision() !== expected.revision ||
+        ((needsFreshDocument(msg) && guard.pending()) ||
+          guard.revision() !== expected.revision ||
           (!!expected.loader && now !== expected.loader) ||
           (fresh !== undefined && (fresh === null || (!!now && fresh !== now))));
       const where = {
@@ -520,7 +529,10 @@ export class CdpInputHandler {
         else this.logger.debug(fields, 'cdp-input: human input refused (page changed)');
         throw new Error(PAGE_CHANGED_ERROR);
       }
-      documentAtDispatch = now;
+      // A press is bound to its document AND history entry: a pushState swap keeps the loader
+      // but not what the press was aimed at (复审 #2 A). Unknown ('' loader, pending) binds to none.
+      const entry = guard.entry();
+      documentAtDispatch = now && entry !== null && !guard.pending() ? `${now}#${entry}` : '';
       if (activates(msg)) {
         this.lastTarget = target;
         this.logger.info(
@@ -804,13 +816,19 @@ export class CdpInputHandler {
     // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a key or button is released only on the document it
     // was pressed on. When the page has changed since (the Enter that submitted a search), the
     // new page never saw the press — releasing there could activate whatever it focused.
-    // The same document is the same loader: a replaceState meanwhile (a drag on a map that writes
-    // its position into the URL) keeps it, and the release is always sent there (复审 #1 #2).
-    const now = this.documentGuard ? this.documentGuard.loader() : null;
+    // The same document is the same loader and history entry: a replaceState meanwhile (a drag on
+    // a map that writes its position into the URL) keeps both and the release is sent (复审 #1 #2);
+    // a pushState swap does not (复审 #2 A). A press whose document was not known is not released.
+    const g = this.documentGuard;
+    const loaderNow = g?.loader() ?? '';
+    const entryNow = g?.entry() ?? null;
+    const now =
+      g && loaderNow && entryNow !== null && !g.pending() ? `${loaderNow}#${entryNow}` : '';
     const samePage = (id: string): boolean => {
-      if (!this.documentGuard) return true;
+      if (!g) return true;
       const pressed = this.pressedOn.get(id);
-      return pressed === undefined || pressed === null || pressed === '' || pressed === now;
+      if (pressed === undefined || pressed === null) return true; // pressed before the guard was set
+      return !!pressed && !!now && pressed === now;
     };
     for (const [id, key] of [...this.pressedKeys.entries()]) {
       if (!samePage(`key:${id}`)) {

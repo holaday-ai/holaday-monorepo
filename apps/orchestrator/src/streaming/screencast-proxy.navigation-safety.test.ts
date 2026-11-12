@@ -71,6 +71,24 @@ window.addEventListener('mouseup', () => window.hits.push('up'));
 q.focus();
 </script>`;
 
+// 复审 #2 A: a press that swaps the page in place (pushState) — the press and its release are
+// not the new content's.
+const PAGE_PUSH = `<!doctype html><input id="q" style="position:absolute;left:40px;top:40px"><div id="pad" style="position:absolute;left:300px;top:300px;width:400px;height:300px"></div><div id="tick"></div>
+<script>
+window.hits = [];
+let n = 0; setInterval(() => { document.getElementById('tick').textContent = String(++n); }, 40);
+const swap = () => {
+  history.pushState({}, '', '/push?swapped=1');
+  document.body.innerHTML = '<button id="share" style="position:absolute;left:0;top:0;width:1280px;height:800px">Share</button>';
+  const b = document.getElementById('share');
+  for (const t of ['keydown', 'keyup', 'mousedown', 'mouseup', 'click']) b.addEventListener(t, (ev) => window.hits.push(t + ':' + (ev.key || '')));
+  b.focus();
+};
+document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); swap(); } });
+document.getElementById('pad').addEventListener('mousedown', () => swap());
+document.getElementById('q').focus();
+</script>`;
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length)
@@ -86,6 +104,7 @@ async function site(): Promise<string> {
     if (req.url?.startsWith('/b')) res.end(PAGE_B);
     else if (req.url?.startsWith('/spa')) res.end(PAGE_SPA);
     else if (req.url?.startsWith('/mirror')) res.end(PAGE_MIRROR);
+    else if (req.url?.startsWith('/push')) res.end(PAGE_PUSH);
     else res.end(PAGE_A);
   });
   server.listen(0, '127.0.0.1');
@@ -279,4 +298,29 @@ it('the audit description names buttons only, never options, links or fields, an
   expect(await at(10, 310)).toEqual({ role: 'input', name: null, page: origin });
   await page.goto('data:text/html,<p>private</p>');
   expect(await at(5, 5)).toMatchObject({ page: 'data:' });
+}, 30000);
+
+it('an Enter whose press swapped the page in place (pushState) is not released onto the new content (复审 #2 A)', async () => {
+  const h = await harness('/push');
+  const before = h.frame();
+  h.key('keyDown', 'Enter', before);
+  await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
+  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
+  h.key('keyUp', 'Enter', before);
+  await new Promise((r) => setTimeout(r, 300));
+  await h.handBack();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(await h.hits()).toEqual([]);
+}, 30000);
+
+it('a mouse press that swapped the page in place is not released onto the new content (复审 #2 A)', async () => {
+  const h = await harness('/push');
+  const before = h.frame();
+  h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
+  await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
+  h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
+  await new Promise((r) => setTimeout(r, 300));
+  await h.handBack();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(await h.hits()).toEqual([]);
 }, 30000);

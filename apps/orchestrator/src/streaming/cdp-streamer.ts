@@ -194,22 +194,39 @@ export class CdpStreamer {
     if (loader && !this.loader && session === this.cdpSession) this.loader = loader;
     return loader;
   }
-  /** Learn the current history entry; a different one means a pushState swapped the page. */
+  /** Same-document navigations whose history entry is still being read (复审 #2 B). */
+  private historyReads = 0;
+  /** The current history entry id; null until read. */
+  historyEntryId(): number | null {
+    return this.historyEntry;
+  }
+  /** A same-document navigation happened and whether it was a new entry is not known yet. */
+  historyPending(): boolean {
+    return this.historyReads > 0;
+  }
+  /**
+   * Learn the current history entry; a different one (or none known before) means a pushState
+   * swapped the page and, when `retire`, the old frames go. A read that fails retires too.
+   */
   private async noteHistoryEntry(session: CDPSession, retire: boolean): Promise<void> {
+    if (retire) this.historyReads++;
     try {
       const h = await session.send('Page.getNavigationHistory');
       const id = h.entries[h.currentIndex]?.id ?? null;
       if (session !== this.cdpSession) return;
-      const changed = this.historyEntry !== null && id !== null && id !== this.historyEntry;
+      const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
       this.historyEntry = id;
       if (retire && changed) this.invalidateObservation();
     } catch {
-      /* the session went away */
+      if (retire && session === this.cdpSession) this.invalidateObservation();
+    } finally {
+      if (retire) this.historyReads = Math.max(0, this.historyReads - 1);
     }
   }
   private bindPage(page: Page): void {
     this.loader = '';
     this.historyEntry = null;
+    this.historyReads = 0;
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
