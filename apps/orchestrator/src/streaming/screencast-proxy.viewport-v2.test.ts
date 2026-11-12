@@ -154,6 +154,21 @@ it.each([false, true])(
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(2),
       );
       expect(await page.evaluate(() => innerWidth)).toBe(1280);
+      // FIX-62 P1-3: the screen that takes control re-sends its size right after the first press;
+      // the press and its release, already sent, land on the layout they were aimed at.
+      const aimed = currentFrame();
+      send('mouseDown', aimed);
+      send('mouseUp', aimed);
+      ws.send(
+        JSON.stringify({
+          type: 'input',
+          controlLease: lease,
+          payload: { type: 'viewport', width: 1000, height: 700 },
+        }),
+      );
+      await vi.waitFor(async () =>
+        expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(3),
+      );
       // A size sent with the lease re-lays the page out: input naming the frame before it is refused.
       const previous = currentFrame();
       const beforeResizeCalls = calls;
@@ -168,7 +183,7 @@ it.each([false, true])(
       send('mouseUp', previous);
       await new Promise((r) => setTimeout(r, 350));
       expect(calls).toBe(beforeResizeCalls);
-      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(2);
+      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(3);
     } finally {
       ws.close();
       await once(ws, 'close');

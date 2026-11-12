@@ -293,6 +293,13 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
     let viewportPending = false;
+    // FIX-62 P1-3: the order inputs arrived in, and the last one before the pending size was asked.
+    let receivedSeq = 0;
+    let sizeAskedAfter = 0;
+    const seqOf = new WeakMap<object, number>();
+    const unsettled = new Map<number, Promise<void>>();
+    const aimedBeforeSize = (envelope: object): boolean =>
+      viewportPending && (seqOf.get(envelope) ?? Number.POSITIVE_INFINITY) <= sizeAskedAfter;
     // The newest lease a viewport message from this screen carried (DEPLOY-61 第 0 步 #2).
     let viewportLease: string | null = null;
     const humanLease = (): string | null => {
@@ -388,12 +395,37 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
       viewportV2: args.viewportV2,
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
+      onInputReceived: (envelope) => {
+        const seq = ++receivedSeq;
+        seqOf.set(envelope, seq);
+        let settle!: () => void;
+        unsettled.set(seq, new Promise<void>((resolve) => (settle = resolve)));
+        return () => {
+          unsettled.delete(seq);
+          settle();
+        };
+      },
       onViewportRequested: (envelope) => {
         if (typeof envelope.controlLease === 'string') viewportLease = envelope.controlLease;
         if (!args.viewportV2 || !viewportWillApply()) return;
+        // FIX-62 P1-3 (local repro at a 2x screen; online 4 of 4 「请再点一次」 on a finished task):
+        // the press's mouseUp arrived before the screen's new size, waited behind the mouseDown, and
+        // was refused because the size had been asked for — though it is applied only after it, in
+        // the same queue. Input that arrived before the size is checked against the layout it meets
+        // (still the one it was aimed at); input after it is refused as before. The frames go stale
+        // once that earlier input is through (and again when the size is applied).
+        if (!viewportPending) sizeAskedAfter = receivedSeq;
         viewportPending = true;
-        invalidate();
-        streamer?.invalidateObservation();
+        const earlier = [...unsettled.entries()]
+          .filter(([seq]) => seq <= sizeAskedAfter)
+          .map(([, done]) => done);
+        const stale = () => {
+          if (!viewportPending) return;
+          invalidate();
+          streamer?.invalidateObservation();
+        };
+        if (!earlier.length) stale();
+        else void Promise.allSettled(earlier).then(stale);
       },
       beforeDispatch: args.viewportV2
         ? async (envelope, signal) => {
@@ -441,7 +473,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             if (
               inputKind === 'pointer' &&
               message.type === 'keyDown' &&
-              !viewportPending &&
+              (!viewportPending || aimedBeforeSize(envelope)) &&
               !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
               frameGuard.validate(envelope.observation, Date.now(), 'lenient') &&
               (await stillTypingTarget())
@@ -451,7 +483,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             }
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
-              viewportPending ||
+              (viewportPending && !aimedBeforeSize(envelope)) ||
               !frameGuard.validate(envelope.observation, Date.now(), inputKind)
             ) {
               streamer?.requestFrameRefresh();

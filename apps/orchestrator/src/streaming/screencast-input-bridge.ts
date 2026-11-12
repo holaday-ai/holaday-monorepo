@@ -16,6 +16,11 @@ interface DeferredScreencastInputBridgeOptions {
   maxViewportHeight?: number;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
   onViewportRequested?: (envelope: InputEnvelope) => void;
+  /**
+   * FIX-62 P1-3: a pointer / key / text input as it arrives, before any size sent after it; the
+   * returned callback runs once it is sent or refused.
+   */
+  onInputReceived?: (envelope: InputEnvelope) => (() => void) | undefined;
   beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   /** Optional until the session/route and frontend negotiate owner leases. */
   runOwnedInput?: (
@@ -46,6 +51,7 @@ export class DeferredScreencastInputBridge {
   private readonly runWithStableViewport?: DeferredScreencastInputBridgeOptions['runWithStableViewport'];
   private readonly maxViewportHeight: number;
   private readonly onViewportRequested?: (envelope: InputEnvelope) => void;
+  private readonly onInputReceived?: DeferredScreencastInputBridgeOptions['onInputReceived'];
   private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions['beforeDispatch'];
   private sinkGeneration = 0;
   private latestViewport: Extract<InputMessage, { type: 'viewport' }> | null = null;
@@ -59,6 +65,7 @@ export class DeferredScreencastInputBridge {
     this.onViewportApplied = options.onViewportApplied;
     this.beforeDispatch = options.beforeDispatch;
     this.onViewportRequested = options.onViewportRequested;
+    this.onInputReceived = options.onInputReceived;
     this.runOwnedInput = options.runOwnedInput;
     this.queueViewport = options.queueViewport;
   }
@@ -91,15 +98,21 @@ export class DeferredScreencastInputBridge {
       this.latestViewport = envelope.payload;
     }
 
-    if (!this.sink) {
-      return;
-    }
+    const settled =
+      envelope.payload.type === 'viewport' ? undefined : this.onInputReceived?.(envelope);
+    try {
+      if (!this.sink) {
+        return;
+      }
 
-    await this.dispatch(
-      envelope.payload,
-      typeof envelope.controlLease === 'string' ? envelope.controlLease : undefined,
-      envelope,
-    );
+      await this.dispatch(
+        envelope.payload,
+        typeof envelope.controlLease === 'string' ? envelope.controlLease : undefined,
+        envelope,
+      );
+    } finally {
+      settled?.();
+    }
   }
 
   async attach(sink: ScreencastInputSink): Promise<void> {

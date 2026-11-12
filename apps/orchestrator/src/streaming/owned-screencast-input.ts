@@ -16,6 +16,7 @@ export function createOwnedScreencastInputBridge(options: {
   peek: (taskId: string) => BrowserInstance | null;
   onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
   onViewportRequested?: (envelope: InputEnvelope) => void;
+  onInputReceived?: (envelope: InputEnvelope) => (() => void) | undefined;
   beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   releasePressed?: (signal: AbortSignal) => Promise<void>;
   executionDrain?: ExecutionAdmission;
@@ -46,6 +47,7 @@ export function createOwnedScreencastInputBridge(options: {
       await options.beforeDispatch?.(envelope, signal);
     },
     onViewportRequested: options.onViewportRequested,
+    onInputReceived: options.onInputReceived,
     runOwnedInput: async (lease, action, kind) => {
       if (!allowed()) throw new Error('MAINTENANCE_INPUT_CLOSED');
       const session = current();
