@@ -399,7 +399,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         const seq = ++receivedSeq;
         seqOf.set(envelope, seq);
         let settle!: () => void;
-        unsettled.set(seq, new Promise<void>((resolve) => (settle = resolve)));
+        unsettled.set(
+          seq,
+          new Promise<void>((resolve) => {
+            settle = resolve;
+          }),
+        );
         return () => {
           unsettled.delete(seq);
           settle();
