@@ -310,6 +310,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let viewportApplies = false;
     // How many sizes have started to apply (a deferred staleness for an applied size is moot).
     let sizesTaken = 0;
+    // Sizes asked with the lease so far, and how many of them the size being dispatched covers.
+    let sizeRequests = 0;
+    let sizeRequestsCovered = 0;
     const unsettled = new Map<number, Promise<void>>();
     // FIX-62 复审 #8: the release of a press held when the size arrived (it waited for it).
     let sizeRelease: number | null = null;
@@ -471,6 +474,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         // the same queue. Input that arrived before the size is checked against the layout it meets
         // (still the one it was aimed at); input after it is refused as before. The frames go stale
         // once that earlier input is through (and again when the size is applied).
+        sizeRequests += 1;
         if (!viewportPending) {
           sizeAskedAfter = arrival.after;
           sizeRelease = arrival.release;
@@ -499,6 +503,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             if (message.type === 'viewport') {
               viewportApplies = viewportWillApply();
               if (viewportApplies) sizesTaken += 1;
+              sizeRequestsCovered = sizeRequests;
             }
             if (message.type === 'viewport' && !viewportWillApply()) return;
             if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
@@ -614,6 +619,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         const applied = viewportApplies;
         viewportApplies = false;
         streamer?.setCaptureScale(viewport.deviceScaleFactor ?? 1);
+        // 复审 #9: a size asked with the lease but not applied after all (control handed back while
+        // it waited) leaves nothing to wait for — unless a newer size was asked since.
+        if (args.viewportV2 && !applied && viewportPending && sizeRequests === sizeRequestsCovered)
+          viewportPending = false;
         if (args.viewportV2 && applied) {
           viewportPending = false;
           streamer?.invalidateObservation();

@@ -455,3 +455,61 @@ describe('FIX-62 复审 #8: partial answers keep the right prices and the person
     ).not.toMatch(/9,299/);
   });
 });
+
+// FIX-62 复审 #9: 「约 / about / 左右」 is how a price is written, not the person's own number; a page
+// with two layouts is judged section by section.
+describe('FIX-62 复审 #9: no exemption for 「约」, and layouts by section', () => {
+  const INTENT = 'iPhone 16 Pro Max 256GB 多少钱';
+  const COMPARE = [
+    'iPhone 17 Pro Max',
+    'RMB 9,299 起',
+    'iPhone 16 Pro Max',
+    '于授权经销商处有售',
+  ].join('\n');
+  it.each([
+    '部分完成：iPhone 16 Pro Max 售价约 RMB 9,299。',
+    '部分完成：iPhone 16 Pro Max 大概 RMB 9,299 左右。',
+    '部分完成：iPhone 16 Pro Max 合约价 RMB 9,299。',
+    '部分完成：iPhone 16 Pro Max 预约价 RMB 9,299。',
+  ])('another model’s price written 「%s」 still goes', (text) => {
+    expect(partialAnswerPrices(text, [COMPARE], INTENT)).not.toMatch(/9,299/);
+  });
+  it('English 「about」 does not keep it either', () => {
+    expect(
+      partialAnswerPrices(
+        'Partially completed: the iPhone 16 Pro Max costs about RMB 9,299.',
+        [COMPARE],
+        'iPhone 16 Pro Max 256GB price',
+      ),
+    ).not.toMatch(/9,299/);
+  });
+  it('main results with prices above titles, then recommendations with titles above', () => {
+    const page = [
+      '- heading "搜索结果" [level=2]',
+      '¥8,999',
+      'iPhone 16 Pro',
+      '¥9,999',
+      'iPhone 16 Pro Max',
+      '- heading "猜你喜欢" [level=2]',
+      'iPhone 15',
+      '¥4,999',
+      'iPhone 15 Plus',
+      '¥5,499',
+      'iPhone 14',
+      '¥3,999',
+    ].join('\n');
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 售价 ¥9,999。', [page], INTENT),
+    ).toContain('¥9,999');
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 售价 ¥8,999。', [page], INTENT),
+    ).not.toMatch(/8,999/);
+    expect(
+      partialAnswerPrices(
+        '部分完成：iPhone 15 Plus 售价 ¥5,499。',
+        [page],
+        'iPhone 15 Plus 多少钱',
+      ),
+    ).toContain('¥5,499');
+  });
+});

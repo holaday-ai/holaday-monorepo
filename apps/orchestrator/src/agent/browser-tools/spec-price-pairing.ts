@@ -202,6 +202,7 @@ function nearestModels(
     if (named.size) return named;
   }
   for (let k = i + step; k >= 0 && k < lines.length && Math.abs(k - i) <= MODEL_REACH; k += step) {
+    if (isSectionHeading(lines[k]!)) return null;
     const named = modelsOf(lines[k]!);
     if (named.size) return named;
     if (pricesOf(lines[k]!).length && !STRUCK_LINE_RE.test(lines[k]!)) return null;
@@ -209,20 +210,35 @@ function nearestModels(
   return null;
 }
 
+/** A section heading naming no model and no price (「猜你喜欢」「Related」): a layout may change there. */
+const isSectionHeading = (line: string): boolean =>
+  /^(?:-\s*)?heading\s+"[^"]*"|^#{1,4}\s/u.test(line) &&
+  !modelsOf(line).size &&
+  !pricesOf(line).length;
+
 /**
- * Which way a page's prices find their titles: down only when more of its price lines find a model
- * below than above (a list with each price above its title); up otherwise, ties included.
+ * Which way each line's prices find their titles, section by section (复审 #9: main results with each
+ * price above its title, then 「猜你喜欢」 cards with the title above): down only when more of the
+ * section's price lines find a model below than above; up otherwise, ties included.
  */
-function titleSide(lines: readonly string[]): -1 | 1 {
-  let up = 0;
-  let down = 0;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!pricesOf(lines[i]!).length || STRUCK_LINE_RE.test(lines[i]!)) continue;
-    if (modelsOf(lines[i]!).size) continue;
-    if (nearestModels(lines, i, null, -1)) up += 1;
-    if (nearestModels(lines, i, null, 1)) down += 1;
-  }
-  return down > up ? 1 : -1;
+function titleSides(lines: readonly string[]): Array<-1 | 1> {
+  const sides: Array<-1 | 1> = new Array(lines.length).fill(-1);
+  let start = 0;
+  const close = (end: number) => {
+    let up = 0;
+    let down = 0;
+    for (let i = start; i < end; i += 1) {
+      if (!pricesOf(lines[i]!).length || STRUCK_LINE_RE.test(lines[i]!)) continue;
+      if (modelsOf(lines[i]!).size) continue;
+      if (nearestModels(lines, i, null, -1)) up += 1;
+      if (nearestModels(lines, i, null, 1)) down += 1;
+    }
+    sides.fill(down > up ? 1 : -1, start, end);
+    start = end;
+  };
+  for (let i = 0; i < lines.length; i += 1) if (i > start && isSectionHeading(lines[i]!)) close(i);
+  close(lines.length);
+  return sides;
 }
 
 /**
@@ -238,12 +254,12 @@ function priceForModel(
   let found = false;
   for (const lines of read) {
     const named = new Set(lines.flatMap((l) => [...modelsOf(l)]));
-    const side = titleSide(lines);
+    const sides = titleSides(lines);
     for (let i = 0; i < lines.length; i += 1) {
       if (!pricesOf(lines[i]!).includes(amount)) continue;
       found = true;
       if (!models.size || named.size < 2) return 'ok';
-      const near = nearestModels(lines, i, amount, side);
+      const near = nearestModels(lines, i, amount, sides[i]);
       if (near && sharesModel(models, near)) return 'ok';
     }
   }
@@ -419,11 +435,14 @@ export function withoutUnmatchedPrices(
     .join('');
 }
 
-/** Words before a number that make it a budget, conversion or difference (复审 #8). */
+/**
+ * Words right before a number that make it a budget, conversion or difference (复审 #8) — explicit
+ * structures only (复审 #9: a bare 「约 / about / 左右」 is how a price is often written, and
+ * 「合约价 / 预约价」 are prices).
+ */
 const OWN_NUMBER_BEFORE_RE =
-  /预算|以内|不超过|低于|高于|约合|折合|合人民币|相当于|约|差价|相差|差了|便宜了?|贵了?|多花|省下?|budget|under|below|within|less than|more than|about|approx(?:imately)?|around|roughly|cheaper by|save[sd]?|difference of|[≈~]\s*$/iu;
-const OWN_NUMBER_AFTER_RE =
-  /^\s*(?:以内|以下|以上|左右|上下|的预算|预算|差价|cheaper|less|more|budget)/iu;
+  /(?:预算(?:是|为|在)?|不超过|低于|约合(?:人民币)?|折合(?:人民币)?|合人民币|相当于(?:人民币)?|差价(?:是|为)?|相差|差了|便宜了?|贵了?|多花了?|省下?了?|budget(?: of)?|under|below|within|less than|cheaper by|saves?|saved|difference of|≈)\s*$/iu;
+const OWN_NUMBER_AFTER_RE = /^\s*(?:以内|以下|的预算|预算)/u;
 
 /**
  * FIX-62 P0-3 (iPhone run f62k2): a 「部分完成」 answer's own text explained what was not found and
