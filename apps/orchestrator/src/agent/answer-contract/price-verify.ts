@@ -103,7 +103,6 @@ const LABEL_ONLY_SECONDARY =
   /^\s*(?:list(?:\s*price)?|was|typical(?:\s*price)?|rrp|m\.?r\.?p\.?|lowest(?:\s*price)?|原价|划线价|参考价|市场价|历史价|吊牌价|定价)\s*[:：]?\s*$/i;
 /** A whole-number price split from its cents across nodes: 「$9」 then 「99」 / 「.99」. */
 const WHOLE_PRICE_LINE = /^\s*((?:[A-Z]{1,3})?\$|RM|¥|￥|€|£)\s?(\d[\d,]*)\s*$/u;
-const CENTS_LINE = /^\s*\.?(\d{2})\s*$/;
 
 /** The block's primary prices (entries) and the amounts it shows only as secondary prices. */
 export function pricedLines(
