@@ -7,13 +7,13 @@
  * above titles, configurators):
  *  1. a guess about how a configuration is priced (通常 / 可能 / likely … 更贵 / 更便宜 / cheaper);
  *  2. a capacity in a price clause that no read page shows at all;
- *  3. a clause pointing a price at a capacity (「这是 128GB 版的起售价」「对应 128GB 版本」): the
- *     capacity must be on the line of that price or right beside it (one line);
- *  4. a capacity written with its own price in a clause: within PAIR_LINES lines of that price, in
- *     either direction; 「分别 / respectively」 sentences are taken whole.
+ *  3. a clause pointing a price at a capacity (「这是 128GB 版的起售价」「对应 128GB 版本」), and
+ *  4. a capacity written with its own price in a clause: the capacity within PAIR_LINES lines of
+ *     that price, in either direction, in a piece of the page that names no other model (Pro vs
+ *     Pro Max: 复审 #4 — the incident's 128GB was the Pro's); 「分别 / respectively」 taken whole.
  * Prices are compared by value (¥7,999 is ¥7999.00). A clause that says the price was not read
- * claims nothing. Which model a capacity belongs to on a page listing several is beyond a text
- * check: REBUILD-3's price contract (one block per variant) is the structural fix.
+ * claims nothing. Known limits: swapped pairs both within reach, a page that names no model; the
+ * structural fix is REBUILD-3's price contract (one block per variant).
  */
 
 /** A price as written: currency + number, or number + 元 / 円. */
@@ -83,12 +83,39 @@ function clausesOf(sentence: string): string[] {
     .filter(Boolean);
 }
 
-/** A read page shows `capacity` within `reach` lines of a price equal to `price` (any when null). */
+/**
+ * 复审 #4: the model a text is about, by its suffix — 「Pro Max」 before 「Pro」. Undefined when it
+ * names none. A capacity the page gives another model (「iPhone 16 Pro 提供 128GB」 beside the Pro
+ * Max's price) is no evidence for this one.
+ */
+const MODEL_RE = /\b(pro\s*max|pro|plus|mini|ultra|air|lite|se|fe|neo)\b/giu;
+function modelOf(text: string): string | undefined {
+  let best: string | undefined;
+  for (const m of text.matchAll(MODEL_RE)) {
+    const k = m[1]!.toLowerCase().replace(/\s+/g, '');
+    if (!best || k.length > best.length) best = k;
+  }
+  return best;
+}
+
+/** A line's pieces (「，；。」) — each with its own capacities and model. */
+function piecesOf(line: string): Array<{ caps: string[]; model: string | undefined }> {
+  return line
+    .split(/[，；。;]|,\s/u)
+    .map((piece) => ({ caps: capacitiesOf(piece), model: modelOf(piece) }))
+    .filter((piece) => piece.caps.length > 0);
+}
+
+/**
+ * A read page shows `capacity` within `reach` lines of a price equal to `price` (any when null),
+ * in a piece that names no other model than `model`.
+ */
 function near(
   pages: readonly string[][],
   capacity: string,
   price: number | null,
   reach: number,
+  model: string | undefined,
 ): boolean {
   for (const lines of pages) {
     for (let i = 0; i < lines.length; i += 1) {
@@ -98,7 +125,9 @@ function near(
       const from = Math.max(0, i - reach);
       const to = Math.min(lines.length - 1, i + reach);
       for (let k = from; k <= to; k += 1)
-        if (capacitiesOf(lines[k]!).includes(capacity)) return true;
+        for (const piece of piecesOf(lines[k]!))
+          if (piece.caps.includes(capacity) && (!model || !piece.model || piece.model === model))
+            return true;
     }
   }
   return false;
@@ -134,7 +163,12 @@ export function unsupportedSpecPricePairings(
       `「${clause.slice(0, 60)}」把 ${caps.map(shownCapacity).join('、')} 和价格对应起来，已读页面上这个价格旁边没有它：删掉这句，或写「没读到」`,
     );
   let previousPrices: number[] = [];
+  const taskModel = modelOf(intent);
+  let previousModel: string | undefined;
   for (const sentence of sentencesOf(summary)) {
+    // The model this sentence is about: its own, the sentence before's, or the task's.
+    const sentenceModel = modelOf(sentence) ?? previousModel ?? taskModel;
+    previousModel = sentenceModel;
     const sentencePrices = pricesOf(sentence);
     // 「…起售价为 RMB 9,999。这是 128GB 版的起售价格」: 「这」 is the sentence before's price.
     const nearby = sentencePrices.length ? sentencePrices : previousPrices;
@@ -163,16 +197,22 @@ export function unsupportedSpecPricePairings(
         unsupported(clause, absent);
         continue;
       }
-      // 3. Pointing a price at a capacity: on that price's line or right beside it.
+      const model = modelOf(clause) ?? sentenceModel;
+      // 3. Pointing a price at a capacity (「这是 / 对应 128GB」): that price — the sentence's or the
+      // sentence before's when it has one — must show it for this model (复审 #4: within reach).
       if (pointing) {
         const target: Array<number | null> = nearby.length === 1 ? nearby : [null];
-        const off = capacities.filter((c) => !target.some((p) => near(read, c, p, 1)));
+        const off = capacities.filter(
+          (c) => !target.some((p) => near(read, c, p, PAIR_LINES, model)),
+        );
         if (off.length) unsupported(clause, off);
         continue;
       }
-      // 4. Written with its own price: within PAIR_LINES of it.
+      // 4. Written with its own price: within PAIR_LINES of it, for this model.
       if (prices.length) {
-        const off = capacities.filter((c) => !prices.some((p) => near(read, c, p, PAIR_LINES)));
+        const off = capacities.filter(
+          (c) => !prices.some((p) => near(read, c, p, PAIR_LINES, model)),
+        );
         if (off.length) unsupported(clause, off);
       }
     }

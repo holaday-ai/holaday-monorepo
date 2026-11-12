@@ -171,4 +171,38 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     // Split over two lines: 「对应 128GB 版本」 points at the line before's price.
     expect(check('起售价 RMB 9,999\n对应 128GB 版本', [page], INTENT)).toHaveLength(1);
   });
+
+  it('复审 #4: pointing sentences on common layouts are not sent back', () => {
+    const news = [
+      'iPhone 16 Pro Max 提供 256GB、512GB 和 1TB 容量。',
+      '新机采用钛金属设计。',
+      'iPhone 16 Pro Max 以 RMB 9,999 起售。',
+    ].join('\n');
+    expect(check('起售价 RMB 9,999。这是 256GB 版本的价格。', [news], INTENT)).toEqual([]);
+    expect(check('起售价 RMB 9,999，对应 256GB 起步容量。', [news], INTENT)).toEqual([]);
+    const card = [
+      'Apple iPhone 15 (128 GB) - Black',
+      '4.6 out of 5 stars',
+      'List: $829.00',
+      '$729.00',
+    ].join('\n');
+    expect(
+      check('It costs $729. That is for the 128 GB model.', [card], 'iPhone 15 price'),
+    ).toEqual([]);
+  });
+
+  it('复审 #4: the incident and its variants are caught when the 128GB on the page is another model’s', () => {
+    // Both models in one paragraph, as Apple newsrooms write.
+    const sameLine =
+      'iPhone 16 Pro 提供 128GB、256GB、512GB 和 1TB 容量，iPhone 16 Pro Max 提供 256GB、512GB 和 1TB 容量；iPhone 16 Pro 以 RMB 7,999 起售，iPhone 16 Pro Max 以 RMB 9,999 起售。';
+    for (const answer of [
+      'iPhone 16 Pro Max 的起售价为 RMB 9,999。这是 128GB 入门版的起售价格。',
+      '起售价 RMB 9,999\n对应 128GB 版本',
+      'RMB 9,999 是 128GB 版本的起售价。',
+      'iPhone 16 Pro Max 起售价 RMB 9,999（128GB）。',
+    ])
+      expect(check(answer, [sameLine], INTENT)).toHaveLength(1);
+    // The right pairing on the same page passes.
+    expect(check('iPhone 16 Pro Max 256GB 起售价 RMB 9,999。', [sameLine], INTENT)).toEqual([]);
+  });
 });
