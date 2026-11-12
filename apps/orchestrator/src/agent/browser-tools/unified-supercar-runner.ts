@@ -6,11 +6,15 @@ import {
   saveBrowserProfile,
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
 import { getContract } from '../../execution/execution-pipeline.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { markAnswerContract } from '../answer-contract/handled.js';
+import { isPriceTask } from '../answer-contract/price-task.js';
+import { benchRecorderFromEnv } from '../bench-replay/recorder.js';
 import { cleanElementName } from '../internal-refs.js';
 import type {
   RunSupercarOptions,
@@ -669,6 +673,23 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         await opts.onCaptchaEvidence?.({ jpeg, url, at: new Date(), rule });
       });
     };
+    const loopIntent = [
+      opts.intent,
+      guidance ? `【结果要求】\n${guidance}` : '',
+      siteHint ? `【站点提示】\n${siteHint}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    // REBUILD-3: BENCH_RECORD_DIR records this run as a replay fixture (benchmark machines only).
+    const recorder = benchRecorderFromEnv({
+      id: opts.taskId,
+      intent: loopIntent,
+      userIntent: opts.intent,
+      observationV2: capabilities.observationV2,
+    });
+    const executeTool = recorder
+      ? recorder.wrapExecute((action: UnifiedBrowserAction) => tools.execute(action))
+      : (action: UnifiedBrowserAction) => tools.execute(action);
     const outcome = await runUnifiedBrowserLoop({
       wrapUp,
       ...(control
@@ -813,14 +834,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return interruption;
       },
       userIntent: opts.intent,
-      intent: [
-        opts.intent,
-        guidance ? `【结果要求】\n${guidance}` : '',
-        siteHint ? `【站点提示】\n${siteHint}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+      intent: loopIntent,
       ...(opts.askedFieldJudge ? { fieldJudge: opts.askedFieldJudge } : {}),
+      // REBUILD-3: price tasks answer through the price contract while the flag is on.
+      ...(env.ANSWER_CONTRACT_PRICE && isPriceTask(opts.intent)
+        ? { answerContract: 'price' as const }
+        : {}),
       ...(contract && guidance
         ? {
             reviewFinish: (summary: string, pageText?: string) =>
@@ -830,11 +849,21 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           }
         : {}),
       adapter,
-      ...(opts.unifiedWebSearch ? { webSearch: opts.unifiedWebSearch } : {}),
+      ...(opts.unifiedWebSearch
+        ? {
+            webSearch: recorder
+              ? recorder.wrapWebSearch(opts.unifiedWebSearch)
+              : opts.unifiedWebSearch,
+          }
+        : {}),
       ...(opts.unifiedWebSearchAfterWall
         ? { webSearchAfterWall: opts.unifiedWebSearchAfterWall }
         : {}),
-      ...(opts.unifiedReadPage ? { readPage: opts.unifiedReadPage } : {}),
+      ...(opts.unifiedReadPage
+        ? {
+            readPage: recorder ? recorder.wrapReadPage(opts.unifiedReadPage) : opts.unifiedReadPage,
+          }
+        : {}),
       ...(opts.unifiedLocalFixtures ? { localFixtures: true } : {}),
       maxSteps: opts.maxIterations ?? 40,
       signal: controller.signal,
@@ -864,7 +893,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             submit: action.tool === 'type' && action.submit === true,
             role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
           };
-        const result = await tools.execute(action);
+        const result = await executeTool(action);
         page = tools.page;
         lastTriggers = result.effect?.triggers ?? [];
         // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
@@ -961,6 +990,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       requestHuman: async ({ reason, message }) =>
         (await parkForReply(message, awaitingKindFor(reason))) !== null,
     });
+    if (recorder) {
+      const title = await tools.page.title().catch(() => '');
+      recorder.finish({
+        url: tools.page.url(),
+        title,
+        outcome: {
+          status: outcome.status,
+          ...(outcome.status === 'completed' ? { summary: outcome.summary } : {}),
+        },
+      });
+    }
     const stoppedAtEnd = sessionStopped();
     if (stoppedAtEnd && outcome.status !== 'cancelled')
       return {
@@ -979,12 +1019,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             confidence: 'observed',
           }),
         );
+        // REBUILD-3: downstream checks the contract replaces skip this task's answer.
+        if (outcome.answerContract) markAnswerContract(opts.taskId, outcome.answerContract);
         return {
           status: 'completed',
           summary: withAlternateNotice(outcome.summary),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
           ...(outcome.partial ? { partial: outcome.partial } : {}),
+          ...(outcome.answerContract ? { answerContract: outcome.answerContract } : {}),
         };
       case 'awaiting_user':
         return {
