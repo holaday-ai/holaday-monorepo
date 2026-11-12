@@ -103,3 +103,19 @@ describe('FIX-61B P1-4: read-only background-request pauses', () => {
     expect(refRole(snapshot, 'e9')).toBeNull();
   });
 });
+
+describe('FIX-62 P1-8: a log endpoint whose content check failed still asks', () => {
+  it('the same BestBuy logger with a failed keyed check (「 check:」) is not passed', () => {
+    const failed = [{ ...BACKGROUND[0]!, bodyShape: 'json(3 keys) check:key:uid' }];
+    expect(
+      readOnlyEffectMayPass({
+        readOnly: true,
+        reason: 'unexpected_effect',
+        action: { tool: 'navigate' },
+        triggers: failed,
+      }),
+    ).toBe(false);
+    // Without a failed check it passes, as before.
+    expect(pass({ tool: 'navigate' })).toBe(true);
+  });
+});

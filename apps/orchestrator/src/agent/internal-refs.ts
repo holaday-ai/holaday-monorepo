@@ -176,7 +176,7 @@ export function cleanElementName(raw: string | null | undefined): string | null 
 /**
  * FIX-61B P0-2 (Deploy-61 as-shan: the answer opened with the model's reasoning and a 「</think>」):
  * a model's reasoning never reaches the user. A `<think>…</think>` block goes whole; a lone closing
- * `</think>` takes everything before it with it. Other text is left as written.
+ * `</think>` that ends reasoning takes everything before it with it. Other text is left as written.
  */
 export function stripReasoning(text: string): string {
   if (!text || !/<\/?think>/i.test(text)) return text;
@@ -199,9 +199,18 @@ export function stripReasoning(text: string): string {
     // 复审 #2: a lone </think> (its <think> before the text) ends the reasoning wherever it is —
     // code before it is the reasoning's own. Prose that names both tags (no leading <think>, an
     // opening one before the closing one) is left as written.
+    // FIX-62 P1-9 (FIX-61B 复审 #2): only a </think> that ends reasoning — at the start, on a line
+    // of its own, right after a sentence's end, or ending a line. One named inside a sentence
+    // (「再用 </think> 标签结束推理部分」) or in quotes / 书名号 is prose and stays.
     const close = out.search(/<\/think>/i);
-    if (close >= 0 && !/<think>/i.test(out.slice(0, close)))
-      out = out.slice(close + '</think>'.length);
+    if (close >= 0 && !/<think>/i.test(out.slice(0, close))) {
+      const before = out.slice(0, close);
+      const after = out.slice(close + '</think>'.length);
+      const endsReasoning =
+        /(?:^|\n|[。！？.!?…])[ \t]*$/u.test(before) || /^[ \t]*(?:\n|$)/.test(after);
+      const quoted = /[「“"'《（(]\s*$/u.test(before) || /^\s*[」”"'》）)]/u.test(after);
+      if (endsReasoning && !quoted) out = after;
+    }
   }
   return out
     .replace(/\uE000(\d+)\uE000/g, (_, i: string) => code[Number(i)] ?? '')

@@ -50,7 +50,13 @@ export function readOnlyEffectMayPass(input: {
 }): boolean {
   const { readOnly, reason, action, triggers } = input;
   if (!readOnly || reason !== 'unexpected_effect' || !action) return false;
-  if (!triggers.length || !triggers.every((t) => telemetryTrigger(t))) return false;
+  // FIX-62 P1-8 (FIX-61B 复审 #1): a log endpoint whose content check failed (「 check:」 in its body
+  // shape) is not known to be a log report — it asks.
+  if (
+    !triggers.length ||
+    !triggers.every((t) => telemetryTrigger(t) && !/ check:/.test(t.bodyShape ?? ''))
+  )
+    return false;
   // Each request is judged by the step that set it off, not merely the last one acted.
   if (triggers.some((t) => t.action !== undefined && t.action !== action.tool)) return false;
   const label = cleanElementName(action.label) ?? '';

@@ -216,4 +216,17 @@ describe('FIX-61B P0-2: a model reasoning never reaches the user', () => {
     expect(hasReasoningTag(text)).toBe(false);
     expect(text).toContain('8848.86');
   });
+
+  it('FIX-62 P1-9: a </think> named inside a sentence or in quotes leaves the text before it', () => {
+    const prose = 'DeepSeek R1 的输出会先写推理，再用 </think> 标签结束推理部分，之后才是正文。';
+    expect(stripReasoning(prose)).toBe(prose);
+    const quoted = '推理结束的标记是「</think>」，看到它就说明后面是答案。';
+    expect(stripReasoning(quoted)).toBe(quoted);
+    const english = 'The model closes its reasoning with "</think>" before the answer.';
+    expect(stripReasoning(english)).toBe(english);
+    // Still gone: reasoning ending on its own line, after a sentence's end, or ending a line.
+    expect(stripReasoning('先想一想。</think>答案是 42。')).toBe('答案是 42。');
+    expect(stripReasoning('先想一想\n</think>\n答案是 42。')).toBe('答案是 42。');
+    expect(stripReasoning('先想一想</think>\n答案是 42。')).toBe('答案是 42。');
+  });
 });
