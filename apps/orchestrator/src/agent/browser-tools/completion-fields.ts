@@ -3,6 +3,7 @@ import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
 import { assessEngagementClaims } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
+import { unsupportedSpecPricePairings } from './spec-price-pairing.js';
 import {
   searchCardPriceMismatches,
   unmatchedVariantPrices,
@@ -1412,6 +1413,15 @@ export function assessCompletionFacts(input: {
     ...wrongVariantPrices(
       unescapeLiteralBreaks(input.summary),
       input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+    ),
+  );
+  // FIX-62 P0-2: a capacity / edition paired with a price must be paired so on a read page; a
+  // guess about another configuration's price is never the page's.
+  contradictions.push(
+    ...unsupportedSpecPricePairings(
+      unescapeLiteralBreaks(input.summary),
+      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
+      intent,
     ),
   );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
