@@ -145,12 +145,16 @@ import {
 } from '../../agent/text-sanitizer.js';
 import {
   decideExecutionRoute,
+  fallbackAnswer,
+  fallbackIntent,
+  fallbackQuery,
   freshnessHandover,
   freshnessProblem,
   interfaceSearchLane,
   routeTask,
   toolRouterSettings,
   toolsForRegion,
+  wallEnd,
   withInterfaceSource,
 } from '../../agent/tool-router/index.js';
 import {
@@ -7379,6 +7383,103 @@ export const tasksRouter = router({
                           summary: delivered.summary,
                           partial: delivered.partial,
                         };
+                      }
+                      // REBUILD-2 协调方决定 (2026-11-12): a read-only task whose browser run
+                      // ended on a wall (login, verification, blocked) takes the asked fields from
+                      // public sources through the search interface, says the wall plainly and
+                      // where each fact came from. Writes and personal data still go to the user;
+                      // the browser is not used again. TOOL_ROUTER_V2 only.
+                      const wall = taskToolRouter.enabled ? wallEnd(outcome, input.intent) : null;
+                      const wallSearchTool = wall
+                        ? (toolsForRegion(
+                            taskToolRouter.tools,
+                            userRow.modelDataRegion === 'cn' || userRow.modelDataRegion === 'intl'
+                              ? userRow.modelDataRegion
+                              : null,
+                          ).find((tool) => tool.kind === 'search') ?? null)
+                        : null;
+                      const wallRuntime = wallSearchTool
+                        ? resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion)
+                        : null;
+                      if (wall && wallSearchTool && wallRuntime?.kind === 'ready') {
+                        const language = replyLanguage(input.intent, userRow.modelDataRegion);
+                        const browserSummary =
+                          outcome.status === 'completed' ? outcome.summary : undefined;
+                        const query = fallbackQuery(input.intent, wall, browserSummary);
+                        const lane = interfaceSearchLane({
+                          tool: wallSearchTool,
+                          client: taskToolRouter.client,
+                          query,
+                          language,
+                        });
+                        try {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.progress',
+                            taskId,
+                            message: `${wall.site}${wall.kind === 'login' ? '要登录' : '把访问拦下了'}，改用公开来源查…`,
+                          });
+                        } catch {
+                          /* broadcast best-effort */
+                        }
+                        const fallback = await (await import('../../agent/scrape-runner.js'))
+                          .runScrapeTask({
+                            taskId,
+                            userId: ctx.userId,
+                            intent: fallbackIntent(input.intent, wall),
+                            userIntent: input.intent,
+                            responsesAdapter: wallRuntime.responses(),
+                            firecrawl: lane,
+                            searchLabel: wallSearchTool.title,
+                            logger: ctx.logger,
+                          })
+                          .catch((err: unknown) => {
+                            ctx.logger.warn(
+                              { taskId, err: err instanceof Error ? err.message : String(err) },
+                              'tool-router: wall fallback failed',
+                            );
+                            return null;
+                          });
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            code: 'WALL_PUBLIC_FALLBACK',
+                            wall,
+                            tool: wallSearchTool.id,
+                            query,
+                            status: fallback?.status ?? 'error',
+                            laneFailure: lane.lastFailure(),
+                          },
+                          'tool-router: read task ended on a wall, tried public sources',
+                        );
+                        if (fallback?.status === 'completed' && fallback.summary.trim()) {
+                          for (const url of fallback.sources) {
+                            recordEvidence(taskId, {
+                              fact: `web_search_url=${url}`,
+                              sourceType: 'tool_result',
+                              sourceDetail: 'wall fallback search result',
+                              confidence: 'observed',
+                            });
+                          }
+                          const summary = withInterfaceSource(
+                            fallbackAnswer({
+                              wall,
+                              intent: input.intent,
+                              answer: fallback.summary,
+                              ...(browserSummary ? { browserSummary } : {}),
+                            }),
+                            lane.lastSource(),
+                            language,
+                          );
+                          outcome = {
+                            status: 'completed',
+                            summary,
+                            iterations: outcome.iterations,
+                            toolsUsed: [...(outcome.toolsUsed ?? []), wallSearchTool.id],
+                            ...(outcome.status === 'completed' && outcome.partial
+                              ? { partial: outcome.partial }
+                              : {}),
+                          };
+                        }
                       }
                       if (browserRoute.limitation && outcome.status === 'completed') {
                         outcome = {

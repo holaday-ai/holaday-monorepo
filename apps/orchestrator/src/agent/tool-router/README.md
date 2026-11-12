@@ -111,3 +111,24 @@ malformed | empty | timeout | network`).
 - Price-candidate rows are not yet passed into the browser prompt (no price tool is enabled).
 - The routing turn and the interface call add latency to `tasks.create` (router ≤ 8 s timeout;
   one real WebSearch call took 3.5 s end to end).
+
+## Public sources after a wall (协调方决定 2026-11-12, `wall-fallback.ts`)
+
+With the flag on, a **read-only** browser task that ended on a wall — paused at a login /
+verification page, failed with a block / login reason, or a partial answer whose data is masked or
+login-only (「¥7??9」「登录后可查看」) — gets one more try from public sources:
+
+1. `wallEnd(outcome, intent)` decides it is a wall. Not for writes (`isReadOnlyIntent`, plus an
+   English 「Open X and tell me …」 read rule), data only the signed-in user has (我的/订单/购物车/
+   账户/…), or payment pages. Nothing is solved, retried or disguised; the browser is not used again.
+2. The first enabled `search` interface for the user's region runs `fallbackQuery` (the name the
+   browser read, else the address, plus the request); the scrape lane answers from those rows
+   with `fallbackIntent`: the request without addresses (or the lane would try to fetch them), told
+   that the site was walled, to name the site behind every fact, never to pass another site's data
+   off as the walled site's, and to say what it did not find.
+3. Delivered as `completed` (a partial browser answer stays partial): first the wall line
+   (「京东要登录才能看，没能直接读到页面。以下是从公开来源查到的（不是京东页面上的数据）：」) or,
+   for a partial answer, what the browser did read followed by 「另外从公开来源补查…」; then the
+   answer and the interface source line. The result URLs are recorded as evidence for the
+   browser lane's verifier. If the search finds nothing usable the browser outcome is kept as it was.
+4. Logged as `WALL_PUBLIC_FALLBACK` (wall, tool, query, status).

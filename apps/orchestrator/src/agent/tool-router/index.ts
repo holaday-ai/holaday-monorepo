@@ -16,6 +16,16 @@ export {
   isTimeSensitive,
 } from './freshness.js';
 export {
+  type BrowserEnd,
+  type WallEnd,
+  type WallKind,
+  fallbackAnswer,
+  fallbackIntent,
+  fallbackQuery,
+  wallEnd,
+  wallLine,
+} from './wall-fallback.js';
+export {
   type CallableInterfaceTool,
   INTERFACE_TOOLS,
   enabledInterfaceTools,
