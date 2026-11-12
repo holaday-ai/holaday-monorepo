@@ -205,4 +205,35 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     // The right pairing on the same page passes.
     expect(check('iPhone 16 Pro Max 256GB 起售价 RMB 9,999。', [sameLine], INTENT)).toEqual([]);
   });
+
+  it('复审 #5: model words that are not models, pages naming several models, the base model', () => {
+    const both =
+      'iPhone 16 Pro 和 iPhone 16 Pro Max 提供 256GB、512GB 和 1TB 容量。\niPhone 16 Pro 以 RMB 8,999 起售。';
+    expect(check('iPhone 16 Pro 256GB 售价 RMB 8,999。', [both], 'iPhone 16 Pro 多少钱')).toEqual(
+      [],
+    );
+    const base =
+      'iPhone 16 和 iPhone 16 Plus 提供 128GB、256GB 和 512GB 容量。\niPhone 16 以 RMB 5,999 起售。';
+    expect(
+      check(
+        'iPhone 16 Pro Max 起售价 RMB 9,999。iPhone 16 标准版 128GB 售价 RMB 5,999。',
+        [base, NEWSROOM],
+        'iPhone 16 系列价格',
+      ),
+    ).toEqual([]);
+    const jd = ['Apple iPhone 16 Pro 128GB 原色', '¥7899 PLUS会员价'].join('\n');
+    expect(check('128GB 版本京东 PLUS 会员价 ¥7,899。', [jd], 'iPhone 16 Pro 价格')).toEqual([]);
+    const amazon = ['Samsung Galaxy S24 Ultra 256GB', '$19.99'].join('\n');
+    expect(check('The 256GB case costs $19.99 plus shipping.', [amazon], 'case price')).toEqual([]);
+    const caseCard = ['iPhone 15 Pro 128GB Case Plus Screen Protector', '¥99'].join('\n');
+    expect(check('iPhone 15 Pro 128GB 手机壳 ¥99。', [caseCard], '手机壳价格')).toEqual([]);
+    const pro = 'iPhone 16 Pro 提供 128GB、256GB 容量。\niPhone 16 Pro 以 RMB 7,999 起售。';
+    expect(
+      check(
+        'iPhone 16 Pro Max 起售价 RMB 9,999。而 128GB 起步的那款售价 RMB 7,999。',
+        [pro, NEWSROOM],
+        'iPhone 16 价格',
+      ),
+    ).toEqual([]);
+  });
 });

@@ -84,27 +84,45 @@ function clausesOf(sentence: string): string[] {
 }
 
 /**
- * 复审 #4: the model a text is about, by its suffix — 「Pro Max」 before 「Pro」. Undefined when it
- * names none. A capacity the page gives another model (「iPhone 16 Pro 提供 128GB」 beside the Pro
- * Max's price) is no evidence for this one.
+ * 复审 #4/#5: the models a text names. A suffix counts only right after a model number or a series
+ * name (「16 Pro」「S24 Ultra」「MacBook Air」「iPad mini」) — never a lone word (「PLUS 会员价」「plus
+ * shipping」「Case Plus」). A number with no suffix after a series (「iPhone 16」) and 「标准版」 are the
+ * base model. A text may name several (「iPhone 16 Pro 和 iPhone 16 Pro Max 提供…」): it is evidence
+ * for each. A capacity the page gives only another model (the incident: the Pro's 128GB beside the
+ * Pro Max's price) is no evidence for this one.
  */
-const MODEL_RE = /\b(pro\s*max|pro|plus|mini|ultra|air|lite|se|fe|neo)\b/giu;
-function modelOf(text: string): string | undefined {
-  let best: string | undefined;
-  for (const m of text.matchAll(MODEL_RE)) {
-    const k = m[1]!.toLowerCase().replace(/\s+/g, '');
-    if (!best || k.length > best.length) best = k;
-  }
-  return best;
+const SUFFIX = 'pro\\s*max|pro|plus|mini|ultra|air|lite|se|fe|neo';
+const NUMBERED_RE = new RegExp(
+  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b`,
+  'giu',
+);
+const SERIES_RE = new RegExp(
+  `\\b(?:macbook|ipad|iphone|galaxy|pixel|surface)\\s+(${SUFFIX})\\b`,
+  'giu',
+);
+const BASE_RE = new RegExp(
+  `\\b(?:iphone|ipad|galaxy\\s*s|pixel|mate|redmi|xiaomi)\\s*\\d{1,3}(?![\\d.]|\\s*(?:${SUFFIX}|max|e)\\b)|小米\\s*\\d{1,3}(?!\\s*(?:${SUFFIX}|ultra)\\b)|标准版|标准款|base model`,
+  'giu',
+);
+function modelsOf(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const re of [NUMBERED_RE, SERIES_RE])
+    for (const m of text.matchAll(re)) out.add(m[1]!.toLowerCase().replace(/\s+/g, ''));
+  if (BASE_RE.test(text)) out.add('base');
+  BASE_RE.lastIndex = 0;
+  return out;
 }
 
-/** A line's pieces (「，；。」) — each with its own capacities and model. */
-function piecesOf(line: string): Array<{ caps: string[]; model: string | undefined }> {
+/** A line's pieces (「，；。」) — each with its own capacities and the models it names. */
+function piecesOf(line: string): Array<{ caps: string[]; models: Set<string> }> {
   return line
     .split(/[，；。;]|,\s/u)
-    .map((piece) => ({ caps: capacitiesOf(piece), model: modelOf(piece) }))
+    .map((piece) => ({ caps: capacitiesOf(piece), models: modelsOf(piece) }))
     .filter((piece) => piece.caps.length > 0);
 }
+
+const sharesModel = (a: Set<string>, b: Set<string>) =>
+  a.size === 0 || b.size === 0 || [...a].some((m) => b.has(m));
 
 /**
  * A read page shows `capacity` within `reach` lines of a price equal to `price` (any when null),
@@ -115,7 +133,7 @@ function near(
   capacity: string,
   price: number | null,
   reach: number,
-  model: string | undefined,
+  models: Set<string>,
 ): boolean {
   for (const lines of pages) {
     for (let i = 0; i < lines.length; i += 1) {
@@ -126,8 +144,7 @@ function near(
       const to = Math.min(lines.length - 1, i + reach);
       for (let k = from; k <= to; k += 1)
         for (const piece of piecesOf(lines[k]!))
-          if (piece.caps.includes(capacity) && (!model || !piece.model || piece.model === model))
-            return true;
+          if (piece.caps.includes(capacity) && sharesModel(models, piece.models)) return true;
     }
   }
   return false;
@@ -163,12 +180,18 @@ export function unsupportedSpecPricePairings(
       `「${clause.slice(0, 60)}」把 ${caps.map(shownCapacity).join('、')} 和价格对应起来，已读页面上这个价格旁边没有它：删掉这句，或写「没读到」`,
     );
   let previousPrices: number[] = [];
-  const taskModel = modelOf(intent);
-  let previousModel: string | undefined;
+  // A task naming a series (「iPhone 16 价格」) asks about the whole line: only an explicit 标准版
+  // makes it the base model.
+  const taskModels = modelsOf(intent);
+  if (!/标准版|标准款|base model/iu.test(intent)) taskModels.delete('base');
+  let previousModels = new Set<string>();
   for (const sentence of sentencesOf(summary)) {
-    // The model this sentence is about: its own, the sentence before's, or the task's.
-    const sentenceModel = modelOf(sentence) ?? previousModel ?? taskModel;
-    previousModel = sentenceModel;
+    // The models a clause is about: its own, its sentence's, else the task's. Only a pointing clause
+    // (「这是…」 is the sentence before's) takes the sentence before's; another never does
+    // (复审 #5: 「而 128GB 起步的那款」 is not the previous sentence's model).
+    const ownModels = modelsOf(sentence);
+    const beforeModels = previousModels;
+    previousModels = ownModels;
     const sentencePrices = pricesOf(sentence);
     // 「…起售价为 RMB 9,999。这是 128GB 版的起售价格」: 「这」 is the sentence before's price.
     const nearby = sentencePrices.length ? sentencePrices : previousPrices;
@@ -197,7 +220,16 @@ export function unsupportedSpecPricePairings(
         unsupported(clause, absent);
         continue;
       }
-      const model = modelOf(clause) ?? sentenceModel;
+      const pick = (...sets: Set<string>[]) =>
+        sets.find((set) => set.size > 0) ?? new Set<string>();
+      const model = pointing
+        ? pick(
+            modelsOf(clause),
+            ownModels,
+            sentencePrices.length ? new Set() : beforeModels,
+            taskModels,
+          )
+        : pick(modelsOf(clause), ownModels, taskModels);
       // 3. Pointing a price at a capacity (「这是 / 对应 128GB」): that price — the sentence's or the
       // sentence before's when it has one — must show it for this model (复审 #4: within reach).
       if (pointing) {
