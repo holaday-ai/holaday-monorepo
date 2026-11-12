@@ -177,23 +177,52 @@ function near(
 /** Lines up from a price within which the model it belongs to is looked for (a card's title). */
 const MODEL_REACH = 12;
 
+/** A was / list / struck price line: not another card's price (复审 #8: amazon 「List: $1,099」). */
+const STRUCK_LINE_RE =
+  /was|list(?:\s*price)?\s*:|typical|\brrp\b|m\.?s\.?r\.?p|原价|划线|参考价|吊牌价|市场价|门市价/iu;
+
 /**
- * The models nearest above a price at line `i`: its own piece, its line, then the lines above —
- * stopping at another price (another card or column). Null when none is found that way.
+ * The models nearest a price at line `i`: its own piece, its line, then the lines `step` way (-1 up
+ * to a card's title, +1 down for price-above-title lists, 复审 #8) — stopping at another price
+ * (another card or column; a was / list price line is passed over). Null when none is found.
  */
-function nearestModels(lines: readonly string[], i: number, amount: number): Set<string> | null {
+function nearestModels(
+  lines: readonly string[],
+  i: number,
+  amount: number | null,
+  step: -1 | 1 = -1,
+): Set<string> | null {
   const line = lines[i]!;
-  const piece = line.split(/[，；。;]|,\s/u).find((p) => pricesOf(p).includes(amount)) ?? line;
+  const piece =
+    amount === null
+      ? line
+      : (line.split(/[，；。;]|,\s/u).find((p) => pricesOf(p).includes(amount)) ?? line);
   for (const where of [piece, line]) {
     const named = modelsOf(where);
     if (named.size) return named;
   }
-  for (let k = i - 1; k >= 0 && k >= i - MODEL_REACH; k -= 1) {
+  for (let k = i + step; k >= 0 && k < lines.length && Math.abs(k - i) <= MODEL_REACH; k += step) {
     const named = modelsOf(lines[k]!);
     if (named.size) return named;
-    if (pricesOf(lines[k]!).length) return null;
+    if (pricesOf(lines[k]!).length && !STRUCK_LINE_RE.test(lines[k]!)) return null;
   }
   return null;
+}
+
+/**
+ * Which way a page's prices find their titles: down only when more of its price lines find a model
+ * below than above (a list with each price above its title); up otherwise, ties included.
+ */
+function titleSide(lines: readonly string[]): -1 | 1 {
+  let up = 0;
+  let down = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!pricesOf(lines[i]!).length || STRUCK_LINE_RE.test(lines[i]!)) continue;
+    if (modelsOf(lines[i]!).size) continue;
+    if (nearestModels(lines, i, null, -1)) up += 1;
+    if (nearestModels(lines, i, null, 1)) down += 1;
+  }
+  return down > up ? 1 : -1;
 }
 
 /**
@@ -209,11 +238,12 @@ function priceForModel(
   let found = false;
   for (const lines of read) {
     const named = new Set(lines.flatMap((l) => [...modelsOf(l)]));
+    const side = titleSide(lines);
     for (let i = 0; i < lines.length; i += 1) {
       if (!pricesOf(lines[i]!).includes(amount)) continue;
       found = true;
       if (!models.size || named.size < 2) return 'ok';
-      const near = nearestModels(lines, i, amount);
+      const near = nearestModels(lines, i, amount, side);
       if (near && sharesModel(models, near)) return 'ok';
     }
   }
@@ -344,6 +374,7 @@ export function withoutUnmatchedPrices(
   text: string,
   pages: readonly string[],
   intent = '',
+  opts: { absent?: boolean } = {},
 ): string {
   if (!text || !new RegExp(PRICE_RE.source, 'iu').test(text)) return text;
   const read = pages.map((page) =>
@@ -355,8 +386,16 @@ export function withoutUnmatchedPrices(
   const taskModels = modelsOf(intent);
   if (!/标准版|标准款|base model/iu.test(intent))
     for (const m of [...taskModels]) if (m.endsWith('|base')) taskModels.delete(m);
-  const shown = (amount: number, models: Set<string>): boolean =>
-    priceForModel(read, amount, models) === 'ok';
+  // 复审 #8: an English answer gets an English placeholder.
+  const placeholder = /[\u4e00-\u9fff]/u.test(intent || text)
+    ? '（没读到准确价格）'
+    : '(exact price not read)';
+  // 'absent' (no read page shows it) only when every page read is still here (复审 #8: older reads
+  // drop out after 20, and a price read off a screenshot is in none).
+  const unmatched = (amount: number, models: Set<string>): boolean => {
+    const where = priceForModel(read, amount, models);
+    return where === 'other' || (where === 'absent' && opts.absent !== false);
+  };
   return text
     .split(/(?<=[。！？!?；;\n])/u)
     .map((sentence) => {
@@ -364,15 +403,27 @@ export function withoutUnmatchedPrices(
       const models = own.size ? own : taskModels;
       return sentence.replace(
         new RegExp(`[「“"]?(?:${PRICE_RE.source})\\s*起?[」”"]?`, 'giu'),
-        (match) => {
+        (match, ...rest) => {
+          const at = rest.at(-2) as number;
+          // 复审 #8: a budget, conversion or difference is the person's or the answer's own number,
+          // not a price the page gave this model.
+          const before = sentence.slice(Math.max(0, at - 8), at);
+          const after = sentence.slice(at + match.length, at + match.length + 6);
+          if (OWN_NUMBER_BEFORE_RE.test(before) || OWN_NUMBER_AFTER_RE.test(after)) return match;
           const amount = pricesOf(match)[0];
-          if (amount === undefined || shown(amount, models)) return match;
-          return '（没读到准确价格）';
+          if (amount === undefined || !unmatched(amount, models)) return match;
+          return placeholder;
         },
       );
     })
     .join('');
 }
+
+/** Words before a number that make it a budget, conversion or difference (复审 #8). */
+const OWN_NUMBER_BEFORE_RE =
+  /预算|以内|不超过|低于|高于|约合|折合|合人民币|相当于|约|差价|相差|差了|便宜了?|贵了?|多花|省下?|budget|under|below|within|less than|more than|about|approx(?:imately)?|around|roughly|cheaper by|save[sd]?|difference of|[≈~]\s*$/iu;
+const OWN_NUMBER_AFTER_RE =
+  /^\s*(?:以内|以下|以上|左右|上下|的预算|预算|差价|cheaper|less|more|budget)/iu;
 
 /**
  * FIX-62 P0-3 (iPhone run f62k2): a 「部分完成」 answer's own text explained what was not found and
@@ -380,7 +431,12 @@ export function withoutUnmatchedPrices(
  * model, a price in a partial answer goes through the same check as a failure explanation; the 未核实
  * lines are left as they are (they already say what was not found word for word).
  */
-export function partialAnswerPrices(text: string, pages: readonly string[], intent = ''): string {
+export function partialAnswerPrices(
+  text: string,
+  pages: readonly string[],
+  intent = '',
+  opts: { absent?: boolean } = {},
+): string {
   const taskModels = modelsOf(intent);
   if (!/标准版|标准款|base model/iu.test(intent))
     for (const m of [...taskModels]) if (m.endsWith('|base')) taskModels.delete(m);
@@ -388,9 +444,11 @@ export function partialAnswerPrices(text: string, pages: readonly string[], inte
   return text
     .split('\n')
     .map((line) =>
-      /^\s*(?:未核实：|Not verified:|译述，未逐字核对：|Paraphrased, not checked)/u.test(line)
+      /^\s*(?:[-*•·]\s*)?(?:未核实：|Not verified:|译述，未逐字核对：|Paraphrased, not checked)/u.test(
+        line,
+      )
         ? line
-        : withoutUnmatchedPrices(line, pages, intent),
+        : withoutUnmatchedPrices(line, pages, intent, opts),
     )
     .join('\n');
 }

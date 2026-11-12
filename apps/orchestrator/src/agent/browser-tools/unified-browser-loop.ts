@@ -463,14 +463,20 @@ export async function runUnifiedBrowserLoop(
   const rescueState: RescueState = input.rescueState ?? { started: false };
   // FIX-62 P0-3: what the pages said, for the prices a failure / partial explanation names.
   const readTexts: string[] = [];
+  // 复审 #8: a price no kept read shows is only 「not read」 when no read has dropped out.
+  let readsDropped = false;
   const looped = await browserLoop({
     ...input,
     rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
       if (result.ok && result.text && READ_TEXT_TOOLS.has(action.tool)) {
+        if (result.text.length > 64_000) readsDropped = true;
         readTexts.push(result.text.slice(0, 64_000));
-        if (readTexts.length > 20) readTexts.shift();
+        if (readTexts.length > 20) {
+          readTexts.shift();
+          readsDropped = true;
+        }
       }
       const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
       steps.push(
@@ -501,7 +507,8 @@ export async function runUnifiedBrowserLoop(
     withoutDanglingLeads(humanizeToolMentions(stripInternalRefs(text, seen)), written);
   // FIX-62 P0-3: an explanation's price must be this item's on a read page, or it is not said.
   const intentText = input.userIntent ?? input.intent;
-  const explain = (text: string) => withoutUnmatchedPrices(strip(text), readTexts, intentText);
+  const explain = (text: string) =>
+    withoutUnmatchedPrices(strip(text), readTexts, intentText, { absent: !readsDropped });
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
@@ -513,7 +520,9 @@ export async function runUnifiedBrowserLoop(
       return {
         ...outcome,
         // FIX-62 P0-3 (f62k2): a partial answer explains what is missing — its prices too.
-        summary: outcome.partial ? partialAnswerPrices(summary, readTexts, intentText) : summary,
+        summary: outcome.partial
+          ? partialAnswerPrices(summary, readTexts, intentText, { absent: !readsDropped })
+          : summary,
         ...(outcome.partial?.missing
           ? { partial: { ...outcome.partial, missing: explain(outcome.partial.missing) } }
           : {}),

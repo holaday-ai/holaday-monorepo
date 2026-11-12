@@ -397,3 +397,61 @@ describe('FIX-62 P0-3 f62k2: a partial answer’s prices are checked like an exp
     expect(partialAnswerPrices(K2, [], '帮我找 3 款 USB-C 数据线的价格')).toBe(K2);
   });
 });
+
+// FIX-62 复审 #8: what the partial-answer check must leave alone.
+describe('FIX-62 复审 #8: partial answers keep the right prices and the person’s own numbers', () => {
+  const INTENT = 'iPhone 16 Pro Max 256GB 多少钱';
+  it('a list with each price above its title: the right price stays, the other card’s goes', () => {
+    const page = ['¥8,999', 'iPhone 16 Pro', '¥9,999', 'iPhone 16 Pro Max'].join('\n');
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 售价 ¥9,999。', [page], INTENT),
+    ).toContain('¥9,999');
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 售价 ¥8,999。', [page], INTENT),
+    ).not.toMatch(/8,999/);
+  });
+  it('a card with its 「List」 price above the price: the price stays', () => {
+    const page = ['Apple iPhone 16 Pro Max 256GB (Renewed)', 'List: $1,099.00', '$929.00'].join(
+      '\n',
+    );
+    const text = '部分完成：亚马逊翻新 iPhone 16 Pro Max 256GB 为 $929.00。';
+    expect(partialAnswerPrices(text, [page], INTENT)).toBe(text);
+  });
+  it('a budget, a conversion and a difference are left as written', () => {
+    const page = ['iPhone 16 Pro Max', 'RMB 9,999 起'].join('\n');
+    for (const text of [
+      '部分完成：没有找到 ¥8,000 以内的 iPhone 16 Pro Max。',
+      '部分完成：iPhone 16 Pro Max 官网 RMB 9,999 起，约合人民币 ¥8,600 的翻新机没读到。',
+      '部分完成：iPhone 16 Pro Max 比官网便宜 ¥100 的渠道没找到。',
+    ])
+      expect(partialAnswerPrices(text, [page], INTENT)).toBe(text);
+  });
+  it('an English answer gets an English placeholder', () => {
+    const out = partialAnswerPrices(
+      'Partially completed: iPhone 16 Pro Max 256GB is $1,234 on Amazon.',
+      [['iPhone 16 Pro Max', '$1,199'].join('\n')],
+      'iPhone 16 Pro Max 256GB price',
+    );
+    expect(out).toContain('(exact price not read)');
+    expect(out).not.toMatch(/[一-鿿]/);
+  });
+  it('a 未核实 line written as a list item is left as written', () => {
+    const line = '- 未核实：以下内容未能在已读页面中逐字找到，请自行确认——价格「$929.00」';
+    expect(partialAnswerPrices(`部分完成：没读到。\n${line}`, [], INTENT)).toContain(line);
+  });
+  it('when reads have dropped out, a price no kept read shows is kept (another model’s still goes)', () => {
+    const compare = [
+      'iPhone 17 Pro',
+      'RMB 9,299 起',
+      'iPhone 16 Pro Max',
+      '于授权经销商处有售',
+    ].join('\n');
+    const absent = '部分完成：iPhone 16 Pro Max 京东价 ¥8,888。';
+    expect(partialAnswerPrices(absent, [compare], INTENT, { absent: false })).toBe(absent);
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 官网 RMB 9,299 起。', [compare], INTENT, {
+        absent: false,
+      }),
+    ).not.toMatch(/9,299/);
+  });
+});
