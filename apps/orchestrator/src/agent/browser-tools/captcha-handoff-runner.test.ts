@@ -296,3 +296,17 @@ it('FIX-52 #8: the browser is kept from idle reclaim for as long as the wait las
     vi.useRealTimers();
   }
 });
+
+it('REBUILD-2 协调方决定: a read task the caller answers from public sources is not handed the verification', async () => {
+  const f = await scenario(3000, undefined, { wallFallback: true });
+  const started = Date.now();
+  const outcome = await f.run;
+  // Ends at the wall at once (the caller's public-source fallback takes over), no 10-minute wait.
+  expect(outcome.status).toBe('awaiting_user');
+  // What the wall check reads to recognise a verification wall.
+  expect(outcome.status === 'awaiting_user' && outcome.question).toMatch(/验证|captcha|verif/i);
+  expect(Date.now() - started).toBeLessThan(2500);
+  expect(f.events).toEqual([]);
+  expect(replay.pauses).toBe(0);
+  f.control.close();
+}, 10000);

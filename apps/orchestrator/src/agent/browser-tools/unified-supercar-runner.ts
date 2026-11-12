@@ -674,7 +674,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       ...(control
         ? {
             // A search wall the fallback can answer is not the user's job.
-            captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
+            captchaHandoffWanted: () =>
+              !opts.wallFallback && !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
               // FIX-52 #8 (Deploy-52 wall-zhihu): nobody watching the panel, the pool's 5-minute idle
