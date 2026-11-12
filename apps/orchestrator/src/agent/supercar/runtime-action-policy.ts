@@ -8,6 +8,8 @@ export interface RuntimeAction {
   name?: string | null;
   inputType?: string | null;
   url?: string | null;
+  /** FIX-62 P1-7: a clicked link's own address (absolute), when the control is a link. */
+  href?: string | null;
   tagName?: string | null;
   pageUrl?: string | null;
   pageTitle?: string | null;
@@ -107,7 +109,19 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
 
   if (action.kind === 'navigate') return { allowed: true };
 
-  const raw = [action.label, action.ariaLabel, action.title, action.placeholder, action.name];
+  // FIX-62 P1-7 (DEPLOY-61 第 1 步 core-02): a search result's link is named by its whole card —
+  // 「Weather https://www.nea.gov.sg/…  Government officials will NEVER ask you to transfer money…」
+  // — and 「transfer」 in the snippet made an ordinary link ask 「确认继续执行吗」. A link to a web
+  // page is judged by its title: the name's first part, before a URL or a long gap.
+  const plainLink =
+    action.kind === 'click' &&
+    (action.tagName ?? '').toLowerCase() === 'a' &&
+    /^https?:\/\//i.test((action.href ?? '').split(' ')[0] ?? '');
+  const linkTitle = (value: string | null | undefined): string | null | undefined =>
+    plainLink && value ? (value.split(/\s{2,}|\n|\s(?=https?:\/\/)/)[0] ?? '').slice(0, 80) : value;
+  const raw = [action.label, action.ariaLabel, action.title, action.placeholder, action.name].map(
+    linkTitle,
+  );
   const signals = raw.map((value) => normalize(value)).filter(Boolean);
   const matchedSignal =
     signals.find((value) => IRREVERSIBLE_CONTROL_RE.test(value)) ??

@@ -41,7 +41,8 @@ describe('FIX-61 复审 #2: the login step names the site that asked for it', ()
         intent: '打开 https://www.apple.com.cn/shop/bag 看购物袋',
         finalUrl: 'https://www.apple.com.cn/shop/bag',
       })?.label,
-    ).toMatch(/^你在浏览器里登录.*apple.*，我帮你读完整内容$/i);
+      // FIX-62 P1-11: the site by its name, not its domain.
+    ).toBe('你在浏览器里登录苹果官网，我帮你读完整内容');
   });
 
   it('English rescued lead names its site', () => {
@@ -50,5 +51,23 @@ describe('FIX-61 复审 #2: the login step names the site that asked for it', ()
       partialLoginStep({ text, intent: 'how much is the iPhone 16 Pro Max 256GB', finalUrl: APPLE })
         ?.label,
     ).toBe("Log in to JD.com in the browser and I'll read the exact price");
+  });
+});
+
+describe('FIX-62 P1-11: 「无需登录」 is no login wall; sites by name', () => {
+  it('an answer that says no login was needed offers no login step', () => {
+    for (const text of [
+      '苹果官网无需登录即可查看价格，iPhone 16 Pro Max 256GB 起售价为 RMB 9,999。',
+      '这个页面不需要登录，价格是 RMB 9,999。',
+      'The Apple page shows the price without logging in: $1,199.',
+      "The page doesn't require a login; it lists $1,199.",
+    ])
+      expect(partialLoginStep({ text, intent: IPHONE, finalUrl: APPLE })).toBeNull();
+  });
+  it('a real login wall on the same page still offers the step, named in words', () => {
+    const text = '苹果官网页面要登录才能看价格，只拿到了一部分。';
+    expect(partialLoginStep({ text, intent: IPHONE, finalUrl: APPLE })?.label).toBe(
+      '你在浏览器里登录苹果官网，我帮你读准确价格',
+    );
   });
 });

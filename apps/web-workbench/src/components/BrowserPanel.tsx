@@ -1357,12 +1357,21 @@ function CloudBrowserPanel({
   // forwards plain ASCII keystrokes via `type` / `key` paths; CJK
   // composition input bypasses that route entirely (browsers swallow
   // composing keystrokes from the keydown handler).
+  // FIX-62 P1-4: in CDP mode `sendInput` returns at once — the bar's text was dropped without a
+  // word. It goes through the screen's own channel instead; when that cannot send, it says so.
+  const cdpTextChannel = React.useRef<((text: string) => boolean) | null>(null);
   const sendInsertText = React.useCallback(
     (text: string) => {
-      if (!interactiveActive || !text) return;
+      if (!text) return;
+      if (usingCdp) {
+        if (!cdpTextChannel.current?.(text))
+          toast.show('文字没发出去：请先点一下画面上的输入框，再发送', 'info');
+        return;
+      }
+      if (!interactiveActive) return;
       sendInput({ kind: 'insert_text', text });
     },
-    [interactiveActive, sendInput],
+    [interactiveActive, sendInput, toast, usingCdp],
   );
 
   const onWheel = React.useCallback(
@@ -1839,6 +1848,7 @@ function CloudBrowserPanel({
                     replayAfterControl={taskIsTerminal}
                     onHeldInputDropped={handleHeldInputDropped}
                     onKeyRefused={handleKeyRefused}
+                    textChannel={cdpTextChannel}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}

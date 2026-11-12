@@ -103,6 +103,11 @@ interface Props {
   onHeldInputDropped?: () => void;
   /** FIX-61B P1-5: the server refused a key (the screen changed under it): ask to press again. */
   onKeyRefused?: () => void;
+  /**
+   * FIX-62 P1-4: a channel for the panel's text bar (中文 / 任意文本输入). Set to a sender that returns
+   * false when this screen cannot send now (only watching, no control asked for).
+   */
+  textChannel?: React.MutableRefObject<((text: string) => boolean) | null>;
   onStatusChange?: (status: CdpScreencastStatus) => void;
   /** Fired after the first real frame is painted for the current viewport. */
   onFrameReady?: () => void;
@@ -168,6 +173,7 @@ export function CdpScreencastViewport({
   onRequestControl,
   onHeldInputDropped,
   onKeyRefused,
+  textChannel,
   replayAfterControl = true,
   onStatusChange,
   onFrameReady,
@@ -1126,6 +1132,14 @@ export function CdpScreencastViewport({
   // request is in flight), so the release / keys that follow the asking press are not lost.
   const acceptsInput = (): boolean =>
     !viewOnly || Boolean(onRequestControl) || controlRequestInFlight(Date.now());
+  // FIX-62 P1-4: the text bar's words go the same way as typed text — insertText, held for
+  // control like any other input. Before, the bar's send returned at once in CDP mode.
+  if (textChannel)
+    textChannel.current = (text: string): boolean => {
+      if (!text || !acceptsInput()) return false;
+      deliverInput(() => ({ type: 'insertText', text }));
+      return true;
+    };
   // Mouse handlers
   const onMouseMove = (e: React.MouseEvent) => {
     if (viewOnly || !canDeliverNow()) return;

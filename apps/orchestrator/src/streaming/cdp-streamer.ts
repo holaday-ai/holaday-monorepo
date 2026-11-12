@@ -158,7 +158,121 @@ export class CdpStreamer {
     this.observationSequence++;
     this.opts.onObservationInvalidated?.();
   }
+  /** The revision the frames now being published carry (FIX-62 P0-1: checked at dispatch). */
+  currentRevision(): number {
+    return this.viewportRevision;
+  }
+  /**
+   * FIX-62 P0-1: the main frame's document (CDP loaderId) the frames now show, as the navigation
+   * events last reported it. Empty until the first read or navigation of the bound page.
+   */
+  private loader = '';
+  /** The current history entry (pushState makes a new one; replaceState keeps it). */
+  private historyEntry: number | null = null;
+  documentLoader(): string {
+    return this.loader;
+  }
+  /**
+   * The main frame's loader read from the browser NOW — newer than documentLoader() when a
+   * navigation committed whose event has not been handled yet. Null when it cannot be read in
+   * time (a JS dialog blocks the page): the caller then cannot confirm the document.
+   */
+  async freshLoader(timeoutMs = 1500): Promise<string | null> {
+    const session = this.cdpSession;
+    if (!session) return null;
+    let timer: NodeJS.Timeout | undefined;
+    const read = session
+      .send('Page.getFrameTree')
+      .then((r) => r.frameTree.frame.loaderId)
+      .catch(() => null);
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+      timer.unref?.();
+    });
+    const loader = await Promise.race([read, late]);
+    if (timer) clearTimeout(timer);
+    if (loader && !this.loader && session === this.cdpSession) this.loader = loader;
+    return loader;
+  }
+  /** Same-document navigations whose history entry is still being read (复审 #2 B). */
+  private historyReads = 0;
+  /** Bumped when the page is (re)bound: an older read's result and count no longer apply. */
+  private historyGeneration = 0;
+  /** Waiters for the reads in flight to settle (复审 #3 #1). */
+  private historyWaiters: Array<() => void> = [];
+  /** The current history entry id; null until read, -1 when it could not be read. */
+  historyEntryId(): number | null {
+    return this.historyEntry;
+  }
+  /** A same-document navigation happened and whether it was a new entry is not known yet. */
+  historyPending(): boolean {
+    return this.historyReads > 0;
+  }
+  /** Sentinels for entries that could not be read: each new, never equal to a real id. */
+  private unknownEntrySeq = 0;
+  private unknownEntry(): number {
+    this.unknownEntrySeq -= 1;
+    return this.unknownEntrySeq;
+  }
+  /** Resolves when no history read is in flight, or after `timeoutMs` at most. */
+  historySettled(timeoutMs = 300): Promise<void> {
+    if (!this.historyReads) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(done, timeoutMs);
+      timer.unref?.();
+      const waiters = this.historyWaiters;
+      function done(): void {
+        clearTimeout(timer);
+        const at = waiters.indexOf(done);
+        if (at >= 0) waiters.splice(at, 1);
+        resolve();
+      }
+      waiters.push(done);
+    });
+  }
+  /**
+   * Learn the current history entry; a different one (or none known before) means a pushState
+   * swapped the page and, when `retire`, the old frames go. A read that fails or takes longer
+   * than 1.5s retires too (复审 #3 #2: the pending flag can never stay up).
+   */
+  private async noteHistoryEntry(session: CDPSession, retire: boolean): Promise<void> {
+    const generation = this.historyGeneration;
+    if (retire) this.historyReads++;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const h = await Promise.race([
+        session.send('Page.getNavigationHistory'),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('history read timed out')), 1500);
+          timer.unref?.();
+        }),
+      ]);
+      const id = h.entries[h.currentIndex]?.id ?? null;
+      if (session !== this.cdpSession || generation !== this.historyGeneration) return;
+      const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
+      this.historyEntry = id ?? this.unknownEntry();
+      if (retire && changed) this.invalidateObservation();
+    } catch {
+      if (session === this.cdpSession && generation === this.historyGeneration) {
+        // 复审 #4 #1: a new entry no press can be bound to — an earlier press is never released on
+        // whatever the page now shows; later presses bind to this one and release normally.
+        this.historyEntry = this.unknownEntry();
+        if (retire) this.invalidateObservation();
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (retire && generation === this.historyGeneration) {
+        this.historyReads = Math.max(0, this.historyReads - 1);
+        if (!this.historyReads) for (const wake of [...this.historyWaiters]) wake();
+      }
+    }
+  }
   private bindPage(page: Page): void {
+    this.loader = '';
+    this.historyEntry = null;
+    this.historyReads = 0;
+    this.historyGeneration++;
+    for (const wake of [...this.historyWaiters]) wake();
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
@@ -233,6 +347,9 @@ export class CdpStreamer {
       this.bindPage(page);
       this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
+      // FIX-62 P0-1: the document and history entry the first frames show.
+      void this.noteHistoryEntry(this.cdpSession, false);
+      void this.freshLoader();
       await this.cdpSession.send('Page.enable');
       const tree = await this.cdpSession.send('Page.getFrameTree');
       this.mainFrameId = tree?.frameTree?.frame?.id;
@@ -287,6 +404,9 @@ export class CdpStreamer {
       // but the SPA only cares about the address-bar URL.
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
+      this.loader = params.frame.loaderId;
+      this.historyEntry = null;
+      void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
@@ -322,7 +442,11 @@ export class CdpStreamer {
       if (!this.streaming || this.cdpSession !== cdp) return;
       if (params.frameId == null || (this.mainFrameId && params.frameId !== this.mainFrameId))
         return;
-      this.invalidateCaptureRequests();
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a pushState swap can replace everything the person
+      // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
+      // history entry retires the old frames; replaceState (a search box mirroring each letter
+      // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
+      void this.noteHistoryEntry(cdp, true);
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.
@@ -769,6 +893,9 @@ export class CdpStreamer {
     this.bindPage(page);
     this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
+    // FIX-62 P0-1: the document and history entry the first frames show.
+    void this.noteHistoryEntry(this.cdpSession, false);
+    void this.freshLoader();
     await this.cdpSession.send('Page.enable');
     const tree = await this.cdpSession.send('Page.getFrameTree');
     this.mainFrameId = tree?.frameTree?.frame?.id;

@@ -159,6 +159,13 @@ const BRAND_LABELS: Readonly<Record<string, string>> = {
   'douyin.com': '抖音',
   'bilibili.com': '哔哩哔哩',
   'ctrip.com': '携程',
+  // FIX-62 P1-11: a site is named in words, not by its domain (apple.com.cn → 苹果官网).
+  'apple.com': '苹果官网',
+  'apple.com.cn': '苹果官网',
+  'pinduoduo.com': '拼多多',
+  'meituan.com': '美团',
+  'dianping.com': '大众点评',
+  'goofish.com': '闲鱼',
 };
 
 /**

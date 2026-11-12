@@ -533,3 +533,36 @@ it('FIX-61B P1-5: a key the server refused is said once («请再按一次»), n
   expect(onKeyRefused).toHaveBeenCalledTimes(1);
   expect(onHeldInputDropped).not.toHaveBeenCalled();
 });
+
+it('FIX-62 P1-4: the text bar channel sends insertText under control, and says false when it cannot', () => {
+  const sent: Array<{ controlLease?: string; payload: { type: string; text?: string } }> = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const channel = { current: null as ((text: string) => boolean) | null };
+  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
+  const { rerender } = render(
+    <CdpScreencastViewport {...props} viewOnly controlLease={null} textChannel={channel} />,
+  );
+  // Only watching, no way to ask for control: nothing is sent and the bar is told so.
+  expect(channel.current?.('你好')).toBe(false);
+  expect(sent.filter((m) => m.payload?.type === 'insertText')).toEqual([]);
+  rerender(
+    <CdpScreencastViewport
+      {...props}
+      viewOnly={false}
+      controlLease="granted"
+      textChannel={channel}
+    />,
+  );
+  expect(channel.current?.('你好')).toBe(true);
+  expect(sent.filter((m) => m.payload?.type === 'insertText')).toMatchObject([
+    { controlLease: 'granted', payload: { type: 'insertText', text: '你好' } },
+  ]);
+});

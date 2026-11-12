@@ -129,6 +129,10 @@ export interface ScreencastProxy {
 
 /** FIX-61B P1-5: how long after typing the focus may let an Enter / Space through. */
 const TYPING_FOCUS_MS = 1_500;
+/** FIX-62 复审 #8: how long a size waits for a held press to be released. */
+const HELD_PRESS_WAIT_MS = 1_000;
+/** Where a size arrived among the inputs, and the release of a press it waited for. */
+type SizeArrival = { after: number; release: number | null };
 /** 复审 #1: the text box that really has the focus (through shadow roots); null in a frame or elsewhere. */
 const FOCUSED_TEXT_BOX_EXPRESSION = `(() => {
   let e = document.activeElement;
@@ -293,6 +297,30 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
     let viewportPending = false;
+    // FIX-62 P1-3: the order inputs arrived in, and the last one before the pending size was asked.
+    let receivedSeq = 0;
+    let sizeAskedAfter = 0;
+    const seqOf = new WeakMap<object, number>();
+    let heldPress: {
+      released: Promise<void>;
+      release: () => void;
+      releaseSeq: number | null;
+    } | null = null;
+    // FIX-62 复审 #8: whether the size being dispatched now is one that changes the page.
+    let viewportApplies = false;
+    // How many sizes have started to apply (a deferred staleness for an applied size is moot).
+    let sizesTaken = 0;
+    // Sizes asked with the lease so far, and how many of them the size being dispatched covers.
+    let sizeRequests = 0;
+    let sizeRequestsCovered = 0;
+    const unsettled = new Map<number, Promise<void>>();
+    // FIX-62 复审 #8: the release of a press held when the size arrived (it waited for it).
+    let sizeRelease: number | null = null;
+    const aimedBeforeSize = (envelope: object): boolean => {
+      if (!viewportPending) return false;
+      const seq = seqOf.get(envelope) ?? Number.POSITIVE_INFINITY;
+      return seq <= sizeAskedAfter || seq === sizeRelease;
+    };
     // The newest lease a viewport message from this screen carried (DEPLOY-61 第 0 步 #2).
     let viewportLease: string | null = null;
     const humanLease = (): string | null => {
@@ -312,6 +340,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return lease !== null && viewportLease === lease;
     };
     const frameGuard = new BrowserFrameGuard();
+    // FIX-62 P0-1: the frame revision each accepted human input was checked against; the handler
+    // re-checks it (and the document itself) right before the input is sent.
+    const validated = new WeakMap<object, { revision: number; loader: string }>();
     /**
      * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
      * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
@@ -385,12 +416,82 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
       viewportV2: args.viewportV2,
       maxViewportHeight: args.viewportV2 ? 2400 : 1600,
-      onViewportRequested: (envelope) => {
+      onInputReceived: (envelope) => {
+        const seq = ++receivedSeq;
+        seqOf.set(envelope, seq);
+        // FIX-62 复审 #8: a press held open (mouseDown received, its mouseUp not yet through).
+        const kind = envelope.payload?.type;
+        if (kind === 'mouseDown' && !heldPress) {
+          let release!: () => void;
+          const released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          heldPress = { released, release, releaseSeq: null };
+        }
+        const press = kind === 'mouseUp' ? heldPress : null;
+        if (press && press.releaseSeq === null) press.releaseSeq = seq;
+        let settle!: () => void;
+        unsettled.set(
+          seq,
+          new Promise<void>((resolve) => {
+            settle = resolve;
+          }),
+        );
+        return () => {
+          unsettled.delete(seq);
+          settle();
+          if (press) {
+            if (heldPress === press) heldPress = null;
+            press.release();
+          }
+        };
+      },
+      beforeViewportTaken: async (): Promise<SizeArrival> => {
+        // Synchronous up to the first await: the inputs received before this size (a ws chunk can
+        // carry the size and the inputs after it in one tick, 复审 #8).
+        const after = receivedSeq;
+        const press = heldPress;
+        if (!press) return { after, release: null };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          press.released,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, HELD_PRESS_WAIT_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+        // A press never released in time is not waited for again.
+        if (heldPress === press) heldPress = null;
+        return { after, release: press.releaseSeq };
+      },
+      onViewportRequested: (envelope, taken) => {
         if (typeof envelope.controlLease === 'string') viewportLease = envelope.controlLease;
         if (!args.viewportV2 || !viewportWillApply()) return;
+        const arrival = (taken as SizeArrival | undefined) ?? { after: receivedSeq, release: null };
+        // FIX-62 P1-3 (local repro at a 2x screen; online 4 of 4 「请再点一次」 on a finished task):
+        // the press's mouseUp arrived before the screen's new size, waited behind the mouseDown, and
+        // was refused because the size had been asked for — though it is applied only after it, in
+        // the same queue. Input that arrived before the size is checked against the layout it meets
+        // (still the one it was aimed at); input after it is refused as before. The frames go stale
+        // once that earlier input is through (and again when the size is applied).
+        sizeRequests += 1;
+        if (!viewportPending) {
+          sizeAskedAfter = arrival.after;
+          sizeRelease = arrival.release;
+        }
         viewportPending = true;
-        invalidate();
-        streamer?.invalidateObservation();
+        const earlier = [...unsettled.entries()]
+          .filter(([seq]) => seq <= sizeAskedAfter || seq === sizeRelease)
+          .map(([, done]) => done);
+        const gen = sizesTaken;
+        const stale = () => {
+          // Applying the size makes the frames stale itself; once it has started, nothing to do.
+          if (!viewportPending || sizesTaken !== gen) return;
+          invalidate();
+          streamer?.invalidateObservation();
+        };
+        if (!earlier.length) stale();
+        else void Promise.allSettled(earlier).then(stale);
       },
       beforeDispatch: args.viewportV2
         ? async (envelope, signal) => {
@@ -399,6 +500,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             // FIX-61B P0-3: a size that changes nothing (sent while only watching) never fails —
             // whichever page the agent is on now. Online, such a size queued for a running task
             // met a new tab, failed as browser_tab_changed and the task with it.
+            if (message.type === 'viewport') {
+              viewportApplies = viewportWillApply();
+              if (viewportApplies) sizesTaken += 1;
+              sizeRequestsCovered = sizeRequests;
+            }
             if (message.type === 'viewport' && !viewportWillApply()) return;
             if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
               invalidate();
@@ -438,7 +544,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             if (
               inputKind === 'pointer' &&
               message.type === 'keyDown' &&
-              !viewportPending &&
+              (!viewportPending || aimedBeforeSize(envelope)) &&
               !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
               frameGuard.validate(envelope.observation, Date.now(), 'lenient') &&
               (await stillTypingTarget())
@@ -448,12 +554,17 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             }
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
-              viewportPending ||
+              (viewportPending && !aimedBeforeSize(envelope)) ||
               !frameGuard.validate(envelope.observation, Date.now(), inputKind)
             ) {
               streamer?.requestFrameRefresh();
               throw new Error('browser_observation_expired');
             }
+            if (envelope.observation)
+              validated.set(message, {
+                revision: envelope.observation.viewportRevision,
+                loader: streamer?.documentLoader() ?? '',
+              });
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
             // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
             if (
@@ -503,8 +614,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         streamer?.notePointerInput('release');
       },
       onViewportApplied: (viewport) => {
+        // FIX-62 复审 #8: a watcher's size changes nothing on the page — it must not make the lease
+        // holder's frames stale or clear a size still to be applied.
+        const applied = viewportApplies;
+        viewportApplies = false;
         streamer?.setCaptureScale(viewport.deviceScaleFactor ?? 1);
-        if (args.viewportV2) {
+        // 复审 #9: a size asked with the lease but not applied after all (control handed back while
+        // it waited) leaves nothing to wait for — unless a newer size was asked since.
+        if (args.viewportV2 && !applied && viewportPending && sizeRequests === sizeRequestsCovered)
+          viewportPending = false;
+        if (args.viewportV2 && applied) {
           viewportPending = false;
           streamer?.invalidateObservation();
           streamer?.requestFrameRefresh();
@@ -656,6 +775,18 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             browserControlSessions.noteAgentViewportChanged(args.instance, restore),
         },
       );
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document its frame
+      // showed: the revision and loader it was validated against, checked again when it is sent.
+      const streamRef = streamer;
+      inputHandler.setDocumentGuard({
+        expected: (message) => validated.get(message),
+        revision: () => streamRef.currentRevision(),
+        loader: () => streamRef.documentLoader(),
+        freshLoader: () => streamRef.freshLoader(),
+        entry: () => streamRef.historyEntryId(),
+        pending: () => streamRef.historyPending(),
+        settled: (ms) => streamRef.historySettled(ms),
+      });
       await inputBridge.attach(inputHandler);
       // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the
       // workbench does); only that message may change the assistant's page (mayAlign above).

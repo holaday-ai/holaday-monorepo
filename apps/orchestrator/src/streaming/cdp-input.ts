@@ -48,6 +48,128 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
   return false;
 })()`;
 
+/**
+ * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document the person was
+ * looking at. Wired by the screencast proxy from the streamer's records. Everything that waits on
+ * the browser is bounded, and the last check before sending is synchronous (复审 #1 #3/#4).
+ */
+export interface InputDocumentGuard {
+  /** The frame revision and document an accepted input was checked against; none on legacy input. */
+  expected(msg: InputMessage): { revision: number; loader: string } | undefined;
+  /** The stream's revision now. */
+  revision(): number;
+  /** The document (CDP loaderId) the stream's events say is shown now; '' when not known yet. */
+  loader(): string;
+  /** The document read from the browser now; null when it cannot be read in time. */
+  freshLoader(): Promise<string | null>;
+  /** The current history entry (pushState makes a new one); null when not known. */
+  entry(): number | null;
+  /** A same-document navigation whose kind (push or replace) is not known yet. */
+  pending(): boolean;
+  /** Waits (bounded, 300ms unless given) until no such navigation is being classified. */
+  settled(timeoutMs?: number): Promise<void>;
+}
+
+/** Error for an input refused because the page changed under it (the screen asks again). */
+export const PAGE_CHANGED_ERROR = 'browser_observation_expired';
+
+const NAMED_KEYS = new Set([
+  'Enter',
+  'Tab',
+  'Escape',
+  'Backspace',
+  'Delete',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+  'Shift',
+  'Control',
+  'Alt',
+  'Meta',
+  'CapsLock',
+  'Insert',
+  'F1',
+  'F2',
+  'F3',
+  'F4',
+  'F5',
+  'F6',
+  'F7',
+  'F8',
+  'F9',
+  'F10',
+  'F11',
+  'F12',
+]);
+
+/** What a key is, for logs: Enter / Space / a named key; anything else is 「char」 — never the character. */
+export function keyClass(m: { key?: string; code?: string; keyCode?: number }): string {
+  if (m.key === 'Enter' || m.code === 'Enter' || m.code === 'NumpadEnter' || m.keyCode === 13)
+    return 'Enter';
+  if (m.key === ' ' || m.key === 'Spacebar' || m.code === 'Space' || m.keyCode === 32)
+    return 'Space';
+  return m.key && NAMED_KEYS.has(m.key) ? m.key : 'char';
+}
+
+/** Presses that can activate something: a mouse press / release, Enter, Space. */
+function activates(msg: InputMessage): boolean {
+  if (msg.type === 'mouseDown' || msg.type === 'mouseUp') return true;
+  if (msg.type === 'keyDown' || msg.type === 'keyUp') {
+    const k = keyClass(msg);
+    return k === 'Enter' || k === 'Space';
+  }
+  return false;
+}
+
+/**
+ * Inputs whose document is read fresh before sending: anything that can change or act on a page.
+ * Moves, wheel and the release of an ordinary key are not (复审 #1 #6: one CDP round trip each).
+ */
+function needsFreshDocument(msg: InputMessage): boolean {
+  if (msg.type === 'mouseMove' || msg.type === 'scroll' || msg.type === 'viewport') return false;
+  if (msg.type === 'keyUp') return activates(msg);
+  return true;
+}
+
+/**
+ * The element an input hits, for the audit log: its role, and a name only for controls whose
+ * name is their own label (buttons, tabs, menu items, check boxes) — never an option, a link or
+ * a field, whose text can be what someone typed (复审 #1 #5) — and the page's origin only.
+ */
+export function describeTargetExpression(msg: InputMessage): string {
+  const pick =
+    'x' in msg && Number.isFinite(msg.x)
+      ? `document.elementFromPoint(${Number(msg.x)}, ${Number((msg as { y: number }).y)})`
+      : 'document.activeElement';
+  return `(() => {
+  const el = ${pick};
+  const page = /^https?:$/.test(location.protocol) ? location.origin : location.protocol;
+  if (!el) return { role: null, name: null, page };
+  const tag = el.tagName.toLowerCase();
+  const role = el.getAttribute('role') || tag;
+  const labelled = ['button', 'summary'].includes(tag) || ['button', 'menuitem', 'tab', 'checkbox', 'radio', 'switch'].includes(role);
+  const raw = labelled ? (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || '') : '';
+  return { role, name: labelled ? String(raw).replace(/\\s+/g, ' ').trim().slice(0, 40) : null, page };
+})()`;
+}
+
+/** Waits at most `ms` for a browser answer; null when it does not come (a dialog blocks the page). */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+      timer.unref?.();
+    }),
+  ]).finally(() => timer && clearTimeout(timer));
+}
+
 /** The size the cloud browser's agent page starts a task with. */
 export const AGENT_LAUNCH_VIEWPORT = { width: 1280, height: 800 } as const;
 
@@ -181,6 +303,16 @@ export class CdpInputHandler {
     'left' | 'middle' | 'right',
     Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
   >();
+  /** FIX-62 P0-1: the document each held key / button was pressed on. */
+  private readonly pressedOn = new Map<string, string | null>();
+  private documentGuard: InputDocumentGuard | null = null;
+  /** The last activating input's target, for the 「outcome unknown」 log. */
+  private lastTarget: { role: string | null; name: string | null; page: string } | null = null;
+
+  /** FIX-62 P0-1: bind every human input to the document its frame showed. */
+  setDocumentGuard(guard: InputDocumentGuard | null): void {
+    this.documentGuard = guard;
+  }
 
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
@@ -346,7 +478,7 @@ export class CdpInputHandler {
    * propagate and cancellation interrupts the real CDP session. We still await
    * the original send: detach failure must not manufacture a settled action.
    */
-  async handle(msg: InputMessage, signal?: AbortSignal): Promise<void> {
+  async handle(msg: InputMessage, signal?: AbortSignal, releaseOf?: string | null): Promise<void> {
     signal?.throwIfAborted();
     const session = this.getSession();
     if (!session) {
@@ -358,6 +490,64 @@ export class CdpInputHandler {
     if (session !== this.activeSession) {
       this.activeSession = session;
       this.activeModifiers = 0;
+    }
+    // FIX-62 P0-1: the input's page must still be the one in the browser when it is sent. The
+    // waits (fresh document read, target for the log) come first and are bounded; then one
+    // synchronous check: a navigation that committed meanwhile has bumped the revision or
+    // changed the loader by then. Refusal happens before the interruption wiring: it is no
+    // uncertain outcome.
+    const guard = this.documentGuard;
+    let documentAtDispatch: string | null = null;
+    if (guard && msg.type !== 'viewport') {
+      const expected = releaseOf === undefined ? guard.expected(msg) : undefined;
+      // 复审 #3 #1: a same-document navigation being classified is waited for (bounded), not
+      // refused outright — a page that replaceStates every frame would otherwise drop letters.
+      if (expected && needsFreshDocument(msg) && guard.pending()) await guard.settled();
+      // 复审 #4 #2: still being classified after the wait — an activating input (press, release,
+      // Enter, Space) is refused; the screen asks again.
+      const stillPending = !!expected && activates(msg) && guard.pending();
+      const fresh = expected && needsFreshDocument(msg) ? await guard.freshLoader() : undefined;
+      const target = activates(msg)
+        ? await within(
+            session
+              .send('Runtime.evaluate', {
+                expression: describeTargetExpression(msg),
+                returnByValue: true,
+              })
+              .then((r) => (r.result?.value as CdpInputHandler['lastTarget']) ?? null),
+            1000,
+          )
+        : null;
+      const now = guard.loader();
+      const refused =
+        !!expected &&
+        (stillPending ||
+          guard.revision() !== expected.revision ||
+          (!!expected.loader && now !== expected.loader) ||
+          (fresh !== undefined && (fresh === null || (!!now && fresh !== now))));
+      const where = {
+        type: msg.type,
+        ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+        ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+      };
+      if (refused) {
+        const fields = { ...where, target, unreadable: fresh === null };
+        if (activates(msg))
+          this.logger.info(fields, 'cdp-input: human input refused (page changed)');
+        else this.logger.debug(fields, 'cdp-input: human input refused (page changed)');
+        throw new Error(PAGE_CHANGED_ERROR);
+      }
+      // A press is bound to its document AND history entry: a pushState swap keeps the loader
+      // but not what the press was aimed at (复审 #2 A). Unknown ('' loader, pending) binds to none.
+      const entry = guard.entry();
+      documentAtDispatch = now && entry !== null ? `${now}#${entry}` : '';
+      if (activates(msg)) {
+        this.lastTarget = target;
+        this.logger.info(
+          { ...where, target, ...(releaseOf !== undefined ? { release: true } : {}) },
+          'cdp-input: human activation',
+        );
+      }
     }
     let interrupted = false;
     const interrupt = (): void => {
@@ -503,6 +693,7 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.set(msg.button ?? 'left', msg);
+          this.pressedOn.set(`button:${msg.button ?? 'left'}`, documentAtDispatch);
           break;
         case 'mouseUp':
           await send('Input.dispatchMouseEvent', {
@@ -513,6 +704,7 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.delete(msg.button ?? 'left');
+          this.pressedOn.delete(`button:${msg.button ?? 'left'}`);
           break;
         case 'scroll':
           await send('Input.dispatchMouseEvent', {
@@ -539,6 +731,10 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.set(msg.code ?? msg.key ?? String(msg.keyCode), msg);
+          this.pressedOn.set(
+            `key:${msg.code ?? msg.key ?? String(msg.keyCode)}`,
+            documentAtDispatch,
+          );
           break;
         }
         case 'keyUp': {
@@ -554,6 +750,7 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.delete(msg.code ?? msg.key ?? String(msg.keyCode));
+          this.pressedOn.delete(`key:${msg.code ?? msg.key ?? String(msg.keyCode)}`);
           break;
         }
         case 'insertText':
@@ -578,6 +775,18 @@ export class CdpInputHandler {
         'cdp-input: dispatch failed',
       );
       if (signal) {
+        // FIX-62 P0-1: what was in flight when its outcome became unknown — type, position,
+        // the element it was aimed at, the page (origin + path). No typed text.
+        this.logger.warn(
+          {
+            type: msg.type,
+            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+            target: activates(msg) ? this.lastTarget : null,
+            ...(releaseOf !== undefined ? { release: true } : {}),
+          },
+          'cdp-input: human input outcome unknown',
+        );
         interrupt();
         throw new BrowserInputOutcomeUnknownError();
       }
@@ -612,18 +821,61 @@ export class CdpInputHandler {
       this.onInputUncertain?.();
       throw new BrowserInputOutcomeUnknownError();
     }
-    for (const key of [...this.pressedKeys.values()]) {
+    // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a key or button is released only on the document it
+    // was pressed on. When the page has changed since (the Enter that submitted a search), the
+    // new page never saw the press — releasing there could activate whatever it focused.
+    // The same document is the same loader and history entry: a replaceState meanwhile (a drag on
+    // a map that writes its position into the URL) keeps both and the release is sent (复审 #1 #2);
+    // a pushState swap does not (复审 #2 A). A press whose document was not known is not released.
+    const g = this.documentGuard;
+    // 复审 #4: wait as long as the read may take (it gives up at 1.5s); still undecided → treat the
+    // page as changed and release nothing.
+    if (g?.pending()) await g.settled(1600);
+    const undecided = !!g?.pending();
+    const loaderNow = g?.loader() ?? '';
+    const entryNow = g?.entry() ?? null;
+    const now = g && !undecided && loaderNow && entryNow !== null ? `${loaderNow}#${entryNow}` : '';
+    const samePage = (id: string): boolean => {
+      if (!g) return true;
+      const pressed = this.pressedOn.get(id);
+      if (pressed === undefined || pressed === null) return true; // pressed before the guard was set
+      return !!pressed && !!now && pressed === now;
+    };
+    for (const [id, key] of [...this.pressedKeys.entries()]) {
+      if (!samePage(`key:${id}`)) {
+        this.pressedKeys.delete(id);
+        this.pressedOn.delete(`key:${id}`);
+        this.logger.info(
+          { type: 'keyUp', key: keyClass(key) },
+          'cdp-input: held key not released (page changed)',
+        );
+        continue;
+      }
       await this.handle(
         { ...key, type: 'keyUp', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false },
         signal,
+        this.pressedOn.get(`key:${id}`) ?? null,
       );
     }
     for (const modifier of MODIFIER_KEYS) {
       if (this.activeModifiers & modifier.bit)
-        await this.handle({ type: 'keyUp', ...modifier }, signal);
+        await this.handle({ type: 'keyUp', ...modifier }, signal, now);
     }
-    for (const button of [...this.pressedButtons.values()]) {
-      await this.handle({ ...button, type: 'mouseUp' }, signal);
+    for (const [id, button] of [...this.pressedButtons.entries()]) {
+      if (!samePage(`button:${id}`)) {
+        this.pressedButtons.delete(id);
+        this.pressedOn.delete(`button:${id}`);
+        this.logger.info(
+          { type: 'mouseUp', x: Math.round(button.x), y: Math.round(button.y) },
+          'cdp-input: held button not released (page changed)',
+        );
+        continue;
+      }
+      await this.handle(
+        { ...button, type: 'mouseUp' },
+        signal,
+        this.pressedOn.get(`button:${id}`) ?? null,
+      );
     }
   }
 

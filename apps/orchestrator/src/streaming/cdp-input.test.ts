@@ -832,3 +832,254 @@ describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under
     });
   });
 });
+
+// FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document it was made on.
+describe('CdpInputHandler document guard', () => {
+  const recording = (
+    evaluate: () => Promise<unknown> = async () => ({ result: { value: null } }),
+  ) => {
+    const effects: string[] = [];
+    const session = {
+      send: async (method: string, params: { type?: string }) => {
+        if (method === 'Runtime.evaluate') return evaluate();
+        effects.push(params.type ?? method);
+      },
+      detach: async () => undefined,
+    } as unknown as CDPSession;
+    return { effects, session };
+  };
+  const ENTER = { type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 } as const;
+  const guardFor = (
+    state: { revision: number; loader: string; entry?: number; pending?: boolean },
+    fresh: () => Promise<string | null>,
+  ) => {
+    const checked = new WeakMap<object, { revision: number; loader: string }>();
+    return {
+      check: (m: object) => checked.set(m, { revision: state.revision, loader: state.loader }),
+      guard: {
+        expected: (m: object) => checked.get(m),
+        revision: () => state.revision,
+        loader: () => state.loader,
+        freshLoader: fresh,
+        entry: () => state.entry ?? 1,
+        pending: () => state.pending ?? false,
+        settled: async () => {
+          state.pending = false;
+        },
+      },
+    };
+  };
+
+  it('refuses an input whose revision changed since it was checked — no event, no uncertain outcome', async () => {
+    const { effects, session } = recording();
+    const uncertain = vi.fn();
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      undefined,
+      uncertain,
+    );
+    const state = { revision: 5, loader: 'L1' };
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard(g.guard);
+    const msg = { ...ENTER };
+    g.check(msg);
+    state.revision = 6;
+    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    expect(effects).toEqual([]);
+    expect(uncertain).not.toHaveBeenCalled();
+  });
+
+  it('a navigation that commits while the document is being read is caught by the last check (复审 #1 #3)', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const state = { revision: 5, loader: 'L1' };
+    // The read's answer arrives after the navigation event was handled — as CDP orders them.
+    const g = guardFor(state, async () => {
+      state.revision = 6;
+      state.loader = 'L2';
+      return 'L2';
+    });
+    handler.setDocumentGuard(g.guard);
+    const msg = { ...ENTER };
+    g.check(msg);
+    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    expect(effects).toEqual([]);
+  });
+
+  it('a document that cannot be read in time (a JS dialog) refuses instead of hanging (复审 #1 #4)', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const state = { revision: 5, loader: 'L1' };
+    const g = guardFor(state, async () => null);
+    handler.setDocumentGuard(g.guard);
+    const msg = { type: 'mouseDown', x: 1, y: 1 } as const;
+    g.check(msg);
+    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    expect(effects).toEqual([]);
+  });
+
+  it('a target lookup that never answers does not hold the input', async () => {
+    const { effects, session } = recording(() => new Promise(() => undefined));
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const state = { revision: 5, loader: 'L1' };
+    const g = guardFor(state, async () => 'L1');
+    handler.setDocumentGuard(g.guard);
+    const msg = { type: 'mouseDown', x: 1, y: 1 } as const;
+    g.check(msg);
+    const started = Date.now();
+    await handler.handle(msg, new AbortController().signal);
+    expect(effects).toEqual(['mousePressed']);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it('moves and ordinary key releases are not read fresh (one round trip saved each)', async () => {
+    const { effects, session } = recording();
+    const fresh = vi.fn(async () => 'L1');
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const state = { revision: 5, loader: 'L1' };
+    const g = guardFor(state, fresh);
+    handler.setDocumentGuard(g.guard);
+    const move = { type: 'mouseMove', x: 1, y: 1 } as const;
+    const up = { type: 'keyUp', key: 'a', code: 'KeyA' } as const;
+    g.check(move);
+    g.check(up);
+    await handler.handle(move, new AbortController().signal);
+    await handler.handle(up, new AbortController().signal);
+    expect(fresh).not.toHaveBeenCalled();
+    expect(effects).toEqual(['mouseMoved', 'keyUp']);
+  });
+
+  it('releases a held key or button only on the document it was pressed on', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1' };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal);
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    state.loader = 'L2';
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed']);
+    // Nothing is left held: a later release has nothing to send.
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed']);
+  });
+
+  it('on the same document (a replaceState meanwhile keeps the loader) the release is sent (复审 #1 #2)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1' };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
+    const signal = new AbortController().signal;
+    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed', 'keyUp', 'mouseReleased']);
+  });
+
+  it('a pushState swap (same loader, new history entry) drops the held release (复审 #2 A)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1', entry: 1 };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal);
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    state.entry = 2;
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed']);
+  });
+
+  it('a same-document navigation being classified is waited for, then judged (复审 #3 #1)', async () => {
+    const { effects, session } = recording();
+    // replaceState meanwhile: the read settles, no revision change → the letter goes through.
+    const state = { revision: 5, loader: 'L1', pending: true };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard(g.guard);
+    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
+    g.check(letter);
+    await handler.handle(letter, new AbortController().signal);
+    expect(effects).toEqual(['keyDown']);
+    // pushState meanwhile: the read retires the frames (revision bump) → refused.
+    const handler2 = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g2 = guardFor(state, async () => state.loader);
+    handler2.setDocumentGuard({
+      ...g2.guard,
+      pending: () => true,
+      settled: async () => {
+        state.revision = 6;
+      },
+    });
+    const enter = { ...ENTER };
+    g2.check(enter);
+    await expect(handler2.handle(enter, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    expect(effects).toEqual(['keyDown']);
+  });
+
+  it('a session swap clears held modifiers (restored after 复审 #2 C)', async () => {
+    const effects: string[] = [];
+    const mk = () =>
+      ({
+        send: async (method: string, params: { type?: string; key?: string }) => {
+          if (method === 'Runtime.evaluate') return { result: { value: null } };
+          effects.push(`${params.type}:${params.key ?? ''}`);
+        },
+        detach: async () => undefined,
+      }) as unknown as CDPSession;
+    let session = mk();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const signal = new AbortController().signal;
+    await handler.handle(
+      { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', shiftKey: true },
+      signal,
+    );
+    session = mk();
+    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
+    expect(effects).toEqual(['keyDown:Shift', 'keyDown:a']);
+  });
+
+  it('still undecided after the wait: an activating input is refused (复审 #4 #2)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1' };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard({ ...g.guard, pending: () => true, settled: async () => undefined });
+    const enter = { ...ENTER };
+    g.check(enter);
+    await expect(handler.handle(enter, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    // A letter is no activation: it waits, then goes.
+    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
+    g.check(letter);
+    await handler.handle(letter, new AbortController().signal);
+    expect(effects).toEqual(['keyDown']);
+  });
+
+  it('still undecided at handback: held keys and buttons are not released (复审 #4)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1', pending: false };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard({
+      ...g.guard,
+      pending: () => state.pending,
+      settled: async () => undefined,
+    });
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal);
+    state.pending = true;
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown']);
+  });
+});
