@@ -378,6 +378,13 @@ const LOGIN_WORDS =
  * that lead, the login must be about the page the task is on: a login sentence that names only
  * another site (「京东等电商平台需要登录」 on apple.com.cn) offers nothing.
  */
+/**
+ * FIX-62 P1-11: 「无需登录」「不需要登录」「without logging in」 say no login is needed — the 「需登录 /
+ * log in」 inside them is no login wall. They are taken out before looking for one.
+ */
+const NO_LOGIN_RE =
+  /(?:无需|无须|毋需|不需要?|不用|不必|没必要|免)登录|未登录(?:状态)?(?:下)?(?:即可|也能|也可以|就能)|without (?:a )?(?:log(?:ging)? ?in|sign(?:ing)? ?in)|no (?:need to )?(?:log ?in|sign ?in)(?: (?:needed|required))?|(?:doesn'?t|does not|don'?t|do not|didn'?t) (?:need|require) (?:a |you to |to )?(?:log ?in|sign ?in)/giu;
+
 export function partialLoginStep(input: {
   text: string;
   intent: string;
@@ -385,7 +392,9 @@ export function partialLoginStep(input: {
 }): NextStepOption | null {
   const intent = input.intent.trim();
   if (!intent) return null;
-  if (!LOGIN_WORDS.test(input.text)) return null;
+  const text = input.text.replace(NO_LOGIN_RE, ' ');
+  if (!LOGIN_WORDS.test(text)) return null;
+  input = { ...input, text };
   // 复审 #7: an English task gets the step in English.
   if (isEnglishTask(intent)) {
     const rescued = input.text.match(/\(the (.{1,40}?) page(?: you gave)? needs a login\)/i)?.[1];
