@@ -57,6 +57,20 @@ q.addEventListener('keydown', (e) => {
 q.focus();
 </script>`;
 
+// 复审 #1 #1/#2: a search box that mirrors every letter into the URL (replaceState), and a map
+// that writes its position into the URL while dragged. Neither is a new document.
+const PAGE_MIRROR = `<!doctype html><input id="q" style="position:absolute;left:40px;top:40px"><div id="pad" style="position:absolute;left:300px;top:300px;width:400px;height:300px"></div><div id="tick"></div>
+<script>
+window.hits = [];
+let n = 0; setInterval(() => { document.getElementById('tick').textContent = String(++n); }, 40);
+const q = document.getElementById('q');
+q.addEventListener('input', () => history.replaceState({}, '', '/mirror?q=' + encodeURIComponent(q.value)));
+const pad = document.getElementById('pad');
+pad.addEventListener('mousedown', () => { window.hits.push('down'); history.replaceState({}, '', '/mirror?at=' + Date.now()); });
+window.addEventListener('mouseup', () => window.hits.push('up'));
+q.focus();
+</script>`;
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length)
@@ -71,6 +85,7 @@ async function site(): Promise<string> {
     res.setHeader('content-type', 'text/html');
     if (req.url?.startsWith('/b')) res.end(PAGE_B);
     else if (req.url?.startsWith('/spa')) res.end(PAGE_SPA);
+    else if (req.url?.startsWith('/mirror')) res.end(PAGE_MIRROR);
     else res.end(PAGE_A);
   });
   server.listen(0, '127.0.0.1');
@@ -221,4 +236,47 @@ it('after a pushState page swap, an Enter made on the old frame does not reach t
   h.key('keyUp', 'Enter', before);
   await new Promise((r) => setTimeout(r, 500));
   expect(await h.hits()).toEqual([]);
+}, 30000);
+
+it('a search box that writes each letter into the URL (replaceState) still gets every letter (复审 #1 #1)', async () => {
+  const h = await harness('/mirror');
+  for (const ch of 'holadayai') {
+    h.key('keyDown', ch);
+    h.key('keyUp', ch);
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe('holadayai'), {
+    timeout: 5000,
+  });
+}, 30000);
+
+it('a drag on a page that writes its position into the URL is released there (复审 #1 #2)', async () => {
+  const h = await harness('/mirror');
+  h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 });
+  await vi.waitFor(async () => expect(await h.hits()).toEqual(['down']), { timeout: 5000 });
+  await h.handBack();
+  await vi.waitFor(async () => expect(await h.hits()).toEqual(['down', 'up']), { timeout: 5000 });
+}, 30000);
+
+it('the audit description names buttons only, never options, links or fields, and the page by origin', async () => {
+  const { describeTargetExpression } = await import('./cdp-input.js');
+  const browser = await chromium.launch({ headless: true });
+  cleanups.push(() => browser.close());
+  const page = await browser.newPage();
+  const origin = await site();
+  await page.goto(`${origin}/a`);
+  await page.setContent(
+    '<button id="b" style="position:absolute;left:0;top:0;width:100px;height:50px">Share</button>' +
+      '<div role="option" style="position:absolute;left:0;top:100px;width:100px;height:50px">my secret query</div>' +
+      '<a href="#" style="position:absolute;left:0;top:200px;width:100px;height:50px;display:block">inbox of someone@example.com</a>' +
+      '<input id="f" value="typed text" style="position:absolute;left:0;top:300px">',
+  );
+  const at = (x: number, y: number) =>
+    page.evaluate(describeTargetExpression({ type: 'mouseDown', x, y }));
+  expect(await at(10, 10)).toEqual({ role: 'button', name: 'Share', page: origin });
+  expect(await at(10, 110)).toEqual({ role: 'option', name: null, page: origin });
+  expect(await at(10, 210)).toEqual({ role: 'a', name: null, page: origin });
+  expect(await at(10, 310)).toEqual({ role: 'input', name: null, page: origin });
+  await page.goto('data:text/html,<p>private</p>');
+  expect(await at(5, 5)).toMatchObject({ page: 'data:' });
 }, 30000);

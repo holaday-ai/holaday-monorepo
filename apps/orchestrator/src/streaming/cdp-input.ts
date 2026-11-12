@@ -50,26 +50,64 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
 
 /**
  * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document the person was
- * looking at. Wired by the screencast proxy from the streamer's document record.
+ * looking at. Wired by the screencast proxy from the streamer's records. Everything that waits on
+ * the browser is bounded, and the last check before sending is synchronous (复审 #1 #3/#4).
  */
 export interface InputDocumentGuard {
-  /** False when the page this input was meant for is no longer the one in the browser. */
-  stillCurrent(msg: InputMessage): Promise<boolean>;
-  /** The document now in the browser (loader + URL), or null when it cannot be read. */
-  current(): Promise<string | null>;
+  /** The frame revision and document an accepted input was checked against; none on legacy input. */
+  expected(msg: InputMessage): { revision: number; loader: string } | undefined;
+  /** The stream's revision now. */
+  revision(): number;
+  /** The document (CDP loaderId) the stream's events say is shown now; '' when not known yet. */
+  loader(): string;
+  /** The document read from the browser now; null when it cannot be read in time. */
+  freshLoader(): Promise<string | null>;
 }
 
 /** Error for an input refused because the page changed under it (the screen asks again). */
 export const PAGE_CHANGED_ERROR = 'browser_observation_expired';
 
-/** What a key is, for logs: Enter / Space / a named key — never the character typed. */
+const NAMED_KEYS = new Set([
+  'Enter',
+  'Tab',
+  'Escape',
+  'Backspace',
+  'Delete',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+  'Shift',
+  'Control',
+  'Alt',
+  'Meta',
+  'CapsLock',
+  'Insert',
+  'F1',
+  'F2',
+  'F3',
+  'F4',
+  'F5',
+  'F6',
+  'F7',
+  'F8',
+  'F9',
+  'F10',
+  'F11',
+  'F12',
+]);
+
+/** What a key is, for logs: Enter / Space / a named key; anything else is 「char」 — never the character. */
 export function keyClass(m: { key?: string; code?: string; keyCode?: number }): string {
   if (m.key === 'Enter' || m.code === 'Enter' || m.code === 'NumpadEnter' || m.keyCode === 13)
     return 'Enter';
   if (m.key === ' ' || m.key === 'Spacebar' || m.code === 'Space' || m.keyCode === 32)
     return 'Space';
-  if (m.key && m.key.length === 1) return 'char';
-  return m.key ?? m.code ?? 'unknown';
+  return m.key && NAMED_KEYS.has(m.key) ? m.key : 'char';
 }
 
 /** Presses that can activate something: a mouse press / release, Enter, Space. */
@@ -83,28 +121,47 @@ function activates(msg: InputMessage): boolean {
 }
 
 /**
- * The element an input hits — role and visible name only (labels, aria-label, a button's own
- * text), never what anyone typed — plus origin + path of the page (no query: it can hold a
- * search the person typed).
+ * Inputs whose document is read fresh before sending: anything that can change or act on a page.
+ * Moves, wheel and the release of an ordinary key are not (复审 #1 #6: one CDP round trip each).
  */
-function describeTargetExpression(msg: InputMessage): string {
+function needsFreshDocument(msg: InputMessage): boolean {
+  if (msg.type === 'mouseMove' || msg.type === 'scroll' || msg.type === 'viewport') return false;
+  if (msg.type === 'keyUp') return activates(msg);
+  return true;
+}
+
+/**
+ * The element an input hits, for the audit log: its role, and a name only for controls whose
+ * name is their own label (buttons, tabs, menu items, check boxes) — never an option, a link or
+ * a field, whose text can be what someone typed (复审 #1 #5) — and the page's origin only.
+ */
+export function describeTargetExpression(msg: InputMessage): string {
   const pick =
     'x' in msg && Number.isFinite(msg.x)
       ? `document.elementFromPoint(${Number(msg.x)}, ${Number((msg as { y: number }).y)})`
       : 'document.activeElement';
   return `(() => {
   const el = ${pick};
-  const page = location.origin + location.pathname;
+  const page = /^https?:$/.test(location.protocol) ? location.origin : location.protocol;
   if (!el) return { role: null, name: null, page };
   const tag = el.tagName.toLowerCase();
   const role = el.getAttribute('role') || tag;
-  let name = el.getAttribute('aria-label') || el.getAttribute('title') || '';
-  if (!name && (tag === 'input' || tag === 'textarea' || tag === 'select'))
-    name = (el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('placeholder') || el.getAttribute('name') || '';
-  if (!name && (['button', 'a', 'summary', 'label', 'option'].includes(tag) || ['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'radio', 'switch'].includes(role)))
-    name = el.innerText || '';
-  return { role, name: String(name).replace(/\s+/g, ' ').trim().slice(0, 40), page };
+  const labelled = ['button', 'summary'].includes(tag) || ['button', 'menuitem', 'tab', 'checkbox', 'radio', 'switch'].includes(role);
+  const raw = labelled ? (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || '') : '';
+  return { role, name: labelled ? String(raw).replace(/\\s+/g, ' ').trim().slice(0, 40) : null, page };
 })()`;
+}
+
+/** Waits at most `ms` for a browser answer; null when it does not come (a dialog blocks the page). */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+      timer.unref?.();
+    }),
+  ]).finally(() => timer && clearTimeout(timer));
 }
 
 /** The size the cloud browser's agent page starts a task with. */
@@ -424,48 +481,53 @@ export class CdpInputHandler {
       return;
     }
     if (this.interruptedSessions.has(session)) throw new BrowserInputOutcomeUnknownError();
-    // FIX-62 P0-1: right before it is sent, the input's page must still be the one in the
-    // browser. Checked before the interruption wiring: a refusal is no uncertain outcome.
+    // FIX-62 P0-1: the input's page must still be the one in the browser when it is sent. The
+    // waits (fresh document read, target for the log) come first and are bounded; then one
+    // synchronous check: a navigation that committed meanwhile has bumped the revision or
+    // changed the loader by then. Refusal happens before the interruption wiring: it is no
+    // uncertain outcome.
     const guard = this.documentGuard;
-    if (guard && msg.type !== 'viewport' && releaseOf === undefined) {
-      if (!(await guard.stillCurrent(msg))) {
-        this.logger.info(
-          {
-            type: msg.type,
-            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
-            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
-          },
-          'cdp-input: human input refused (page changed)',
-        );
-        throw new Error(PAGE_CHANGED_ERROR);
-      }
-    }
     let documentAtDispatch: string | null = null;
     if (guard && msg.type !== 'viewport') {
-      documentAtDispatch = await guard.current();
+      const expected = releaseOf === undefined ? guard.expected(msg) : undefined;
+      const fresh = expected && needsFreshDocument(msg) ? await guard.freshLoader() : undefined;
+      const target = activates(msg)
+        ? await within(
+            session
+              .send('Runtime.evaluate', {
+                expression: describeTargetExpression(msg),
+                returnByValue: true,
+              })
+              .then((r) => (r.result?.value as CdpInputHandler['lastTarget']) ?? null),
+            1000,
+          )
+        : null;
+      const now = guard.loader();
+      const refused =
+        !!expected &&
+        (guard.revision() !== expected.revision ||
+          (!!expected.loader && now !== expected.loader) ||
+          (fresh !== undefined && (fresh === null || (!!now && fresh !== now))));
+      const where = {
+        type: msg.type,
+        ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+        ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+      };
+      if (refused) {
+        const fields = { ...where, target, unreadable: fresh === null };
+        if (activates(msg))
+          this.logger.info(fields, 'cdp-input: human input refused (page changed)');
+        else this.logger.debug(fields, 'cdp-input: human input refused (page changed)');
+        throw new Error(PAGE_CHANGED_ERROR);
+      }
+      documentAtDispatch = now;
       if (activates(msg)) {
-        this.lastTarget = await session
-          .send('Runtime.evaluate', {
-            expression: describeTargetExpression(msg),
-            returnByValue: true,
-          })
-          .then((r) => (r.result?.value as typeof this.lastTarget) ?? null)
-          .catch(() => null);
+        this.lastTarget = target;
         this.logger.info(
-          {
-            type: msg.type,
-            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
-            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
-            target: this.lastTarget,
-            ...(releaseOf !== undefined ? { release: true } : {}),
-          },
+          { ...where, target, ...(releaseOf !== undefined ? { release: true } : {}) },
           'cdp-input: human activation',
         );
       }
-    }
-    if (session !== this.activeSession) {
-      this.activeSession = session;
-      this.activeModifiers = 0;
     }
     let interrupted = false;
     const interrupt = (): void => {
@@ -742,11 +804,13 @@ export class CdpInputHandler {
     // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a key or button is released only on the document it
     // was pressed on. When the page has changed since (the Enter that submitted a search), the
     // new page never saw the press — releasing there could activate whatever it focused.
-    const now = this.documentGuard ? await this.documentGuard.current() : null;
+    // The same document is the same loader: a replaceState meanwhile (a drag on a map that writes
+    // its position into the URL) keeps it, and the release is always sent there (复审 #1 #2).
+    const now = this.documentGuard ? this.documentGuard.loader() : null;
     const samePage = (id: string): boolean => {
       if (!this.documentGuard) return true;
       const pressed = this.pressedOn.get(id);
-      return pressed !== undefined && pressed !== null && now !== null && pressed === now;
+      return pressed === undefined || pressed === null || pressed === '' || pressed === now;
     };
     for (const [id, key] of [...this.pressedKeys.entries()]) {
       if (!samePage(`key:${id}`)) {

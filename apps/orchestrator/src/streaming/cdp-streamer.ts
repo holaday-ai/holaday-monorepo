@@ -163,33 +163,53 @@ export class CdpStreamer {
     return this.viewportRevision;
   }
   /**
-   * FIX-62 P0-1: which document the frames show — main-frame loader + URL, as the navigation
+   * FIX-62 P0-1: the main frame's document (CDP loaderId) the frames now show, as the navigation
    * events last reported it. Empty until the first read or navigation of the bound page.
    */
-  private docKey = '';
-  documentKey(): string {
-    return this.docKey;
+  private loader = '';
+  /** The current history entry (pushState makes a new one; replaceState keeps it). */
+  private historyEntry: number | null = null;
+  documentLoader(): string {
+    return this.loader;
   }
   /**
-   * The main frame's document read from the browser NOW (loader + URL). It differs from
-   * documentKey() when a navigation has committed whose event this stream has not handled yet.
-   * Null when it cannot be read.
+   * The main frame's loader read from the browser NOW — newer than documentLoader() when a
+   * navigation committed whose event has not been handled yet. Null when it cannot be read in
+   * time (a JS dialog blocks the page): the caller then cannot confirm the document.
    */
-  async currentDocumentKey(): Promise<string | null> {
+  async freshLoader(timeoutMs = 1500): Promise<string | null> {
     const session = this.cdpSession;
     if (!session) return null;
+    let timer: NodeJS.Timeout | undefined;
+    const read = session
+      .send('Page.getFrameTree')
+      .then((r) => r.frameTree.frame.loaderId)
+      .catch(() => null);
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+      timer.unref?.();
+    });
+    const loader = await Promise.race([read, late]);
+    if (timer) clearTimeout(timer);
+    if (loader && !this.loader && session === this.cdpSession) this.loader = loader;
+    return loader;
+  }
+  /** Learn the current history entry; a different one means a pushState swapped the page. */
+  private async noteHistoryEntry(session: CDPSession, retire: boolean): Promise<void> {
     try {
-      const { frameTree } = await session.send('Page.getFrameTree');
-      const f = frameTree.frame;
-      const key = `${f.loaderId}|${withoutFragment(f.url)}`;
-      if (!this.docKey && session === this.cdpSession) this.docKey = key;
-      return key;
+      const h = await session.send('Page.getNavigationHistory');
+      const id = h.entries[h.currentIndex]?.id ?? null;
+      if (session !== this.cdpSession) return;
+      const changed = this.historyEntry !== null && id !== null && id !== this.historyEntry;
+      this.historyEntry = id;
+      if (retire && changed) this.invalidateObservation();
     } catch {
-      return null;
+      /* the session went away */
     }
   }
   private bindPage(page: Page): void {
-    this.docKey = '';
+    this.loader = '';
+    this.historyEntry = null;
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
@@ -264,6 +284,9 @@ export class CdpStreamer {
       this.bindPage(page);
       this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
+      // FIX-62 P0-1: the document and history entry the first frames show.
+      void this.noteHistoryEntry(this.cdpSession, false);
+      void this.freshLoader();
       await this.cdpSession.send('Page.enable');
       const tree = await this.cdpSession.send('Page.getFrameTree');
       this.mainFrameId = tree?.frameTree?.frame?.id;
@@ -318,7 +341,9 @@ export class CdpStreamer {
       // but the SPA only cares about the address-bar URL.
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
-      this.docKey = `${params.frame.loaderId}|${withoutFragment(params.frame.url)}`;
+      this.loader = params.frame.loaderId;
+      this.historyEntry = null;
+      void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
@@ -354,12 +379,11 @@ export class CdpStreamer {
       if (!this.streaming || this.cdpSession !== cdp) return;
       if (params.frameId == null || (this.mainFrameId && params.frameId !== this.mainFrameId))
         return;
-      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a pushState / hash swap can replace everything the
-      // person sees — an Enter made on the old frame landed on the new page's focused 「Share」.
-      // The old frames are retired like on any navigation; the stream itself stays armed.
-      const loader = this.docKey.split('|')[0] ?? '';
-      this.docKey = `${loader}|${withoutFragment(params.url)}`;
-      this.invalidateObservation();
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a pushState swap can replace everything the person
+      // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
+      // history entry retires the old frames; replaceState (a search box mirroring each letter
+      // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
+      void this.noteHistoryEntry(cdp, true);
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.
@@ -806,6 +830,9 @@ export class CdpStreamer {
     this.bindPage(page);
     this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
+    // FIX-62 P0-1: the document and history entry the first frames show.
+    void this.noteHistoryEntry(this.cdpSession, false);
+    void this.freshLoader();
     await this.cdpSession.send('Page.enable');
     const tree = await this.cdpSession.send('Page.getFrameTree');
     this.mainFrameId = tree?.frameTree?.frame?.id;
@@ -865,10 +892,4 @@ function errMsg(err: unknown): string {
 
 function logOrigin(url: string | null): string | null {
   return url === null ? null : browserUrlForLog(url);
-}
-
-/** The document part of a URL: a fragment change keeps the document (it still retires frames). */
-function withoutFragment(url: string): string {
-  const hash = url.indexOf('#');
-  return hash < 0 ? url : url.slice(0, hash);
 }

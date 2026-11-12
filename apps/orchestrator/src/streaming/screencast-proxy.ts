@@ -314,7 +314,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const frameGuard = new BrowserFrameGuard();
     // FIX-62 P0-1: the frame revision each accepted human input was checked against; the handler
     // re-checks it (and the document itself) right before the input is sent.
-    const validatedRevision = new WeakMap<object, number>();
+    const validated = new WeakMap<object, { revision: number; loader: string }>();
     /**
      * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
      * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
@@ -458,7 +458,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               throw new Error('browser_observation_expired');
             }
             if (envelope.observation)
-              validatedRevision.set(message, envelope.observation.viewportRevision);
+              validated.set(message, {
+                revision: envelope.observation.viewportRevision,
+                loader: streamer?.documentLoader() ?? '',
+              });
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
             // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
             if (
@@ -662,18 +665,13 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         },
       );
       // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document its frame
-      // showed. Read fresh at dispatch: a navigation can commit before its event reaches us.
+      // showed: the revision and loader it was validated against, checked again when it is sent.
       const streamRef = streamer;
       inputHandler.setDocumentGuard({
-        stillCurrent: async (message) => {
-          const revision = validatedRevision.get(message);
-          if (revision !== undefined && revision !== streamRef.currentRevision()) return false;
-          const now = await streamRef.currentDocumentKey();
-          if (now === null) return false;
-          const recorded = streamRef.documentKey();
-          return !recorded || now === recorded;
-        },
-        current: () => streamRef.currentDocumentKey(),
+        expected: (message) => validated.get(message),
+        revision: () => streamRef.currentRevision(),
+        loader: () => streamRef.documentLoader(),
+        freshLoader: () => streamRef.freshLoader(),
       });
       await inputBridge.attach(inputHandler);
       // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the
