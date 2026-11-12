@@ -196,7 +196,11 @@ export class CdpStreamer {
   }
   /** Same-document navigations whose history entry is still being read (复审 #2 B). */
   private historyReads = 0;
-  /** The current history entry id; null until read. */
+  /** Bumped when the page is (re)bound: an older read's result and count no longer apply. */
+  private historyGeneration = 0;
+  /** Waiters for the reads in flight to settle (复审 #3 #1). */
+  private historyWaiters: Array<() => void> = [];
+  /** The current history entry id; null until read, -1 when it could not be read. */
   historyEntryId(): number | null {
     return this.historyEntry;
   }
@@ -204,29 +208,64 @@ export class CdpStreamer {
   historyPending(): boolean {
     return this.historyReads > 0;
   }
+  /** Resolves when no history read is in flight, or after `timeoutMs` at most. */
+  historySettled(timeoutMs = 300): Promise<void> {
+    if (!this.historyReads) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(done, timeoutMs);
+      timer.unref?.();
+      const waiters = this.historyWaiters;
+      function done(): void {
+        clearTimeout(timer);
+        const at = waiters.indexOf(done);
+        if (at >= 0) waiters.splice(at, 1);
+        resolve();
+      }
+      waiters.push(done);
+    });
+  }
   /**
    * Learn the current history entry; a different one (or none known before) means a pushState
-   * swapped the page and, when `retire`, the old frames go. A read that fails retires too.
+   * swapped the page and, when `retire`, the old frames go. A read that fails or takes longer
+   * than 1.5s retires too (复审 #3 #2: the pending flag can never stay up).
    */
   private async noteHistoryEntry(session: CDPSession, retire: boolean): Promise<void> {
+    const generation = this.historyGeneration;
     if (retire) this.historyReads++;
+    let timer: NodeJS.Timeout | undefined;
     try {
-      const h = await session.send('Page.getNavigationHistory');
+      const h = await Promise.race([
+        session.send('Page.getNavigationHistory'),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('history read timed out')), 1500);
+          timer.unref?.();
+        }),
+      ]);
       const id = h.entries[h.currentIndex]?.id ?? null;
-      if (session !== this.cdpSession) return;
+      if (session !== this.cdpSession || generation !== this.historyGeneration) return;
       const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
-      this.historyEntry = id;
+      this.historyEntry = id ?? -1;
       if (retire && changed) this.invalidateObservation();
     } catch {
-      if (retire && session === this.cdpSession) this.invalidateObservation();
+      if (session === this.cdpSession && generation === this.historyGeneration) {
+        // Unknown but stable from here on: presses can still be bound and released.
+        if (this.historyEntry === null) this.historyEntry = -1;
+        if (retire) this.invalidateObservation();
+      }
     } finally {
-      if (retire) this.historyReads = Math.max(0, this.historyReads - 1);
+      if (timer) clearTimeout(timer);
+      if (retire && generation === this.historyGeneration) {
+        this.historyReads = Math.max(0, this.historyReads - 1);
+        if (!this.historyReads) for (const wake of [...this.historyWaiters]) wake();
+      }
     }
   }
   private bindPage(page: Page): void {
     this.loader = '';
     this.historyEntry = null;
     this.historyReads = 0;
+    this.historyGeneration++;
+    for (const wake of [...this.historyWaiters]) wake();
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {

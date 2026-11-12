@@ -674,6 +674,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         freshLoader: () => streamRef.freshLoader(),
         entry: () => streamRef.historyEntryId(),
         pending: () => streamRef.historyPending(),
+        settled: () => streamRef.historySettled(),
       });
       await inputBridge.attach(inputHandler);
       // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the

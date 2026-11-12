@@ -863,6 +863,9 @@ describe('CdpInputHandler document guard', () => {
         freshLoader: fresh,
         entry: () => state.entry ?? 1,
         pending: () => state.pending ?? false,
+        settled: async () => {
+          state.pending = false;
+        },
       },
     };
   };
@@ -994,18 +997,33 @@ describe('CdpInputHandler document guard', () => {
     expect(effects).toEqual(['keyDown', 'mousePressed']);
   });
 
-  it('while a same-document navigation is being classified, acting input is refused (复审 #2 B)', async () => {
+  it('a same-document navigation being classified is waited for, then judged (复审 #3 #1)', async () => {
     const { effects, session } = recording();
+    // replaceState meanwhile: the read settles, no revision change → the letter goes through.
     const state = { revision: 5, loader: 'L1', pending: true };
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
     const g = guardFor(state, async () => state.loader);
     handler.setDocumentGuard(g.guard);
-    const msg = { ...ENTER };
-    g.check(msg);
-    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
+    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
+    g.check(letter);
+    await handler.handle(letter, new AbortController().signal);
+    expect(effects).toEqual(['keyDown']);
+    // pushState meanwhile: the read retires the frames (revision bump) → refused.
+    const handler2 = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g2 = guardFor(state, async () => state.loader);
+    handler2.setDocumentGuard({
+      ...g2.guard,
+      pending: () => true,
+      settled: async () => {
+        state.revision = 6;
+      },
+    });
+    const enter = { ...ENTER };
+    g2.check(enter);
+    await expect(handler2.handle(enter, new AbortController().signal)).rejects.toThrow(
       'browser_observation_expired',
     );
-    expect(effects).toEqual([]);
+    expect(effects).toEqual(['keyDown']);
   });
 
   it('a session swap clears held modifiers (restored after 复审 #2 C)', async () => {

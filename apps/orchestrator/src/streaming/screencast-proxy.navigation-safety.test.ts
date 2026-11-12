@@ -89,6 +89,16 @@ document.getElementById('pad').addEventListener('mousedown', () => swap());
 document.getElementById('q').focus();
 </script>`;
 
+// 复审 #3 #1: a page that writes into the URL every frame (a video's ?t=, a scroll position).
+const PAGE_EVERY_FRAME = `<!doctype html><input id="q" style="position:absolute;left:40px;top:40px"><div id="pad" style="position:absolute;left:300px;top:300px;width:400px;height:300px"></div>
+<script>
+window.downs = 0; window.ups = 0;
+let n = 0; (function tick() { history.replaceState({}, '', '/frames?t=' + (++n)); requestAnimationFrame(tick); })();
+document.getElementById('pad').addEventListener('mousedown', () => window.downs++);
+window.addEventListener('mouseup', () => window.ups++);
+document.getElementById('q').focus();
+</script>`;
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length)
@@ -105,6 +115,7 @@ async function site(): Promise<string> {
     else if (req.url?.startsWith('/spa')) res.end(PAGE_SPA);
     else if (req.url?.startsWith('/mirror')) res.end(PAGE_MIRROR);
     else if (req.url?.startsWith('/push')) res.end(PAGE_PUSH);
+    else if (req.url?.startsWith('/frames')) res.end(PAGE_EVERY_FRAME);
     else res.end(PAGE_A);
   });
   server.listen(0, '127.0.0.1');
@@ -324,3 +335,29 @@ it('a mouse press that swapped the page in place is not released onto the new co
   await new Promise((r) => setTimeout(r, 300));
   expect(await h.hits()).toEqual([]);
 }, 30000);
+
+it('a page that replaceStates every frame loses no letter and keeps no button held (复审 #3 #1)', async () => {
+  const h = await harness('/frames');
+  const word = 'abcdefghijklmnopqrstuvwxyz';
+  for (const ch of word) {
+    h.key('keyDown', ch);
+    h.key('keyUp', ch);
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe(word), {
+    timeout: 8000,
+  });
+  for (let i = 0; i < 15; i++) {
+    h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 });
+    h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 });
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  await new Promise((r) => setTimeout(r, 500));
+  const counts = await h.page.evaluate(() => {
+    const w = window as unknown as { downs: number; ups: number };
+    return { downs: w.downs, ups: w.ups };
+  });
+  // Every press that landed was released on the same page.
+  expect(counts.ups).toBe(counts.downs);
+  expect(counts.downs).toBeGreaterThan(10);
+}, 40000);
