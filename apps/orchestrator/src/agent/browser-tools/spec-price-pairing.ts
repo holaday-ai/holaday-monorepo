@@ -93,21 +93,32 @@ function clausesOf(sentence: string): string[] {
  */
 const SUFFIX = 'pro\\s*max|pro|plus|mini|ultra|air|lite|se|fe|neo';
 const NUMBERED_RE = new RegExp(
-  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b`,
+  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b(?!\\s*\\+)`,
   'giu',
 );
+/** 复审 #6: 「S24+」 is the Plus, 「Mate 60 Pro+」 its own model (not the Pro). */
+const PLUS_SIGN_RE = /(?<![\d.,$¥￥])\b(?:[a-z]{1,2}\d{1,3}[a-z]?|\d{1,3}\s*(pro))\s*\+/giu;
 const SERIES_RE = new RegExp(
-  `\\b(?:macbook|ipad|iphone|galaxy|pixel|surface)\\s+(${SUFFIX})\\b`,
+  `\\b(?:macbook|ipad|iphone|galaxy|pixel|surface)\\s+(${SUFFIX})\\b(?!\\s*\\+)`,
   'giu',
 );
 const BASE_RE = new RegExp(
-  `\\b(?:iphone|ipad|galaxy\\s*s|pixel|mate|redmi|xiaomi)\\s*\\d{1,3}(?![\\d.]|\\s*(?:${SUFFIX}|max|e)\\b)|小米\\s*\\d{1,3}(?!\\s*(?:${SUFFIX}|ultra)\\b)|标准版|标准款|base model`,
+  `\\b(?:iphone|ipad|galaxy\\s*s|pixel|mate|redmi|xiaomi)\\s*\\d{1,3}(?![\\d.+]|\\s*(?:${SUFFIX}|max|e|\\+)\\b)|小米\\s*\\d{1,3}(?![\\d.+]|\\s*(?:${SUFFIX}|\\+))|标准版|标准款|base model`,
   'giu',
 );
-function modelsOf(text: string): Set<string> {
+/** Operating systems carry edition words that are no device models (「Windows 11 Pro」). */
+const OS_RE =
+  /\b(?:windows|win)\s*\d{1,2}\s*(?:pro|home|plus|se|enterprise)\b|\bmacos\b|\bios\s*\d+/giu;
+function modelsOf(raw: string): Set<string> {
+  const text = raw.replace(OS_RE, ' ');
   const out = new Set<string>();
-  for (const re of [NUMBERED_RE, SERIES_RE])
-    for (const m of text.matchAll(re)) out.add(m[1]!.toLowerCase().replace(/\s+/g, ''));
+  for (const re of [NUMBERED_RE, SERIES_RE]) {
+    for (const m of text.matchAll(re)) {
+      const k = m[1]!.toLowerCase().replace(/\s+/g, '');
+      out.add(k === 'plus' ? 'plus' : k);
+    }
+  }
+  for (const m of text.matchAll(PLUS_SIGN_RE)) out.add(m[1] ? 'proplus' : 'plus');
   if (BASE_RE.test(text)) out.add('base');
   BASE_RE.lastIndex = 0;
   return out;

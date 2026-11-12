@@ -236,4 +236,22 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
       ),
     ).toEqual([]);
   });
+
+  it('复审 #6: S24+ is the Plus, Mate 60 Pro+ is not the Pro, 小米 14 Ultra is no base, Windows Pro is no model', () => {
+    const s24 = [
+      'Samsung Galaxy S24 Plus 256GB',
+      '¥7999',
+      'Samsung Galaxy S24 256GB',
+      '¥5999',
+    ].join('\n\n\n\n\n\n\n\n\n\n');
+    expect(check('Galaxy S24+ 256GB ¥7,999。', [s24], 'S24+ 价格')).toEqual([]);
+    const plusOnly = ['Samsung Galaxy S24+ 256GB', '¥7999'].join('\n');
+    expect(check('Galaxy S24 256GB ¥7,999。', [plusOnly], 'Galaxy S24 价格')).toHaveLength(1);
+    const mate = ['华为 Mate 60 Pro+ 512GB', '¥8999'].join('\n');
+    expect(check('Mate 60 Pro 512GB ¥8,999。', [mate], 'Mate 60 Pro 价格')).toHaveLength(1);
+    const mi = ['小米 14 512GB', '¥4999'].join('\n');
+    expect(check('小米 14 Ultra 512GB ¥4,999。', [mi], '小米 14 Ultra 价格')).toHaveLength(1);
+    const xps = ['Dell XPS 13 Plus 512GB SSD Windows 11 Pro', '$1,299'].join('\n');
+    expect(check('XPS 13 Plus 512GB $1,299.', [xps], 'XPS 13 Plus price')).toEqual([]);
+  });
 });
