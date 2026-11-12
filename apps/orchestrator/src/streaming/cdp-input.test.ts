@@ -832,3 +832,65 @@ describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under
     });
   });
 });
+
+// FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document it was made on.
+describe('CdpInputHandler document guard', () => {
+  const recording = () => {
+    const effects: string[] = [];
+    const session = {
+      send: async (method: string, params: { type?: string }) => {
+        if (method === 'Runtime.evaluate') return { result: { value: null } };
+        effects.push(params.type ?? method);
+      },
+      detach: async () => undefined,
+    } as unknown as CDPSession;
+    return { effects, session };
+  };
+
+  it('refuses an input whose page changed before it was sent — no event, no uncertain outcome', async () => {
+    const { effects, session } = recording();
+    const uncertain = vi.fn();
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      undefined,
+      uncertain,
+    );
+    handler.setDocumentGuard({ stillCurrent: async () => false, current: async () => 'B' });
+    await expect(
+      handler.handle(
+        { type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('browser_observation_expired');
+    expect(effects).toEqual([]);
+    expect(uncertain).not.toHaveBeenCalled();
+  });
+
+  it('releases a held key only on the page it was pressed on', async () => {
+    const { effects, session } = recording();
+    let page = 'A';
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setDocumentGuard({ stillCurrent: async () => true, current: async () => page });
+    const signal = new AbortController().signal;
+    await handler.handle({ type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 }, signal);
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    page = 'B';
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed']);
+    // Nothing is left held: a later release has nothing to send.
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed']);
+  });
+
+  it('still releases on the same page', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setDocumentGuard({ stillCurrent: async () => true, current: async () => 'A' });
+    const signal = new AbortController().signal;
+    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown', 'mousePressed', 'keyUp', 'mouseReleased']);
+  });
+});

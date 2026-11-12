@@ -1,0 +1,224 @@
+import { once } from 'node:events';
+import { type Server, createServer } from 'node:http';
+import type { BrowserFrameGeometry } from '@holaday/shared-types';
+import { pino } from 'pino';
+import { type Browser, type Page, chromium } from 'playwright';
+import { afterEach, expect, it, vi } from 'vitest';
+import { WebSocket } from 'ws';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
+import type { BrowserPool } from '../browser-pool/index.js';
+import type { BrowserInstance } from '../browser-pool/types.js';
+import { createScreencastProxy } from './screencast-proxy.js';
+
+/**
+ * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): after a person's search left Google's start page, the
+ * page restored later had Google's 「Share public link」 dialog open — nobody had pressed 分享.
+ * Human input may only ever reach the document the person was looking at:
+ *   - a key or button still held when the page changed is not released onto the NEW page at
+ *     handback (the release used to be sent to whatever page was current);
+ *   - a same-document navigation (pushState swapping the content) retires the old frames, so an
+ *     Enter made on the old frame never reaches the new page's focused control.
+ */
+
+// Page B's controls count every event they get; a human key or click that reaches them was meant
+// for page A.
+const PAGE_B = `<!doctype html><button id="share" autofocus style="position:absolute;left:0;top:0;width:1280px;height:800px">Share</button>
+<script>
+window.hits = [];
+const b = document.getElementById('share');
+for (const t of ['keydown', 'keyup', 'mousedown', 'mouseup', 'click']) b.addEventListener(t, (e) => window.hits.push(t + ':' + (e.key || '')));
+b.focus();
+</script>`;
+const PAGE_A = `<!doctype html><form id="f" action="/b"><input id="q" name="q" style="position:absolute;left:40px;top:40px"></form>
+<a id="nav" href="/b" style="position:absolute;left:400px;top:300px;width:300px;height:100px;display:block">go</a>
+<div id="tick"></div>
+<script>
+// An animating page (a caret, a suggestion list): a new frame every few dozen milliseconds.
+let n = 0; setInterval(() => { document.getElementById('tick').textContent = String(++n); }, 40);
+// Like a results page that leaves on mousedown (tracking links), not on click.
+document.getElementById('nav').addEventListener('mousedown', () => { location.href = '/b'; });
+document.getElementById('q').focus();
+</script>`;
+// A single-page app: Enter swaps the content in place (pushState) and focuses a new button.
+const PAGE_SPA = `<!doctype html><input id="q" style="position:absolute;left:40px;top:40px"><div id="tick"></div>
+<script>
+window.hits = [];
+let n = 0; setInterval(() => { document.getElementById('tick').textContent = String(++n); }, 40);
+const q = document.getElementById('q');
+q.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  history.pushState({}, '', '/spa?q=' + encodeURIComponent(q.value));
+  document.body.innerHTML = '<button id="share" style="position:absolute;left:0;top:0;width:1280px;height:800px">Share</button>';
+  const b = document.getElementById('share');
+  for (const t of ['keydown', 'keyup', 'click']) b.addEventListener(t, (ev) => window.hits.push(t + ':' + (ev.key || '')));
+  b.focus();
+});
+q.focus();
+</script>`;
+
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  while (cleanups.length)
+    await cleanups
+      .pop()?.()
+      .catch(() => undefined);
+  vi.unstubAllEnvs();
+});
+
+async function site(): Promise<string> {
+  const server: Server = createServer((req, res) => {
+    res.setHeader('content-type', 'text/html');
+    if (req.url?.startsWith('/b')) res.end(PAGE_B);
+    else if (req.url?.startsWith('/spa')) res.end(PAGE_SPA);
+    else res.end(PAGE_A);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  cleanups.push(() => new Promise<void>((r) => server.close(() => r())));
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+}
+
+async function harness(path: string) {
+  vi.stubEnv('BROWSER_VIEWPORT_V2', 'true');
+  const origin = await site();
+  const browser: Browser = await chromium.launch({
+    headless: true,
+    args: ['--renderer-process-limit=2'],
+  });
+  cleanups.push(() => browser.close());
+  const page: Page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.goto(origin + path);
+  const taskId = `tsk_nav_safety_${Math.random().toString(36).slice(2, 8)}`;
+  const instance = {
+    taskId,
+    userId: 'usr_nav',
+    status: 'ready',
+    executor: { getPage: async () => page },
+  } as unknown as BrowserInstance;
+  const binding = browserControlSessions.start(instance);
+  binding.control.requestHuman();
+  const parked = binding.control.checkpoint(async () => undefined);
+  const lease = binding.control.snapshot().lease;
+  if (!lease) throw new Error('fixture lease missing');
+  let frame: BrowserFrameGeometry | undefined;
+  const server = createServer();
+  const proxy = createScreencastProxy({
+    pool: { peek: () => instance, touch: () => {} } as unknown as BrowserPool,
+    logger: pino({ level: 'silent' }),
+    authenticateToken: async () => instance.userId,
+    beforeViewportAction: async (_i, envelope) => ({
+      request: {
+        taskId: instance.taskId,
+        runId: 'run',
+        actor: 'human',
+        lane: 'cdp',
+        tabId: envelope.observation?.tabId ?? '',
+        origin,
+        observationRevision: envelope.observation?.viewportRevision ?? 0,
+        actionDigest: 'input',
+        lease: envelope.controlLease ?? '',
+      },
+      decision: { kind: 'allow', sensitive: false },
+    }),
+  });
+  server.on('upgrade', proxy.handleUpgrade);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${(server.address() as { port: number }).port}/screencast-ws/${taskId}?token=fixture&viewportV2=1`,
+  );
+  ws.on('message', (raw) => {
+    const m = JSON.parse(String(raw));
+    if (m.geometry) frame = m.geometry;
+  });
+  let handedBack = false;
+  const handBack = async () => {
+    if (handedBack) return;
+    handedBack = true;
+    binding.control.returnToAgent(lease);
+    await parked;
+  };
+  cleanups.push(async () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+      await once(ws, 'close');
+    }
+    await handBack();
+    binding.finish();
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+  await once(ws, 'open');
+  await vi.waitFor(() => expect(frame).toBeDefined(), { timeout: 5000 });
+  const send = (payload: Record<string, unknown>, ref: BrowserFrameGeometry | undefined = frame) =>
+    ws.send(JSON.stringify({ type: 'input', controlLease: lease, observation: ref, payload }));
+  const key = (
+    type: 'keyDown' | 'keyUp',
+    k: string,
+    ref: BrowserFrameGeometry | undefined = frame,
+  ) =>
+    send(
+      k === 'Enter'
+        ? { type, key: 'Enter', code: 'Enter', keyCode: 13 }
+        : { type, key: k, code: `Key${k.toUpperCase()}`, keyCode: k.toUpperCase().charCodeAt(0) },
+      ref,
+    );
+  const hits = async (): Promise<string[]> =>
+    page.evaluate(() => (window as unknown as { hits?: string[] }).hits ?? []);
+  return { page, origin, send, key, hits, handBack, frame: () => frame };
+}
+
+it('an Enter still held when the search left the page is not released onto the new page', async () => {
+  const h = await harness('/a');
+  for (const ch of 'xy') {
+    h.key('keyDown', ch);
+    h.key('keyUp', ch);
+  }
+  await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe('xy'), {
+    timeout: 5000,
+  });
+  const before = h.frame();
+  h.key('keyDown', 'Enter', before);
+  await h.page.waitForURL(/\/b\?q=xy/, { timeout: 5000 });
+  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
+  // The release arrives naming the old page's frame (it is refused: that page is gone).
+  h.key('keyUp', 'Enter', before);
+  await new Promise((r) => setTimeout(r, 300));
+  // Handing back releases whatever is still held — never onto a page the person never saw.
+  await h.handBack();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(await h.hits()).toEqual([]);
+}, 30000);
+
+it('a press on a link that leaves on mousedown is not released onto the new page', async () => {
+  const h = await harness('/a');
+  const before = h.frame();
+  h.send({ type: 'mouseDown', x: 500, y: 350, button: 'left', clickCount: 1 }, before);
+  await h.page.waitForURL(/\/b$/, { timeout: 5000 });
+  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
+  h.send({ type: 'mouseUp', x: 500, y: 350, button: 'left', clickCount: 1 }, before);
+  await new Promise((r) => setTimeout(r, 300));
+  await h.handBack();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(await h.hits()).toEqual([]);
+}, 30000);
+
+it('after a pushState page swap, an Enter made on the old frame does not reach the new focused button', async () => {
+  const h = await harness('/spa');
+  h.key('keyDown', 'z');
+  h.key('keyUp', 'z');
+  await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe('z'), {
+    timeout: 5000,
+  });
+  const before = h.frame();
+  // The first Enter swaps the page (the person meant it); a second one, pressed at once while
+  // the screen still shows the search box, names that same old frame.
+  h.key('keyDown', 'Enter', before);
+  h.key('keyUp', 'Enter', before);
+  await h.page.waitForURL(/\/spa\?q=z/, { timeout: 5000 });
+  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
+  h.key('keyDown', 'Enter', before);
+  h.key('keyUp', 'Enter', before);
+  await new Promise((r) => setTimeout(r, 500));
+  expect(await h.hits()).toEqual([]);
+}, 30000);

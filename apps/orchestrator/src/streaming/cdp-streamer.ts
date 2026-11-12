@@ -158,7 +158,38 @@ export class CdpStreamer {
     this.observationSequence++;
     this.opts.onObservationInvalidated?.();
   }
+  /** The revision the frames now being published carry (FIX-62 P0-1: checked at dispatch). */
+  currentRevision(): number {
+    return this.viewportRevision;
+  }
+  /**
+   * FIX-62 P0-1: which document the frames show — main-frame loader + URL, as the navigation
+   * events last reported it. Empty until the first read or navigation of the bound page.
+   */
+  private docKey = '';
+  documentKey(): string {
+    return this.docKey;
+  }
+  /**
+   * The main frame's document read from the browser NOW (loader + URL). It differs from
+   * documentKey() when a navigation has committed whose event this stream has not handled yet.
+   * Null when it cannot be read.
+   */
+  async currentDocumentKey(): Promise<string | null> {
+    const session = this.cdpSession;
+    if (!session) return null;
+    try {
+      const { frameTree } = await session.send('Page.getFrameTree');
+      const f = frameTree.frame;
+      const key = `${f.loaderId}|${withoutFragment(f.url)}`;
+      if (!this.docKey && session === this.cdpSession) this.docKey = key;
+      return key;
+    } catch {
+      return null;
+    }
+  }
   private bindPage(page: Page): void {
+    this.docKey = '';
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
@@ -287,6 +318,7 @@ export class CdpStreamer {
       // but the SPA only cares about the address-bar URL.
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
+      this.docKey = `${params.frame.loaderId}|${withoutFragment(params.frame.url)}`;
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
@@ -322,7 +354,12 @@ export class CdpStreamer {
       if (!this.streaming || this.cdpSession !== cdp) return;
       if (params.frameId == null || (this.mainFrameId && params.frameId !== this.mainFrameId))
         return;
-      this.invalidateCaptureRequests();
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a pushState / hash swap can replace everything the
+      // person sees — an Enter made on the old frame landed on the new page's focused 「Share」.
+      // The old frames are retired like on any navigation; the stream itself stays armed.
+      const loader = this.docKey.split('|')[0] ?? '';
+      this.docKey = `${loader}|${withoutFragment(params.url)}`;
+      this.invalidateObservation();
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.
@@ -828,4 +865,10 @@ function errMsg(err: unknown): string {
 
 function logOrigin(url: string | null): string | null {
   return url === null ? null : browserUrlForLog(url);
+}
+
+/** The document part of a URL: a fragment change keeps the document (it still retires frames). */
+function withoutFragment(url: string): string {
+  const hash = url.indexOf('#');
+  return hash < 0 ? url : url.slice(0, hash);
 }

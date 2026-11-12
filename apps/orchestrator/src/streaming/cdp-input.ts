@@ -48,6 +48,65 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
   return false;
 })()`;
 
+/**
+ * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document the person was
+ * looking at. Wired by the screencast proxy from the streamer's document record.
+ */
+export interface InputDocumentGuard {
+  /** False when the page this input was meant for is no longer the one in the browser. */
+  stillCurrent(msg: InputMessage): Promise<boolean>;
+  /** The document now in the browser (loader + URL), or null when it cannot be read. */
+  current(): Promise<string | null>;
+}
+
+/** Error for an input refused because the page changed under it (the screen asks again). */
+export const PAGE_CHANGED_ERROR = 'browser_observation_expired';
+
+/** What a key is, for logs: Enter / Space / a named key — never the character typed. */
+export function keyClass(m: { key?: string; code?: string; keyCode?: number }): string {
+  if (m.key === 'Enter' || m.code === 'Enter' || m.code === 'NumpadEnter' || m.keyCode === 13)
+    return 'Enter';
+  if (m.key === ' ' || m.key === 'Spacebar' || m.code === 'Space' || m.keyCode === 32)
+    return 'Space';
+  if (m.key && m.key.length === 1) return 'char';
+  return m.key ?? m.code ?? 'unknown';
+}
+
+/** Presses that can activate something: a mouse press / release, Enter, Space. */
+function activates(msg: InputMessage): boolean {
+  if (msg.type === 'mouseDown' || msg.type === 'mouseUp') return true;
+  if (msg.type === 'keyDown' || msg.type === 'keyUp') {
+    const k = keyClass(msg);
+    return k === 'Enter' || k === 'Space';
+  }
+  return false;
+}
+
+/**
+ * The element an input hits — role and visible name only (labels, aria-label, a button's own
+ * text), never what anyone typed — plus origin + path of the page (no query: it can hold a
+ * search the person typed).
+ */
+function describeTargetExpression(msg: InputMessage): string {
+  const pick =
+    'x' in msg && Number.isFinite(msg.x)
+      ? `document.elementFromPoint(${Number(msg.x)}, ${Number((msg as { y: number }).y)})`
+      : 'document.activeElement';
+  return `(() => {
+  const el = ${pick};
+  const page = location.origin + location.pathname;
+  if (!el) return { role: null, name: null, page };
+  const tag = el.tagName.toLowerCase();
+  const role = el.getAttribute('role') || tag;
+  let name = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+  if (!name && (tag === 'input' || tag === 'textarea' || tag === 'select'))
+    name = (el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+  if (!name && (['button', 'a', 'summary', 'label', 'option'].includes(tag) || ['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'radio', 'switch'].includes(role)))
+    name = el.innerText || '';
+  return { role, name: String(name).replace(/\s+/g, ' ').trim().slice(0, 40), page };
+})()`;
+}
+
 /** The size the cloud browser's agent page starts a task with. */
 export const AGENT_LAUNCH_VIEWPORT = { width: 1280, height: 800 } as const;
 
@@ -181,6 +240,16 @@ export class CdpInputHandler {
     'left' | 'middle' | 'right',
     Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
   >();
+  /** FIX-62 P0-1: the document each held key / button was pressed on. */
+  private readonly pressedOn = new Map<string, string | null>();
+  private documentGuard: InputDocumentGuard | null = null;
+  /** The last activating input's target, for the 「outcome unknown」 log. */
+  private lastTarget: { role: string | null; name: string | null; page: string } | null = null;
+
+  /** FIX-62 P0-1: bind every human input to the document its frame showed. */
+  setDocumentGuard(guard: InputDocumentGuard | null): void {
+    this.documentGuard = guard;
+  }
 
   /**
    * @param getSession Returns the streamer's CURRENT CDP session,
@@ -346,7 +415,7 @@ export class CdpInputHandler {
    * propagate and cancellation interrupts the real CDP session. We still await
    * the original send: detach failure must not manufacture a settled action.
    */
-  async handle(msg: InputMessage, signal?: AbortSignal): Promise<void> {
+  async handle(msg: InputMessage, signal?: AbortSignal, releaseOf?: string | null): Promise<void> {
     signal?.throwIfAborted();
     const session = this.getSession();
     if (!session) {
@@ -355,6 +424,45 @@ export class CdpInputHandler {
       return;
     }
     if (this.interruptedSessions.has(session)) throw new BrowserInputOutcomeUnknownError();
+    // FIX-62 P0-1: right before it is sent, the input's page must still be the one in the
+    // browser. Checked before the interruption wiring: a refusal is no uncertain outcome.
+    const guard = this.documentGuard;
+    if (guard && msg.type !== 'viewport' && releaseOf === undefined) {
+      if (!(await guard.stillCurrent(msg))) {
+        this.logger.info(
+          {
+            type: msg.type,
+            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+          },
+          'cdp-input: human input refused (page changed)',
+        );
+        throw new Error(PAGE_CHANGED_ERROR);
+      }
+    }
+    let documentAtDispatch: string | null = null;
+    if (guard && msg.type !== 'viewport') {
+      documentAtDispatch = await guard.current();
+      if (activates(msg)) {
+        this.lastTarget = await session
+          .send('Runtime.evaluate', {
+            expression: describeTargetExpression(msg),
+            returnByValue: true,
+          })
+          .then((r) => (r.result?.value as typeof this.lastTarget) ?? null)
+          .catch(() => null);
+        this.logger.info(
+          {
+            type: msg.type,
+            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+            target: this.lastTarget,
+            ...(releaseOf !== undefined ? { release: true } : {}),
+          },
+          'cdp-input: human activation',
+        );
+      }
+    }
     if (session !== this.activeSession) {
       this.activeSession = session;
       this.activeModifiers = 0;
@@ -503,6 +611,7 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.set(msg.button ?? 'left', msg);
+          this.pressedOn.set(`button:${msg.button ?? 'left'}`, documentAtDispatch);
           break;
         case 'mouseUp':
           await send('Input.dispatchMouseEvent', {
@@ -513,6 +622,7 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.delete(msg.button ?? 'left');
+          this.pressedOn.delete(`button:${msg.button ?? 'left'}`);
           break;
         case 'scroll':
           await send('Input.dispatchMouseEvent', {
@@ -539,6 +649,10 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.set(msg.code ?? msg.key ?? String(msg.keyCode), msg);
+          this.pressedOn.set(
+            `key:${msg.code ?? msg.key ?? String(msg.keyCode)}`,
+            documentAtDispatch,
+          );
           break;
         }
         case 'keyUp': {
@@ -554,6 +668,7 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.delete(msg.code ?? msg.key ?? String(msg.keyCode));
+          this.pressedOn.delete(`key:${msg.code ?? msg.key ?? String(msg.keyCode)}`);
           break;
         }
         case 'insertText':
@@ -578,6 +693,18 @@ export class CdpInputHandler {
         'cdp-input: dispatch failed',
       );
       if (signal) {
+        // FIX-62 P0-1: what was in flight when its outcome became unknown — type, position,
+        // the element it was aimed at, the page (origin + path). No typed text.
+        this.logger.warn(
+          {
+            type: msg.type,
+            ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
+            ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
+            target: activates(msg) ? this.lastTarget : null,
+            ...(releaseOf !== undefined ? { release: true } : {}),
+          },
+          'cdp-input: human input outcome unknown',
+        );
         interrupt();
         throw new BrowserInputOutcomeUnknownError();
       }
@@ -612,18 +739,50 @@ export class CdpInputHandler {
       this.onInputUncertain?.();
       throw new BrowserInputOutcomeUnknownError();
     }
-    for (const key of [...this.pressedKeys.values()]) {
+    // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a key or button is released only on the document it
+    // was pressed on. When the page has changed since (the Enter that submitted a search), the
+    // new page never saw the press — releasing there could activate whatever it focused.
+    const now = this.documentGuard ? await this.documentGuard.current() : null;
+    const samePage = (id: string): boolean => {
+      if (!this.documentGuard) return true;
+      const pressed = this.pressedOn.get(id);
+      return pressed !== undefined && pressed !== null && now !== null && pressed === now;
+    };
+    for (const [id, key] of [...this.pressedKeys.entries()]) {
+      if (!samePage(`key:${id}`)) {
+        this.pressedKeys.delete(id);
+        this.pressedOn.delete(`key:${id}`);
+        this.logger.info(
+          { type: 'keyUp', key: keyClass(key) },
+          'cdp-input: held key not released (page changed)',
+        );
+        continue;
+      }
       await this.handle(
         { ...key, type: 'keyUp', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false },
         signal,
+        this.pressedOn.get(`key:${id}`) ?? null,
       );
     }
     for (const modifier of MODIFIER_KEYS) {
       if (this.activeModifiers & modifier.bit)
-        await this.handle({ type: 'keyUp', ...modifier }, signal);
+        await this.handle({ type: 'keyUp', ...modifier }, signal, now);
     }
-    for (const button of [...this.pressedButtons.values()]) {
-      await this.handle({ ...button, type: 'mouseUp' }, signal);
+    for (const [id, button] of [...this.pressedButtons.entries()]) {
+      if (!samePage(`button:${id}`)) {
+        this.pressedButtons.delete(id);
+        this.pressedOn.delete(`button:${id}`);
+        this.logger.info(
+          { type: 'mouseUp', x: Math.round(button.x), y: Math.round(button.y) },
+          'cdp-input: held button not released (page changed)',
+        );
+        continue;
+      }
+      await this.handle(
+        { ...button, type: 'mouseUp' },
+        signal,
+        this.pressedOn.get(`button:${id}`) ?? null,
+      );
     }
   }
 

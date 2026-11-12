@@ -312,6 +312,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return lease !== null && viewportLease === lease;
     };
     const frameGuard = new BrowserFrameGuard();
+    // FIX-62 P0-1: the frame revision each accepted human input was checked against; the handler
+    // re-checks it (and the document itself) right before the input is sent.
+    const validatedRevision = new WeakMap<object, number>();
     /**
      * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
      * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
@@ -454,6 +457,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               streamer?.requestFrameRefresh();
               throw new Error('browser_observation_expired');
             }
+            if (envelope.observation)
+              validatedRevision.set(message, envelope.observation.viewportRevision);
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
             // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
             if (
@@ -656,6 +661,20 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             browserControlSessions.noteAgentViewportChanged(args.instance, restore),
         },
       );
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document its frame
+      // showed. Read fresh at dispatch: a navigation can commit before its event reaches us.
+      const streamRef = streamer;
+      inputHandler.setDocumentGuard({
+        stillCurrent: async (message) => {
+          const revision = validatedRevision.get(message);
+          if (revision !== undefined && revision !== streamRef.currentRevision()) return false;
+          const now = await streamRef.currentDocumentKey();
+          if (now === null) return false;
+          const recorded = streamRef.documentKey();
+          return !recorded || now === recorded;
+        },
+        current: () => streamRef.currentDocumentKey(),
+      });
       await inputBridge.attach(inputHandler);
       // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the
       // workbench does); only that message may change the assistant's page (mayAlign above).
