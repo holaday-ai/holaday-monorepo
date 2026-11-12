@@ -93,38 +93,48 @@ function clausesOf(sentence: string): string[] {
  */
 const SUFFIX = 'pro\\s*max|pro\\s*xl|pro|plus|mini|ultra|air|lite|se|fe|neo|xl';
 const NUMBERED_RE = new RegExp(
-  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b(?!\\+(?![\\p{L}\\d]))`,
+  `(?<![\\d.,$¥￥])\\b([a-z]{0,2}\\d{1,3}[a-z]?)\\s*(${SUFFIX})\\b(?!\\+(?![\\p{L}\\d]))`,
   'giu',
 );
 /** 复审 #6: 「S24+」 is the Plus, 「Mate 60 Pro+」 its own model (not the Pro). */
 // 复审 #7: only a 「+」 right on the model (no space) and not followed by a word: 「16 Pro + AppleCare+」
 // 「15 Pro +保护壳」 are bundles of the Pro.
 const PLUS_SIGN_RE =
-  /(?<![\d.,$¥￥])\b(?:[a-z]{1,2}\d{1,3}[a-z]?|\d{1,3}\s*(pro))\+(?![\p{L}\d])/giu;
+  /(?<![\d.,$¥￥])\b(?:([a-z]{1,2}\d{1,3}[a-z]?)|(\d{1,3})\s*(pro))\+(?![\p{L}\d])/giu;
 const SERIES_RE = new RegExp(
   `\\b(?:macbook|ipad|iphone|galaxy|pixel|surface)\\s+(${SUFFIX})\\b(?!\\s*\\+)`,
   'giu',
 );
 const BASE_RE = new RegExp(
-  `\\b(?:iphone|ipad|galaxy\\s*s|pixel|mate|redmi|xiaomi)\\s*\\d{1,3}(?![\\d.+]|\\s*(?:${SUFFIX}|max|e|\\+)\\b)|小米\\s*\\d{1,3}(?![\\d.+]|\\s*(?:${SUFFIX}|\\+))|标准版|标准款|base model`,
+  `\\b(?:iphone|ipad|galaxy\\s*s|pixel|mate|redmi|xiaomi)\\s*(\\d{1,3})(?![\\d.+]|\\s*(?:${SUFFIX}|max|e|\\+)\\b)|小米\\s*(\\d{1,3})(?![\\d.+]|\\s*(?:${SUFFIX}|\\+))|标准版|标准款|base model`,
   'giu',
 );
 /** Operating systems carry edition words that are no device models (「Windows 11 Pro」). */
 const OS_RE =
   /\b(?:windows|win)\s*\d{1,2}\s*(?:pro|home|plus|se|enterprise)\b|\bmacos\b|\bios\s*\d+/giu;
+/**
+ * FIX-62 iPhone run f62j2: 「16 Pro Max」 and 「18 Pro Max」 are different models — the comparison
+ * page's 18 Pro Max price was said as the 16 Pro Max's. A model is 「generation|suffix」
+ * (「16|promax」); 「|promax」 when no number is written.
+ */
 function modelsOf(raw: string): Set<string> {
   const text = raw.replace(OS_RE, ' ');
   const out = new Set<string>();
-  for (const re of [NUMBERED_RE, SERIES_RE]) {
-    for (const m of text.matchAll(re)) {
-      const k = m[1]!.toLowerCase().replace(/\s+/g, '');
-      out.add(k === 'plus' ? 'plus' : k);
-    }
-  }
-  for (const m of text.matchAll(PLUS_SIGN_RE)) out.add(m[1] ? 'proplus' : 'plus');
-  if (BASE_RE.test(text)) out.add('base');
-  BASE_RE.lastIndex = 0;
+  const gen = (g: string | undefined) => (g ?? '').toLowerCase().replace(/\s+/g, '');
+  for (const m of text.matchAll(NUMBERED_RE))
+    out.add(`${gen(m[1])}|${m[2]!.toLowerCase().replace(/\s+/g, '')}`);
+  for (const m of text.matchAll(SERIES_RE)) out.add(`|${m[1]!.toLowerCase().replace(/\s+/g, '')}`);
+  for (const m of text.matchAll(PLUS_SIGN_RE))
+    out.add(m[3] ? `${gen(m[2])}|proplus` : `${gen(m[1])}|plus`);
+  for (const m of text.matchAll(BASE_RE)) out.add(`${gen(m[1] ?? m[2])}|base`);
   return out;
+}
+
+/** Two models are the same when their suffixes match and their generations do (where both say one). */
+function sameModel(a: string, b: string): boolean {
+  const [ga, sa] = a.split('|');
+  const [gb, sb] = b.split('|');
+  return sa === sb && (!ga || !gb || ga === gb);
 }
 
 /** A line's pieces (「，；。」) — each with its own capacities and the models it names. */
@@ -136,7 +146,7 @@ function piecesOf(line: string): Array<{ caps: string[]; models: Set<string> }> 
 }
 
 const sharesModel = (a: Set<string>, b: Set<string>) =>
-  a.size === 0 || b.size === 0 || [...a].some((m) => b.has(m));
+  a.size === 0 || b.size === 0 || [...a].some((m) => [...b].some((n) => sameModel(m, n)));
 
 /**
  * A read page shows `capacity` within `reach` lines of a price equal to `price` (any when null),
@@ -162,6 +172,52 @@ function near(
     }
   }
   return false;
+}
+
+/** Lines up from a price within which the model it belongs to is looked for (a card's title). */
+const MODEL_REACH = 12;
+
+/**
+ * The models nearest above a price at line `i`: its own piece, its line, then the lines above —
+ * stopping at another price (another card or column). Null when none is found that way.
+ */
+function nearestModels(lines: readonly string[], i: number, amount: number): Set<string> | null {
+  const line = lines[i]!;
+  const piece = line.split(/[，；。;]|,\s/u).find((p) => pricesOf(p).includes(amount)) ?? line;
+  for (const where of [piece, line]) {
+    const named = modelsOf(where);
+    if (named.size) return named;
+  }
+  for (let k = i - 1; k >= 0 && k >= i - MODEL_REACH; k -= 1) {
+    const named = modelsOf(lines[k]!);
+    if (named.size) return named;
+    if (pricesOf(lines[k]!).length) return null;
+  }
+  return null;
+}
+
+/**
+ * Whether a read page gives `amount` to `models`: 'ok' — on a page naming one model or none, or
+ * with the nearest model above it being this one; 'other' — shown, but only beside another model
+ * (or none) on a page listing several (a comparison page); 'absent' — no page shows it.
+ */
+function priceForModel(
+  read: readonly string[][],
+  amount: number,
+  models: Set<string>,
+): 'ok' | 'other' | 'absent' {
+  let found = false;
+  for (const lines of read) {
+    const named = new Set(lines.flatMap((l) => [...modelsOf(l)]));
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!pricesOf(lines[i]!).includes(amount)) continue;
+      found = true;
+      if (!models.size || named.size < 2) return 'ok';
+      const near = nearestModels(lines, i, amount);
+      if (near && sharesModel(models, near)) return 'ok';
+    }
+  }
+  return found ? 'other' : 'absent';
 }
 
 const shownCapacity = (c: string) => `${c.slice(0, -1)}${c.endsWith('t') ? 'TB' : 'GB'}`;
@@ -197,7 +253,8 @@ export function unsupportedSpecPricePairings(
   // A task naming a series (「iPhone 16 价格」) asks about the whole line: only an explicit 标准版
   // makes it the base model.
   const taskModels = modelsOf(intent);
-  if (!/标准版|标准款|base model/iu.test(intent)) taskModels.delete('base');
+  if (!/标准版|标准款|base model/iu.test(intent))
+    for (const m of [...taskModels]) if (m.endsWith('|base')) taskModels.delete(m);
   let previousModels = new Set<string>();
   for (const sentence of sentencesOf(summary)) {
     // The models a clause is about: its own, its sentence's, else the task's. Only a pointing clause
@@ -224,6 +281,16 @@ export function unsupportedSpecPricePairings(
           `「${clause.slice(0, 60)}」是对规格价格的推测，已读页面上没有这个说法：删掉这句，或写「没读到」`,
         );
         continue;
+      }
+      // 5. FIX-62 f62j2: a model named in the task, priced here — the page must give this price to
+      // this model (16 Pro Max is not 18 Pro Max), not to another column of a comparison page.
+      if (prices.length && taskModels.size) {
+        const models = [modelsOf(clause), ownModels, taskModels].find((m) => m.size) ?? taskModels;
+        const other = prices.filter((p) => priceForModel(read, p, models) === 'other');
+        if (other.length)
+          out.push(
+            `「${clause.slice(0, 60)}」把这个价格说成这一款的，但已读页面上它挨着的是别的机型（或页面同时列了好几款、分不清）：进这一款自己的页面读，或写「没读到」`,
+          );
       }
       if (!capacities.length) continue;
       const pointing = !prices.length && POINTS_AT_RE.test(clause);
@@ -286,28 +353,10 @@ export function withoutUnmatchedPrices(
       .filter(Boolean),
   );
   const taskModels = modelsOf(intent);
-  if (!/标准版|标准款|base model/iu.test(intent)) taskModels.delete('base');
-  const shown = (amount: number, models: Set<string>): boolean => {
-    for (const lines of read) {
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i]!;
-        if (!pricesOf(line).includes(amount)) continue;
-        if (!models.size) return true;
-        // The piece of the line holding the price, else the line, else the line above.
-        const piece =
-          line.split(/[，；。;]|,\s/u).find((p) => pricesOf(p).includes(amount)) ?? line;
-        for (const where of [piece, line, lines[i - 1] ?? '']) {
-          const named = modelsOf(where);
-          if (named.size) {
-            if (sharesModel(models, named)) return true;
-            break;
-          }
-          if (where === (lines[i - 1] ?? '')) return true;
-        }
-      }
-    }
-    return false;
-  };
+  if (!/标准版|标准款|base model/iu.test(intent))
+    for (const m of [...taskModels]) if (m.endsWith('|base')) taskModels.delete(m);
+  const shown = (amount: number, models: Set<string>): boolean =>
+    priceForModel(read, amount, models) === 'ok';
   return text
     .split(/(?<=[。！？!?；;\n])/u)
     .map((sentence) => {

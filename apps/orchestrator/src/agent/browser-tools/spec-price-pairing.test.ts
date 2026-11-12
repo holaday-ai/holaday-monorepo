@@ -306,3 +306,59 @@ describe('FIX-62 P0-3: prices in a failure / partial explanation', () => {
     expect(withoutUnmatchedPrices(text, [COMPARE], 'iPhone 16 Pro Max 多少钱')).toBe(text);
   });
 });
+
+// FIX-62 iPhone run f62j2 (completed, red line): the comparison page's 18 Pro Max price was said as
+// the 16 Pro Max's — 「iPhone 16 Pro Max 256GB 在 Apple 中国官网机型比较页显示的价格为 RMB 10,999 起」.
+describe('FIX-62 f62j2: a model named in the task is priced from its own column or card', () => {
+  const INTENT_16 = 'iPhone 16 Pro Max 256GB 多少钱';
+  const ANSWER = 'iPhone 16 Pro Max 256GB 在 Apple 中国官网机型比较页显示的价格为 RMB 10,999 起。';
+  it('column by column: 10,999 sits under 18 Pro Max → sent back', () => {
+    const page = [
+      'iPhone 机型比较',
+      'iPhone 16 Pro Max',
+      '于授权经销商处有售',
+      '256GB 512GB 1TB',
+      'iPhone 18 Pro Max',
+      'RMB 10,999 起',
+      '256GB 512GB 1TB 2TB',
+      'iPhone 18 Pro',
+      'RMB 9,299 起',
+    ].join('\n');
+    expect(check(ANSWER, [page], INTENT_16).join('\n')).toMatch(/挨着的是别的机型/);
+  });
+  it('row by row (a flattened table): no model beside the price → sent back', () => {
+    const page = [
+      'iPhone 16 Pro Max',
+      'iPhone 18 Pro Max',
+      'iPhone 18 Pro',
+      '价格',
+      '于授权经销商处有售',
+      'RMB 10,999 起',
+      'RMB 9,299 起',
+    ].join('\n');
+    expect(check(ANSWER, [page], INTENT_16).join('\n')).toMatch(/挨着的是别的机型/);
+  });
+  it('a store list with each card’s title above its price passes', () => {
+    const page = [
+      'Apple iPhone 16 Pro Max 256GB 原色钛金属',
+      '¥8999',
+      'Apple iPhone 16 Pro 256GB 黑色钛金属',
+      '¥7999',
+    ].join('\n');
+    expect(check('iPhone 16 Pro Max 256GB 京东价 ¥8,999。', [page], INTENT_16)).toEqual([]);
+    expect(check('iPhone 16 Pro Max 256GB 京东价 ¥7,999。', [page], INTENT_16).join()).toMatch(
+      /挨着的是别的机型/,
+    );
+  });
+  it('the same holds for a failure explanation (P0-3)', () => {
+    const page = [
+      'iPhone 16 Pro Max',
+      '于授权经销商处有售',
+      'iPhone 18 Pro Max',
+      'RMB 10,999 起',
+    ].join('\n');
+    expect(withoutUnmatchedPrices(`没拿到准确价格；${ANSWER}`, [page], INTENT_16)).not.toMatch(
+      /10,999/,
+    );
+  });
+});
