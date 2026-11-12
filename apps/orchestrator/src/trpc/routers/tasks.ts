@@ -145,6 +145,8 @@ import {
 } from '../../agent/text-sanitizer.js';
 import {
   decideExecutionRoute,
+  freshnessHandover,
+  freshnessProblem,
   interfaceSearchLane,
   routeTask,
   toolRouterSettings,
@@ -4926,6 +4928,24 @@ export const tasksRouter = router({
                     ))
                   ) {
                     return;
+                  }
+                  // REBUILD-2 bench a1 ruling (live-sh): a time-sensitive answer from an interface
+                  // states the data's own time, and only data of the day (news: or the day
+                  // before; weather: today or later) is said as current — else the live page.
+                  const stale =
+                    interfaceRoute && interfaceLane && scrapeOutcome.status === 'completed'
+                      ? freshnessProblem({
+                          intent: input.intent,
+                          answer: scrapeOutcome.summary,
+                          results: interfaceLane.lastText(),
+                        })
+                      : null;
+                  if (stale) {
+                    ctx.logger.info(
+                      { taskId, problem: stale },
+                      'tool-router: interface answer not current, handing over to browser',
+                    );
+                    if (await handOverToBrowser(freshnessHandover(stale))) return;
                   }
                   const pageUnreadable =
                     scrapeOutcome.status === 'failed' &&

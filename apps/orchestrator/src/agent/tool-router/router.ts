@@ -302,6 +302,8 @@ export function withInterfaceSource(
 export interface InterfaceSearchLane extends FirecrawlLane {
   /** Where the last successful call's rows came from; null before one. */
   lastSource(): InterfaceSource | null;
+  /** The text of the last successful call's rows (for the freshness check). */
+  lastText(): string;
   /** Why the last call failed; null when it succeeded or none ran. */
   lastFailure(): string | null;
 }
@@ -321,8 +323,10 @@ export function interfaceSearchLane(opts: {
 }): InterfaceSearchLane {
   let source: InterfaceSource | null = null;
   let failure: string | null = null;
+  let text = '';
   return {
     lastSource: () => source,
+    lastText: () => text,
     lastFailure: () => failure,
     async scrape() {
       failure = 'page_not_supported';
@@ -341,16 +345,19 @@ export function interfaceSearchLane(opts: {
       }
       failure = null;
       source = result.source;
-      const line = formatSourceLine(result.source, opts.language ?? 'zh');
-      return {
-        ok: true,
-        credits: 0,
-        results: result.results.map((row) => ({
-          url: row.url,
-          title: row.title,
-          markdown: `# ${row.title || row.host || row.url}\n\n${row.snippet}\n\n${line}`,
-        })),
-      };
+      // Bench a1 (live-sh): the retrieval time on each row was read as the data's time. It is
+      // labelled as what it is; the answer states the data's own date / time.
+      const line =
+        (opts.language ?? 'zh') === 'en'
+          ? `${formatSourceLine(result.source, 'en')} — retrieval time, not the data's time`
+          : `${formatSourceLine(result.source, 'zh').replace('来源：', '检索于：')}（这是检索时间，不是数据本身的时间）`;
+      const rows = result.results.map((row) => ({
+        url: row.url,
+        title: row.title,
+        markdown: `# ${row.title || row.host || row.url}\n\n${row.snippet}\n\n${line}`,
+      }));
+      text = rows.map((row) => row.markdown).join('\n\n');
+      return { ok: true, credits: 0, results: rows };
     },
   };
 }

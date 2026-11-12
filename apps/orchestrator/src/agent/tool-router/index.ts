@@ -10,6 +10,12 @@ export {
 } from './bailian-mcp-client.js';
 export { explicitSiteRequest, explicitSiteRoute } from './explicit-site.js';
 export {
+  type FreshnessProblem,
+  freshnessHandover,
+  freshnessProblem,
+  isTimeSensitive,
+} from './freshness.js';
+export {
   type CallableInterfaceTool,
   INTERFACE_TOOLS,
   enabledInterfaceTools,

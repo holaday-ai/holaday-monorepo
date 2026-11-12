@@ -19,6 +19,8 @@ const TOOLS = enabledInterfaceTools('bailian_web_search');
 const WEB = TOOLS[0]!;
 const AT = '2026-11-11T02:30:00.000Z';
 const SOURCE_LINE = '来源：百炼联网搜索 · 2026-11-11 10:30';
+// Bench a1 (live-sh): on the rows the retrieval time is labelled as such.
+const ROW_LINE = '检索于：百炼联网搜索 · 2026-11-11 10:30（这是检索时间，不是数据本身的时间）';
 
 function fakeModel(input: unknown): MessagesAdapter & { create: ReturnType<typeof vi.fn> } {
   return {
@@ -236,7 +238,7 @@ describe('interfaceSearchLane (hard rule 1 + source line)', () => {
         {
           url: 'https://a.example/1',
           title: '上证指数',
-          markdown: `# 上证指数\n\n收盘 3663.72\n\n${SOURCE_LINE}`,
+          markdown: `# 上证指数\n\n收盘 3663.72\n\n${ROW_LINE}`,
         },
       ],
     });
@@ -393,7 +395,9 @@ describe('source line language (review #1 item 5)', () => {
     const bundle = await lane.search('q');
     expect(bundle).toMatchObject({
       ok: true,
-      results: [{ markdown: `# SSE\n\n3663.72\n\n${EN_LINE}` }],
+      results: [
+        { markdown: `# SSE\n\n3663.72\n\n${EN_LINE} — retrieval time, not the data's time` },
+      ],
     });
   });
 });
