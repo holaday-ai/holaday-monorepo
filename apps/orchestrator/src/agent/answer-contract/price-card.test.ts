@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PriceItem } from './price-result.js';
-import { verifyPriceItems } from './price-verify.js';
+import { blockPriceEntries, pagesQuotingInOrder, verifyPriceItems } from './price-verify.js';
 import type { ReadPage } from './read-blocks.js';
 
 // Bench a1 (coordinator ruling): a search result's product card is one block; a was / list price
@@ -108,4 +108,82 @@ describe('bench a1: one product card is one block', () => {
     );
     expect(out.rejected.map((r) => r.problems)).toEqual([]);
   });
+});
+
+describe('bench r3 b-p02: a quote that skips the rating lines between name and price', () => {
+  const READ: ReadPage[] = [
+    {
+      text: [
+        'Best Sellers',
+        'Gift Shop',
+        'Best Seller',
+        'Anker USB C to USB C Cable, 60W Fast Charging Cable (2-Pack, 6 ft, Black)',
+        'For iPhone 18 / 17 Series, iPad mini 6, and More',
+        '4.7',
+        '4.7 out of 5 stars',
+        ' (91.3K)',
+        '10K+ bought in past month',
+        'Price, product page',
+        '$9.99',
+        '$9',
+        '.',
+        '99 (',
+      ].join('\n'),
+      sourceURL: 'https://www.amazon.com/s?k=usb+c+cable',
+    },
+    ...PAGES,
+  ];
+  const elided =
+    'Best Seller\nAnker USB C to USB C Cable, 60W Fast Charging Cable (2-Pack, 6 ft, Black)\n$9.99';
+
+  it('its lines in order, close together on one read page, count as read (block mode)', () => {
+    expect(pagesQuotingInOrder(elided, READ)).toHaveLength(1);
+    // A snapshot card repeats the title (link + heading); the quote gives it once, then the price.
+    const checked = verifyPriceItems(
+      [item({ quote: `${UGREEN_1M}\n50+ bought in past month\nS$10.92` })],
+      PAGES,
+    );
+    expect(checked.rejected).toEqual([]);
+    // The block still has to hold every line: a badge outside the card is not in it.
+    const outside = verifyPriceItems(
+      [item({ quote: 'Best Seller\nUGREEN 2 Pack USB C\nS$10.92' })],
+      [{ text: `Best Seller\n${LIST}`, sourceURL: PAGES[0]!.sourceURL, tabId: 'tab_1' }],
+    );
+    expect(outside.rejected[0]?.problems).toEqual([expect.stringMatching(/不在这个区块里/)]);
+  });
+
+  it('out of order, too far apart, or text mode: still rejected', () => {
+    expect(
+      pagesQuotingInOrder('$9.99\nAnker USB C to USB C Cable, 60W Fast Charging Cable', READ),
+    ).toEqual([]);
+    const far: ReadPage[] = [{ text: `Anker cable\n${'x '.repeat(600)}\n$9.99`, sourceURL: 'u' }];
+    expect(pagesQuotingInOrder('Anker cable\n$9.99', far)).toEqual([]);
+    const text = verifyPriceItems(
+      [item({ quote: 'Best Seller\nUGREEN 2 Pack USB C\nS$10.92', block_ref: 'text' })],
+      [{ text: `Best Seller\n${LIST}`, sourceURL: PAGES[0]!.sourceURL, tabId: 'tab_1' }],
+    );
+    expect(text.rejected[0]?.problems[0]).toMatch(/不在本次读到的页面文字里/);
+  });
+});
+
+it('bench r3 b-p02: a unit price split over nodes (「$5.00」「/count)」) is not a second price', () => {
+  const lines = [
+    'Price, product page',
+    '$9.99 ( $5.00 /count)',
+    '$9.99',
+    '$',
+    '9',
+    '.',
+    '99',
+    '(',
+    '$5.00',
+    '$5.00',
+    '/count)',
+  ];
+  expect(blockPriceEntries(lines.map((text) => ({ text })))).toEqual(['9.99']);
+  // Not a unit marker: a second card's price stays a second price.
+  expect(blockPriceEntries(['$9.99', '$12.99', 'Add to cart'].map((text) => ({ text })))).toEqual([
+    '9.99',
+    '12.99',
+  ]);
 });

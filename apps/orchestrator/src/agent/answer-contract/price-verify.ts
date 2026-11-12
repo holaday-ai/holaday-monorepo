@@ -157,6 +157,7 @@ export function pricedLines(
     labelNextOnly = false;
     const isSecondary =
       inLabel ||
+      unitFollows(lines, i, text, bare) ||
       (line.role !== undefined && SECONDARY_ROLES.has(line.role)) ||
       (SECONDARY_PRICE_LINE.test(text) && !LEADING_PRICE_THEN_LABEL.test(text));
     if (isSecondary) {
@@ -179,6 +180,28 @@ export function pricedLines(
     for (const amount of amounts) if (Number.isFinite(amount)) entries.add(String(amount));
   }
   return { primary: [...entries], secondary };
+}
+
+/** A unit marker on a line of its own: 「/count)」「/100 g」「/件」. */
+const UNIT_LINE =
+  /^\s*\/\s?(?:count|unit|item|piece|each|ea|ct|片|个|件|只|条|100\s?(?:g|ml)|kg|g|ml|l|oz|fl\.?\s?oz|lb)\b/iu;
+
+/**
+ * Bench r3 (b-p02 fixture): amazon prints a unit price over nodes — 「$5.00」「$5.00」「/count)」.
+ * The amount is a unit price when, past repeats of itself, the next line is the unit marker.
+ */
+function unitFollows(
+  lines: ReadonlyArray<{ text: string }>,
+  i: number,
+  text: string,
+  bare: (text: string) => string,
+): boolean {
+  for (let k = i + 1; k < lines.length && k <= i + 3; k += 1) {
+    const next = bare(lines[k]!.text);
+    if (UNIT_LINE.test(next)) return true;
+    if (next !== text) return false;
+  }
+  return false;
 }
 
 /** 「S$10.92 Was: S$17.42」「$9.99 List: $14.99」「¥7999 原价 ¥8999」: a price, then a labelled one. */
@@ -305,10 +328,19 @@ function blockProblems(
   page?: ReadPage,
   /** Prices the block shows split over nodes (「$」「9」「99」), joined. */
   joined: readonly string[] = [],
+  /** A block_ref block (not a text-mode quote): its quote may skip lines. */
+  blockMode = false,
 ): string[] {
   const problems: string[] = [];
   const quote = flatText(item.quote);
-  if (quote && !flat.includes(quote) && !flatRaw.includes(quote))
+  // Bench r3: a card read twice reads differently (a snapshot repeats the title in its heading,
+  // the page text does not); a quote that skips lines counts when its lines sit in order here.
+  if (
+    quote &&
+    !flat.includes(quote) &&
+    !flatRaw.includes(quote) &&
+    !(blockMode && inOrder(flat, quoteParts(item.quote)))
+  )
     problems.push(`quote「${item.quote.slice(0, 80)}」不在这个区块里`);
   const name = flatText(withoutEllipsis(item.name));
   // The name may come from the page's own title: a variant item does not repeat it.
@@ -356,15 +388,66 @@ function around(quote: string, pages: readonly ReadPage[]): string {
     .trim();
 }
 
+/** How far apart an elided quote's first and last lines may sit in the read text. */
+const MAX_ELIDED_SPAN = 600;
+
+/**
+ * Bench r3 (b-p02 ×3): the model quoted a card as 「Best Seller\nAnker … (2-Pack, 6 ft, Black)\n
+ * $9.99」, leaving out the rating and 「bought in past month」 lines between the name and the
+ * price, and the whole item was dropped as 「quote 不在本次读到的页面文字里」. Such a quote counts when
+ * its lines (or 「…」-separated parts) occur in that order on one read page, the first and last
+ * within MAX_ELIDED_SPAN characters. Block mode only: there the block check pairs the name,
+ * variant and price; a text-mode quote is the block and must be contiguous.
+ */
+function quoteParts(quote: string): string[] {
+  return quote
+    .split(/\n+|…|\.\.\./u)
+    .map((part) => flatText(part))
+    .filter((part) => part.length >= 2);
+}
+
+/** The parts occur in this order in `text`, the first and last within MAX_ELIDED_SPAN. */
+function inOrder(text: string, parts: readonly string[]): boolean {
+  if (parts.length < 2) return false;
+  const head = parts[0]!;
+  for (let start = text.indexOf(head); start >= 0; start = text.indexOf(head, start + 1)) {
+    let at = start + head.length;
+    let ok = true;
+    for (const part of parts.slice(1)) {
+      const found = text.indexOf(part, at);
+      if (found < 0 || found + part.length - start > MAX_ELIDED_SPAN) {
+        ok = false;
+        break;
+      }
+      at = found + part.length;
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+export function pagesQuotingInOrder(quote: string, pages: readonly ReadPage[]): ReadPage[] {
+  const parts = quoteParts(quote);
+  return [...pages]
+    .reverse()
+    .filter(
+      (page) =>
+        inOrder(flatText(plainPageText(page.text)), parts) || inOrder(flatText(page.text), parts),
+    );
+}
+
 function verifyItem(
   item: PriceItem,
   index: number,
   pages: readonly ReadPage[],
 ): VerifiedPriceItem | RejectedPriceItem {
   const quoting = pagesQuoting(item.quote, pages);
-  const quoteProblem = quoting.length
-    ? []
-    : [`quote「${item.quote.slice(0, 80)}」不在本次读到的页面文字里`];
+  const elided =
+    !quoting.length && parseBlockRef(item.block_ref)
+      ? pagesQuotingInOrder(item.quote, pages).length > 0
+      : false;
+  const quoteProblem =
+    quoting.length || elided ? [] : [`quote「${item.quote.slice(0, 80)}」不在本次读到的页面文字里`];
   const nearest = () =>
     quoteProblem.length
       ? (nearestPassage(item.quote, [...pages]) ?? '')
@@ -417,6 +500,7 @@ function verifyItem(
         flatText(block.raw),
         block.page,
         pricedLines(block.nodes).primary,
+        true,
       ),
       ...sizeProblems(item, `block_ref「${item.block_ref}」`, block.nodes, block.nodes),
     ];
