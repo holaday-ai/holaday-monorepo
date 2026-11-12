@@ -75,6 +75,7 @@ import {
   claimsNoPlayback,
 } from './playback-guard.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { withoutUnmatchedPrices } from './spec-price-pairing.js';
 import {
   UNIFIED_BROWSER_TOOLS,
   type UnifiedBrowserAction,
@@ -436,6 +437,19 @@ export type ActionGateDecision =
   | { kind: 'stop'; outcome: UnifiedBrowserOutcome };
 
 const MAX_CONTEXT_IMAGES = 2;
+/** Tools whose text is what a page said (FIX-62 P0-3). */
+const READ_TEXT_TOOLS = new Set([
+  'snapshot',
+  'read_page',
+  'get_page_text',
+  'get_text',
+  'read_url',
+  'read_section',
+  'find',
+  'sections',
+  'extract',
+  'links',
+]);
 
 /** Model-agnostic browser loop over the unified tool set. Never throws. */
 export async function runUnifiedBrowserLoop(
@@ -447,11 +461,17 @@ export async function runUnifiedBrowserLoop(
   // FIX-51 复审 #3: a failed run's steps, for the log only: tool names and the start of tab ids.
   const steps: string[] = [];
   const rescueState: RescueState = input.rescueState ?? { started: false };
+  // FIX-62 P0-3: what the pages said, for the prices a failure / partial explanation names.
+  const readTexts: string[] = [];
   const looped = await browserLoop({
     ...input,
     rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
+      if (result.ok && result.text && READ_TEXT_TOOLS.has(action.tool)) {
+        readTexts.push(result.text.slice(0, 64_000));
+        if (readTexts.length > 20) readTexts.shift();
+      }
       const tab = 'targetTabId' in action ? action.targetTabId : result.tabId;
       steps.push(
         `${action.tool}${result.ok ? '' : '!'}${tab ? `:${tab.replace(/^tab_/, '').slice(0, 8)}` : ''}${result.openedTab ? '+' : ''}`,
@@ -479,6 +499,9 @@ export async function runUnifiedBrowserLoop(
   // 复审 #1 必须修 4: only lead-ins whose value came out here, compared with the text as written.
   const strip = (text: string, written = text) =>
     withoutDanglingLeads(humanizeToolMentions(stripInternalRefs(text, seen)), written);
+  // FIX-62 P0-3: an explanation's price must be this item's on a read page, or it is not said.
+  const intentText = input.userIntent ?? input.intent;
+  const explain = (text: string) => withoutUnmatchedPrices(strip(text), readTexts, intentText);
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
@@ -489,9 +512,12 @@ export async function runUnifiedBrowserLoop(
           plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
           outcome.summary,
         ),
+        ...(outcome.partial?.missing
+          ? { partial: { ...outcome.partial, missing: explain(outcome.partial.missing) } }
+          : {}),
       };
     case 'failed':
-      return { ...outcome, reason: strip(outcome.reason) };
+      return { ...outcome, reason: explain(outcome.reason) };
     case 'awaiting_user':
       return {
         ...outcome,
@@ -501,7 +527,7 @@ export async function runUnifiedBrowserLoop(
     case 'cancelled':
       return {
         ...outcome,
-        ...(outcome.reason ? { reason: strip(outcome.reason) } : {}),
+        ...(outcome.reason ? { reason: explain(outcome.reason) } : {}),
         ...(outcome.heldAnswer
           ? {
               heldAnswer: {

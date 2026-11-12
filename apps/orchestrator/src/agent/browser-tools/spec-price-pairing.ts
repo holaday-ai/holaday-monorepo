@@ -265,3 +265,62 @@ export function unsupportedSpecPricePairings(
   }
   return out.slice(0, 4);
 }
+
+/**
+ * FIX-62 P0-3 (iPhone run f62i1): a failure said 「已确认：Apple 官网对比页显示该机型起售价为『RMB 9,299
+ * 起』」 — not the 16 Pro Max's price; most likely another model's on the comparison page. A price
+ * in a failure / partial explanation is kept only when a read page shows that amount in a piece
+ * naming the explanation's model (its sentence's, else the task's) or no model at all; otherwise
+ * the number goes and 「没读到准确价格」 is said instead.
+ */
+export function withoutUnmatchedPrices(
+  text: string,
+  pages: readonly string[],
+  intent = '',
+): string {
+  if (!text || !new RegExp(PRICE_RE.source, 'iu').test(text)) return text;
+  const read = pages.map((page) =>
+    page
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+  );
+  const taskModels = modelsOf(intent);
+  if (!/标准版|标准款|base model/iu.test(intent)) taskModels.delete('base');
+  const shown = (amount: number, models: Set<string>): boolean => {
+    for (const lines of read) {
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i]!;
+        if (!pricesOf(line).includes(amount)) continue;
+        if (!models.size) return true;
+        // The piece of the line holding the price, else the line, else the line above.
+        const piece =
+          line.split(/[，；。;]|,\s/u).find((p) => pricesOf(p).includes(amount)) ?? line;
+        for (const where of [piece, line, lines[i - 1] ?? '']) {
+          const named = modelsOf(where);
+          if (named.size) {
+            if (sharesModel(models, named)) return true;
+            break;
+          }
+          if (where === (lines[i - 1] ?? '')) return true;
+        }
+      }
+    }
+    return false;
+  };
+  return text
+    .split(/(?<=[。！？!?；;\n])/u)
+    .map((sentence) => {
+      const own = modelsOf(sentence);
+      const models = own.size ? own : taskModels;
+      return sentence.replace(
+        new RegExp(`[「“"]?(?:${PRICE_RE.source})\\s*起?[」”"]?`, 'giu'),
+        (match) => {
+          const amount = pricesOf(match)[0];
+          if (amount === undefined || shown(amount, models)) return match;
+          return '（没读到准确价格）';
+        },
+      );
+    })
+    .join('');
+}

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { unsupportedSpecPricePairings as check } from './spec-price-pairing.js';
+import {
+  unsupportedSpecPricePairings as check,
+  withoutUnmatchedPrices,
+} from './spec-price-pairing.js';
 
 // FIX-62 P0-2 (DEPLOY-61 第三次 专项 4, sp-iphone-zh), with 复审 #2's cases.
 const NEWSROOM = [
@@ -263,5 +266,43 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     const pixel = ['Google Pixel 9 Pro 256GB', '$999'].join('\n');
     expect(check('Pixel 9 Pro XL 256GB $999.', [pixel], 'Pixel 9 Pro XL price')).toHaveLength(1);
     expect(check('Pixel 9 Pro 256GB $999.', [pixel], 'Pixel 9 Pro price')).toEqual([]);
+  });
+});
+
+// FIX-62 P0-3 (f62i1): a failure explanation's price must be this item's on a read page.
+describe('FIX-62 P0-3: prices in a failure / partial explanation', () => {
+  const COMPARE = [
+    '机型比较',
+    'iPhone 17 Pro Max',
+    'RMB 9,999 起',
+    'iPhone 17 Pro',
+    'RMB 9,299 起',
+    'iPhone 16 Pro Max',
+    '于授权经销商处有售',
+  ].join('\n');
+  const F62I1 =
+    '未能拿到 iPhone 16 Pro Max 256GB 的当前在售价格。已确认：Apple 官网对比页显示该机型起售价为「RMB 9,299 起」，但官网购买链接已返回 404。';
+  it('f62i1: the other model’s 9,299 is not said as the 16 Pro Max’s', () => {
+    const out = withoutUnmatchedPrices(F62I1, [COMPARE], 'iPhone 16 Pro Max 256GB 多少钱');
+    expect(out).not.toMatch(/9,299/);
+    expect(out).toContain('（没读到准确价格）');
+    expect(out).toContain('官网购买链接已返回 404');
+  });
+  it('a price the page gives this model is kept; one no page shows goes', () => {
+    const page = ['iPhone 16 Pro Max', 'RMB 9,999 起'].join('\n');
+    expect(
+      withoutUnmatchedPrices(
+        '官网显示 iPhone 16 Pro Max 起售价 RMB 9,999 起，但已停售。',
+        [page],
+        'iPhone 16 Pro Max 多少钱',
+      ),
+    ).toContain('RMB 9,999');
+    expect(
+      withoutUnmatchedPrices('京东价格是 ¥8,888，但需要登录。', [page], 'iPhone 16 Pro Max 多少钱'),
+    ).not.toMatch(/8,888/);
+  });
+  it('text without prices is unchanged', () => {
+    const text = '京东要登录才能看价格，官网已不再销售。';
+    expect(withoutUnmatchedPrices(text, [COMPARE], 'iPhone 16 Pro Max 多少钱')).toBe(text);
   });
 });
