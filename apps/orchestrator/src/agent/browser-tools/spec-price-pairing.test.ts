@@ -85,6 +85,20 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     ).toHaveLength(1);
   });
 
+  it('「未能读到 / 无法读到 / 读不到 / couldn’t read」 a capacity’s price is not a pairing (DEPLOY-62 i2)', () => {
+    const intent = 'iPhone 16 Pro Max 256GB 多少钱';
+    for (const line of [
+      '部分完成：未能读到 iPhone 16 Pro Max 256GB 的当前售价。',
+      '无法读到 256GB 的售价。',
+      '256GB 的价格读不到。',
+      '没能拿到 256GB 的价格。',
+      'Partial: I could not read the price of the 256GB model.',
+    ])
+      expect(check(line, [NEWSROOM], intent)).toEqual([]);
+    // Still checked: a price written beside it in another clause.
+    expect(check('未能读到京东价，128GB 售价 RMB 9,999。', [NEWSROOM], intent)).toHaveLength(1);
+  });
+
   it('honest wrap-up wording stays: 「没有列出 256GB 的价格；还缺具体售价」', () => {
     expect(
       check(

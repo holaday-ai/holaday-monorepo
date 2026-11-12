@@ -36,9 +36,12 @@ const CONFIG_WORD_RE =
 /** A guess about a price, not a reading. */
 const GUESS_RE =
   /(?:通常|一般|往往|可能|应该|估计|大概|预计|想必|likely|usually|typically|probably|presumably|generally)[^。！？\n]{0,30}(?:更高|更贵|更便宜|更低|贵一些|便宜一些|贵|便宜|higher|more expensive|cheaper|lower|pricier)/iu;
-/** The clause says the price was not read. */
+/**
+ * The clause says the price was not read. DEPLOY-62 i2: 「未能读到 …256GB 的当前售价」 was sent back as a
+ * pairing and the task failed — 「未能 / 没能 / 无法 + 读到 / 获取 / 读取 / 找到 / 拿到」 and 「读不到」 count too.
+ */
 const NOT_READ_RE =
-  /没读到|未读到|没有读到|未获取|没获取|没有显示|未显示|没显示|没有列出|未列出|没列出|没找到|未找到|找不到|看不到|还缺|not (?:shown|found|listed|displayed)|no price/iu;
+  /(?:没|未|没有|未能|没能|无法)(?:读到|获取|读取|找到|拿到)|读不到|拿不到|没有显示|未显示|没显示|没有列出|未列出|没列出|找不到|看不到|还缺|not (?:shown|found|listed|displayed)|no price|(?:could ?n[o']t|unable to|did ?n[o']t) (?:read|find|get)/iu;
 /** Lines on either side of a price within which a capacity written beside it must appear. */
 const PAIR_LINES = 8;
 
