@@ -34,19 +34,16 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     expect(check('iPhone 16 Pro 128GB 售价 ¥7,999。', [card], '京东 iPhone 价格')).toEqual([]);
   });
 
-  it('pairs in one sentence cannot be swapped (复审 #2 漏网 2)', () => {
+  it('a capacity paired with a price far from it on the page is sent back', () => {
     const page = [
       'iPhone 16 Pro 128GB',
       '¥7999',
+      ...Array(9).fill('x'),
       'iPhone 16 Pro 256GB',
       '¥8999',
-      'iPhone 16 Pro 512GB',
-      '¥10999',
-      'iPhone 16 Pro 1TB',
-      '¥12999',
-    ].join('\n\n\n\n\n');
+    ].join('\n');
     expect(check('128GB ¥7,999，256GB ¥8,999。', [page], 'iPhone 价格')).toEqual([]);
-    expect(check('128GB ¥8,999，256GB ¥7,999。', [page], 'iPhone 价格')).toHaveLength(2);
+    expect(check('128GB 售价 ¥8,999。', [page], 'iPhone 价格')).toHaveLength(1);
   });
 
   it('1TB and 8+128 are capacities (复审 #2 漏网 3)', () => {
@@ -121,5 +118,57 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     expect(
       check('The iPhone 16 Pro Max 256GB starts at $1,199.', [page], 'iPhone 16 Pro Max price'),
     ).toEqual([]);
+  });
+
+  it('复审 #3 layouts are not sent back: price above title, table cells, configurator, 分别为', () => {
+    const priceFirst = [
+      '¥7999',
+      'Apple iPhone 16 Pro 128GB',
+      '¥8999',
+      'Apple iPhone 16 Pro 256GB',
+    ].join('\n');
+    expect(check('iPhone 16 Pro 256GB ¥8,999。', [priceFirst], 'iPhone 价格')).toEqual([]);
+    const cells = ['容量', '128GB', '256GB', '512GB', '价格', '¥7999', '¥8999', '¥10999'].join(
+      '\n',
+    );
+    expect(check('128GB ¥7,999，512GB ¥10,999。', [cells], 'iPhone 价格')).toEqual([]);
+    const config = [
+      '选择容量',
+      '256GB',
+      '512GB',
+      '1TB',
+      '颜色',
+      '沙漠色',
+      '原色',
+      'RMB 9,999 起',
+    ].join('\n');
+    expect(check('256GB 版 RMB 9,999 起。', [config], 'iPhone 价格')).toEqual([]);
+    const both = ['128GB ¥7999', '256GB ¥8999'].join('\n');
+    expect(check('128GB、256GB 售价分别为 ¥7,999、¥8,999。', [both], 'iPhone 价格')).toEqual([]);
+  });
+
+  it('5G is a network, not a capacity', () => {
+    const page = ['华为 Mate 60 5G 版', '¥5999'].join('\n');
+    expect(check('Mate 60 5G 版售价 ¥5,999。', [page], 'Mate 60 多少钱')).toEqual([]);
+  });
+
+  it('the incident wording is sent back even when 128GB is elsewhere on the page (another model)', () => {
+    const page = [
+      'iPhone 16 Pro 提供 128GB、256GB、512GB 和 1TB 容量。',
+      'iPhone 16 Pro Max 提供 256GB、512GB 和 1TB 容量。',
+      '新机采用钛金属设计，提供四种外观。',
+      '机身更轻，屏幕更大。',
+      '价格及供货情况',
+      'iPhone 16 Pro Max 以 RMB 9,999 起售。',
+    ].join('\n');
+    expect(
+      check(
+        'iPhone 16 Pro Max 的起售价为 RMB 9,999。这是 128GB 入门版的起售价格。',
+        [page],
+        INTENT,
+      ),
+    ).toHaveLength(1);
+    // Split over two lines: 「对应 128GB 版本」 points at the line before's price.
+    expect(check('起售价 RMB 9,999\n对应 128GB 版本', [page], INTENT)).toHaveLength(1);
   });
 });
