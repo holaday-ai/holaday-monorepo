@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { Logger } from 'pino';
+import { type Logger, pino } from 'pino';
 import type { CDPSession, Page } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
@@ -860,4 +860,43 @@ it('serializes input behind a capture so emulation is stable', async () => {
   await capture;
   await input;
   expect(events).toEqual(['capture', 'restored', 'input']);
+});
+
+// FIX-62 复审 #4 #1: a history read that times out leaves a NEW entry, never the old one — a
+// press bound to the old entry is not released on whatever the page now shows.
+it('a history read that times out gives a fresh unknown entry', async () => {
+  vi.useFakeTimers();
+  try {
+    const streamer = new CdpStreamer({
+      getPage: async () => ({}) as never,
+      ws: { send: () => {}, readyState: 1 } as never,
+      logger: pino({ level: 'silent' }),
+    });
+    let answer: ((v: unknown) => void) | null = null;
+    const session = {
+      send: (method: string) =>
+        method === 'Page.getNavigationHistory'
+          ? new Promise((r) => {
+              answer = r;
+            })
+          : Promise.resolve({}),
+    };
+    const s = streamer as unknown as {
+      cdpSession: unknown;
+      historyEntry: number | null;
+      noteHistoryEntry: (session: unknown, retire: boolean) => Promise<void>;
+    };
+    s.cdpSession = session;
+    s.historyEntry = 4;
+    const read = s.noteHistoryEntry(session, true);
+    expect(streamer.historyPending()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1600);
+    await read;
+    expect(streamer.historyPending()).toBe(false);
+    expect(streamer.historyEntryId()).not.toBe(4);
+    expect(streamer.historyEntryId()).toBeLessThan(0);
+    void answer;
+  } finally {
+    vi.useRealTimers();
+  }
 });

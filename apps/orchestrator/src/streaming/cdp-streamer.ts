@@ -208,6 +208,12 @@ export class CdpStreamer {
   historyPending(): boolean {
     return this.historyReads > 0;
   }
+  /** Sentinels for entries that could not be read: each new, never equal to a real id. */
+  private unknownEntrySeq = 0;
+  private unknownEntry(): number {
+    this.unknownEntrySeq -= 1;
+    return this.unknownEntrySeq;
+  }
   /** Resolves when no history read is in flight, or after `timeoutMs` at most. */
   historySettled(timeoutMs = 300): Promise<void> {
     if (!this.historyReads) return Promise.resolve();
@@ -244,12 +250,13 @@ export class CdpStreamer {
       const id = h.entries[h.currentIndex]?.id ?? null;
       if (session !== this.cdpSession || generation !== this.historyGeneration) return;
       const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
-      this.historyEntry = id ?? -1;
+      this.historyEntry = id ?? this.unknownEntry();
       if (retire && changed) this.invalidateObservation();
     } catch {
       if (session === this.cdpSession && generation === this.historyGeneration) {
-        // Unknown but stable from here on: presses can still be bound and released.
-        if (this.historyEntry === null) this.historyEntry = -1;
+        // 复审 #4 #1: a new entry no press can be bound to — an earlier press is never released on
+        // whatever the page now shows; later presses bind to this one and release normally.
+        this.historyEntry = this.unknownEntry();
         if (retire) this.invalidateObservation();
       }
     } finally {

@@ -66,8 +66,8 @@ export interface InputDocumentGuard {
   entry(): number | null;
   /** A same-document navigation whose kind (push or replace) is not known yet. */
   pending(): boolean;
-  /** Waits (bounded) until no such navigation is being classified. */
-  settled(): Promise<void>;
+  /** Waits (bounded, 300ms unless given) until no such navigation is being classified. */
+  settled(timeoutMs?: number): Promise<void>;
 }
 
 /** Error for an input refused because the page changed under it (the screen asks again). */
@@ -503,6 +503,9 @@ export class CdpInputHandler {
       // 复审 #3 #1: a same-document navigation being classified is waited for (bounded), not
       // refused outright — a page that replaceStates every frame would otherwise drop letters.
       if (expected && needsFreshDocument(msg) && guard.pending()) await guard.settled();
+      // 复审 #4 #2: still being classified after the wait — an activating input (press, release,
+      // Enter, Space) is refused; the screen asks again.
+      const stillPending = !!expected && activates(msg) && guard.pending();
       const fresh = expected && needsFreshDocument(msg) ? await guard.freshLoader() : undefined;
       const target = activates(msg)
         ? await within(
@@ -518,7 +521,8 @@ export class CdpInputHandler {
       const now = guard.loader();
       const refused =
         !!expected &&
-        (guard.revision() !== expected.revision ||
+        (stillPending ||
+          guard.revision() !== expected.revision ||
           (!!expected.loader && now !== expected.loader) ||
           (fresh !== undefined && (fresh === null || (!!now && fresh !== now))));
       const where = {
@@ -824,10 +828,13 @@ export class CdpInputHandler {
     // a map that writes its position into the URL) keeps both and the release is sent (复审 #1 #2);
     // a pushState swap does not (复审 #2 A). A press whose document was not known is not released.
     const g = this.documentGuard;
-    if (g?.pending()) await g.settled();
+    // 复审 #4: wait as long as the read may take (it gives up at 1.5s); still undecided → treat the
+    // page as changed and release nothing.
+    if (g?.pending()) await g.settled(1600);
+    const undecided = !!g?.pending();
     const loaderNow = g?.loader() ?? '';
     const entryNow = g?.entry() ?? null;
-    const now = g && loaderNow && entryNow !== null ? `${loaderNow}#${entryNow}` : '';
+    const now = g && !undecided && loaderNow && entryNow !== null ? `${loaderNow}#${entryNow}` : '';
     const samePage = (id: string): boolean => {
       if (!g) return true;
       const pressed = this.pressedOn.get(id);

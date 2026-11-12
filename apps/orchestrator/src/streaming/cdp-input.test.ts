@@ -1047,4 +1047,39 @@ describe('CdpInputHandler document guard', () => {
     await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
     expect(effects).toEqual(['keyDown:Shift', 'keyDown:a']);
   });
+
+  it('still undecided after the wait: an activating input is refused (复审 #4 #2)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1' };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard({ ...g.guard, pending: () => true, settled: async () => undefined });
+    const enter = { ...ENTER };
+    g.check(enter);
+    await expect(handler.handle(enter, new AbortController().signal)).rejects.toThrow(
+      'browser_observation_expired',
+    );
+    // A letter is no activation: it waits, then goes.
+    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
+    g.check(letter);
+    await handler.handle(letter, new AbortController().signal);
+    expect(effects).toEqual(['keyDown']);
+  });
+
+  it('still undecided at handback: held keys and buttons are not released (复审 #4)', async () => {
+    const { effects, session } = recording();
+    const state = { revision: 5, loader: 'L1', pending: false };
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const g = guardFor(state, async () => state.loader);
+    handler.setDocumentGuard({
+      ...g.guard,
+      pending: () => state.pending,
+      settled: async () => undefined,
+    });
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal);
+    state.pending = true;
+    await handler.releasePressed(signal);
+    expect(effects).toEqual(['keyDown']);
+  });
 });
