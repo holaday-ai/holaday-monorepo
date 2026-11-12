@@ -91,13 +91,16 @@ function clausesOf(sentence: string): string[] {
  * for each. A capacity the page gives only another model (the incident: the Pro's 128GB beside the
  * Pro Max's price) is no evidence for this one.
  */
-const SUFFIX = 'pro\\s*max|pro|plus|mini|ultra|air|lite|se|fe|neo';
+const SUFFIX = 'pro\\s*max|pro\\s*xl|pro|plus|mini|ultra|air|lite|se|fe|neo|xl';
 const NUMBERED_RE = new RegExp(
-  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b(?!\\s*\\+)`,
+  `(?<![\\d.,$¥￥])\\b[a-z]{0,2}\\d{1,3}[a-z]?\\s*(${SUFFIX})\\b(?!\\+(?![\\p{L}\\d]))`,
   'giu',
 );
 /** 复审 #6: 「S24+」 is the Plus, 「Mate 60 Pro+」 its own model (not the Pro). */
-const PLUS_SIGN_RE = /(?<![\d.,$¥￥])\b(?:[a-z]{1,2}\d{1,3}[a-z]?|\d{1,3}\s*(pro))\s*\+/giu;
+// 复审 #7: only a 「+」 right on the model (no space) and not followed by a word: 「16 Pro + AppleCare+」
+// 「15 Pro +保护壳」 are bundles of the Pro.
+const PLUS_SIGN_RE =
+  /(?<![\d.,$¥￥])\b(?:[a-z]{1,2}\d{1,3}[a-z]?|\d{1,3}\s*(pro))\+(?![\p{L}\d])/giu;
 const SERIES_RE = new RegExp(
   `\\b(?:macbook|ipad|iphone|galaxy|pixel|surface)\\s+(${SUFFIX})\\b(?!\\s*\\+)`,
   'giu',

@@ -254,4 +254,14 @@ describe('FIX-62 P0-2: capacity ↔ price pairings', () => {
     const xps = ['Dell XPS 13 Plus 512GB SSD Windows 11 Pro', '$1,299'].join('\n');
     expect(check('XPS 13 Plus 512GB $1,299.', [xps], 'XPS 13 Plus price')).toEqual([]);
   });
+
+  it('复审 #7: bundles 「Pro + AppleCare+」「Pro +保护壳」 are the Pro; Pro XL is not the Pro', () => {
+    const bundle = ['Apple iPhone 16 Pro + AppleCare+ 256GB 套装', '¥9498'].join('\n');
+    expect(check('iPhone 16 Pro 256GB 套装 ¥9,498。', [bundle], 'iPhone 16 Pro 价格')).toEqual([]);
+    const caseBundle = ['iPhone 15 Pro +保护壳 128GB', '¥6999'].join('\n');
+    expect(check('iPhone 15 Pro 128GB ¥6,999。', [caseBundle], 'iPhone 15 Pro 价格')).toEqual([]);
+    const pixel = ['Google Pixel 9 Pro 256GB', '$999'].join('\n');
+    expect(check('Pixel 9 Pro XL 256GB $999.', [pixel], 'Pixel 9 Pro XL price')).toHaveLength(1);
+    expect(check('Pixel 9 Pro 256GB $999.', [pixel], 'Pixel 9 Pro price')).toEqual([]);
+  });
 });
