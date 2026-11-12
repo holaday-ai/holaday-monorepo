@@ -60,9 +60,18 @@ it.each([false, true])(
     );
     let frame: BrowserFrameGeometry | undefined;
     let receivedFrame = false;
+    let appliedWidth = 0;
+    let framesSinceApplied = 0;
     ws.on('message', (raw) => {
       const m = JSON.parse(String(raw));
-      if (m.geometry) frame = m.geometry;
+      if (m.type === 'viewport-applied') {
+        appliedWidth = m.width;
+        framesSinceApplied = 0;
+      }
+      if (m.geometry) {
+        frame = m.geometry;
+        framesSinceApplied += 1;
+      }
       if (m.type === 'frame') receivedFrame = true;
     });
     const currentFrame = () => {
@@ -169,6 +178,35 @@ it.each([false, true])(
       await vi.waitFor(async () =>
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(3),
       );
+      // 复审 #8: a person's click holds the button 50–150ms; a size arriving while it is held waits
+      // for the release, which lands on the layout the press was aimed at.
+      // A frame of the new layout (one shown while the size was still to be applied is refused).
+      const appliedFrame = (width: number) =>
+        vi.waitFor(
+          () => {
+            expect(appliedWidth).toBe(width);
+            expect(framesSinceApplied).toBeGreaterThan(0);
+            expect(currentFrame().cssWidth).toBe(width);
+          },
+          { timeout: 5000 },
+        );
+      await appliedFrame(1000);
+      const held = currentFrame();
+      send('mouseDown', held);
+      await new Promise((r) => setTimeout(r, 40));
+      ws.send(
+        JSON.stringify({
+          type: 'input',
+          controlLease: lease,
+          payload: { type: 'viewport', width: 1100, height: 700 },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 120));
+      send('mouseUp', held);
+      await vi.waitFor(async () =>
+        expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(4),
+      );
+      await appliedFrame(1100);
       // A size sent with the lease re-lays the page out: input naming the frame before it is refused.
       const previous = currentFrame();
       const beforeResizeCalls = calls;
@@ -183,7 +221,7 @@ it.each([false, true])(
       send('mouseUp', previous);
       await new Promise((r) => setTimeout(r, 350));
       expect(calls).toBe(beforeResizeCalls);
-      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(3);
+      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(4);
     } finally {
       ws.close();
       await once(ws, 'close');
