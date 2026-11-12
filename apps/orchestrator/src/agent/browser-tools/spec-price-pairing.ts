@@ -202,7 +202,6 @@ function nearestModels(
     if (named.size) return named;
   }
   for (let k = i + step; k >= 0 && k < lines.length && Math.abs(k - i) <= MODEL_REACH; k += step) {
-    if (isSectionHeading(lines[k]!)) return null;
     const named = modelsOf(lines[k]!);
     if (named.size) return named;
     if (pricesOf(lines[k]!).length && !STRUCK_LINE_RE.test(lines[k]!)) return null;
@@ -219,7 +218,9 @@ const isSectionHeading = (line: string): boolean =>
 /**
  * Which way each line's prices find their titles, section by section (复审 #9: main results with each
  * price above its title, then 「猜你喜欢」 cards with the title above): down only when more of the
- * section's price lines find a model below than above; up otherwise, ties included.
+ * section's price lines find a model below than above; up otherwise, ties included. Headings only
+ * split the sections; the search for a price's model goes past them (复审 #10: a product page's
+ * 「价格 / 选择版本 / Price」 heading sits between the title and the price).
  */
 function titleSides(lines: readonly string[]): Array<-1 | 1> {
   const sides: Array<-1 | 1> = new Array(lines.length).fill(-1);
@@ -441,7 +442,7 @@ export function withoutUnmatchedPrices(
  * 「合约价 / 预约价」 are prices).
  */
 const OWN_NUMBER_BEFORE_RE =
-  /(?:预算(?:是|为|在)?|不超过|低于|约合(?:人民币)?|折合(?:人民币)?|合人民币|相当于(?:人民币)?|差价(?:是|为)?|相差|差了|便宜了?|贵了?|多花了?|省下?了?|budget(?: of)?|under|below|within|less than|cheaper by|saves?|saved|difference of|≈)\s*$/iu;
+  /(?:预算(?:是|为|在)?|不超过|低于|约合(?:人民币)?|折合(?:人民币)?|合人民币|差价(?:是|为)?|相差|差了|便宜了?|贵了?|多花了?|省下?了?|budget(?: of)?|under|below|within|less than|cheaper by|saves?|saved|difference of|≈)\s*$/iu;
 const OWN_NUMBER_AFTER_RE = /^\s*(?:以内|以下|的预算|预算)/u;
 
 /**

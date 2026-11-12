@@ -513,3 +513,40 @@ describe('FIX-62 复审 #9: no exemption for 「约」, and layouts by section',
     ).toContain('¥5,499');
   });
 });
+
+// FIX-62 复审 #10: a product page's 「价格 / 选择版本 / Price」 heading sits between the title and the
+// price; recommendations elsewhere on the page do not make the price another model's.
+describe('FIX-62 复审 #10: the model search goes past a section heading', () => {
+  const INTENT = 'iPhone 16 Pro Max 256GB 多少钱';
+  const RECS = ['- heading "为你推荐" [level=2]', 'iPhone 16 Pro', '¥7,999'];
+  it.each([
+    [
+      [
+        '- heading "Apple iPhone 16 Pro Max 256GB" [level=1]',
+        '- heading "价格" [level=2]',
+        '¥9999.00',
+      ],
+    ],
+    [['Apple iPhone 16 Pro Max', '- heading "选择版本" [level=2]', '256GB', '¥9999.00']],
+    [['# iPhone 16 Pro Max 256GB', '## 价格', '¥9999.00']],
+  ])('%j keeps 售价 ¥9,999', (head) => {
+    const text = '部分完成：iPhone 16 Pro Max 256GB 售价 ¥9,999，京东价没读到。';
+    expect(partialAnswerPrices(text, [[...head, ...RECS].join('\n')], INTENT)).toBe(text);
+  });
+  it('English: 「## Price」 between the title and $1,199.00', () => {
+    const text = 'Partially completed: iPhone 16 Pro Max 256GB is $1,199 at Apple.';
+    const page = ['# iPhone 16 Pro Max 256GB', '## Price', '$1,199.00', ...RECS].join('\n');
+    expect(partialAnswerPrices(text, [page], 'iPhone 16 Pro Max 256GB price')).toBe(text);
+  });
+  it('「相当于」 a comparison page’s other price is not kept', () => {
+    const page = [
+      'iPhone 17 Pro Max',
+      'RMB 9,299 起',
+      'iPhone 16 Pro Max',
+      '于授权经销商处有售',
+    ].join('\n');
+    expect(
+      partialAnswerPrices('部分完成：iPhone 16 Pro Max 售价相当于 RMB 9,299。', [page], INTENT),
+    ).not.toMatch(/9,299/);
+  });
+});
