@@ -306,6 +306,7 @@ function descriptor(
     name: signals?.name ?? null,
     inputType: signals?.type ?? null,
     tagName: signals?.tagName ?? null,
+    ...(signals?.href ? { href: signals.href.split(' ')[0] ?? null } : {}),
     pageUrl: signals?.url ?? pageUrl,
     ...(signals?.credentialForm ? { credentialForm: true } : {}),
     ...(signals?.loginControl ? { loginControl: true } : {}),
