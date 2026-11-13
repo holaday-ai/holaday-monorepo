@@ -120,6 +120,25 @@ it('REBUILD-4: the running task screen takes input straight away — no lease, n
   );
 });
 
+it('REBUILD-4 fix 1: the open screen does not swallow keys pressed elsewhere in the app', async () => {
+  render(
+    <>
+      <button type="button" data-testid="outside">
+        外面的按钮
+      </button>
+      <BrowserPanel {...base} />
+    </>,
+  );
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  const outside = screen.getByTestId('outside');
+  outside.focus();
+  for (const key of ['Escape', 'Enter', ' ', 'ArrowDown', 'a']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    outside.dispatchEvent(event);
+    expect(event.defaultPrevented, key).toBe(false);
+  }
+});
+
 it('REBUILD-4 (d): for 2 s after the person acts, the status says the assistant is waiting for them', async () => {
   render(<BrowserPanel {...base} />);
   await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));

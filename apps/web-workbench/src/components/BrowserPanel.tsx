@@ -1250,45 +1250,11 @@ function CloudBrowserPanel({
     [interactiveActive, sendInput],
   );
 
-  // Global keyboard listener while interactive mode is on. We forward
-  // printable chars as `type` and named keys (Enter / Tab / Backspace
-  // / arrows / Escape) as `key`. Skip modifier-only chords to avoid
-  // doubling browser shortcuts.
-  React.useEffect(() => {
-    if (!interactiveActive) return;
-    const onKeyDown = (ev: KeyboardEvent) => {
-      // Don't steal typing when the user is in a normal input/textarea
-      // elsewhere on the page.
-      const target = ev.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      ) {
-        return;
-      }
-      const named = NAMED_KEYS[ev.key];
-      if (named) {
-        ev.preventDefault();
-        const chord = [
-          ev.ctrlKey && 'ctrl',
-          ev.metaKey && 'meta',
-          ev.altKey && 'alt',
-          ev.shiftKey && 'shift',
-          named,
-        ]
-          .filter(Boolean)
-          .join('+');
-        sendInput({ kind: 'key', key: chord });
-        return;
-      }
-      if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-        ev.preventDefault();
-        sendInput({ kind: 'type', text: ev.key });
-      }
-    };
-    window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [interactiveActive, sendInput]);
+  // No window-level keyboard capture: keys reach the remote page only through the screen's own
+  // input (CdpScreencastViewport), i.e. after the person clicks the page. Since REBUILD-4 the
+  // panel is interactive whenever a stream is open (no takeover), and `sendInput` is a no-op on
+  // the CDP lane, so a window listener only swallowed Escape / Enter / Space / arrows / letters
+  // everywhere else in the app (menus could not close, buttons could not be pressed by keyboard).
 
   if (layout === 'sheet' && !open) return null;
 
