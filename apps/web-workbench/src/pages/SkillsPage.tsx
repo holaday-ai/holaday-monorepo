@@ -13,6 +13,7 @@ import {
   skillTaskDraft,
 } from '@/lib/skills-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
@@ -57,7 +58,8 @@ export function SkillsPage(): JSX.Element {
       setLoading(true);
       setLoadError(null);
       try {
-        const list = normalizeSkillRows(await trpc.skills.list.query());
+        // HIDE-1: the A-share skill card is an entry, hidden with it.
+        const list = withoutHiddenEntrySkills(normalizeSkillRows(await trpc.skills.list.query()));
         if (!mountedRef.current || requestId !== requestIdRef.current) return;
         setSkills(list);
         setActiveSkillId((current) => {

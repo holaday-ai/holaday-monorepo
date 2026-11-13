@@ -36,6 +36,7 @@ import {
   skillSelectionFromTaskDraft,
   skillTaskAttachmentHandoffs,
 } from '@/lib/skills-page-state';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';
@@ -252,7 +253,9 @@ export function InputArea({
       .query()
       .then((rows) => {
         if (cancelled || !mountedRef.current) return;
-        setMentionSkills(normalizeSkillRows(rows).filter((skill) => skill.enabled));
+        setMentionSkills(
+          withoutHiddenEntrySkills(normalizeSkillRows(rows)).filter((skill) => skill.enabled),
+        );
       })
       .catch(() => {
         if (!cancelled && mountedRef.current) {
