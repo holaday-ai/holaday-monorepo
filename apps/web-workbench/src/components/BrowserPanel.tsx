@@ -1,4 +1,5 @@
 import {
+  type CdpRefusedInput,
   type CdpScreencastStatus,
   CdpScreencastViewport,
 } from '@/components/CdpScreencastViewport';
@@ -6,11 +7,11 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LocalChromeTaskPanel } from '@/components/LocalChromeTaskPanel';
 import { type VncStatus, VncViewport } from '@/components/VncViewport';
 import {
-  type BrowserControlAction,
   type BrowserPanelHeaderStatus,
   type TerminalBrowserRecoveryState,
   type TerminalEvidenceScreenshotSource,
-  browserControlAction,
+  USER_INPUT_QUIET_MS,
+  browserCoopStatusCopy,
   browserFrameCanPanInPortraitSheet,
   browserInputFallbackMode,
   browserLiveOverlayCopy,
@@ -46,7 +47,6 @@ import {
 } from '@/components/browser-panel-state';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
 import { useBrowserPanelDockInset } from '@/hooks/useBrowserPanelDockInset';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { browserNavExceptionMessage, browserNavFailureMessage } from '@/lib/browser-nav-copy';
@@ -70,19 +70,16 @@ import { liveStatusLabel } from '@/utils/step-humanize';
 import {
   ArrowLeft,
   ArrowRight,
-  Bot,
   Check,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Globe,
-  Hand,
   Keyboard,
   ListChecks,
   LockKeyhole,
   Maximize2,
   Minimize2,
-  MousePointerClick,
   RotateCw,
   Square,
   X,
@@ -260,8 +257,6 @@ interface Props {
   onReExecute?: () => void;
   /** True while the parent is creating the fresh replacement task. */
   reExecuting?: boolean;
-  /** Focus the current task's follow-up composer before handing a terminal page back to AI. */
-  onRequestAgentHelp?: () => void;
 }
 
 /**
@@ -337,7 +332,6 @@ function CloudBrowserPanel({
   onToggleCollapse,
   onReExecute,
   reExecuting = false,
-  onRequestAgentHelp,
 }: Props): JSX.Element | null {
   const isSheet = layout === 'sheet';
   // P2-A — only the non-clarification kinds need browser takeover.
@@ -392,10 +386,6 @@ function CloudBrowserPanel({
     return () => ro.disconnect();
   }, []);
   useBrowserPanelDockInset(panelRootRef, !isSheet);
-  // Interactive mode is in the global store so the TaskStream's
-  // "Continue in browser" button can flip it on from the left panel.
-  const requestedInteractive = useTaskStore((s) => s.browserInteractive);
-  const setInteractive = useTaskStore((s) => s.setBrowserInteractive);
 
   const activeTask = useTaskStore((s) =>
     activeTaskId ? (s.tasks.find((t) => t.taskId === activeTaskId) ?? null) : null,
@@ -598,44 +588,6 @@ function CloudBrowserPanel({
     });
   }, [screencastUrlForCdp, activeTaskId, taskTerminal, isNonPoolTask]);
   const [vncStatus, setVncStatus] = React.useState<VncStatus>('idle');
-  const ownership = useBrowserOwnership(
-    usingCdp ? (activeTaskId ?? null) : null,
-    vncStatus === 'connected',
-  );
-  const requestOwnership = ownership.request;
-  const interactive = Boolean(ownership.lease);
-  const previousIntent = React.useRef(false);
-  React.useEffect(() => {
-    if (previousIntent.current === requestedInteractive) return;
-    if (vncStatus !== 'connected' || !ownership.supported || ownership.pending) return;
-    previousIntent.current = requestedInteractive;
-    if (requestedInteractive && !interactive) void requestOwnership('takeover');
-    else if (!requestedInteractive && interactive) void requestOwnership('return');
-  }, [
-    requestedInteractive,
-    interactive,
-    requestOwnership,
-    vncStatus,
-    ownership.supported,
-    ownership.pending,
-  ]);
-  React.useEffect(() => {
-    if (previousIntent.current !== requestedInteractive || ownership.pending) return;
-    if (
-      ownership.state?.phase === 'human' ||
-      ownership.state?.phase === 'agent' ||
-      ownership.state?.phase === 'closed'
-    ) {
-      previousIntent.current = interactive;
-      setInteractive(interactive);
-    }
-  }, [
-    ownership.state?.phase,
-    ownership.pending,
-    requestedInteractive,
-    interactive,
-    setInteractive,
-  ]);
   // P3 hibernation detection: count consecutive failed attempts. The
   // pool's idle GC reaps after 5 min, after which /vnc-ws/ rejects
   // with HTTP 409 ("browser not allocated") which surfaces in noVNC
@@ -939,10 +891,33 @@ function CloudBrowserPanel({
       startupTargetUrl ??
       'about:blank');
   const displayUrlIsPendingTarget = startupTargetUrl != null && displayUrl === startupTargetUrl;
-  // FIX-61 DEPLOY-61 P0-2: the panel never asks for control by itself. When the assistant
-  // stops to ask (a login, a check, 「确认继续执行吗？」), it asks in the conversation; control is
-  // requested only when the person presses or types on the screen or presses 「我来操作」.
-  // (It used to take over on every browser wait — DEPLOY-61 专项 3: 「正在交接」 with no input.)
+  // REBUILD-4 共同操作: the live cloud browser is shared. The task's owner can click, type and
+  // scroll on it at any time — while the assistant works and after the task ends, as long as the
+  // browser is still open. There is no takeover: the assistant waits until the person has been
+  // still for a moment, re-reads the page and continues.
+  const interactive = usingCdp && useVnc && Boolean(activeTaskId) && !workspaceIdle;
+  // The person acted on the page in the last moment: the assistant is waiting for them.
+  const [userActive, setUserActive] = React.useState(false);
+  const userActiveTimerRef = React.useRef<number | null>(null);
+  const handleUserInput = React.useCallback(() => {
+    setUserActive(true);
+    if (userActiveTimerRef.current !== null) window.clearTimeout(userActiveTimerRef.current);
+    userActiveTimerRef.current = window.setTimeout(() => {
+      userActiveTimerRef.current = null;
+      setUserActive(false);
+    }, USER_INPUT_QUIET_MS);
+  }, []);
+  React.useEffect(() => {
+    setUserActive(false);
+    if (userActiveTimerRef.current !== null) window.clearTimeout(userActiveTimerRef.current);
+    userActiveTimerRef.current = null;
+  }, [activeTaskId]);
+  React.useEffect(
+    () => () => {
+      if (userActiveTimerRef.current !== null) window.clearTimeout(userActiveTimerRef.current);
+    },
+    [],
+  );
   // Recent steps for the in-panel activity overlay. Select WITHOUT a
   // fresh-array fallback — zustand treats each new `[]` as a changed
   // snapshot and infinite-loops the component (getSnapshot cache warn,
@@ -1075,64 +1050,31 @@ function CloudBrowserPanel({
     dotStatus: status,
     liveStatus: vncStatus,
     browserAwaiting,
-    interactiveActive,
-    interactiveOwned: interactive && !terminalSessionUnavailable,
     showReconnect,
     hasPresentedFrame: hasPresentedLiveFrame,
-    taskIsTerminal,
   });
   const evidenceHeaderActive = terminalSessionUnavailable;
+  // One plain line saying who is working on the page and that the person can just use it.
+  const coopStatus =
+    interactiveActive && !evidenceHeaderActive && !browserAwaiting
+      ? browserCoopStatusCopy({ taskRunning: isExecuting, userActive })
+      : null;
   const displayedHeaderStatus = evidenceHeaderActive
     ? browserPanelEvidenceHeaderStatus(taskStatus, finalEvidenceFrame?.url ?? persistedFinalUrl)
-    : usingCdp && !workspaceIdle
-      ? {
-          ...headerStatus,
-          label:
-            ownership.error === 'input_outcome_unknown'
-              ? '会话异常'
-              : ownership.pending
-                ? ownership.state?.phase === 'human'
-                  ? '正在交还'
-                  : '正在交接'
-                : ownership.state?.phase === 'requested'
-                  ? '正在交接'
-                  : ownership.state?.phase === 'resuming'
-                    ? '正在交还'
-                    : ownership.error === 'observation_failed'
-                      ? '观察失败，可重试交还'
-                      : interactive
-                        ? '你在操作'
-                        : !ownership.supported
-                          ? ownership.starting && !taskIsTerminal
-                            ? '正在连接'
-                            : '仅观察'
-                          : taskIsTerminal
-                            ? '浏览器就绪'
-                            : 'AI 正在操作',
-          tooltip:
-            ownership.starting && !taskIsTerminal
-              ? '浏览器正在启动，AI 即将开始操作。'
-              : ownership.error
-                ? '暂未恢复 AI 操作，请检查连接或重试交还。'
-                : headerStatus.tooltip,
-          showLabel: true,
-        }
+    : coopStatus
+      ? { ...headerStatus, tooltip: coopStatus }
       : headerStatus;
+  // The fullscreen bar has no room for the status line, so its chip says it instead.
+  const fullscreenHeaderStatus: BrowserPanelHeaderStatus = coopStatus
+    ? {
+        ...displayedHeaderStatus,
+        label: coopStatus,
+        tooltip: coopStatus,
+        tone: userActive && isExecuting ? 'takeover' : 'live',
+        showLabel: true,
+      }
+    : displayedHeaderStatus;
 
-  const browserControl = browserControlAction({
-    interactive,
-    taskIsTerminal,
-  });
-  const controlDisabled =
-    !usingCdp ||
-    ownership.pending ||
-    ownership.state?.phase === 'requested' ||
-    ownership.state?.phase === 'resuming' ||
-    (!ownership.supported &&
-      !terminalSessionUnavailable &&
-      !(taskIsTerminal && terminalCanRestore)) ||
-    ownership.error === 'input_outcome_unknown' ||
-    (ownership.state?.phase === 'closed' && !taskIsTerminal);
   const inputFallbackMode = browserInputFallbackMode({
     interactiveActive,
     usingCdp,
@@ -1142,98 +1084,16 @@ function CloudBrowserPanel({
     setActivityVisible(false);
     setCjkFallbackOpen(false);
   }, [activeTaskId]);
-  // FIX-61 复审 #2 #2: a takeover the server refuses is said out loud, not left as 「仅观察」.
-  // DEPLOY-61: taking control re-laid the page out at the phone's width, so the press that
-  // asked for it was not delivered (it would have hit something else).
-  const handleHeldInputDropped = React.useCallback(() => {
-    toast.show('已由你操作；刚才那一下没有发出（画面刚刚变了），请再点一次', 'info');
-  }, [toast]);
-  const handleKeyRefused = React.useCallback(() => {
-    toast.show('这一下没发出去，请再按一次', 'info');
-  }, [toast]);
-  const takeOver = React.useCallback(() => {
-    void requestOwnership('takeover').then((granted) => {
-      if (granted === false && mountedRef.current)
-        toast.show('没能接管浏览器，请稍后再点一次画面或「我来操作」', 'error');
-    });
-  }, [requestOwnership, toast]);
-  // FIX-61 P0: a released / expired browser is reopened on the same task and
-  // page, then handed to the user. If that fails the panel says so in plain
-  // words and offers 「重新打开这个页面」.
-  const [screenReopenFailed, setScreenReopenFailed] = React.useState(false);
-  React.useEffect(() => {
-    setScreenReopenFailed(false);
-  }, [activeTaskId]);
-  const reopenAndTakeOver = React.useCallback(() => {
-    setScreenReopenFailed(false);
-    void restoreTerminalSession(true).then((restored) => {
-      if (!mountedRef.current) return;
-      if (!restored) {
-        setScreenReopenFailed(true);
-        return;
-      }
-      setInteractive(true);
-      previousIntent.current = true;
-      takeOver();
-    });
-  }, [takeOver, restoreTerminalSession, setInteractive]);
-  const handleUserTakeoverClick = React.useCallback(() => {
-    if (controlDisabled) return;
-    const next = browserControl.nextInteractive;
-    if (next) {
-      // If a terminal process was released, takeover first restores the same
-      // task's browser. Static evidence never receives interactive controls.
-      if (terminalSessionUnavailable || (taskIsTerminal && !ownership.supported)) {
-        reopenAndTakeOver();
-        return;
-      }
-    }
-    setInteractive(next);
-    previousIntent.current = next;
-    if (next) takeOver();
-    else void requestOwnership('return');
-    if (browserControl.focusFollowUp) onRequestAgentHelp?.();
-  }, [
-    browserControl,
-    onRequestAgentHelp,
-    reopenAndTakeOver,
-    terminalSessionUnavailable,
-    taskIsTerminal,
-    ownership.supported,
-    setInteractive,
-    controlDisabled,
-    requestOwnership,
-    takeOver,
-  ]);
-  // FIX-61 P0: pressing or typing on the screen IS the takeover. The viewport
-  // holds the pressed point / keys until control is granted, then delivers them.
-  const screenControlAvailable =
-    usingCdp &&
-    !workspaceIdle &&
-    !evidenceHeaderActive &&
-    Boolean(activeTaskId) &&
-    !interactive &&
-    !ownership.pending &&
-    ownership.state?.phase !== 'requested' &&
-    ownership.state?.phase !== 'resuming' &&
-    ownership.error !== 'input_outcome_unknown' &&
-    (ownership.supported || (taskIsTerminal && terminalCanRestore));
-  const handleScreenControlRequest = React.useCallback(() => {
-    if (taskIsTerminal && (!ownership.supported || terminalSessionUnavailable)) {
-      reopenAndTakeOver();
-      return;
-    }
-    setInteractive(true);
-    previousIntent.current = true;
-    takeOver();
-  }, [
-    ownership.supported,
-    reopenAndTakeOver,
-    takeOver,
-    setInteractive,
-    taskIsTerminal,
-    terminalSessionUnavailable,
-  ]);
+  // The page changed under an input (the assistant acted, a navigation): say so plainly.
+  const handleInputRefused = React.useCallback(
+    (input: CdpRefusedInput) => {
+      toast.show(
+        input === 'key' ? '页面刚变了，这一下没发出去，请再按一次' : '页面刚变了，再点一次',
+        'info',
+      );
+    },
+    [toast],
+  );
 
   // Codex P2 — hide the address bar / nav / takeover chrome when
   // the panel is open on a terminal task with no viewable evidence
@@ -1527,13 +1387,8 @@ function CloudBrowserPanel({
               <FullscreenFloatingToolbar
                 displayUrl={displayUrl}
                 pendingTarget={displayUrlIsPendingTarget}
-                status={displayedHeaderStatus}
+                status={fullscreenHeaderStatus}
                 interactiveActive={interactiveActive}
-                interactive={interactive}
-                controlAction={browserControl}
-                controlLease={ownership.lease}
-                controlDisabled={controlDisabled}
-                onToggleInteractive={handleUserTakeoverClick}
                 navTaskId={evidenceHeaderActive ? null : (activeTaskId ?? null)}
                 controlsEnabled={!evidenceHeaderActive}
                 isExecuting={!evidenceHeaderActive && isExecuting}
@@ -1586,33 +1441,17 @@ function CloudBrowserPanel({
                   button when a page hangs. */}
                 {!evidenceHeaderActive && !workspaceIdle && !isNarrow && !isSheet && (
                   <div className="hidden items-center gap-1 sm:flex">
-                    <NavButton
-                      direction="back"
-                      title="后退"
-                      navTaskId={activeTaskId ?? null}
-                      controlLease={ownership.lease}
-                    />
-                    <NavButton
-                      direction="forward"
-                      title="前进"
-                      navTaskId={activeTaskId ?? null}
-                      controlLease={ownership.lease}
-                    />
+                    <NavButton direction="back" title="后退" navTaskId={activeTaskId ?? null} />
+                    <NavButton direction="forward" title="前进" navTaskId={activeTaskId ?? null} />
                   </div>
                 )}
                 {!evidenceHeaderActive && !workspaceIdle && (
-                  <NavButton
-                    direction="reload"
-                    title="刷新"
-                    navTaskId={activeTaskId ?? null}
-                    controlLease={ownership.lease}
-                  />
+                  <NavButton direction="reload" title="刷新" navTaskId={activeTaskId ?? null} />
                 )}
                 <UrlBar
                   displayUrl={workspaceIdle ? '' : displayUrl}
                   interactiveActive={interactiveActive}
                   navTaskId={evidenceHeaderActive ? null : (activeTaskId ?? null)}
-                  controlLease={ownership.lease}
                   readOnly={evidenceHeaderActive}
                   pendingTarget={displayUrlIsPendingTarget}
                   onLaunchTask={workspaceIdle ? onStartWorkspaceTask : undefined}
@@ -1633,32 +1472,6 @@ function CloudBrowserPanel({
                     )}
                   >
                     <Square className="h-3 w-3" strokeWidth={2.5} />
-                  </button>
-                )}
-                {!evidenceHeaderActive && !workspaceIdle && (
-                  <button
-                    type="button"
-                    onClick={handleUserTakeoverClick}
-                    disabled={controlDisabled}
-                    title={browserControl.title}
-                    aria-label={browserControl.ariaLabel}
-                    aria-pressed={interactive}
-                    className={cn(
-                      'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] border px-2.5 transition-colors',
-                      interactive
-                        ? 'border-[#FF0061]/35 bg-[#FF0061]/10 text-[#FF0061]'
-                        : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5',
-                    )}
-                  >
-                    {interactive ? (
-                      <Bot className="h-3.5 w-3.5" />
-                    ) : (
-                      <MousePointerClick className="h-3.5 w-3.5" />
-                    )}
-                    {/* FIX-61: the control always says what it does, at every width. */}
-                    <span className="whitespace-nowrap text-[11px] font-medium">
-                      {browserControl.label}
-                    </span>
                   </button>
                 )}
                 {/* Fullscreen toggle is a power-user feature; hide on
@@ -1755,35 +1568,20 @@ function CloudBrowserPanel({
               </div>
             </div>
           )}
-          {usingCdp && interactive && !taskIsTerminal && !evidenceHeaderActive && (
+          {coopStatus && !fullscreen && (
             <div
               role="status"
+              aria-live="polite"
+              data-testid="browser-coop-status"
               className={cn(
-                'border-b border-[#FF0061]/15 bg-[#FF0061]/[0.06] text-[#B8004A] dark:text-[#FF7AAE]',
+                'truncate border-b',
+                userActive && isExecuting
+                  ? 'border-[#FF0061]/15 bg-[#FF0061]/[0.06] text-[#B8004A] dark:text-[#FF7AAE]'
+                  : 'border-[#42C0EF]/20 bg-[#42C0EF]/[0.06] text-[#256D85] dark:text-[#9BDDF2]',
                 isSheet ? 'px-2 py-1.5 text-[11px]' : 'px-3 py-2 text-xs',
               )}
             >
-              你在操作，我先停下；需要我继续时点『交还给我』。
-            </div>
-          )}
-          {screenReopenFailed && taskIsTerminal && (
-            <div
-              role="alert"
-              className={cn(
-                'flex flex-wrap items-center gap-2 border-b bg-white text-[#595757] dark:bg-card/85 dark:text-foreground',
-                isSheet ? 'px-2 py-1.5 text-[11px]' : 'px-3 py-2 text-xs',
-              )}
-            >
-              <span className="min-w-0 flex-1">这个页面的浏览器已经关掉了，刚才没能重新打开。</span>
-              {terminalCanRestore && (
-                <button
-                  type="button"
-                  onClick={reopenAndTakeOver}
-                  className="inline-flex h-7 shrink-0 items-center rounded-md border border-[#FF0061]/35 px-2.5 text-[11px] font-medium text-[#FF0061] hover:bg-[#FF0061]/10"
-                >
-                  重新打开这个页面
-                </button>
-              )}
+              {coopStatus}
             </div>
           )}
           <div
@@ -1841,18 +1639,12 @@ function CloudBrowserPanel({
                     streamToken={streamToken}
                     reconnectSignal={reconnectEpoch}
                     viewOnly={!interactiveActive}
-                    controlLease={ownership.lease}
-                    onRequestControl={
-                      screenControlAvailable ? handleScreenControlRequest : undefined
-                    }
-                    replayAfterControl={taskIsTerminal}
-                    onHeldInputDropped={handleHeldInputDropped}
-                    onKeyRefused={handleKeyRefused}
+                    onInputRefused={handleInputRefused}
+                    onUserInput={handleUserInput}
                     textChannel={cdpTextChannel}
                     viewportV2={viewportV2}
                     fitMode="contain"
                     displayMode={displayMode}
-                    mobileViewport={isSheet}
                     onStatusChange={(s: CdpScreencastStatus) =>
                       // Reuse the VNC status state — the enum values
                       // overlap exactly so the existing
@@ -2053,7 +1845,7 @@ function CloudBrowserPanel({
                 aria-live="polite"
                 className="absolute left-1/2 top-3 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-[9px] border border-[#DCDDDD] bg-white/95 py-1 pl-2.5 pr-1 text-[11px] text-muted-foreground shadow-[0_4px_16px_rgba(17,24,39,0.10)] backdrop-blur dark:border-white/10 dark:bg-card/95"
               >
-                <span className="truncate">连接恢复较慢，接管状态已保留</span>
+                <span className="truncate">连接恢复较慢，正在自动重连</span>
                 <button
                   type="button"
                   onClick={handleManualReconnect}
@@ -2838,7 +2630,7 @@ function EmptyBrowserState({
           : '当任务需要打开网页、登录、验证或读取页面时，HOLA DAY 会在这里显示浏览器。'}
       </div>
       <div className="mt-3 rounded-full bg-[#EFEFEF]/80 px-3 py-1 text-[11px] text-[#595757] dark:bg-white/10 dark:text-foreground/70">
-        {workspaceIdle ? '回车或点击箭头开始' : '支持观察进度和手动接管'}
+        {workspaceIdle ? '回车或点击箭头开始' : '可以看着 AI 做，也可以直接点画面'}
       </div>
     </div>
   );
@@ -3078,7 +2870,6 @@ function UrlBar({
   displayUrl,
   interactiveActive,
   navTaskId,
-  controlLease,
   readOnly = false,
   pendingTarget = false,
   onLaunchTask,
@@ -3093,7 +2884,6 @@ function UrlBar({
    * backend falls through to peekActiveForUser.
    */
   navTaskId: string | null;
-  controlLease: string | null;
   readOnly?: boolean;
   /** Requested destination shown before the first observed page URL arrives. */
   pendingTarget?: boolean;
@@ -3124,7 +2914,7 @@ function UrlBar({
   const UrlIcon = pending || pendingTarget ? RotateCw : isSecurePage ? LockKeyhole : Globe;
 
   const submit = async (): Promise<void> => {
-    if (readOnly || (!onLaunchTask && !controlLease)) return;
+    if (readOnly || (!onLaunchTask && !navTaskId)) return;
     if (pending) return;
     const target = draft.trim();
     if (!target || (!onLaunchTask && target === displayUrl)) {
@@ -3145,7 +2935,6 @@ function UrlBar({
       }
       const res = await trpc.tasks.browserNav.mutate({
         direction: 'goto',
-        controlLease: controlLease ?? undefined,
         url: target,
         ...(navTaskId ? { taskId: navTaskId } : {}),
       });
@@ -3202,7 +2991,7 @@ function UrlBar({
               ? '尚未打开网页'
               : '输入网址回车跳转'
         }
-        readOnly={readOnly || (!onLaunchTask && !controlLease)}
+        readOnly={readOnly || (!onLaunchTask && !navTaskId)}
         onFocus={() => {
           if (!readOnly) setEditing(true);
         }}
@@ -3267,13 +3056,11 @@ function NavButton({
   direction,
   title,
   navTaskId,
-  controlLease,
 }: {
   direction: 'back' | 'forward' | 'reload';
   title: string;
-  /** F3 — same as UrlBar's navTaskId. Null falls through to user-pick. */
+  /** F3 — same as UrlBar's navTaskId. Null: no task browser to navigate. */
   navTaskId: string | null;
-  controlLease: string | null;
 }): JSX.Element {
   const toast = useToast();
   const [pending, setPending] = React.useState(false);
@@ -3290,16 +3077,12 @@ function NavButton({
       type="button"
       title={title}
       aria-label={title}
-      disabled={pending || !controlLease}
+      disabled={pending || !navTaskId}
       onClick={async () => {
-        if (pending || !controlLease) return;
+        if (pending || !navTaskId) return;
         setPending(true);
         try {
-          const res = await trpc.tasks.browserNav.mutate({
-            direction,
-            controlLease,
-            ...(navTaskId ? { taskId: navTaskId } : {}),
-          });
+          const res = await trpc.tasks.browserNav.mutate({ direction, taskId: navTaskId });
           if (!res.ok) {
             const message = browserNavFailureMessage(res.reason, direction);
             if (message) toast.show(message, 'error');
@@ -3340,24 +3123,18 @@ function NavButton({
  *   - URL bar (read-only display; the same UrlBar component the
  *     header uses, so clipboard + edit-to-navigate behave
  *     identically)
- *   - browser ownership toggle (mirrors the header button)
  *   - stop button (when executing)
  *   - exit fullscreen
  *
  * Terminal evidence mode reuses the toolbar as a passive viewer while the
- * live browser is unavailable. Navigation and takeover return after the
- * current task's managed browser has been restored.
+ * live browser is unavailable. Navigation returns after the current task's
+ * managed browser has been restored.
  */
 function FullscreenFloatingToolbar({
   displayUrl,
   pendingTarget,
   status,
   interactiveActive,
-  interactive,
-  controlAction,
-  controlLease,
-  controlDisabled,
-  onToggleInteractive,
   navTaskId,
   controlsEnabled,
   isExecuting,
@@ -3368,11 +3145,6 @@ function FullscreenFloatingToolbar({
   pendingTarget: boolean;
   status: BrowserPanelHeaderStatus;
   interactiveActive: boolean;
-  interactive: boolean;
-  controlAction: BrowserControlAction;
-  controlLease: string | null;
-  controlDisabled: boolean;
-  onToggleInteractive: () => void;
   navTaskId: string | null;
   controlsEnabled: boolean;
   isExecuting: boolean;
@@ -3431,31 +3203,15 @@ function FullscreenFloatingToolbar({
       <BrowserConnectionChip state={status} compact={false} />
       {controlsEnabled && (
         <>
-          <NavButton
-            direction="back"
-            title="后退"
-            navTaskId={navTaskId}
-            controlLease={controlLease}
-          />
-          <NavButton
-            direction="forward"
-            title="前进"
-            navTaskId={navTaskId}
-            controlLease={controlLease}
-          />
-          <NavButton
-            direction="reload"
-            title="刷新"
-            navTaskId={navTaskId}
-            controlLease={controlLease}
-          />
+          <NavButton direction="back" title="后退" navTaskId={navTaskId} />
+          <NavButton direction="forward" title="前进" navTaskId={navTaskId} />
+          <NavButton direction="reload" title="刷新" navTaskId={navTaskId} />
         </>
       )}
       <UrlBar
         displayUrl={displayUrl}
         interactiveActive={interactiveActive}
         navTaskId={navTaskId}
-        controlLease={controlLease}
         readOnly={!controlsEnabled}
         pendingTarget={pendingTarget}
       />
@@ -3474,22 +3230,6 @@ function FullscreenFloatingToolbar({
           )}
         >
           <Square className="h-3 w-3" strokeWidth={2.5} />
-        </button>
-      )}
-      {controlsEnabled && (
-        <button
-          type="button"
-          onClick={onToggleInteractive}
-          disabled={controlDisabled}
-          title={controlAction.title}
-          aria-label={controlAction.ariaLabel}
-          className={cn(
-            'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-white/85 transition-colors hover:bg-white/10',
-            interactive && 'bg-[#FF0061]/35 text-white',
-          )}
-        >
-          {interactive ? <Bot className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
-          <span className="whitespace-nowrap text-[11px] font-medium">{controlAction.label}</span>
         </button>
       )}
     </div>

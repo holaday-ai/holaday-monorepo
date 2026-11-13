@@ -46,9 +46,9 @@ describe('StepCard execution record truthfulness', () => {
     expect(screen.getByLabelText('步骤 1 · 未执行').className).not.toContain('bg-[#42C0EF]');
 
     rerender(<StepCard step={step('selected_chrome_handoff', 'done', 2)} />);
-    expect(screen.getByText('人工交还记录')).toBeTruthy();
-    expect(screen.getByText('人工已交还')).toBeTruthy();
-    expect(screen.getByLabelText('步骤 2 · 人工已交还').className).not.toContain('bg-[#42C0EF]');
+    expect(screen.getByText('你在页面上的操作')).toBeTruthy();
+    expect(screen.getByText('你已操作完')).toBeTruthy();
+    expect(screen.getByLabelText('步骤 2 · 你已操作完').className).not.toContain('bg-[#42C0EF]');
   });
 
   it('labels historical browser model-round ticks as unverified', () => {

@@ -1,401 +1,368 @@
-import { describe, expect, it } from 'vitest';
-import { BrowserControl } from './browser-control.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  BrowserControl,
+  BrowserInputOutcomeUnknownError,
+  HUMAN_IDLE_MS,
+} from './browser-control.js';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
-function lease(control: BrowserControl): string {
-  const value = control.snapshot().lease;
-  expect(typeof value).toBe('string');
-  if (!value) throw new Error('expected owner lease');
-  return value;
+/** Tracks whether a promise has settled without awaiting it. */
+function track<T>(promise: Promise<T>) {
+  const state: { done: boolean; value?: T } = { done: false };
+  void promise.then((value) => {
+    state.done = true;
+    state.value = value;
+  });
+  return state;
 }
 
-describe('BrowserControl ownership handoff', () => {
-  it('parks a waiting reply on the same control and preserves an early reply until return', async () => {
-    const control = new BrowserControl();
-    const reply = deferred<string>();
-    const effects: string[] = [];
-    const waiting = control.waitForReply(
-      reply.promise,
-      async () => {
-        effects.push('observe');
-      },
-      1000,
-    );
-    control.requestHuman();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(control.snapshot().phase).toBe('human');
-    reply.resolve('继续');
-    let finished = false;
-    void waiting.then(() => {
-      finished = true;
-    });
-    await Promise.resolve();
-    expect(finished).toBe(false);
-    control.returnToAgent(lease(control));
-    expect(await waiting).toMatchObject({ reason: 'reply', value: '继续', resumed: true });
-    expect(effects).toEqual(['observe']);
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
-  it('coalesces resize requests and reobserves before allowing another AI action', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    control.queueViewport(async () => {
-      effects.push('old-size');
-    });
-    control.queueViewport(async () => {
-      effects.push('latest-size');
-    });
-    expect(control.canAgentAct()).toBe(false);
-    expect(control.snapshot().lease).toBeNull();
-    expect(effects).toEqual([]);
-    await control.checkpoint(async () => {
-      effects.push('observe');
-      expect(control.canAgentAct()).toBe(false);
-    });
-    expect(effects).toEqual(['latest-size', 'observe']);
-    expect(control.canAgentAct()).toBe(true);
-    expect(control.snapshot().lease).toBeNull();
-  });
+const makeControl = () => new BrowserControl(() => Date.now());
 
-  it('repeats observation if the window changes during screenshot capture', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    control.queueViewport(async () => {
-      effects.push('first-size');
-    });
-    await control.checkpoint(async () => {
-      effects.push('observe');
-      if (effects.length === 2) {
-        control.queueViewport(async () => {
-          effects.push('second-size');
-        });
-      }
-    });
-    expect(effects).toEqual(['first-size', 'observe', 'second-size', 'observe']);
+describe('BrowserControl (REBUILD-4 共同操作)', () => {
+  it('accepts the person’s input at any time with no lease and no phase change', async () => {
+    const control = makeControl();
+    expect(control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
+    expect(await control.runHuman(async () => 'clicked', 'mouseDown')).toBe('clicked');
+    expect(await control.runHuman(async () => 'typed', 'insertText')).toBe('typed');
+    expect(control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
     expect(control.canAgentAct()).toBe(true);
   });
 
-  it('settles manual input before resize and observes the new size on return', async () => {
-    const control = new BrowserControl();
+  it('yieldToHuman returns at once when the person is idle', async () => {
+    const control = makeControl();
+    const onWait = vi.fn();
+    expect(await control.yieldToHuman({ onWait })).toEqual({ yielded: false, waitedMs: 0 });
+    expect(onWait).not.toHaveBeenCalled();
+    control.noteHumanInput('mouseDown');
+    await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS);
+    expect(control.humanBusy()).toBe(false);
+    expect(await control.yieldToHuman({ onWait })).toEqual({ yielded: false, waitedMs: 0 });
+    expect(onWait).not.toHaveBeenCalled();
+  });
+
+  it('waits until 2 s after the person’s last busy input, and a new input extends the wait', async () => {
+    const control = makeControl();
+    control.noteHumanInput('mouseDown');
+    await vi.advanceTimersByTimeAsync(500);
+    const onWait = vi.fn();
+    const waiting = track(control.yieldToHuman({ onWait }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onWait).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(waiting.done).toBe(false);
+    control.noteHumanInput('keyDown');
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(waiting.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(waiting.done).toBe(true);
+    expect(waiting.value).toEqual({ yielded: true, waitedMs: 3_000 });
+    expect(onWait).toHaveBeenCalledOnce();
+  });
+
+  it.each(['mouseDown', 'keyDown', 'insertText', 'navigate', 'scroll'] as const)(
+    '%s makes the person busy',
+    (kind) => {
+      const control = makeControl();
+      control.noteHumanInput(kind);
+      expect(control.humanBusy()).toBe(true);
+    },
+  );
+
+  it.each(['mouseMove', 'mouseUp', 'keyUp'] as const)(
+    '%s does not make the person busy',
+    async (kind) => {
+      const control = makeControl();
+      control.noteHumanInput(kind);
+      await control.runHuman(async () => {}, kind);
+      expect(control.humanBusy()).toBe(false);
+      expect(await control.yieldToHuman()).toEqual({ yielded: false, waitedMs: 0 });
+    },
+  );
+
+  it('counts only acting inputs (not scroll or pointer moves) in the input log', async () => {
+    const control = makeControl();
+    control.noteHumanInput('mouseMove');
+    control.noteHumanInput('scroll');
+    expect(control.humanInputLog()).toEqual({ count: 0, firstAt: null, lastAt: null });
+    const first = Date.now();
+    control.noteHumanInput('mouseDown');
+    await vi.advanceTimersByTimeAsync(100);
+    control.noteHumanInput('navigate');
+    expect(control.humanInputLog()).toEqual({ count: 2, firstAt: first, lastAt: first + 100 });
+    expect(control.humanInputLog(first + 1)).toEqual({
+      count: 1,
+      firstAt: first + 100,
+      lastAt: first + 100,
+    });
+  });
+
+  it('waits for an input that is still running, whatever its age', async () => {
+    const control = makeControl();
     const finish = deferred();
-    const started = deferred();
-    const effects: string[] = [];
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      effects.push('observe');
-    });
-    const token = lease(control);
-    const input = control.runHuman(token, async () => {
-      started.resolve();
-      await finish.promise;
-      effects.push('input');
-    });
-    await started.promise;
-    control.queueViewport(async () => {
-      effects.push('resize');
-    });
-    control.returnToAgent(token);
-    expect(effects).toEqual([]);
+    const input = control.runHuman(() => finish.promise);
+    const waiting = track(control.yieldToHuman());
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(control.humanBusy()).toBe(true);
+    expect(waiting.done).toBe(false);
     finish.resolve();
-    await Promise.all([input, parked]);
-    expect(effects).toEqual(['input', 'resize', 'observe']);
+    await input;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(waiting.done).toBe(true);
+    expect(waiting.value).toMatchObject({ yielded: true });
   });
 
-  it('does not grant human control or resume AI when an automatic resize fails', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    control.queueViewport(async () => {
-      throw new Error('session gone');
-    });
-    expect(
-      await control.checkpoint(async () => {
-        effects.push('observe');
-      }),
-    ).toMatchObject({ resumed: false });
-    expect(control.snapshot()).toMatchObject({
-      phase: 'closed',
-      lease: null,
-      error: 'viewport_failed',
-    });
-    expect(effects).toEqual([]);
+  it('gives up waiting on a person who never stops after maxWaitMs', async () => {
+    const control = makeControl();
+    control.noteHumanInput('scroll');
+    const waiting = track(control.yieldToHuman({ maxWaitMs: 3_000 }));
+    for (let i = 0; i < 5 && !waiting.done; i++) {
+      await vi.advanceTimersByTimeAsync(500);
+      control.noteHumanInput('scroll');
+      await vi.advanceTimersByTimeAsync(500);
+      control.noteHumanInput('scroll');
+    }
+    expect(waiting.done).toBe(true);
+    expect(waiting.value).toEqual({ yielded: true, waitedMs: 3_000 });
+    expect(control.humanBusy()).toBe(true);
   });
 
-  it('does not grant manual input until the runner reaches a settled boundary', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    control.requestHuman();
-    expect(control.snapshot().phase).toBe('requested');
-    expect(control.snapshot().lease).toBeNull();
-    await expect(
-      control.runHuman('invented', async () => {
-        effects.push('input');
-      }),
-    ).rejects.toThrow('browser_control_not_owned');
+  it('stops waiting when the control closes', async () => {
+    const control = makeControl();
+    control.noteHumanInput('keyDown');
+    const waiting = track(control.yieldToHuman());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(waiting.done).toBe(false);
+    control.close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(waiting.done).toBe(true);
+    expect(waiting.value).toEqual({ yielded: true, waitedMs: 100 });
+    expect(await control.yieldToHuman()).toEqual({ yielded: false, waitedMs: 0 });
+  });
+
+  it('checkpoint re-reads the page only after it waited for the person', async () => {
+    const control = makeControl();
+    const observe = vi.fn(async () => {});
+    expect(await control.checkpoint(observe)).toEqual({ resumed: false, waitedMs: 0 });
+    expect(observe).not.toHaveBeenCalled();
+    control.noteHumanInput('insertText');
+    const parked = control.checkpoint(observe);
+    await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS - 1);
+    expect(observe).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await parked).toEqual({ resumed: true, waitedMs: HUMAN_IDLE_MS });
+    expect(observe).toHaveBeenCalledOnce();
+  });
+
+  it('checkpoint closes the control when the fresh observation fails', async () => {
+    const control = makeControl();
+    control.noteHumanInput('mouseDown');
     const parked = control.checkpoint(async () => {
-      effects.push('observe');
+      throw new Error('camera unavailable');
     });
-    expect(control.snapshot().phase).toBe('human');
-    const token = lease(control);
-    await control.runHuman(token, async () => {
-      effects.push('input');
-    });
-    expect(effects).toEqual(['input']);
-    control.returnToAgent(token);
-    expect(await parked).toMatchObject({ resumed: true });
-    expect(effects).toEqual(['input', 'observe']);
-    expect(control.snapshot().phase).toBe('agent');
+    await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS);
+    expect(await parked).toMatchObject({ resumed: false });
+    expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'observation_failed' });
   });
 
-  it('merges repeated requests without replacing a valid lease', async () => {
-    const control = new BrowserControl();
-    control.requestHuman();
-    control.requestHuman();
-    const parked = control.checkpoint(async () => undefined);
-    const token = lease(control);
-    control.requestHuman();
-    expect(lease(control)).toBe(token);
-    control.returnToAgent(token);
-    control.returnToAgent(token);
-    await parked;
-    expect(control.snapshot().phase).toBe('agent');
+  it('checkpoint does not observe for a control closed during the wait', async () => {
+    const control = makeControl();
+    const observe = vi.fn(async () => {});
+    control.noteHumanInput('mouseDown');
+    const parked = control.checkpoint(observe);
+    await vi.advanceTimersByTimeAsync(100);
+    control.close();
+    expect(await parked).toMatchObject({ resumed: false });
+    expect(observe).not.toHaveBeenCalled();
   });
 
-  it('serializes accepted inputs and settles all of them before observing', async () => {
-    const control = new BrowserControl();
+  it('waitForReply: a reply with no browser use is not a resume', async () => {
+    const control = makeControl();
+    const reply = deferred<string>();
+    const observe = vi.fn(async () => {});
+    const waiting = control.waitForReply(reply.promise, observe, 10_000);
+    control.noteHumanInput('mouseMove');
+    control.noteHumanInput('scroll');
+    await vi.advanceTimersByTimeAsync(300);
+    reply.resolve('继续');
+    expect(await waiting).toEqual({
+      reason: 'reply',
+      value: '继续',
+      resumed: false,
+      waitedMs: 300,
+    });
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it('waitForReply: when the person acted meanwhile it waits for them to be still, then re-reads', async () => {
+    const control = makeControl();
+    const reply = deferred<string>();
+    const observe = vi.fn(async () => {});
+    const waiting = track(control.waitForReply(reply.promise, observe, 10_000));
+    await vi.advanceTimersByTimeAsync(100);
+    await control.runHuman(async () => {}, 'mouseDown');
+    reply.resolve('好了');
+    await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS - 1);
+    expect(observe).not.toHaveBeenCalled();
+    expect(waiting.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(waiting.done).toBe(true);
+    expect(waiting.value).toMatchObject({ reason: 'reply', value: '好了', resumed: true });
+    expect(observe).toHaveBeenCalledOnce();
+  });
+
+  it('waitForReply: an acting input before the wait does not count', async () => {
+    const control = makeControl();
+    control.noteHumanInput('keyDown');
+    await vi.advanceTimersByTimeAsync(5_000);
+    const observe = vi.fn(async () => {});
+    const result = await control.waitForReply(Promise.resolve('x'), observe, 1_000);
+    expect(result).toMatchObject({ reason: 'reply', resumed: false });
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it('waitForReply: times out, and a close ends it without observing', async () => {
+    const control = makeControl();
+    const observe = vi.fn(async () => {});
+    const timedOut = control.waitForReply(new Promise<string>(() => {}), observe, 1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await timedOut).toMatchObject({ reason: 'timeout', resumed: false, waitedMs: 1_000 });
+
+    const closing = control.waitForReply(new Promise<string>(() => {}), observe, 60_000);
+    control.noteHumanInput('mouseDown');
+    await vi.advanceTimersByTimeAsync(10);
+    control.close();
+    expect(await closing).toMatchObject({ reason: 'closed', resumed: false });
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it('waitForReply: a rejected reply rethrows', async () => {
+    const control = makeControl();
+    const reply = deferred<string>();
+    const waiting = control.waitForReply(reply.promise, async () => {}, 10_000);
+    const rejected = expect(waiting).rejects.toThrow('reply store down');
+    reply.reject(new Error('reply store down'));
+    await rejected;
+  });
+
+  it('waitForReply: a failed re-read closes the control', async () => {
+    const control = makeControl();
+    const waiting = control.waitForReply(
+      new Promise<string>(() => {}),
+      async () => {
+        throw new Error('camera unavailable');
+      },
+      1_000,
+    );
+    control.noteHumanInput('insertText');
+    await vi.advanceTimersByTimeAsync(1_000 + HUMAN_IDLE_MS);
+    expect(await waiting).toMatchObject({ reason: 'closed', resumed: false });
+    expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'observation_failed' });
+  });
+
+  it('runs accepted inputs one at a time in the order accepted', async () => {
+    const control = makeControl();
     const firstStarted = deferred();
     const finishFirst = deferred();
     const events: string[] = [];
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      events.push('observe');
-    });
-    const token = lease(control);
-    const first = control.runHuman(token, async () => {
+    const first = control.runHuman(async () => {
       events.push('first-start');
       firstStarted.resolve();
       await finishFirst.promise;
       events.push('first-end');
-    });
-    const second = control.runHuman(token, async () => {
+    }, 'mouseDown');
+    const second = control.runHuman(async () => {
       events.push('second');
-    });
+    }, 'mouseUp');
+    const third = control.runHuman(async () => {
+      events.push('third');
+    }, 'insertText');
     await firstStarted.promise;
-    control.returnToAgent(token);
-    expect(control.snapshot().phase).toBe('resuming');
-    expect(control.snapshot().lease).toBeNull();
-    await expect(
-      control.runHuman(token, async () => {
-        events.push('late');
-      }),
-    ).rejects.toThrow('browser_control_not_owned');
+    await vi.advanceTimersByTimeAsync(0);
     expect(events).toEqual(['first-start']);
+    expect(control.isSettled()).toBe(false);
     finishFirst.resolve();
-    await Promise.all([first, second, parked]);
-    expect(events).toEqual(['first-start', 'first-end', 'second', 'observe']);
+    await Promise.all([first, second, third]);
+    expect(events).toEqual(['first-start', 'first-end', 'second', 'third']);
+    expect(control.isSettled()).toBe(true);
   });
 
-  it('invalidates earlier handoff leases even on the same task', async () => {
-    const control = new BrowserControl();
+  it('a rejected input does not poison later inputs', async () => {
+    const control = makeControl();
     const effects: string[] = [];
-    control.requestHuman();
-    const first = control.checkpoint(async () => undefined);
-    const oldToken = lease(control);
-    control.returnToAgent(oldToken);
-    await first;
-    control.requestHuman();
-    const second = control.checkpoint(async () => undefined);
-    const newToken = lease(control);
-    expect(newToken).not.toBe(oldToken);
     await expect(
-      control.runHuman(oldToken, async () => {
-        effects.push('stale');
-      }),
-    ).rejects.toThrow('browser_control_not_owned');
-    expect(() => control.returnToAgent(oldToken)).toThrow('browser_control_not_owned');
-    expect(effects).toEqual([]);
-    control.returnToAgent(newToken);
-    await second;
-  });
-
-  it('does not accept another running task or process generation lease', async () => {
-    const one = new BrowserControl();
-    const two = new BrowserControl();
-    one.requestHuman();
-    two.requestHuman();
-    const a = one.checkpoint(async () => undefined);
-    const b = two.checkpoint(async () => undefined);
-    await expect(two.runHuman(lease(one), async () => 'wrong task')).rejects.toThrow(
-      'browser_control_not_owned',
-    );
-    one.close();
-    two.close();
-    await Promise.all([a, b]);
-  });
-
-  it('keeps the runner paused with a new lease when observation fails', async () => {
-    const control = new BrowserControl();
-    const observed = deferred();
-    let attempts = 0;
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      attempts++;
-      if (attempts === 1) {
-        observed.resolve();
-        throw new Error('camera unavailable');
-      }
-    });
-    const oldToken = lease(control);
-    control.returnToAgent(oldToken);
-    await observed.promise;
-    // Let the rejected observation settle inside the real checkpoint.
-    await Promise.resolve();
-    expect(control.snapshot()).toMatchObject({ phase: 'human', error: 'observation_failed' });
-    const retryToken = lease(control);
-    expect(retryToken).not.toBe(oldToken);
-    control.returnToAgent(retryToken);
-    expect(await parked).toMatchObject({ resumed: true });
-    expect(attempts).toBe(2);
-    expect(control.snapshot().error).toBeNull();
-  });
-
-  it('does not confirm return while a fresh observation is still pending', async () => {
-    const control = new BrowserControl();
-    const observing = deferred();
-    const finishObservation = deferred();
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      observing.resolve();
-      await finishObservation.promise;
-    });
-    const token = lease(control);
-    control.returnToAgent(token);
-    await observing.promise;
-    expect(control.snapshot().phase).toBe('resuming');
-    expect(() => control.requestHuman()).toThrow('browser_control_transfer_pending');
-    finishObservation.resolve();
-    await parked;
+      control.runHuman(async () => {
+        throw new Error('input rejected');
+      }, 'mouseDown'),
+    ).rejects.toThrow('input rejected');
+    await control.runHuman(async () => {
+      effects.push('next');
+    }, 'mouseDown');
+    expect(effects).toEqual(['next']);
     expect(control.snapshot().phase).toBe('agent');
   });
 
-  it('cancellation releases the parked runner without resuming AI', async () => {
-    const control = new BrowserControl();
-    const events: string[] = [];
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      events.push('observe');
-    });
-    const token = lease(control);
-    control.close();
-    expect(await parked).toMatchObject({ resumed: false });
-    await expect(
-      control.runHuman(token, async () => {
-        events.push('input');
-      }),
-    ).rejects.toThrow('browser_control_not_owned');
-    expect(events).toEqual([]);
-    expect(control.snapshot().phase).toBe('closed');
-  });
-
-  it('does not resurrect a closed run when observation finishes late', async () => {
-    const control = new BrowserControl();
-    const observing = deferred();
-    const finish = deferred();
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      observing.resolve();
-      await finish.promise;
-    });
-    control.returnToAgent(lease(control));
-    await observing.promise;
-    control.close();
-    finish.resolve();
-    expect(await parked).toMatchObject({ resumed: false });
-    expect(control.snapshot().phase).toBe('closed');
-  });
-
-  it('does not poison later input settlement when an accepted input rejects', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      effects.push('observe');
-    });
-    const token = lease(control);
-    await expect(
-      control.runHuman(token, async () => {
-        throw new Error('input rejected');
-      }),
-    ).rejects.toThrow('input rejected');
-    await control.runHuman(token, async () => {
-      effects.push('next');
-    });
-    control.returnToAgent(token);
-    await parked;
-    expect(effects).toEqual(['next', 'observe']);
-  });
-
-  it('skips queued input after cancellation without treating active input as settled', async () => {
-    const control = new BrowserControl();
+  it('close skips queued input but lets the active one finish; settled waits for it', async () => {
+    const control = makeControl();
     const started = deferred();
     const finish = deferred();
     const events: string[] = [];
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      events.push('observe');
-    });
-    const token = lease(control);
-    const active = control.runHuman(token, async () => {
+    const active = control.runHuman(async (signal) => {
       started.resolve();
       await finish.promise;
-      events.push('active-ended');
+      events.push(`active-ended:${signal.aborted}`);
     });
-    const queued = control.runHuman(token, async () => {
+    const queued = control.runHuman(async () => {
       events.push('queued');
     });
     const rejected = expect(queued).rejects.toThrow('browser_control_closed');
     await started.promise;
     control.close();
-    let runnerReleased = false;
-    void parked.then(() => {
-      runnerReleased = true;
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    try {
-      expect(runnerReleased).toBe(false);
-      expect(events).toEqual([]);
-    } finally {
-      finish.resolve();
-      await active;
-      await rejected;
-      await parked;
-    }
-    expect(events).toEqual(['active-ended']);
+    const settled = track(control.settled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled.done).toBe(false);
+    expect(control.isSettled()).toBe(false);
+    finish.resolve();
+    await active;
+    await rejected;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled.done).toBe(true);
+    expect(events).toEqual(['active-ended:true']);
+    await expect(control.runHuman(async () => {}, 'mouseDown')).rejects.toThrow(
+      'browser_control_closed',
+    );
   });
 
-  it('leaves uninterrupted execution alone and refuses two parked owners', async () => {
-    const control = new BrowserControl();
-    const events: string[] = [];
-    expect(
-      await control.checkpoint(async () => {
-        events.push('unneeded');
-      }),
-    ).toEqual({ resumed: false, waitedMs: 0 });
-    control.requestHuman();
-    const parked = control.checkpoint(async () => undefined);
-    await expect(control.checkpoint(async () => undefined)).rejects.toThrow(
-      'browser_control_checkpoint_active',
-    );
+  it('a missing transport receipt (stop proven) is outcome-unknown and closes the control', async () => {
+    const control = makeControl();
+    expect(() => control.confirmBrowserStopped()).toThrow('browser_stop_not_requested');
+    const input = control.runHuman(() => new Promise<void>(() => {}), 'mouseDown');
+    const rejected = expect(input).rejects.toBeInstanceOf(BrowserInputOutcomeUnknownError);
+    await vi.advanceTimersByTimeAsync(0);
     control.close();
-    await parked;
-    expect(events).toEqual([]);
+    expect(control.isSettled()).toBe(false);
+    control.confirmBrowserStopped();
+    await rejected;
+    expect(control.snapshot()).toEqual({
+      phase: 'closed',
+      lease: null,
+      error: 'input_outcome_unknown',
+    });
+    expect(control.isSettled()).toBe(true);
   });
 });

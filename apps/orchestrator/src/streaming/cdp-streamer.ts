@@ -71,12 +71,6 @@ export interface CdpStreamerOptions {
   maxWidth?: number;
   /** Cap frame height. Default 1200 — matches the largest workbench viewport. */
   maxHeight?: number;
-  /**
-   * Re-applies the latest client viewport after a renderer-changing event.
-   * Chromium can discard device metrics during cross-origin navigation even
-   * while the CDP socket itself remains connected.
-   */
-  onViewportMayReset?: () => Promise<void> | void;
 }
 
 export interface ScreencastFrameMessage {
@@ -309,15 +303,11 @@ export class CdpStreamer {
   private readonly inputRefreshDelayMs = 16;
   private readonly captureScreenshotTimeoutMs = 2500;
   private readonly opts: Required<
-    Omit<
-      CdpStreamerOptions,
-      'logger' | 'onViewportMayReset' | 'onFrame' | 'onObservationInvalidated'
-    >
+    Omit<CdpStreamerOptions, 'logger' | 'onFrame' | 'onObservationInvalidated'>
   > & {
     logger: Logger;
     onFrame?: CdpStreamerOptions['onFrame'];
     onObservationInvalidated?: CdpStreamerOptions['onObservationInvalidated'];
-    onViewportMayReset?: () => Promise<void> | void;
   };
 
   constructor(opts: CdpStreamerOptions) {
@@ -472,11 +462,6 @@ export class CdpStreamer {
 
   private async rearmAfterNavigation(reason: string, url: string | null): Promise<void> {
     await this.armScreencast(reason, url);
-    try {
-      await this.opts.onViewportMayReset?.();
-    } catch (err) {
-      this.opts.logger.debug({ reason, err: errMsg(err) }, 'cdp-streamer: viewport reapply failed');
-    }
   }
 
   /**
@@ -901,7 +886,6 @@ export class CdpStreamer {
     this.mainFrameId = tree?.frameTree?.frame?.id;
     this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
     await this.armScreencast('hard-restart', page.url());
-    await this.opts.onViewportMayReset?.();
   }
 
   /**

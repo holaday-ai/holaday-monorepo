@@ -133,7 +133,7 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
   {
     name: 'request_human',
-    description: '请用户本人接管（登录、验证码、支付、实名等），说明需要用户做什么。',
+    description: '请用户本人在画面上处理这一步（登录、验证码、支付、实名等），说明需要用户做什么。',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -2266,7 +2266,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             failureSource: 'not_started',
             steps: step + 1,
           };
-        const message = typeof args.message === 'string' ? args.message : '需要你接管浏览器。';
+        const message =
+          typeof args.message === 'string' ? args.message : '这一步需要你来：请直接在画面上操作。';
         // FIX-57 #5: a login / permission stop on a read task first tries another public route
         // (复审 #3: also when the reason is 「other」 but the message asks for a login).
         if (
@@ -2290,13 +2291,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         const handed = reason === 'captcha' ? await handCaptcha(message) : undefined;
         if (handed !== undefined) {
           if (handed === 'ended')
-            return { status: 'failed', reason: '验证码接管已结束，任务未完成。', steps: step + 1 };
+            return { status: 'failed', reason: '等待验证已结束，任务未完成。', steps: step + 1 };
           results.push(
             toolResult(
               call.id,
               handed === 'alternate'
                 ? ALTERNATE
-                : '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。',
+                : '用户已在画面上处理完这一步，请重新 snapshot 后继续；用户的操作不算你的操作。',
             ),
           );
           staleTurn = true;
@@ -2305,7 +2306,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         const resumed = await input.requestHuman({ reason, message }).catch(() => false);
         if (!resumed) return { status: 'awaiting_user', reason, message, steps: step + 1 };
         results.push(
-          toolResult(call.id, '用户已完成接管，请重新 snapshot 后继续；用户的操作不算你的操作。'),
+          toolResult(
+            call.id,
+            '用户已在画面上处理完这一步，请重新 snapshot 后继续；用户的操作不算你的操作。',
+          ),
         );
         continue;
       }
@@ -4077,7 +4081,7 @@ export const NOT_STARTED = '执行未开始：浏览器还没有打开目标页�
 
 /** FIX-32: a read the observer masked because the page shows a login/verification-code form. */
 export const SENSITIVE_PAGE_MESSAGE =
-  '页面上有需要你本人填写的登录或验证码输入框，页面内容已遮挡、无法代为读取。请在浏览器中接管（登录或关闭登录弹窗）后继续。';
+  '页面上有需要你本人填写的登录或验证码输入框，页面内容已遮挡、无法代为读取。请直接在画面上处理（登录或关闭登录弹窗），过了我会自动继续。';
 
 /** FIX-32 review: the handover says why the page was masked. */
 export const MASKED_PAGE = {

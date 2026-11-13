@@ -36,47 +36,80 @@ describe('task browser control sessions', () => {
     binding.finish();
   });
 
-  it('does not convert a running task into terminal review or reuse its old lease', async () => {
+  it('does not convert a running task into terminal review; a finished run gets a fresh open control', async () => {
     const sessions = new BrowserControlSessions();
     const instance = { taskId: 'task', userId: 'owner' };
     const first = sessions.start(instance);
     expect(() => sessions.review(instance)).toThrow('browser_runner_active');
-    first.control.requestHuman();
-    const parked = first.control.checkpoint(async () => undefined);
-    const old = first.control.snapshot().lease ?? '';
-    first.control.close();
-    await parked;
     first.finish();
+    expect(first.control.snapshot().phase).toBe('closed');
     const review = sessions.review(instance);
-    expect(review.control.snapshot().phase).toBe('human');
-    await expect(review.control.runHuman(old, async () => undefined)).rejects.toThrow();
+    expect(review.control).not.toBe(first.control);
+    expect(review.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
+    // REBUILD-4: no lease — the person just uses the finished task's browser.
+    expect(await review.control.runHuman(async () => 'typed', 'insertText')).toBe('typed');
+    // The open review control is reused while it is open.
+    expect(sessions.review(instance)).toBe(review);
     review.control.close();
+    expect(sessions.review(instance).control).not.toBe(review.control);
+  });
+
+  it('openForViewer: the running control, then a fresh review control, null when never bound', async () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'task', userId: 'owner' };
+    expect(sessions.openForViewer(instance)).toBeNull();
+    const run = sessions.start(instance);
+    const running = sessions.openForViewer(instance);
+    expect(running?.control).toBe(run.control);
+    expect(running?.active).toBe(true);
+    run.finish();
+    const review = sessions.openForViewer(instance);
+    expect(review).not.toBeNull();
+    expect(review?.control).not.toBe(run.control);
+    expect(review?.active).toBe(false);
+    expect(review?.control.snapshot().phase).toBe('agent');
+    expect(sessions.openForViewer(instance)).toBe(review);
+    // A new run replaces the review control.
+    const next = sessions.start(instance);
+    expect(review?.control.snapshot().phase).toBe('closed');
+    expect(sessions.openForViewer(instance)?.control).toBe(next.control);
+    next.finish();
+  });
+
+  it('openForViewer refuses a browser whose input outcome is unknown', async () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'task', userId: 'owner' };
+    const run = sessions.start(instance);
+    run.finish();
+    await sessions.quarantine(instance, async () => true);
+    expect(sessions.openForViewer(instance)).toBeNull();
+    expect(() => sessions.review(instance)).toThrow('browser_input_outcome_unknown');
   });
 
   it('only a positive physical stop receipt releases an unresolved input', async () => {
     const sessions = new BrowserControlSessions();
     const instance = { taskId: 'task', userId: 'owner' };
     const binding = sessions.start(instance);
-    binding.control.requestHuman();
-    const parked = binding.control.checkpoint(async () => undefined);
-    const input = binding.control.runHuman(
-      binding.control.snapshot().lease ?? '',
-      async () => new Promise<void>(() => {}),
-    );
-    const rejected = expect(input).rejects.toThrow('browser_input_outcome_unknown');
+    const input = binding.control.runHuman(async () => new Promise<void>(() => {}), 'mouseDown');
+    let settled = false;
+    const rejected = input.catch((error: unknown) => {
+      settled = true;
+      throw error;
+    });
+    const assertion = expect(rejected).rejects.toThrow('browser_input_outcome_unknown');
     await Promise.resolve();
     await sessions.quarantine(instance, async () => false);
-    let settled = false;
-    void parked.then(() => {
-      settled = true;
-    });
     await Promise.resolve();
     expect(settled).toBe(false);
+    expect(binding.control.isSettled()).toBe(false);
     expect(() => sessions.review(instance)).toThrow();
+    expect(sessions.openForViewer(instance)).toBe(sessions.get(instance, 'owner', 'task'));
+    expect(() => binding.finish()).toThrow('browser_input_unsettled');
     await sessions.quarantine(instance, async () => true);
-    await rejected;
-    expect(await parked).toMatchObject({ resumed: false });
+    await assertion;
+    expect(binding.control.isSettled()).toBe(true);
     binding.finish();
     expect(() => sessions.review(instance)).toThrow('browser_input_outcome_unknown');
+    expect(sessions.openForViewer(instance)).toBeNull();
   });
 });

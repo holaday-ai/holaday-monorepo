@@ -17,49 +17,26 @@ export interface BrowserPanelHeaderStatus {
   showLabel: boolean;
 }
 
-export interface BrowserControlAction {
-  nextInteractive: boolean;
-  focusFollowUp: boolean;
-  label: '我来操作' | '交还给我';
-  ariaLabel: string;
-  title: string;
-}
+/**
+ * REBUILD-4 共同操作: after the person's last click, key or scroll the assistant waits this long
+ * before it re-reads the page and continues. Until then the panel says it is waiting for them.
+ */
+export const USER_INPUT_QUIET_MS = 2_000;
 
 /**
- * Resolves the browser ownership toggle into an honest user action. A running
- * task can resume immediately when takeover ends. A terminal task has no
- * active agent, so handing it back must focus a follow-up instruction instead
- * of pretending that AI work restarted on its own.
+ * One plain line about who is working on the shared browser. The person never has to take
+ * over or hand back: they can use the page at any time, and the assistant waits for them.
  */
-export function browserControlAction(inputs: {
-  interactive: boolean;
-  taskIsTerminal: boolean;
-}): BrowserControlAction {
-  if (!inputs.interactive) {
-    return {
-      nextInteractive: true,
-      focusFollowUp: false,
-      label: '我来操作',
-      ariaLabel: '我来操作',
-      title: '我来操作 — 也可以直接点画面，你的鼠标键盘直接操作这个页面',
-    };
+export function browserCoopStatusCopy(inputs: {
+  /** The assistant is executing the task right now. */
+  taskRunning: boolean;
+  /** The person acted on the page within the last {@link USER_INPUT_QUIET_MS}. */
+  userActive: boolean;
+}): string {
+  if (inputs.taskRunning) {
+    return inputs.userActive ? '你在操作，我等你停下再继续' : 'AI 正在操作，你也可以直接点画面';
   }
-  if (inputs.taskIsTerminal) {
-    return {
-      nextInteractive: false,
-      focusFollowUp: true,
-      label: '交还给我',
-      ariaLabel: '交还给我',
-      title: '交还给我 — 输入下一步指令，我从当前页面继续',
-    };
-  }
-  return {
-    nextInteractive: false,
-    focusFollowUp: false,
-    label: '交还给我',
-    ariaLabel: '交还给我',
-    title: '交还给我 — 我从当前页面接着做这个任务',
-  };
+  return '浏览器还开着，可以直接操作';
 }
 
 export function browserInputFallbackMode(inputs: {
@@ -99,7 +76,7 @@ export function terminalBrowserRecoveryRetryDelay(attempt: number): number {
 
 /**
  * Once a terminal page has painted, brief socket churn should be invisible:
- * the canvas remains useful and takeover ownership is preserved. Surface the
+ * the canvas remains useful. Surface the
  * compact reconnect affordance only after recovery has had time to complete.
  */
 export function browserReconnectAffordanceDelay(inputs: {
@@ -157,7 +134,7 @@ export type TerminalBrowserRecoveryState = 'idle' | 'restoring' | 'ready' | 'con
 /**
  * A recoverable terminal browser keeps its live viewport mounted while the
  * socket and backend session retry. Unmounting it on each failed attempt turns
- * the last useful frame into a static screenshot and also drops user takeover.
+ * the last useful frame into a static screenshot the person can no longer use.
  * Evidence-only mode is reserved for tasks with no trusted URL to restore.
  */
 export function terminalBrowserSessionUnavailable(inputs: {
@@ -180,8 +157,7 @@ export function isBrowserInteractionActive(inputs: {
 }): boolean {
   if (!inputs.interactive || inputs.liveSessionUnavailable) return false;
   if (inputs.useLiveStream) {
-    // `interactive` preserves takeover ownership through a reconnect. Active
-    // forwarding still waits for an open transport so input is never accepted
+    // Input forwarding waits for an open transport so input is never accepted
     // and then silently discarded.
     return inputs.liveStatus === 'connected';
   }
@@ -313,7 +289,7 @@ export function terminalEvidenceContinuation(
     intent,
     label: '恢复可操作浏览器',
     pendingLabel: '正在恢复浏览器…',
-    description: '在当前任务恢复到最后页面，可以直接点击、输入，或交还给我。',
+    description: '在当前任务恢复到最后页面，可以直接点击、输入，也可以让我继续。',
   };
 }
 
@@ -448,11 +424,8 @@ export function browserPanelHeaderStatus(inputs: {
   dotStatus: 'idle' | 'live' | 'error';
   liveStatus: BrowserLiveStatus;
   browserAwaiting: boolean;
-  interactiveActive: boolean;
-  interactiveOwned?: boolean;
   showReconnect: boolean;
   hasPresentedFrame?: boolean;
-  taskIsTerminal?: boolean;
 }): BrowserPanelHeaderStatus {
   if (inputs.browserAwaiting) {
     return {
@@ -460,27 +433,6 @@ export function browserPanelHeaderStatus(inputs: {
       tooltip: '等待你在浏览器里完成登录、验证或授权',
       tone: 'attention',
       dotStatus: 'error',
-      showLabel: true,
-    };
-  }
-  const interactiveOwned = inputs.interactiveOwned ?? inputs.interactiveActive;
-  if (interactiveOwned && !inputs.interactiveActive) {
-    return {
-      label: '接管保留',
-      tooltip: '浏览器连接恢复后可直接继续输入，无需再次接管',
-      tone: 'recovering',
-      dotStatus: inputs.showReconnect ? 'error' : 'live',
-      showLabel: true,
-    };
-  }
-  if (inputs.interactiveActive) {
-    return {
-      label: '接管中',
-      tooltip: inputs.taskIsTerminal
-        ? '你在操作这个页面；需要我接着做时，点「交还给我」并输入下一步指令。'
-        : '你在操作，我先停下；需要我继续时点『交还给我』。',
-      tone: 'takeover',
-      dotStatus: 'live',
       showLabel: true,
     };
   }
@@ -655,7 +607,7 @@ export function browserLiveOverlayCopy(inputs: {
     if (inputs.showReconnect) {
       return {
         title: '浏览器工作区连接较慢',
-        detail: '正在恢复当前任务的浏览器；成功后可以直接点击、输入，或交还给我。',
+        detail: '正在恢复当前任务的浏览器；成功后可以直接点击、输入，也可以让我继续。',
         reconnectLabel: '重连浏览器',
       };
     }

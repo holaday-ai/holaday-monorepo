@@ -4,9 +4,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-  query: vi.fn(),
   capabilities: vi.fn(),
-  mutate: vi.fn(),
   nav: vi.fn(),
   refresh: vi.fn(),
   abort: vi.fn(),
@@ -17,8 +15,6 @@ vi.mock('@/lib/trpc', () => ({
       capabilities: { query: api.capabilities },
     },
     tasks: {
-      browserControlState: { query: api.query },
-      browserControl: { mutate: api.mutate },
       browserNav: { mutate: api.nav },
       abort: { mutate: api.abort },
     },
@@ -91,14 +87,6 @@ beforeEach(() => {
   nextWidth = 420;
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   document.documentElement.style.removeProperty(BROWSER_PANEL_DOCK_INSET_PROPERTY);
-  api.query.mockResolvedValue({
-    taskId: 'tsk_one',
-    phase: 'agent',
-    lease: null,
-    supported: true,
-    error: null,
-    mode: 'running',
-  });
   useTaskStore.setState({
     browserInteractive: false,
     tasks: [

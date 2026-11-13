@@ -34,10 +34,6 @@ it.each([false, true])(
       executor: { getPage: async () => page },
     } as unknown as BrowserInstance;
     const binding = browserControlSessions.start(instance);
-    binding.control.requestHuman();
-    const parked = binding.control.checkpoint(async () => undefined);
-    const lease = binding.control.snapshot().lease;
-    if (!lease) throw new Error('fixture lease missing');
     let policy: ScreencastProxyOptions['beforeViewportAction'];
     let calls = 0;
     const server = createServer();
@@ -61,17 +57,12 @@ it.each([false, true])(
     let frame: BrowserFrameGeometry | undefined;
     let receivedFrame = false;
     let appliedWidth = 0;
-    let framesSinceApplied = 0;
+    let viewportReady = false;
     ws.on('message', (raw) => {
       const m = JSON.parse(String(raw));
-      if (m.type === 'viewport-applied') {
-        appliedWidth = m.width;
-        framesSinceApplied = 0;
-      }
-      if (m.geometry) {
-        frame = m.geometry;
-        framesSinceApplied += 1;
-      }
+      if (m.type === 'viewport-applied') appliedWidth = m.width;
+      if (m.type === 'viewport-v2-ready') viewportReady = true;
+      if (m.geometry) frame = m.geometry;
       if (m.type === 'frame') receivedFrame = true;
     });
     const currentFrame = () => {
@@ -82,7 +73,6 @@ it.each([false, true])(
       ws.send(
         JSON.stringify({
           type: 'input',
-          controlLease: lease,
           observation,
           payload: { type, x: 150, y: 130, text: '不得输入' },
         }),
@@ -96,7 +86,6 @@ it.each([false, true])(
         ws.send(
           JSON.stringify({
             type: 'input',
-            controlLease: lease,
             payload: { type, x: 150, y: 130 },
           }),
         );
@@ -152,8 +141,8 @@ it.each([false, true])(
       await vi.waitFor(async () =>
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(1),
       );
-      // DEPLOY-61 重跑 #2: a size sent without the lease (someone only watching) changes nothing
-      // on the page (P0-1), so the frame shown stays valid for the lease holder's input.
+      // DEPLOY-61 重跑 #2: a size message (someone only watching) changes nothing on the page, so
+      // the frame shown stays valid for the person's input.
       ws.send(
         JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 800, height: 600 } }),
       );
@@ -163,70 +152,33 @@ it.each([false, true])(
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(2),
       );
       expect(await page.evaluate(() => innerWidth)).toBe(1280);
-      // FIX-62 P1-3: the screen that takes control re-sends its size right after the first press;
-      // the press and its release, already sent, land on the layout they were aimed at.
+      // REBUILD-4 第 4 条: a size message, even from an old client that still sends a lease, is
+      // ignored: the page keeps its layout and a press already sent lands where it was aimed.
       const aimed = currentFrame();
       send('mouseDown', aimed);
-      send('mouseUp', aimed);
       ws.send(
         JSON.stringify({
           type: 'input',
-          controlLease: lease,
+          controlLease: 'stale-lease',
           payload: { type: 'viewport', width: 1000, height: 700 },
         }),
       );
+      send('mouseUp', aimed);
       await vi.waitFor(async () =>
         expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(3),
       );
-      // 复审 #8: a person's click holds the button 50–150ms; a size arriving while it is held waits
-      // for the release, which lands on the layout the press was aimed at.
-      // A frame of the new layout (one shown while the size was still to be applied is refused).
-      const appliedFrame = (width: number) =>
-        vi.waitFor(
-          () => {
-            expect(appliedWidth).toBe(width);
-            expect(framesSinceApplied).toBeGreaterThan(0);
-            expect(currentFrame().cssWidth).toBe(width);
-          },
-          { timeout: 5000 },
-        );
-      await appliedFrame(1000);
-      const held = currentFrame();
-      send('mouseDown', held);
-      await new Promise((r) => setTimeout(r, 40));
-      ws.send(
-        JSON.stringify({
-          type: 'input',
-          controlLease: lease,
-          payload: { type: 'viewport', width: 1100, height: 700 },
-        }),
-      );
-      await new Promise((r) => setTimeout(r, 120));
-      send('mouseUp', held);
-      await vi.waitFor(async () =>
-        expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(4),
-      );
-      await appliedFrame(1100);
-      // A size sent with the lease re-lays the page out: input naming the frame before it is refused.
-      const previous = currentFrame();
-      const beforeResizeCalls = calls;
-      ws.send(
-        JSON.stringify({
-          type: 'input',
-          controlLease: lease,
-          payload: { type: 'viewport', width: 800, height: 600 },
-        }),
-      );
-      send('mouseDown', previous);
-      send('mouseUp', previous);
-      await new Promise((r) => setTimeout(r, 350));
-      expect(calls).toBe(beforeResizeCalls);
-      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(4);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(await page.evaluate(() => innerWidth)).toBe(1280);
+      expect(appliedWidth).toBe(0);
+      expect(currentFrame().cssWidth).toBe(1280);
+      // The server flag enforces V2 even when the URL dropped the negotiation parameter.
+      expect(viewportReady).toBe(true);
+      // The person's input was recorded on the task's control; it stays open (no lease).
+      expect(binding.control.humanInputLog().count).toBeGreaterThan(0);
+      expect(binding.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
     } finally {
       ws.close();
       await once(ws, 'close');
-      binding.control.returnToAgent(lease);
-      await parked;
       binding.finish();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await browser.close();

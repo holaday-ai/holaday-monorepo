@@ -3,13 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import * as React from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
-  query: vi.fn(),
   capabilities: vi.fn(),
-  mutate: vi.fn(),
   nav: vi.fn(),
   ensure: vi.fn(),
   refresh: vi.fn(),
   abort: vi.fn(),
+  checkpoint: vi.fn(),
+  toast: vi.fn(),
 }));
 vi.mock('@/lib/trpc', () => ({
   trpc: {
@@ -17,10 +17,9 @@ vi.mock('@/lib/trpc', () => ({
       capabilities: { query: api.capabilities },
     },
     tasks: {
-      browserControlState: { query: api.query },
-      browserControl: { mutate: api.mutate },
       browserNav: { mutate: api.nav },
       ensureBrowserSession: { mutate: api.ensure },
+      checkpointBrowserSession: { mutate: api.checkpoint },
       abort: { mutate: api.abort },
     },
   },
@@ -31,28 +30,32 @@ vi.mock('@/lib/use-stream-token', () => ({
 vi.mock('@/lib/ws', () => ({ send: vi.fn() }));
 vi.mock('@/lib/hd-debug', () => ({ hdDebug: vi.fn() }));
 vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), show: vi.fn() }),
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), show: api.toast }),
 }));
+const viewportProps = vi.hoisted(() => ({ latest: null as Record<string, unknown> | null }));
 vi.mock('@/components/CdpScreencastViewport', () => ({
   CdpScreencastViewport: (props: {
     onStatusChange: (status: string) => void;
-    controlLease: string | null;
     viewOnly: boolean;
-    onRequestControl?: () => void;
+    onUserInput?: () => void;
+    onInputRefused?: (input: 'key' | 'pointer') => void;
   }) => {
+    viewportProps.latest = props as unknown as Record<string, unknown>;
     const onStatus = React.useRef(props.onStatusChange);
     React.useEffect(() => {
       queueMicrotask(() => onStatus.current('connected'));
     }, []);
     return (
-      <div
-        data-testid="viewport"
-        data-lease={props.controlLease ?? ''}
-        data-readonly={String(props.viewOnly)}
-        data-can-request={String(Boolean(props.onRequestControl))}
-      >
-        <button type="button" data-testid="screen" onClick={() => props.onRequestControl?.()}>
+      <div data-testid="viewport" data-readonly={String(props.viewOnly)}>
+        <button type="button" data-testid="screen" onClick={() => props.onUserInput?.()}>
           screen
+        </button>
+        <button
+          type="button"
+          data-testid="refused"
+          onClick={() => props.onInputRefused?.('pointer')}
+        >
+          refused
         </button>
       </div>
     );
@@ -60,29 +63,27 @@ vi.mock('@/components/CdpScreencastViewport', () => ({
 }));
 import { useTaskStore } from '@/stores/task-store';
 import { BrowserPanel, recentActivitySteps, summariseAction } from './BrowserPanel';
-const control = (phase = 'agent', lease: string | null = null) => ({
-  taskId: 'tsk_one',
-  phase,
-  lease,
-  supported: true,
-  error: null,
-  mode: 'running',
-});
 const base = {
   activeTaskId: 'tsk_one',
   taskStatus: 'executing' as const,
   poolUserId: 'usr_one',
   onToggleFullscreen: vi.fn(),
 };
+const setTaskStatus = (status: 'executing' | 'completed') =>
+  useTaskStore.setState((state) => ({
+    tasks: state.tasks.map((task) => ({ ...task, status })),
+  }));
 beforeEach(() => {
+  viewportProps.latest = null;
   api.capabilities.mockResolvedValue({
-    viewportV2: false,
+    viewportV2: true,
     observationV2: false,
     replayV1: false,
     routingV2: false,
   });
   useTaskStore.setState({
     browserInteractive: false,
+    awaitingUserByTask: {},
     tasks: [
       {
         taskId: 'tsk_one',
@@ -95,40 +96,125 @@ beforeEach(() => {
       },
     ],
   });
-  api.query.mockResolvedValue(control());
   api.nav.mockResolvedValue({ ok: true });
+  api.abort.mockResolvedValue({ ok: true, state: 'aborting' });
+  api.checkpoint.mockResolvedValue({ ok: true });
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
-it('local Chrome uses real ownership controls without mounting a cloud viewport', async () => {
+const NO_TAKEOVER = /我来操作|交还给我|交还|接管/;
+
+it('REBUILD-4: the running task screen takes input straight away — no lease, no first click', async () => {
+  render(<BrowserPanel {...base} />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  expect(viewportProps.latest).not.toHaveProperty('controlLease');
+  expect(viewportProps.latest).not.toHaveProperty('onRequestControl');
+  expect(viewportProps.latest).not.toHaveProperty('mobileViewport');
+  expect(viewportProps.latest).not.toHaveProperty('desktopViewport');
+  expect(screen.getByTestId('browser-coop-status').textContent).toBe(
+    'AI 正在操作，你也可以直接点画面',
+  );
+});
+
+it('REBUILD-4 (d): for 2 s after the person acts, the status says the assistant is waiting for them', async () => {
+  render(<BrowserPanel {...base} />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByTestId('screen'));
+  expect(screen.getByTestId('browser-coop-status').textContent).toBe('你在操作，我等你停下再继续');
+  act(() => {
+    vi.advanceTimersByTime(1_500);
+  });
+  // Still acting: the 2 s start again from the newest input.
+  fireEvent.click(screen.getByTestId('screen'));
+  act(() => {
+    vi.advanceTimersByTime(1_900);
+  });
+  expect(screen.getByTestId('browser-coop-status').textContent).toBe('你在操作，我等你停下再继续');
+  act(() => {
+    vi.advanceTimersByTime(200);
+  });
+  expect(screen.getByTestId('browser-coop-status').textContent).toBe(
+    'AI 正在操作，你也可以直接点画面',
+  );
+});
+
+it('REBUILD-4 (e): no 我来操作 / 交还给我 button renders — panel header or fullscreen bar', async () => {
+  const { rerender } = render(<BrowserPanel {...base} />);
+  await screen.findByTestId('viewport');
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  expect(
+    screen.queryAllByRole('button').filter((b) => NO_TAKEOVER.test(b.textContent ?? '')),
+  ).toEqual([]);
+  expect(screen.queryByRole('button', { name: NO_TAKEOVER })).toBeNull();
+  rerender(<BrowserPanel {...base} fullscreen />);
+  expect(screen.queryByRole('button', { name: NO_TAKEOVER })).toBeNull();
+  expect(screen.queryByText(NO_TAKEOVER)).toBeNull();
+  // The fullscreen bar carries the status instead of the status line.
+  expect(screen.getByText('AI 正在操作，你也可以直接点画面')).toBeTruthy();
+  expect(screen.queryByTestId('browser-coop-status')).toBeNull();
+});
+
+it('REBUILD-4 (f): the 停止 button still renders and stops the task — panel header and fullscreen', async () => {
+  const { rerender } = render(<BrowserPanel {...base} />);
+  await screen.findByTestId('viewport');
+  fireEvent.click(screen.getByRole('button', { name: '停止当前任务' }));
+  await waitFor(() => expect(api.abort).toHaveBeenCalledWith({ taskId: 'tsk_one' }));
+  rerender(<BrowserPanel {...base} fullscreen />);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: '停止当前任务' }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '停止当前任务' }));
+  await waitFor(() => expect(api.abort).toHaveBeenCalledTimes(2));
+});
+
+it('REBUILD-4: back / forward / reload work without a lease', async () => {
+  render(<BrowserPanel {...base} fullscreen />);
+  await screen.findByTestId('viewport');
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+  expect(api.nav).toHaveBeenCalledWith({ direction: 'reload', taskId: 'tsk_one' });
+});
+
+it('REBUILD-4: a finished task whose browser is still open can just be used', async () => {
+  setTaskStatus('completed');
+  render(<BrowserPanel {...base} taskStatus="completed" />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  expect(screen.getByTestId('browser-coop-status').textContent).toBe('浏览器还开着，可以直接操作');
+  expect(screen.queryByRole('button', { name: '停止当前任务' })).toBeNull();
+  expect(screen.queryByRole('button', { name: NO_TAKEOVER })).toBeNull();
+});
+
+it('REBUILD-4: a login wall asks the person to act right on the screen, and never takes control', async () => {
+  render(<BrowserPanel {...base} awaitingUser awaitingKind="login" />);
+  await waitFor(() => expect(screen.getByTestId('viewport').dataset.readonly).toBe('false'));
+  expect(screen.getByText('这一步需要你来：直接在画面上操作，过了我会自动继续。')).toBeTruthy();
+  // The waiting banner says it; no second, contradicting status line.
+  expect(screen.queryByTestId('browser-coop-status')).toBeNull();
+  expect(screen.queryByText(NO_TAKEOVER)).toBeNull();
+});
+
+it('REBUILD-4: an input the server refused because the page changed is said plainly', async () => {
+  render(<BrowserPanel {...base} />);
+  await screen.findByTestId('viewport');
+  fireEvent.click(screen.getByTestId('refused'));
+  expect(api.toast).toHaveBeenCalledWith('页面刚变了，再点一次', 'info');
+});
+
+it('local Chrome shows the stop control and no takeover controls, without a cloud viewport', async () => {
   useTaskStore.setState((state) => ({
     tasks: state.tasks.map((task) => ({ ...task, browserSource: 'local-chrome' as const })),
   }));
-  api.mutate
-    .mockResolvedValueOnce(control('human', 'local-lease'))
-    .mockResolvedValueOnce(control('agent'));
-  api.abort.mockResolvedValue({ ok: true, state: 'aborting' });
   render(<BrowserPanel {...base} />);
   expect(screen.getByText('在你的 Chrome 中执行')).toBeTruthy();
+  expect(screen.getByText('AI 正在处理你选择的页面，你也可以直接在 Chrome 里操作。')).toBeTruthy();
   expect(screen.queryByTestId('viewport')).toBeNull();
-  await waitFor(() =>
-    expect((screen.getByRole('button', { name: '我来操作' }) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
-  );
-  fireEvent.click(screen.getByRole('button', { name: '我来操作' }));
-  await screen.findByRole('button', { name: '交还给我' });
-  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenLastCalledWith({
-      taskId: 'tsk_one',
-      action: 'return',
-      controlLease: 'local-lease',
-    }),
-  );
+  expect(screen.queryByRole('button', { name: NO_TAKEOVER })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '停止任务' }));
   await waitFor(() => expect(api.abort).toHaveBeenCalledWith({ taskId: 'tsk_one' }));
   expect(api.nav).not.toHaveBeenCalled();
@@ -142,99 +228,7 @@ it('keeps the local panel in the mobile sheet layer', () => {
   expect(screen.getByLabelText('本地 Chrome 任务').parentElement?.className).toContain('fixed');
 });
 
-it('honors a task-stream takeover request made before the panel mounts', async () => {
-  useTaskStore.setState({ browserInteractive: true });
-  api.mutate.mockResolvedValue(control('human', 'from-chat'));
-  render(<BrowserPanel {...base} />);
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
-  );
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('from-chat'));
-});
-
-it('uses confirmed ownership for both normal and fullscreen controls', async () => {
-  let confirm!: (value: unknown) => void;
-  api.mutate.mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        confirm = resolve;
-      }),
-  );
-  const { rerender } = render(<BrowserPanel {...base} />);
-  const takeover = await screen.findByRole('button', { name: '我来操作' });
-  await waitFor(() => expect(takeover.hasAttribute('disabled')).toBe(false));
-  fireEvent.click(takeover);
-  expect(screen.getByTestId('viewport').dataset.lease).toBe('');
-  await act(async () => {
-    confirm(control('human', 'confirmed'));
-  });
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('confirmed'));
-  expect(screen.getByTestId('viewport').dataset.readonly).toBe('false');
-  rerender(<BrowserPanel {...base} fullscreen />);
-  fireEvent.click(screen.getByRole('button', { name: '刷新' }));
-  expect(api.nav).toHaveBeenCalledWith({
-    direction: 'reload',
-    taskId: 'tsk_one',
-    controlLease: 'confirmed',
-  });
-  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
-  expect(screen.getByTestId('viewport').dataset.lease).toBe('');
-  await act(async () => {
-    confirm(control('resuming'));
-  });
-  expect(api.mutate).toHaveBeenLastCalledWith({
-    taskId: 'tsk_one',
-    action: 'return',
-    controlLease: 'confirmed',
-  });
-});
-
-it('FIX-61 DEPLOY-61 P0-2: a login wait does not take control by itself; 「我来操作」 does, once', async () => {
-  api.mutate.mockImplementation(async ({ action }: { action: string }) =>
-    action === 'takeover' ? control('human', 'login') : control('agent'),
-  );
-  render(<BrowserPanel {...base} awaitingUser awaitingKind="login" />);
-  const takeover = await screen.findByRole('button', { name: '我来操作' });
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 50));
-  });
-  expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(0);
-  await waitFor(() => expect(takeover.hasAttribute('disabled')).toBe(false));
-  fireEvent.click(takeover);
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('login'));
-  fireEvent.click(screen.getByRole('button', { name: '交还给我' }));
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenCalledWith({
-      taskId: 'tsk_one',
-      action: 'return',
-      controlLease: 'login',
-    }),
-  );
-  await act(async () => {
-    await Promise.resolve();
-  });
-  expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(1);
-  expect(screen.getByTestId('viewport').dataset.lease).toBe('');
-});
-
-it('FIX-61 DEPLOY-61 P0-2: the assistant asking 「确认继续执行吗？」 never takes control for the person', async () => {
-  api.mutate.mockResolvedValue(control('human', 'auto'));
-  render(<BrowserPanel {...base} awaitingUser awaitingKind="browser_action" />);
-  await screen.findByRole('button', { name: '我来操作' });
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 100));
-  });
-  expect(api.mutate.mock.calls.filter(([args]) => args.action === 'takeover')).toHaveLength(0);
-  expect(screen.getByTestId('viewport').dataset.lease).toBe('');
-});
-
 it('V2 portrait sheet owns only the visible width and defaults to contain', async () => {
-  api.capabilities.mockResolvedValue({
-    viewportV2: true,
-    observationV2: false,
-    replayV1: false,
-    routingV2: false,
-  });
   render(<BrowserPanel {...base} layout="sheet" />);
   const viewport = await screen.findByTestId('viewport');
   await waitFor(() => expect(viewport.parentElement?.className).toContain('w-full'));
@@ -260,64 +254,4 @@ it('renders a blank browser address as an empty state instead of about:blank', a
   const input = await screen.findByRole('textbox', { name: /浏览器地址栏/ });
   expect((input as HTMLInputElement).value).toBe('');
   expect(input.getAttribute('placeholder')).toBe('尚未打开网页');
-});
-
-it('FIX-61: pressing the screen of a running task takes over and says the assistant paused', async () => {
-  api.mutate.mockResolvedValue(control('human', 'screen'));
-  render(<BrowserPanel {...base} />);
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
-  fireEvent.click(screen.getByTestId('screen'));
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
-  );
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('screen'));
-  expect(screen.getByText('你在操作，我先停下；需要我继续时点『交还给我』。')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '交还给我' })).toBeTruthy();
-});
-
-it('FIX-61: a finished task with its browser still open can be used straight from the screen', async () => {
-  useTaskStore.setState((state) => ({
-    tasks: state.tasks.map((task) => ({ ...task, status: 'completed' as const })),
-  }));
-  api.query.mockResolvedValue({ ...control('closed'), mode: 'review' });
-  api.mutate.mockResolvedValue({ ...control('human', 'review-lease'), mode: 'review' });
-  render(<BrowserPanel {...base} taskStatus="completed" />);
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
-  expect(screen.getByRole('button', { name: '我来操作' }).textContent).toContain('我来操作');
-  fireEvent.click(screen.getByTestId('screen'));
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
-  );
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.lease).toBe('review-lease'));
-});
-
-it('FIX-61: a released browser that cannot be reopened says so plainly and offers 「重新打开这个页面」', async () => {
-  useTaskStore.setState((state) => ({
-    tasks: state.tasks.map((task) => ({
-      ...task,
-      status: 'completed' as const,
-      finalUrl: 'https://www.google.com/',
-    })),
-  }));
-  api.query.mockResolvedValue({
-    taskId: 'tsk_one',
-    supported: false,
-    mode: 'review',
-    phase: 'closed',
-    lease: null,
-    error: 'session_unavailable',
-  });
-  api.ensure.mockRejectedValue(new Error('restore failed'));
-  render(<BrowserPanel {...base} taskStatus="completed" />);
-  await waitFor(() => expect(screen.getByTestId('viewport').dataset.canRequest).toBe('true'));
-  fireEvent.click(screen.getByTestId('screen'));
-  await waitFor(() => expect(api.ensure).toHaveBeenCalledWith({ taskId: 'tsk_one' }));
-  await screen.findByText('这个页面的浏览器已经关掉了，刚才没能重新打开。');
-  api.ensure.mockResolvedValue({ restored: true });
-  api.mutate.mockResolvedValue({ ...control('human', 'reopened'), mode: 'review' });
-  fireEvent.click(screen.getByRole('button', { name: '重新打开这个页面' }));
-  await waitFor(() =>
-    expect(api.mutate).toHaveBeenCalledWith({ taskId: 'tsk_one', action: 'takeover' }),
-  );
-  expect(api.mutate).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'return' }));
 });

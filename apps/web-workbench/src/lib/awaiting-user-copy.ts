@@ -23,8 +23,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     streamBody: '请打开浏览器完成登录或扫码，完成后任务会继续，不用重新提交。',
     streamHint: '打开浏览器完成登录',
     panelTitle: '需要登录',
-    panelBody:
-      '在画面上点一下或点「我来操作」就能自己操作。完成登录或扫码后，HOLA DAY 会继续执行，不用重新提交任务。',
+    panelBody: '这一步需要你来：直接在画面上操作，过了我会自动继续。',
     toolbarLabel: '需要登录',
     composerPlaceholder: '登录完成后可在这里补充说明...',
   },
@@ -33,7 +32,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     streamBody: '网站要求人机验证，请在下方浏览器中完成验证。',
     streamHint: '打开浏览器通过验证',
     panelTitle: '需要验证',
-    panelBody: '请在此浏览器中由你本人完成验证，完成后会自动接着原任务执行。',
+    panelBody: '这一步需要你来：直接在画面上操作，过了我会自动继续。',
     toolbarLabel: '需要验证',
     composerPlaceholder: '验证完成后可在这里补充说明...',
   },
@@ -62,7 +61,7 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     streamHint: '打开浏览器确认下一步',
     panelTitle: '等待你确认',
     panelBody:
-      '请检查当前页面并在对话里回复继续；要自己操作就在画面上点一下或点「我来操作」。涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
+      '请检查当前页面并在对话里回复继续；要自己操作，直接点画面就行。涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
     toolbarLabel: '需要确认',
     composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
   },

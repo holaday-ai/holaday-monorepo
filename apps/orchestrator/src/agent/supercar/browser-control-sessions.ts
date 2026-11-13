@@ -10,33 +10,16 @@ interface ControlSession {
   active: boolean;
 }
 
-/** Weak identity keys prevent a replacement browser from inheriting a lease. */
+/**
+ * Weak identity keys: a replacement browser never inherits another one's control. REBUILD-4: there
+ * is no lease — a control is open (the person may use the browser) until a new run replaces it or
+ * the browser stops.
+ */
 export class BrowserControlSessions {
   private readonly entries = new WeakMap<BrowserBinding, ControlSession>();
   private readonly controlledExecutors = new WeakSet<object>();
   private readonly legacyInputs = new WeakMap<object, number>();
   private readonly legacyVncInstances = new WeakSet<BrowserBinding>();
-  /** FIX-61 复审 #1: puts the agent page back to its own size, pending until it runs once. */
-  private readonly agentViewportRestores = new WeakMap<BrowserBinding, () => Promise<void>>();
-
-  /**
-   * The user's lease resized the agent page to their screen. The first
-   * restore (the task's own size) is kept and runs at handback, before the
-   * assistant observes again; a new run that starts first restores it too.
-   */
-  noteAgentViewportChanged(instance: BrowserBinding, restore: () => Promise<void>): void {
-    let pending = this.agentViewportRestores.get(instance);
-    if (!pending) {
-      const run = async (): Promise<void> => {
-        if (this.agentViewportRestores.get(instance) !== run) return;
-        this.agentViewportRestores.delete(instance);
-        await restore();
-      };
-      pending = run;
-      this.agentViewportRestores.set(instance, run);
-    }
-    this.entries.get(instance)?.control.beforeHandback(pending);
-  }
 
   beginLegacyInput(executor: object): () => void {
     if (this.controlledExecutors.has(executor)) throw new Error('browser_control_requires_cdp');
@@ -78,10 +61,6 @@ export class BrowserControlSessions {
     previous?.control.close();
     const entry = { control: new BrowserControl(), active: true };
     this.entries.set(instance, entry);
-    // A review lease ended without handback (e.g. a follow-up started): the
-    // assistant re-observes after its own size is back.
-    const restore = this.agentViewportRestores.get(instance);
-    if (restore) entry.control.queueViewport(restore);
     return {
       control: entry.control,
       finish: () => {
@@ -92,21 +71,32 @@ export class BrowserControlSessions {
     };
   }
 
-  /** Caller has verified a terminal DB task and the same restored pool instance. */
+  /**
+   * REBUILD-4: the control a viewer's input goes through — the running task's, or, once its run has
+   * finished (the runner closed it), a fresh review control on the same browser. Null when no run
+   * ever bound this browser (the caller may still open one after checking the task is terminal).
+   */
+  openForViewer(instance: BrowserBinding): ControlSession | null {
+    const entry = this.entries.get(instance);
+    if (!entry) return null;
+    if (entry.active || entry.control.snapshot().phase !== 'closed') return entry;
+    if (!entry.control.isSettled() || entry.control.snapshot().error) return null;
+    return this.review(instance);
+  }
+
+  /**
+   * Caller has verified a terminal DB task and the same restored pool instance. REBUILD-4: the person
+   * just uses the finished task's browser — the open review control is reused; no lease, no handback.
+   */
   review(instance: BrowserBinding): ControlSession {
     this.claimControlled(instance);
     const previous = this.entries.get(instance);
     if (previous?.active || (previous && !previous.control.isSettled()))
       throw new Error('browser_runner_active');
     if (previous?.control.snapshot().error) throw new Error('browser_input_outcome_unknown');
-    if (previous?.control.snapshot().phase === 'human') return previous;
-    previous?.control.close();
+    if (previous && previous.control.snapshot().phase !== 'closed') return previous;
     const entry = { control: new BrowserControl(), active: false };
     this.entries.set(instance, entry);
-    const restore = this.agentViewportRestores.get(instance);
-    if (restore) entry.control.beforeHandback(restore);
-    entry.control.requestHuman();
-    void entry.control.checkpoint(async () => undefined).finally(() => entry.control.close());
     return entry;
   }
 

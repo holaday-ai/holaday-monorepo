@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { fitDesktopViewportForHost } from './browser-workspace-viewport';
 import {
   framePixelRatio,
   mapClientPointToBrowserFrame,
@@ -9,30 +8,6 @@ import {
 } from './screencast-fit';
 
 describe('FIX-33 #4 · the task browser shows the whole page', () => {
-  it('the remote page lays out at a desktop width shaped like the panel', () => {
-    // A 599×835 panel (1280 window, chat open) — not a 599px-wide remote page.
-    expect(fitDesktopViewportForHost({ hostWidth: 599, hostHeight: 835 })).toEqual({
-      width: 1280,
-      height: 1784,
-    });
-    expect(fitDesktopViewportForHost({ hostWidth: 1500, hostHeight: 900 })).toEqual({
-      width: 1500,
-      height: 900,
-    });
-    // FIX-34: a phone sheet gets a mobile viewport at its own size (scale ≈ 1).
-    expect(fitDesktopViewportForHost({ hostWidth: 380, hostHeight: 684, mobile: true })).toEqual({
-      width: 380,
-      height: 684,
-    });
-    // A narrow desktop panel (1024 window) is still a desktop page.
-    expect(fitDesktopViewportForHost({ hostWidth: 471, hostHeight: 835 })?.width).toBe(1280);
-    expect(fitDesktopViewportForHost({ hostWidth: 300, hostHeight: 400, mobile: true })).toEqual({
-      width: 320,
-      height: 480,
-    });
-    expect(fitDesktopViewportForHost({ hostWidth: 0, hostHeight: 600 })).toBeNull();
-  });
-
   it('fit keeps the aspect ratio and fills the panel width', () => {
     const placed = placeScreencastContainTop({
       hostWidth: 599,
@@ -52,7 +27,7 @@ describe('FIX-33 #4 · the task browser shows the whole page', () => {
     expect(placeScreencastActual({ sourceWidth: 1280, sourceHeight: 800 })?.scale).toBe(1);
   });
 
-  it('a takeover click on the scaled page maps to the same page point (v1 and v2)', () => {
+  it('a click on the scaled page maps to the same page point (v1 and v2)', () => {
     // 1280×800 frame drawn at 0.468 → a 599×374 rect at (681, 97); click at 90% / 50%.
     const rect = { left: 681, top: 97, width: 599, height: 374.375 };
     const clientX = rect.left + rect.width * 0.9;

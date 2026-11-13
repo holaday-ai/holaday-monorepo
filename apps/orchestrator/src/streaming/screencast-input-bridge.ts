@@ -5,73 +5,49 @@ export interface ScreencastInputSink {
   handle(message: InputMessage, signal?: AbortSignal): Promise<void>;
 }
 
-export interface AppliedBrowserViewport {
-  deviceScaleFactor?: number;
-  width: number;
-  height: number;
-}
-
 interface DeferredScreencastInputBridgeOptions {
   runWithStableViewport?: (action: () => Promise<void>) => Promise<void>;
-  maxViewportHeight?: number;
-  onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
-  onViewportRequested?: (envelope: InputEnvelope, taken?: unknown) => void;
   /**
-   * FIX-62 P1-3: a pointer / key / text input as it arrives, before any size sent after it; the
-   * returned callback runs once it is sent or refused.
+   * FIX-62 P1-3: a pointer / key / text input as it arrives; the returned callback runs once it is
+   * sent or refused.
    */
   onInputReceived?: (envelope: InputEnvelope) => (() => void) | undefined;
-  /** FIX-62 复审 #8: waited for before a size is taken (a press still held is released first). */
-  beforeViewportTaken?: () => Promise<unknown>;
   beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
-  /** Optional until the session/route and frontend negotiate owner leases. */
+  /** The person's input through the task's shared control (REBUILD-4: no lease). */
   runOwnedInput?: (
-    lease: string | undefined,
     action: (signal: AbortSignal) => Promise<void>,
     /** FIX-53 #1: which input it is, so only presses, keys and text count as the person acting. */
     kind: InputMessage['type'],
   ) => Promise<void>;
-  /** Accepted immediately; applied and acknowledged only at a runner checkpoint. */
-  queueViewport?: (action: (signal: AbortSignal) => Promise<void>) => void;
 }
 
 export interface InputEnvelope {
   type?: string;
   payload?: InputMessage;
+  /** REBUILD-4: no longer used (no lease); ignored when an old client still sends it. */
   controlLease?: string;
   observation?: BrowserFrameReference;
   confirmationNonce?: string;
 }
 
 /**
- * Keeps the browser's initial viewport request across the asynchronous CDP
- * startup window. Pointer and keyboard events are intentionally not buffered:
- * replaying a stale click after the page becomes available would be unsafe.
+ * Hands the viewer's input to the page's input sink. Pointer and keyboard events are intentionally
+ * not buffered: replaying a stale click after the page becomes available would be unsafe.
+ * REBUILD-4 第 4 条: the page is never resized for a viewer — a `viewport` message is ignored.
  */
 export class DeferredScreencastInputBridge {
   private sink: ScreencastInputSink | null = null;
   private readonly runWithStableViewport?: DeferredScreencastInputBridgeOptions['runWithStableViewport'];
-  private readonly maxViewportHeight: number;
-  private readonly onViewportRequested?: (envelope: InputEnvelope, taken?: unknown) => void;
   private readonly onInputReceived?: DeferredScreencastInputBridgeOptions['onInputReceived'];
-  private readonly beforeViewportTaken?: DeferredScreencastInputBridgeOptions['beforeViewportTaken'];
   private readonly beforeDispatch?: DeferredScreencastInputBridgeOptions['beforeDispatch'];
   private sinkGeneration = 0;
-  private latestViewport: Extract<InputMessage, { type: 'viewport' }> | null = null;
-  private readonly onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
   private readonly runOwnedInput?: DeferredScreencastInputBridgeOptions['runOwnedInput'];
-  private readonly queueViewport?: DeferredScreencastInputBridgeOptions['queueViewport'];
 
   constructor(options: DeferredScreencastInputBridgeOptions = {}) {
     this.runWithStableViewport = options.runWithStableViewport;
-    this.maxViewportHeight = options.maxViewportHeight ?? 1600;
-    this.onViewportApplied = options.onViewportApplied;
     this.beforeDispatch = options.beforeDispatch;
-    this.onViewportRequested = options.onViewportRequested;
     this.onInputReceived = options.onInputReceived;
-    this.beforeViewportTaken = options.beforeViewportTaken;
     this.runOwnedInput = options.runOwnedInput;
-    this.queueViewport = options.queueViewport;
   }
 
   async receive(raw: string): Promise<void> {
@@ -82,42 +58,11 @@ export class DeferredScreencastInputBridge {
       return;
     }
     if (envelope?.type !== 'input' || !envelope.payload) return;
-
-    if (envelope.payload.type === 'viewport') {
-      const { width, height, deviceScaleFactor } = envelope.payload;
-      if (
-        (deviceScaleFactor !== undefined &&
-          (!Number.isFinite(deviceScaleFactor) ||
-            deviceScaleFactor < 1 ||
-            deviceScaleFactor > 2)) ||
-        !Number.isFinite(width) ||
-        !Number.isFinite(height) ||
-        width < 240 ||
-        width > 1920 ||
-        height < 240 ||
-        height > this.maxViewportHeight
-      )
-        return;
-      // FIX-62 复审 #8: a size that arrives while a press is held waits for its release (bounded),
-      // so the release lands on the layout the press was aimed at.
-      // Called at once: where the size arrived among the inputs is read before anything waits.
-      const taken = await this.beforeViewportTaken?.();
-      this.onViewportRequested?.(envelope, taken);
-      this.latestViewport = envelope.payload;
-    }
-
-    const settled =
-      envelope.payload.type === 'viewport' ? undefined : this.onInputReceived?.(envelope);
+    if (envelope.payload.type === 'viewport') return;
+    const settled = this.onInputReceived?.(envelope);
     try {
-      if (!this.sink) {
-        return;
-      }
-
-      await this.dispatch(
-        envelope.payload,
-        typeof envelope.controlLease === 'string' ? envelope.controlLease : undefined,
-        envelope,
-      );
+      if (!this.sink) return;
+      await this.dispatch(envelope.payload, envelope);
     } finally {
       settled?.();
     }
@@ -126,53 +71,27 @@ export class DeferredScreencastInputBridge {
   async attach(sink: ScreencastInputSink): Promise<void> {
     this.sinkGeneration++;
     this.sink = sink;
-    if (this.latestViewport) await this.dispatch(this.latestViewport);
-  }
-
-  async reapplyViewport(): Promise<void> {
-    if (this.latestViewport) await this.dispatch(this.latestViewport);
   }
 
   detach(): void {
     this.sinkGeneration++;
     this.sink = null;
-    this.latestViewport = null;
   }
 
-  private async dispatch(
-    message: InputMessage,
-    lease?: string,
-    envelope?: InputEnvelope,
-  ): Promise<void> {
+  private async dispatch(message: InputMessage, envelope: InputEnvelope): Promise<void> {
     const sink = this.sink;
     if (!sink) return;
     const generation = this.sinkGeneration;
     const stableAction = async (signal?: AbortSignal): Promise<void> => {
       if (this.sink !== sink || this.sinkGeneration !== generation) return;
-      await this.beforeDispatch?.(envelope ?? { type: 'input', payload: message }, signal);
+      await this.beforeDispatch?.(envelope, signal);
       await sink.handle(message, signal);
-      if (message.type === 'viewport' && this.sink === sink && this.sinkGeneration === generation) {
-        this.onViewportApplied?.({
-          width: Math.round(message.width),
-          height: Math.round(message.height),
-          ...(message.deviceScaleFactor !== undefined
-            ? { deviceScaleFactor: message.deviceScaleFactor }
-            : {}),
-        });
-      }
     };
     const action = (signal?: AbortSignal) =>
       this.runWithStableViewport
         ? this.runWithStableViewport(() => stableAction(signal))
         : stableAction(signal);
-    if (message.type === 'viewport' && this.queueViewport) {
-      this.queueViewport(action);
-    } else if (this.runOwnedInput) {
-      // A guarded input connection must never silently bypass layout coordination.
-      if (message.type === 'viewport') throw new Error('browser_viewport_coordinator_required');
-      await this.runOwnedInput(lease, action, message.type);
-    } else {
-      await action();
-    }
+    if (this.runOwnedInput) await this.runOwnedInput(action, message.type);
+    else await action();
   }
 }

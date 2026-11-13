@@ -78,7 +78,8 @@ export function classifyRuntimeAction(action: RuntimeAction): RuntimeActionVerdi
       allowed: false,
       requiresTakeover: true,
       awaitingKind: 'login',
-      reason: '检测到密码或验证码输入框，请由用户接管浏览器完成，不会由 Agent 代填凭证。',
+      reason:
+        '检测到密码或验证码输入框：这一步需要你来，请直接在画面上填写，不会由 Agent 代填凭证。',
     };
   }
 

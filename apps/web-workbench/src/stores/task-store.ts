@@ -2610,12 +2610,28 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     : { subStatus: typedSubStatus, since: Date.now() },
               }
             : prev.subStatusByTask;
+          // REBUILD-4 共同操作: the person can pass a login / captcha wall right on the shared
+          // page; the run then resumes with no chat reply and says so with a progress note
+          // (「页面过了这一步，我接着做…」). A progress note after such a wall means the task runs
+          // again: close the waiting card instead of leaving it up until the next status change.
+          const wait = prev.awaitingUserByTask[msg.taskId];
+          const row = prev.tasks.find((t) => t.taskId === msg.taskId);
+          const wallKind = wait ? wait.awaitingKind : row?.awaitingKind;
+          const resumedFromWall =
+            (wallKind === 'login' || wallKind === 'captcha') &&
+            (Boolean(wait) || row?.status === 'awaiting_user');
           return {
             progressByTask: {
               ...prev.progressByTask,
               [msg.taskId]: msg.message,
             },
             subStatusByTask: nextSubStatus,
+            ...(resumedFromWall
+              ? {
+                  awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, msg.taskId),
+                  captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, msg.taskId),
+                }
+              : {}),
             // Progress phases are shared by browser and generate lanes:
             // browser runs emit planning → browsing → verifying. Never
             // overwrite an execution mode that was already decided by
@@ -2623,7 +2639,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             // only the lane-specific phases are strong enough to infer one.
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== msg.taskId) return t;
-              const liveTask = markTaskRunningFromLiveSignal(t);
+              const liveTask = markTaskRunningFromLiveSignal(
+                resumedFromWall && t.status === 'awaiting_user'
+                  ? { ...t, status: 'executing' as const, awaitingKind: undefined }
+                  : t,
+              );
               if (liveTask.executionMode) return liveTask;
               if (typedSubStatus === 'browsing') {
                 return { ...liveTask, executionMode: 'browser' as const };

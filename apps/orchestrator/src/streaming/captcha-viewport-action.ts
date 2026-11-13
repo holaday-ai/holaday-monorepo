@@ -24,12 +24,12 @@ export async function authorizeHumanViewportInput(
     signal?.throwIfAborted();
     const session = browserControlSessions.get(instance, instance.userId, instance.taskId);
     const state = session?.control.snapshot();
+    // REBUILD-4: no lease — the task's open control (the transport already checked the viewer is
+    // the task's owner) and the frame the person saw.
     if (
       instance.status !== 'ready' ||
       !session ||
-      state?.phase !== 'human' ||
-      !envelope.controlLease ||
-      state.lease !== envelope.controlLease ||
+      state?.phase !== 'agent' ||
       !envelope.observation ||
       !envelope.payload
     )

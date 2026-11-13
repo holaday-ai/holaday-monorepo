@@ -14,8 +14,8 @@ import { createScreencastProxy } from './screencast-proxy.js';
  * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): after a person's search left Google's start page, the
  * page restored later had Google's 「Share public link」 dialog open — nobody had pressed 分享.
  * Human input may only ever reach the document the person was looking at:
- *   - a key or button still held when the page changed is not released onto the NEW page at
- *     handback (the release used to be sent to whatever page was current);
+ *   - the release of a key or button pressed on a page that has since changed is not sent onto
+ *     the NEW page (REBUILD-4: there is no handback; the person's own release names the old frame);
  *   - a same-document navigation (pushState swapping the content) retires the old frames, so an
  *     Enter made on the old frame never reaches the new page's focused control.
  */
@@ -142,10 +142,6 @@ async function harness(path: string) {
     executor: { getPage: async () => page },
   } as unknown as BrowserInstance;
   const binding = browserControlSessions.start(instance);
-  binding.control.requestHuman();
-  const parked = binding.control.checkpoint(async () => undefined);
-  const lease = binding.control.snapshot().lease;
-  if (!lease) throw new Error('fixture lease missing');
   let frame: BrowserFrameGeometry | undefined;
   const server = createServer();
   const proxy = createScreencastProxy({
@@ -177,26 +173,18 @@ async function harness(path: string) {
     const m = JSON.parse(String(raw));
     if (m.geometry) frame = m.geometry;
   });
-  let handedBack = false;
-  const handBack = async () => {
-    if (handedBack) return;
-    handedBack = true;
-    binding.control.returnToAgent(lease);
-    await parked;
-  };
   cleanups.push(async () => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.close();
       await once(ws, 'close');
     }
-    await handBack();
     binding.finish();
     await new Promise<void>((r) => server.close(() => r()));
   });
   await once(ws, 'open');
   await vi.waitFor(() => expect(frame).toBeDefined(), { timeout: 5000 });
   const send = (payload: Record<string, unknown>, ref: BrowserFrameGeometry | undefined = frame) =>
-    ws.send(JSON.stringify({ type: 'input', controlLease: lease, observation: ref, payload }));
+    ws.send(JSON.stringify({ type: 'input', observation: ref, payload }));
   const key = (
     type: 'keyDown' | 'keyUp',
     k: string,
@@ -210,7 +198,7 @@ async function harness(path: string) {
     );
   const hits = async (): Promise<string[]> =>
     page.evaluate(() => (window as unknown as { hits?: string[] }).hits ?? []);
-  return { page, origin, send, key, hits, handBack, frame: () => frame };
+  return { page, origin, send, key, hits, frame: () => frame };
 }
 
 it('an Enter still held when the search left the page is not released onto the new page', async () => {
@@ -229,9 +217,6 @@ it('an Enter still held when the search left the page is not released onto the n
   // The release arrives naming the old page's frame (it is refused: that page is gone).
   h.key('keyUp', 'Enter', before);
   await new Promise((r) => setTimeout(r, 300));
-  // Handing back releases whatever is still held — never onto a page the person never saw.
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
   expect(await h.hits()).toEqual([]);
 }, 30000);
 
@@ -242,9 +227,7 @@ it('a press on a link that leaves on mousedown is not released onto the new page
   await h.page.waitForURL(/\/b$/, { timeout: 5000 });
   await h.page.waitForFunction(() => document.activeElement?.id === 'share');
   h.send({ type: 'mouseUp', x: 500, y: 350, button: 'left', clickCount: 1 }, before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 600));
   expect(await h.hits()).toEqual([]);
 }, 30000);
 
@@ -284,7 +267,8 @@ it('a drag on a page that writes its position into the URL is released there (�
   const h = await harness('/mirror');
   h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 });
   await vi.waitFor(async () => expect(await h.hits()).toEqual(['down']), { timeout: 5000 });
-  await h.handBack();
+  // The person's release, on the frame now shown (the URL changed, the document did not).
+  h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 });
   await vi.waitFor(async () => expect(await h.hits()).toEqual(['down', 'up']), { timeout: 5000 });
 }, 30000);
 
@@ -318,9 +302,7 @@ it('an Enter whose press swapped the page in place (pushState) is not released o
   await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
   await h.page.waitForFunction(() => document.activeElement?.id === 'share');
   h.key('keyUp', 'Enter', before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 600));
   expect(await h.hits()).toEqual([]);
 }, 30000);
 
@@ -330,9 +312,7 @@ it('a mouse press that swapped the page in place is not released onto the new co
   h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
   await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
   h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 600));
   expect(await h.hits()).toEqual([]);
 }, 30000);
 

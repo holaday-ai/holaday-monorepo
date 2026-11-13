@@ -87,6 +87,11 @@ export class CaptchaHandoffs {
     e.cancel();
     return true;
   }
+  /**
+   * REBUILD-4 第 6 条: the assistant stops at the wall and says 「这一步需要你来」; the person works
+   * the page directly (no takeover). A 1 s poll (and 我已完成) checks the page; once the wall is gone
+   * the wait ends, the assistant waits for the person to be still, checks once more and goes on.
+   */
   async wait(o: WaitOptions): Promise<CaptchaHandoffResult> {
     if (this.entries.has(o.taskId)) throw new Error('captcha_handoff_already_active');
     let outcome: CaptchaHandoffResult = 'cancelled';
@@ -99,11 +104,25 @@ export class CaptchaHandoffs {
     const inputsDuring = () => o.control.humanInputLog(startedAt).count;
     let challenge: ChallengeInfo | null = null;
     let stopped = false;
+    /** This round's end: the wall gone, 换个方式继续, or a stop. */
+    let settled = false;
+    let finish!: (result: CaptchaHandoffResult) => void;
+    let round = new Promise<CaptchaHandoffResult>((resolve) => {
+      finish = resolve;
+    });
+    const settle = (result: CaptchaHandoffResult) => {
+      if (settled) return;
+      settled = true;
+      finish(result);
+    };
     const stop = (reason: CaptchaHandoffResult) => {
       stopped = true;
       outcome = reason;
       o.control.close();
+      settled = false;
+      settle(reason);
     };
+    const open = () => !settled && !o.signal?.aborted && o.control.snapshot().phase !== 'closed';
     const entry: Entry = {
       userId: o.userId,
       control: o.control,
@@ -114,11 +133,9 @@ export class CaptchaHandoffs {
         challenge,
       }),
       alternate: () => {
-        if (failedRounds < CAPTCHA_ROUNDS_BEFORE_ALTERNATE || o.signal?.aborted) return false;
-        const lease = o.control.snapshot().lease;
-        if (o.control.snapshot().phase !== 'human' || !lease) return false;
+        if (failedRounds < CAPTCHA_ROUNDS_BEFORE_ALTERNATE || !open()) return false;
         alternateChosen = true;
-        o.control.returnToAgent(lease);
+        settle('alternate');
         return true;
       },
       proceed: async (manual = false) => {
@@ -126,17 +143,16 @@ export class CaptchaHandoffs {
           if (!manual) return false;
           await checking;
         }
-        if (o.signal?.aborted || o.control.snapshot().phase !== 'human') return false;
+        if (!open()) return false;
         const check = (async () => {
           try {
             if (await o.hasWall()) {
               if (manual) failedRounds += 1;
               return false;
             }
-            const lease = o.control.snapshot().lease;
-            if (!lease || o.signal?.aborted) return false;
+            if (!open()) return false;
             if (manual) confirmed = true;
-            o.control.returnToAgent(lease);
+            settle('resumed');
             return true;
           } catch {
             return false;
@@ -152,10 +168,24 @@ export class CaptchaHandoffs {
     };
     this.entries.set(o.taskId, entry);
     const abort = () => stop('cancelled');
-    const timeout = setTimeout(() => stop('timeout'), o.timeoutMs ?? CAPTCHA_HANDOFF_MS);
+    // The wait's own time does not run out while the assistant waits for the person to be still
+    // after the wall went (2 s): a wall cleared at the last moment is no timeout.
+    let yielding = false;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      if (yielding) timedOut = true;
+      else stop('timeout');
+    }, o.timeoutMs ?? CAPTCHA_HANDOFF_MS);
     const poll = setInterval(() => {
       if (o.pageGone?.()) {
         if (!stopped) stop('error');
+        return;
+      }
+      // FIX-35 复审 #2: the control closed on its own (outcome unknown, observation failed) —
+      // neither the person, the task nor the timer ended the wait.
+      if (!stopped && o.control.snapshot().phase === 'closed') {
+        settled = false;
+        settle('error');
         return;
       }
       void entry.proceed();
@@ -167,16 +197,40 @@ export class CaptchaHandoffs {
       await o.onWaiting();
       if (o.signal?.aborted) return outcome;
       if (o.control.snapshot().phase === 'closed') return stopped ? outcome : 'error';
-      o.control.requestHuman();
-      const receipt = await o.control.checkpoint(async () => {
-        // "换个方式继续" resumes the agent with the wall still up, by design.
-        if (!alternateChosen && (await o.hasWall())) throw new Error('captcha_still_visible');
-        if (!(await o.onResumed())) throw new Error('captcha_resume_not_persisted');
-      });
-      if (receipt.resumed) outcome = alternateChosen ? 'alternate' : 'resumed';
-      else if (!stopped && !o.signal?.aborted) outcome = 'error';
-      if (outcome === 'resumed' && !confirmed && inputsDuring() === 0) outcome = 'cleared';
-      return outcome;
+      while (true) {
+        const result = await round;
+        if (stopped) return outcome;
+        if (result !== 'resumed' && result !== 'alternate') return result;
+        // The person may still be at it (typing the last character): go on once they are still.
+        yielding = true;
+        try {
+          await o.control.yieldToHuman();
+        } finally {
+          yielding = false;
+        }
+        if (stopped) return outcome;
+        if (o.control.snapshot().phase === 'closed') return 'error';
+        // "换个方式继续" resumes the agent with the wall still up, by design. A wall that came back
+        // keeps the wait open.
+        if (result === 'resumed' && (await o.hasWall().catch(() => true))) {
+          if (timedOut) {
+            stop('timeout');
+            return outcome;
+          }
+          settled = false;
+          round = new Promise<CaptchaHandoffResult>((resolve) => {
+            finish = resolve;
+          });
+          continue;
+        }
+        const persisted = await o.onResumed().catch(() => false);
+        // A cancel during the resume's persistence wins.
+        if (stopped) return outcome;
+        if (!persisted) return 'error';
+        outcome = alternateChosen ? 'alternate' : 'resumed';
+        if (outcome === 'resumed' && !confirmed && inputsDuring() === 0) outcome = 'cleared';
+        return outcome;
+      }
     } finally {
       const log = o.control.humanInputLog(startedAt);
       o.onActivity?.({ ...log, inputs: log.count, confirmed });
