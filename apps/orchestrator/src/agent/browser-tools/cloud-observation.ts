@@ -2708,7 +2708,7 @@ export class CloudObservation {
       result.interruption = verification
         ? {
             reason: 'captcha',
-            message: `页面进入了网站自己的验证页（${verificationHost(verification.url)}），需要你接管完成验证；当前任务尚未完成。`,
+            message: `页面进入了网站自己的验证页（${verificationHost(verification.url)}），这一步需要你来：请直接在画面上完成验证；当前任务尚未完成。`,
           }
         : {
             reason: 'unexpected_effect',

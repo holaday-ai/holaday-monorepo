@@ -48,10 +48,6 @@ it('real proxy: Enter after typing reaches the same box on a superseded frame', 
     executor: { getPage: async () => page },
   } as unknown as BrowserInstance;
   const binding = browserControlSessions.start(instance);
-  binding.control.requestHuman();
-  const parked = binding.control.checkpoint(async () => undefined);
-  const lease = binding.control.snapshot().lease;
-  if (!lease) throw new Error('fixture lease missing');
   let frame: BrowserFrameGeometry | undefined;
   const server = createServer();
   const proxy = createScreencastProxy({
@@ -68,7 +64,6 @@ it('real proxy: Enter after typing reaches the same box on a superseded frame', 
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'key',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),
@@ -88,7 +83,6 @@ it('real proxy: Enter after typing reaches the same box on a superseded frame', 
     ws.send(
       JSON.stringify({
         type: 'input',
-        controlLease: lease,
         observation: ref,
         payload: { type, key: k, code, keyCode },
       }),
@@ -123,8 +117,6 @@ it('real proxy: Enter after typing reaches the same box on a superseded frame', 
   } finally {
     ws.close();
     await once(ws, 'close');
-    binding.control.returnToAgent(lease);
-    await parked;
     binding.finish();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await browser.close();

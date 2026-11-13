@@ -712,7 +712,7 @@ describe('CdpStreamer', () => {
     }
   });
 
-  it('requests the live viewport again after top-level navigation', async () => {
+  it('re-arms the screencast after top-level navigation (REBUILD-4: no viewport reapply)', async () => {
     const sessionEvents = new EventEmitter();
     const session = Object.assign(sessionEvents, {
       send: vi.fn().mockResolvedValue(undefined),
@@ -724,7 +724,6 @@ describe('CdpStreamer', () => {
       }),
       url: () => 'https://example.org/',
     } as unknown as Page;
-    const reapplyViewport = vi.fn().mockResolvedValue(undefined);
     const streamer = new CdpStreamer({
       getPage: async () => page,
       ws: { send: vi.fn() } as unknown as WebSocket,
@@ -733,14 +732,19 @@ describe('CdpStreamer', () => {
         warn: vi.fn(),
         debug: vi.fn(),
       } as unknown as Logger,
-      onViewportMayReset: reapplyViewport,
     });
 
     await streamer.start();
+    const send = session.send as unknown as ReturnType<typeof vi.fn>;
+    const arms = () =>
+      send.mock.calls.filter(([method]) => method === 'Page.startScreencast').length;
+    const armedAtStart = arms();
+    expect(armedAtStart).toBeGreaterThan(0);
     sessionEvents.emit('Page.frameNavigated', {
       frame: { id: 'main', url: 'https://example.org/' },
     });
-    await vi.waitFor(() => expect(reapplyViewport).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(arms()).toBeGreaterThan(armedAtStart));
+    expect(send).not.toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride', expect.anything());
 
     await streamer.stop();
   });

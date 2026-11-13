@@ -132,9 +132,12 @@ RULES.push(
  * Apply the rules in order; return the first match's replacement, or
  * the original string when nothing matches.
  */
-/** The runner's captcha-handoff endings (unified-supercar-runner / unified-browser-loop). */
+/**
+ * The runner's captcha-wait endings (unified-supercar-runner / unified-browser-loop). REBUILD-4
+ * renamed 「验证码接管…」 to 「等待验证…」; the old wording stays for tasks recorded before.
+ */
 export const CAPTCHA_HANDOFF_ENDING_RE =
-  /等待用户完成验证码已超时|用户已放弃验证|等待验证时云端浏览器已关闭|验证码接管通道异常关闭|验证码等待已结束/;
+  /等待用户完成验证码已超时|用户已放弃验证|等待验证时云端浏览器已关闭|等待验证时画面通道异常关闭|验证码接管通道异常关闭|等待验证已结束|验证码接管已结束|验证码等待已结束/;
 
 const CAPTCHA_HANDOFF_SENTENCE_RE = new RegExp(
   `(?:${CAPTCHA_HANDOFF_ENDING_RE.source})[^。！？!?\\n]*[。！？!?]?`,

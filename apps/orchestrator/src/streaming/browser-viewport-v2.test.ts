@@ -26,7 +26,6 @@ const action = {
   origin: 'https://example.com',
   observationRevision: 1,
   actionDigest: 'object:submit',
-  lease: 'lease',
 };
 describe('frame guard', () => {
   it('rejects stale, forged, unacknowledged and previous tab observations', () => {
@@ -42,13 +41,12 @@ describe('frame guard', () => {
   });
 });
 describe('server-owned one-use confirmations', () => {
-  it('requires exact action, origin, object, lease, run and tab plus short TTL', () => {
+  it('requires exact action, origin, object, run and tab plus short TTL', () => {
     const c = new BrowserActionConfirmations();
     for (const changed of [
       { origin: 'https://other.example' },
       { actionDigest: 'object:delete' },
       { tabId: 't2' },
-      { lease: 'other' },
       { runId: 'other' },
       { observationRevision: 2 },
     ]) {

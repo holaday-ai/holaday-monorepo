@@ -10,10 +10,10 @@ import { pino } from 'pino';
 import { chromium } from 'playwright';
 import { expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { browserControlSessions } from '/Users/yaleiqi/claude-worktrees/fix-61b/apps/orchestrator/src/agent/supercar/browser-control-sessions.js';
-import type { BrowserPool } from '/Users/yaleiqi/claude-worktrees/fix-61b/apps/orchestrator/src/browser-pool/index.js';
-import type { BrowserInstance } from '/Users/yaleiqi/claude-worktrees/fix-61b/apps/orchestrator/src/browser-pool/types.js';
-import { createScreencastProxy } from '/Users/yaleiqi/claude-worktrees/fix-61b/apps/orchestrator/src/streaming/screencast-proxy.js';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
+import type { BrowserPool } from '../browser-pool/index.js';
+import type { BrowserInstance } from '../browser-pool/types.js';
+import { createScreencastProxy } from './screencast-proxy.js';
 
 // DEPLOY-61 第 0 步 #1 (safety): a change inside the page — focus jumping to 「确认支付」 — does
 // not bump the viewport revision. A user still looking at the older frame must not fire that
@@ -58,10 +58,6 @@ it('FIX-61B 复审 #1: in a frame, Enter on a stale frame never fires the button
     executor: { getPage: async () => page },
   } as unknown as BrowserInstance;
   const binding = browserControlSessions.start(instance);
-  binding.control.requestHuman();
-  const parked = binding.control.checkpoint(async () => undefined);
-  const lease = binding.control.snapshot().lease;
-  if (!lease) throw new Error('fixture lease missing');
   let frame: BrowserFrameGeometry | undefined;
   const server = createServer();
   const proxy = createScreencastProxy({
@@ -78,7 +74,6 @@ it('FIX-61B 复审 #1: in a frame, Enter on a stale frame never fires the button
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'key',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),
@@ -98,7 +93,6 @@ it('FIX-61B 复审 #1: in a frame, Enter on a stale frame never fires the button
     ws.send(
       JSON.stringify({
         type: 'input',
-        controlLease: lease,
         observation: ref,
         payload: { type, key: k, code, keyCode },
       }),
@@ -139,8 +133,6 @@ it('FIX-61B 复审 #1: in a frame, Enter on a stale frame never fires the button
   } finally {
     ws.close();
     await once(ws, 'close');
-    binding.control.returnToAgent(lease);
-    await parked;
     binding.finish();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await browser.close();

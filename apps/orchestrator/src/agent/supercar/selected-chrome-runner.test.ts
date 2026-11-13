@@ -9,7 +9,7 @@ import { MessagesAdapterError } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
-import { BrowserControl } from './browser-control.js';
+import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
 import {
   UNVERIFIED_TARGET_REASON,
@@ -66,6 +66,7 @@ function createHarness(
     appliedObservationFailure?: boolean;
     closeUnconfirmed?: boolean;
     closeGate?: Promise<void>;
+    control?: BrowserControl;
   } = {},
 ) {
   let bodyText = 'Draft';
@@ -73,7 +74,7 @@ function createHarness(
   const observeDelaysMs = [...(config.observeDelaysMs ?? [])];
   const requests: NeutralMessagesRequest[] = [];
   const commands: SelectedChromeSessionCommand[] = [];
-  const control = new BrowserControl();
+  const control = config.control ?? new BrowserControl();
   const send = vi.fn(
     async (
       _userId: string,
@@ -155,6 +156,28 @@ function createHarness(
   };
   return { client, control, send, commands, requests, messagesAdapter, modelCreate };
 }
+
+/** REBUILD-4: a control whose clock the test moves; `passIdle()` lets 2 s pass and wakes a wait. */
+function sharedControl() {
+  let skew = 0;
+  const control = new BrowserControl(() => Date.now() + skew);
+  let waits = 0;
+  const yieldToHuman = control.yieldToHuman.bind(control);
+  control.yieldToHuman = (options) => {
+    if (control.humanBusy()) waits++;
+    return yieldToHuman(options);
+  };
+  return {
+    control,
+    waits: () => waits,
+    passIdle: async () => {
+      skew += HUMAN_IDLE_MS;
+      await control.runHuman(async () => {});
+    },
+  };
+}
+
+const DO_IT_YOURSELF = '这一步需要你来：请直接在 Chrome 里完成。';
 
 function finish(evidenceText: string, id = 'finish-1') {
   return response(id, [
@@ -568,46 +591,6 @@ describe('runSelectedChromeTask', () => {
     expect(h.commands.map((command) => command.op)).toContain('observe');
   });
 
-  it('discards an action blocked locally by takeover before dispatch', async () => {
-    const h = createHarness([
-      response('observe-act', [
-        { type: 'tool_use', id: 'observe', name: 'browser_observe', input: {} },
-        {
-          type: 'tool_use',
-          id: 'act',
-          name: 'browser_act',
-          input: { action: { kind: 'key', payload: { key: 'Tab' } } },
-        },
-      ]),
-      finish('Draft'),
-    ]);
-    const ticks: import('./agent-loop.js').SupercarTickEvent[] = [];
-    const running = runSelectedChromeTask({
-      taskId: 'pre-dispatch-handoff',
-      intent: 'Inspect draft',
-      messagesAdapter: h.messagesAdapter,
-      client: h.client,
-      control: h.control,
-      target,
-      onTick: (tick) => {
-        ticks.push(tick);
-        if (tick.execution?.actionKind === 'selected_chrome_observe') h.control.requestHuman();
-      },
-    });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing lease');
-    h.control.returnToAgent(lease);
-    expect(await running).toMatchObject({ status: 'completed' });
-    expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
-    expect(ticks.map((tick) => tick.execution?.actionKind)).toEqual([
-      'selected_chrome_observe',
-      'selected_chrome_plan_discarded',
-      'selected_chrome_handoff',
-      'selected_chrome_finish',
-    ]);
-    expect(JSON.stringify(h.requests.at(-1)?.messages)).toContain('human');
-  });
   it.each(['type', 'wait'] as const)(
     'does not turn a %s not_applied receipt into a completed action',
     async (kind) => {
@@ -935,21 +918,22 @@ describe('runSelectedChromeTask', () => {
         response('act', [{ type: 'tool_use', id: 'act', name: 'browser_act', input: { action } }]),
         finish('Draft'),
       ]);
-      const running = runSelectedChromeTask({
+      const thinking: string[] = [];
+      const outcome = await runSelectedChromeTask({
         taskId: `unverified-${_label}`,
         intent: 'Save the draft',
         messagesAdapter: h.messagesAdapter,
         client: h.client,
         control: h.control,
         target,
+        onThinking: (text) => void thinking.push(text),
       });
-      await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 500 });
-      const lease = h.control.snapshot().lease;
-      if (!lease) throw new Error('missing human lease');
+      // REBUILD-4: no takeover — the person is told to do it in Chrome, the assistant replans.
+      expect(outcome).toMatchObject({ status: 'completed' });
       expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
-      h.control.returnToAgent(lease);
-      expect(await running).toMatchObject({ status: 'completed' });
-      expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
+      expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
+      expect(thinking.join('\n')).not.toMatch(/接管|交还/);
+      expect(h.control.snapshot().lease).toBeNull();
     },
   );
 
@@ -1000,7 +984,7 @@ describe('runSelectedChromeTask', () => {
     ).toEqual({ allowed: true });
   });
 
-  it('routes decoded string payment actions through the existing human handoff', async () => {
+  it('routes decoded string payment actions to the person (这一步需要你来)', async () => {
     const h = createHarness([
       response('string-payment', [
         {
@@ -1015,20 +999,18 @@ describe('runSelectedChromeTask', () => {
       ]),
       finish('Draft'),
     ]);
-    const running = runSelectedChromeTask({
+    const thinking: string[] = [];
+    const outcome = await runSelectedChromeTask({
       taskId: 'string-payment',
       intent: 'Continue',
       messagesAdapter: h.messagesAdapter,
       client: h.client,
       control: h.control,
       target,
+      onThinking: (text) => void thinking.push(text),
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 200 });
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
-    h.control.returnToAgent(lease);
-    expect(await running).toMatchObject({ status: 'completed' });
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
     expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
   });
 
@@ -1216,8 +1198,9 @@ describe('runSelectedChromeTask', () => {
     expect(h.modelCreate).toHaveBeenCalledTimes(1);
   });
 
-  it('discards a model action planned while Chrome is taken over and refreshes after handback', async () => {
-    const h = createHarness([]);
+  it('discards a model action planned while the person used the browser and re-reads the page', async () => {
+    const shared = sharedControl();
+    const h = createHarness([], { control: shared.control });
     const accounting = records();
     const ticks: unknown[] = [];
     let resolveFirst!: (value: NeutralMessagesResponse) => void;
@@ -1248,7 +1231,8 @@ describe('runSelectedChromeTask', () => {
       },
     });
     await vi.waitFor(() => expect(resolveFirst).toBeTypeOf('function'));
-    h.control.requestHuman();
+    // The person clicks in the shared browser while the model plans.
+    await h.control.runHuman(async () => {}, 'mouseDown');
     resolveFirst(
       response('stale-model-action', [
         {
@@ -1259,10 +1243,9 @@ describe('runSelectedChromeTask', () => {
         },
       ]),
     );
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
+    await vi.waitFor(() => expect(shared.waits()).toBe(1));
+    expect(h.modelCreate).toHaveBeenCalledTimes(1);
+    await shared.passIdle();
 
     const outcome = await running;
 
@@ -1491,14 +1474,10 @@ describe('runSelectedChromeTask', () => {
       target,
       onThinking: (text) => void thinking.push(text),
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
-
     expect(await running).toMatchObject({ status: 'completed' });
     expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
-    expect(thinking.join('\n')).toContain('Chrome');
+    expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
+    expect(JSON.stringify(h.commands)).not.toContain('never-send-this');
   });
 
   it('passes visible label strategy hints to the existing irreversible-action policy', async () => {
@@ -1532,35 +1511,34 @@ describe('runSelectedChromeTask', () => {
       control: h.control,
       target,
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 200 });
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
-
     expect(await running).toMatchObject({ status: 'completed' });
     expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
   });
 
-  it('cancellation releases a manual checkpoint and closes without replaying its action', async () => {
-    const h = createHarness([
-      response('password-action-cancelled', [
-        {
-          type: 'tool_use',
-          id: 'password-type-cancelled',
-          name: 'browser_act',
-          input: {
-            action: {
-              kind: 'type',
-              selector: {
-                description: 'Password',
-                strategies: [{ kind: 'placeholder', value: 'Password' }],
+  it('cancellation while waiting for a busy person closes without replaying its action', async () => {
+    const shared = sharedControl();
+    const h = createHarness(
+      [
+        response('password-action-cancelled', [
+          {
+            type: 'tool_use',
+            id: 'password-type-cancelled',
+            name: 'browser_act',
+            input: {
+              action: {
+                kind: 'type',
+                selector: {
+                  description: 'Password',
+                  strategies: [{ kind: 'placeholder', value: 'Password' }],
+                },
+                payload: { text: 'never-send-this' },
               },
-              payload: { text: 'never-send-this' },
             },
           },
-        },
-      ]),
-    ]);
+        ]),
+      ],
+      { control: shared.control },
+    );
     const abort = new AbortController();
     const running = runSelectedChromeTask({
       taskId: 'cancel-manual-checkpoint',
@@ -1570,8 +1548,12 @@ describe('runSelectedChromeTask', () => {
       control: h.control,
       target,
       signal: abort.signal,
+      // The person types in Chrome right as they are asked to do this step.
+      onThinking: (text) => {
+        if (text.includes(DO_IT_YOURSELF)) h.control.noteHumanInput('keyDown');
+      },
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
+    await vi.waitFor(() => expect(shared.waits()).toBe(1));
     abort.abort();
 
     expect(await running).toMatchObject({ status: 'cancelled', iterations: 1 });

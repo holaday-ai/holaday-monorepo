@@ -346,7 +346,8 @@ describe('FIX-53 #1 · end to end: a captcha that goes away on its own during th
 
   it('the person clicked in the panel: their resume, and the answer may say so', async () => {
     const { outcome, seen, activity } = await run(async (control) => {
-      await control.runHuman(control.snapshot().lease!, async () => {}, 'mouseDown');
+      // REBUILD-4: no lease — the click goes to the page; the assistant then waits 2 s for them.
+      await control.runHuman(async () => {}, 'mouseDown');
     });
     expect(activity).toEqual([expect.objectContaining({ inputs: 1 })]);
     expect(seen).toContain('用户已完成验证；');

@@ -648,21 +648,6 @@ export function WorkbenchApp(): JSX.Element {
     setBrowserSheetOpen(false);
     void exitPanelFullscreen();
   }, [closeBrowserWorkbench, exitPanelFullscreen]);
-  const focusBrowserFollowUp = React.useCallback((): void => {
-    const focusComposer = (): void => {
-      window.requestAnimationFrame(() => inputRef.current?.focus());
-    };
-    if (isMobile) {
-      closeBrowserWorkspace();
-      focusComposer();
-    } else if (panelFullscreen) {
-      void exitPanelFullscreen().then(focusComposer);
-    } else {
-      focusComposer();
-    }
-    toast.show('输入下一步指令，AI 会从当前页面继续');
-  }, [closeBrowserWorkspace, exitPanelFullscreen, isMobile, panelFullscreen, toast]);
-
   const startWorkspaceBrowserTask = React.useCallback(
     async (intent: string): Promise<boolean> => {
       const result = await createTask(intent);
@@ -863,7 +848,6 @@ export function WorkbenchApp(): JSX.Element {
             onClose={closeBrowserWorkspace}
             onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
             reExecuting={browserReExecuting}
-            onRequestAgentHelp={focusBrowserFollowUp}
           />
         </div>
       )}
@@ -909,7 +893,6 @@ export function WorkbenchApp(): JSX.Element {
             poolUserId={me?.multiUser ? me.userId : null}
             onReExecute={browserPanelTask ? () => void handleBrowserReExecute() : undefined}
             reExecuting={browserReExecuting}
-            onRequestAgentHelp={focusBrowserFollowUp}
           />
         </div>
       )}

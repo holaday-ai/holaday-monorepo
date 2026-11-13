@@ -74,7 +74,7 @@ import type {
 } from '../vision-loop/playwright-executor.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
-import type { BrowserControl } from './browser-control.js';
+import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from './browser-control.js';
 import { toBrowserPixels } from './browser-coordinates.js';
 import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
@@ -783,6 +783,11 @@ export interface RunSupercarOptions {
    * egress is learned for the user's next launch (never retried now).
    */
   learnEgressBlocks?: boolean;
+  /**
+   * REBUILD-4 第 6 条: a login / permission wait ended because the person passed the wall on the
+   * page itself (no reply). Persists the task as running again; false keeps waiting.
+   */
+  onWallPassed?: () => Promise<boolean>;
   onCaptchaHandoffEnd?: (resumed: boolean) => Promise<boolean>;
   /**
    * FIX-38 #5: the page at the moment a captcha is handed over (password / code boxes masked),
@@ -1966,7 +1971,7 @@ async function runSupercarTaskInternal(
     const observation: ContentBlockParam[] = [
       {
         type: 'text',
-        text: `浏览器控制权或窗口尺寸已更新。请根据当前页面重新规划，不要重放更新前的旧动作。当前 URL：${currentPage.url()}`,
+        text: `用户刚在画面上操作过。请根据当前页面重新规划，不要重放之前的旧动作。当前 URL：${currentPage.url()}`,
       },
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.base64 } },
     ];
@@ -2991,7 +2996,7 @@ async function runSupercarTaskInternal(
           content: [
             {
               type: 'text',
-              text: '用户请求接管，尚未开始的旧动作已取消。请根据交还后的当前页面重新规划。',
+              text: '用户刚在画面上操作过，尚未开始的旧动作已取消。请根据当前页面重新规划。',
             },
           ],
         });
@@ -3018,7 +3023,7 @@ async function runSupercarTaskInternal(
             content: [
               {
                 type: 'text',
-                text: '用户接管后，已取消同一批次中基于旧页面状态生成的动作。请重新观察当前页面。',
+                text: '用户在画面上操作后，已取消同一批次中基于旧页面状态生成的动作。请重新观察当前页面。',
               },
             ],
           });
@@ -3107,7 +3112,11 @@ async function runSupercarTaskInternal(
           let navErrorFriendly: string | null = null;
           // No await between this final admission check and starting goto.
           // Policy, veto and getPage awaits above can all receive a takeover.
-          if (opts.browserControl && !opts.browserControl.canAgentAct()) {
+          // REBUILD-4: the person acted while the veto ran — the planned action is void.
+          if (
+            opts.browserControl &&
+            (!opts.browserControl.canAgentAct() || opts.browserControl.humanBusy())
+          ) {
             await yieldCurrentTool(toolUse.id);
             continue;
           }
@@ -3999,11 +4008,16 @@ async function runSupercarTaskInternal(
             if (actVeto) return actVeto;
           }
         }
+        const actedSince = Date.now();
         const execResult = await executeComputerAction(
           executor,
           computerInput,
           cancellationRequested,
-          opts.browserControl ? () => opts.browserControl?.canAgentAct() === true : undefined,
+          opts.browserControl
+            ? () =>
+                opts.browserControl?.canAgentAct() === true &&
+                opts.browserControl.humanBusy() === false
+            : undefined,
         );
         if (execResult.controlYielded) {
           await yieldCurrentTool(toolUse.id);
@@ -4104,6 +4118,8 @@ async function runSupercarTaskInternal(
         // with "all content must be type `text` if `is_error` is true".
         // So split the shape: on failure we send a text description,
         // on success we send the fresh screenshot.
+        // 协调方判定 (复审 #1): the person also used the page while this action ran.
+        const humanAlsoActed = opts.browserControl?.humanBusySince(actedSince) === true;
         if (execResult.ok) {
           toolResults.push({
             type: 'tool_result',
@@ -4117,6 +4133,14 @@ async function runSupercarTaskInternal(
                   data: shot.base64,
                 },
               },
+              ...(humanAlsoActed
+                ? [
+                    {
+                      type: 'text' as const,
+                      text: HUMAN_ALSO_ACTED_NOTE,
+                    },
+                  ]
+                : []),
             ],
           });
         } else {
@@ -4126,7 +4150,7 @@ async function runSupercarTaskInternal(
             content: [
               {
                 type: 'text',
-                text: `computer action failed: ${execResult.summary}`,
+                text: `computer action failed: ${execResult.summary}${humanAlsoActed ? `\n${HUMAN_ALSO_ACTED_NOTE}` : ''}`,
               },
             ],
             is_error: true,

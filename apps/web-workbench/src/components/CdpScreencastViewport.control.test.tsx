@@ -8,240 +8,351 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('requires and transmits the current lease on actual viewport keyboard input', () => {
-  const sent: Array<{ controlLease?: string; payload: { type: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const props = {
-    wsUrl: 'ws://localhost/screencast-ws/tsk_test',
-    streamToken: 'test',
-    viewOnly: false,
-  };
-  const { container, rerender } = render(<CdpScreencastViewport {...props} controlLease={null} />);
-  const input = container.querySelector('input');
-  if (!input) throw new Error('input missing');
-  fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 });
-  expect(sent).toEqual([]);
-  rerender(<CdpScreencastViewport {...props} controlLease="current" />);
-  fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 });
-  expect(sent).toMatchObject([{ controlLease: 'current', payload: { type: 'keyDown' } }]);
-  rerender(<CdpScreencastViewport {...props} controlLease={null} />);
-  fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 });
-  expect(sent).toHaveLength(1);
-});
+type Sent = {
+  type?: string;
+  controlLease?: unknown;
+  payload?: { type: string; x?: number; y?: number; text?: string; width?: number };
+  observation?: { frameId?: string; tabId?: string; viewportRevision?: number };
+};
 
-it('FIX-61: typing on a view-only screen asks for control and is delivered once control arrives', () => {
-  const sent: Array<{ controlLease?: string; payload: { type: string } }> = [];
+/**
+ * REBUILD-4 共同操作: a v2 screen on a host of the given size, with a socket and an image decoder
+ * the test drives. Frames are of the fixed 1280x800 page (a 100x60 image) unless told otherwise.
+ */
+function sharedScreen(
+  host: { width: number; height: number } = { width: 640, height: 420 },
+  props: Partial<React.ComponentProps<typeof CdpScreencastViewport>> = {},
+) {
+  const sent: Sent[] = [];
+  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
   class Socket {
     static OPEN = 1;
+    static CONNECTING = 0;
     readyState = 1;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    constructor() {
+      sockets.push(this);
+    }
     send(raw: string) {
       sent.push(JSON.parse(raw));
     }
     close() {}
   }
+  const images: Array<{ onload: (() => void) | null }> = [];
+  class FakeImage {
+    src = '';
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    width = 100;
+    height = 60;
+    constructor() {
+      images.push(this);
+    }
+  }
   vi.stubGlobal('WebSocket', Socket);
-  const onRequestControl = vi.fn();
-  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-  const { container, rerender } = render(
+  vi.stubGlobal('Image', FakeImage);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage() {},
+  } as never);
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(host.width);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(host.height);
+  const onInputRefused = vi.fn();
+  const onUserInput = vi.fn();
+  const view = render(
     <CdpScreencastViewport
-      {...props}
-      viewOnly
-      controlLease={null}
-      onRequestControl={onRequestControl}
-    />,
-  );
-  const input = container.querySelector('input');
-  if (!input) throw new Error('input missing');
-  fireEvent.keyDown(input, { key: 'h', code: 'KeyH', keyCode: 72 });
-  fireEvent.keyDown(input, { key: 'i', code: 'KeyI', keyCode: 73 });
-  expect(onRequestControl).toHaveBeenCalledTimes(1);
-  expect(sent.filter((m) => m.payload?.type !== 'viewport')).toEqual([]);
-  rerender(
-    <CdpScreencastViewport
-      {...props}
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
       viewOnly={false}
-      controlLease="granted"
-      onRequestControl={onRequestControl}
-    />,
-  );
-  const keys = sent.filter((m) => m.payload?.type === 'keyDown');
-  expect(keys).toHaveLength(2);
-  expect(keys.every((m) => m.controlLease === 'granted')).toBe(true);
-});
-
-it('FIX-61: input waiting for control is dropped when control does not come within 4 seconds', () => {
-  vi.useFakeTimers();
-  try {
-    const sent: Array<{ payload: { type: string } }> = [];
-    class Socket {
-      static OPEN = 1;
-      readyState = 1;
-      send(raw: string) {
-        sent.push(JSON.parse(raw));
-      }
-      close() {}
-    }
-    vi.stubGlobal('WebSocket', Socket);
-    const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-    const { container, rerender } = render(
-      <CdpScreencastViewport {...props} viewOnly controlLease={null} onRequestControl={vi.fn()} />,
-    );
-    const input = container.querySelector('input');
-    if (!input) throw new Error('input missing');
-    fireEvent.keyDown(input, { key: 'p', code: 'KeyP', keyCode: 80 });
-    vi.advanceTimersByTime(4_500);
-    rerender(
-      <CdpScreencastViewport
-        {...props}
-        viewOnly={false}
-        controlLease="late"
-        onRequestControl={vi.fn()}
-      />,
-    );
-    expect(sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-it('FIX-61: on a running task the press only asks for control and is not replayed later', () => {
-  const sent: Array<{ payload: { type: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const onRequestControl = vi.fn();
-  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-  const { container, rerender } = render(
-    <CdpScreencastViewport
+      onInputRefused={onInputRefused}
+      onUserInput={onUserInput}
       {...props}
-      viewOnly
-      controlLease={null}
-      onRequestControl={onRequestControl}
-      replayAfterControl={false}
     />,
   );
-  const input = container.querySelector('input');
-  if (!input) throw new Error('input missing');
-  fireEvent.keyDown(input, { key: 'q', code: 'KeyQ', keyCode: 81 });
-  expect(onRequestControl).toHaveBeenCalledTimes(1);
-  rerender(
-    <CdpScreencastViewport
-      {...props}
-      viewOnly={false}
-      controlLease="granted"
-      onRequestControl={onRequestControl}
-      replayAfterControl={false}
-    />,
-  );
-  expect(sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
-  fireEvent.keyDown(input, { key: 'q', code: 'KeyQ', keyCode: 81 });
-  expect(sent.filter((m) => m.payload?.type === 'keyDown')).toHaveLength(1);
-});
-
-it('FIX-61 复审 #2 #2: the press that asks for control and its release both land, though the panel withdraws the request while it is in flight', () => {
-  const sent: Array<{ controlLease?: string; payload: { type: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const onRequestControl = vi.fn();
-  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-  const { container, rerender } = render(
-    <CdpScreencastViewport
-      {...props}
-      viewOnly
-      controlLease={null}
-      onRequestControl={onRequestControl}
-    />,
-  );
-  const canvas = container.querySelector('canvas');
-  if (!canvas) throw new Error('canvas missing');
-  fireEvent.mouseDown(canvas, { clientX: 20, clientY: 30, button: 0, detail: 1 });
-  expect(onRequestControl).toHaveBeenCalledTimes(1);
-  // BrowserPanel: the takeover is pending, so it no longer offers onRequestControl.
-  rerender(<CdpScreencastViewport {...props} viewOnly controlLease={null} />);
-  fireEvent.mouseUp(canvas, { clientX: 20, clientY: 30, button: 0, detail: 1 });
-  expect(sent.filter((m) => /^mouse/.test(m.payload?.type))).toEqual([]);
-  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
-  const pointer = sent.filter((m) => /^mouse/.test(m.payload?.type));
-  expect(pointer.map((m) => m.payload.type)).toEqual(['mouseDown', 'mouseUp']);
-  expect(pointer.every((m) => m.controlLease === 'granted')).toBe(true);
-});
-
-it('FIX-61 复审 #2 #2: a press nobody asked control for is still not kept', () => {
-  const sent: Array<{ payload: { type: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-  const { container, rerender } = render(
-    <CdpScreencastViewport {...props} viewOnly controlLease={null} />,
-  );
-  const canvas = container.querySelector('canvas');
-  if (!canvas) throw new Error('canvas missing');
-  fireEvent.mouseDown(canvas, { clientX: 5, clientY: 5, button: 0, detail: 1 });
-  fireEvent.mouseUp(canvas, { clientX: 5, clientY: 5, button: 0, detail: 1 });
-  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="later" />);
-  expect(sent.filter((m) => /^mouse/.test(m.payload?.type))).toEqual([]);
-});
-
-it('FIX-61 复审 #2 #2: held input on a still page asks for a fresh frame once control arrives', () => {
-  const sent: Array<{ type?: string; payload?: { type: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const onRequestControl = vi.fn();
-  const props = {
-    wsUrl: 'ws://localhost/screencast-ws/tsk_test',
-    streamToken: 'test',
-    viewportV2: true,
+  const socket = sockets.at(-1);
+  if (!socket?.onmessage) throw new Error('socket not connected');
+  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
+  let n = 0;
+  // As the server: a re-captured still page keeps its revision; only an invalidation (navigation,
+  // tab change) moves it.
+  let revision = 1;
+  const frame = (
+    scrollY = 0,
+    cssWidth = 1280,
+    cssHeight = 800,
+    at: { tabId?: string; revision?: number } = {},
+  ) => {
+    n++;
+    receive({
+      type: 'frame',
+      data: `f${n}`,
+      metadata: {},
+      geometry: {
+        frameId: `f${n}`,
+        tabId: at.tabId ?? 't',
+        viewportRevision: at.revision ?? revision,
+        cssWidth,
+        cssHeight,
+        imageWidth: 100,
+        imageHeight: 60,
+        pageScaleFactor: 1,
+        offsetTop: 0,
+        scrollOffset: { x: 0, y: scrollY },
+        capturedAt: Date.now(),
+      },
+    });
+    images.at(-1)?.onload?.();
   };
-  const { container, rerender } = render(
+  const canvas = view.container.querySelector('canvas');
+  const input = view.container.querySelector('input');
+  if (!canvas || !input) throw new Error('screen missing');
+  canvas.setPointerCapture = () => {};
+  canvas.releasePointerCapture = () => {};
+  canvas.hasPointerCapture = () => false;
+  canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, x: 0, y: 0, width: 100, height: 60, right: 100, bottom: 60 }) as DOMRect;
+  const press = (clientX = 20, clientY = 30) => {
+    const pointer = { clientX, clientY, button: 0, detail: 1, pointerId: 1, pointerType: 'mouse' };
+    fireEvent.pointerDown(canvas, pointer);
+    fireEvent.pointerUp(canvas, pointer);
+  };
+  const pointer = () => sent.filter((m) => /^mouse(Down|Up)$/.test(m.payload?.type ?? ''));
+  /** The assistant navigated: the server invalidates the frame and moves the revision. */
+  const invalidate = (url = 'https://example.com/other') => {
+    receive({ type: 'url-changed', url });
+    receive({ type: 'observation-invalidated' });
+    revision++;
+  };
+  return {
+    ...view,
+    sent,
+    receive,
+    frame,
+    invalidate,
+    canvas,
+    input,
+    press,
+    pointer,
+    onInputRefused,
+    onUserInput,
+  };
+}
+
+it('REBUILD-4 (a): a press goes straight to the page with no lease and names the frame it was made on', () => {
+  const screen = sharedScreen();
+  screen.receive({ type: 'viewport-v2-ready' });
+  screen.frame();
+  screen.press();
+  const pointer = screen.pointer();
+  expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
+  for (const m of pointer) {
+    expect(m.type).toBe('input');
+    expect('controlLease' in m).toBe(false);
+    expect(m.observation).toEqual({ frameId: 'f1', tabId: 't', viewportRevision: 1 });
+  }
+  expect(screen.onUserInput).toHaveBeenCalled();
+});
+
+it('REBUILD-4 (a): keys go straight to the page too, with no first click to take control', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  fireEvent.keyDown(screen.input, { key: 'x', code: 'KeyX', keyCode: 88 });
+  expect(screen.sent.filter((m) => m.payload?.type === 'keyDown')).toMatchObject([
+    { type: 'input', observation: { frameId: 'f1' } },
+  ]);
+  expect(screen.sent.some((m) => 'controlLease' in m)).toBe(false);
+});
+
+it.each([
+  ['desktop panel', { width: 1280, height: 800 }],
+  ['narrow side panel', { width: 471, height: 835 }],
+  ['phone sheet', { width: 390, height: 760 }],
+])('REBUILD-4 (b): no viewport message is ever sent (%s)', async (_label, host) => {
+  const screen = sharedScreen(host);
+  screen.receive({ type: 'viewport-v2-ready' });
+  screen.frame();
+  window.dispatchEvent(new Event('resize'));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  screen.press();
+  expect(screen.sent.some((m) => m.payload?.type === ('viewport' as string))).toBe(false);
+  expect(screen.pointer()).toHaveLength(2);
+});
+
+it('REBUILD-4 (c): a frame is accepted and scaled without any viewport request — even on a phone', () => {
+  const screen = sharedScreen({ width: 390, height: 760 });
+  // The page stays 1280x800 whatever this screen's size; no viewport-applied ever comes.
+  screen.frame();
+  expect(screen.canvas.dataset.frameId).toBe('f1');
+  screen.press();
+  expect(screen.pointer()).toHaveLength(2);
+  expect(Number(screen.canvas.style.getPropertyValue('--hd-scale'))).toBeLessThan(1);
+});
+
+it('REBUILD-4: the first frame with geometry makes the stream write-ready without viewport-v2-ready', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  screen.press();
+  expect(screen.pointer()).toHaveLength(2);
+});
+
+it('REBUILD-4: a press is mapped from the displayed frame to the fixed page', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  screen.press(20, 30);
+  // 20,30 on a 100x60 image of the 1280x800 page: the image covers the top 768 rows at its
+  // own scale (12.8 page px per image px) → 256,384.
+  expect(screen.pointer()[0]?.payload).toMatchObject({ x: 256, y: 384 });
+});
+
+it('REBUILD-4: a view-only screen sends nothing', () => {
+  const screen = sharedScreen(undefined, { viewOnly: true });
+  screen.frame();
+  screen.press();
+  fireEvent.keyDown(screen.input, { key: 'x', code: 'KeyX', keyCode: 88 });
+  expect(screen.sent.filter((m) => m.type === 'input')).toEqual([]);
+  expect(screen.onUserInput).not.toHaveBeenCalled();
+});
+
+it('REBUILD-4: nothing painted yet → asks for a frame; a press made on no picture is never sent', () => {
+  const screen = sharedScreen();
+  screen.press();
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.sent.some((m) => m.type === 'observe')).toBe(true);
+  screen.frame();
+  // The press was not made on this page's picture: it is not replayed on it.
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+});
+
+it('REBUILD-4: a stale frame is never used to name input; a fresh one is asked for first', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame();
+  // 6 seconds later, nothing new painted: the frame is too old for the server.
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.sent.filter((m) => m.type === 'observe').length).toBeGreaterThan(0);
+  screen.frame();
+  expect(screen.pointer().every((m) => m.observation?.frameId === 'f2')).toBe(true);
+  expect(screen.pointer()).toHaveLength(2);
+});
+
+it('REBUILD-4: the page scrolled before a waiting press could go out — not delivered, 「再点一次」', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame(0);
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  screen.frame(120);
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+});
+
+it('REBUILD-4: a navigation invalidates the frame: input waits for the new page', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  screen.receive({ type: 'url-changed', url: 'https://example.com/next' });
+  screen.press();
+  expect(screen.pointer()).toEqual([]);
+  screen.receive({ type: 'observation-invalidated' });
+  expect(screen.canvas.dataset.frameId).toBeUndefined();
+});
+
+it('REBUILD-4: the server refusing input (the page changed) is said once per burst — keys and presses', () => {
+  const screen = sharedScreen();
+  screen.receive({ type: 'input-expired', input: 'key' });
+  screen.receive({ type: 'input-expired', input: 'key' });
+  screen.receive({ type: 'input-expired', input: 'pointer' });
+  expect(screen.onInputRefused).toHaveBeenCalledTimes(1);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('key');
+});
+
+it('REBUILD-4: a refused press is said as a press; a refused move or scroll says nothing', () => {
+  const screen = sharedScreen();
+  screen.receive({ type: 'input-expired', input: 'mouseMove' });
+  screen.receive({ type: 'input-expired', input: 'scroll' });
+  expect(screen.onInputRefused).not.toHaveBeenCalled();
+  screen.receive({ type: 'input-expired', input: 'mouseDown' });
+  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+});
+
+it('REBUILD-4: hovering does not count as the person operating; a press does', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  fireEvent.pointerMove(screen.canvas, {
+    clientX: 10,
+    clientY: 10,
+    buttons: 0,
+    pointerType: 'mouse',
+  });
+  expect(screen.sent.some((m) => m.payload?.type === 'mouseMove')).toBe(true);
+  expect(screen.onUserInput).not.toHaveBeenCalled();
+  screen.press();
+  expect(screen.onUserInput).toHaveBeenCalled();
+});
+
+it('REBUILD-4: a tap on a phone is a click on the page', () => {
+  const screen = sharedScreen({ width: 390, height: 760 });
+  screen.frame();
+  const touch = { clientX: 20, clientY: 30 };
+  fireEvent.touchStart(screen.canvas, { touches: [touch] });
+  fireEvent.touchEnd(screen.canvas, { changedTouches: [touch] });
+  expect(screen.pointer().map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
+  expect(screen.pointer()[0]?.payload).toMatchObject({ x: 256, y: 384 });
+});
+
+it('FIX-62 P1-4: the text bar channel (phone, Chinese) sends insertText, and says false when only watching', () => {
+  const channel = { current: null as ((text: string) => boolean) | null };
+  const watching = sharedScreen(undefined, { viewOnly: true, textChannel: channel });
+  watching.frame();
+  expect(channel.current?.('你好')).toBe(false);
+  expect(watching.sent.filter((m) => m.payload?.type === 'insertText')).toEqual([]);
+  watching.rerender(
     <CdpScreencastViewport
-      {...props}
-      viewOnly
-      controlLease={null}
-      onRequestControl={onRequestControl}
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
+      viewOnly={false}
+      textChannel={channel}
+    />,
+  );
+  expect(channel.current?.('你好')).toBe(true);
+  expect(watching.sent.filter((m) => m.payload?.type === 'insertText')).toMatchObject([
+    {
+      type: 'input',
+      payload: { type: 'insertText', text: '你好' },
+      observation: { frameId: 'f1' },
+    },
+  ]);
+});
+
+it('legacy (non-v2) stream: input goes out with no lease and no observation', () => {
+  const sent: Sent[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    send(raw: string) {
+      sent.push(JSON.parse(raw));
+    }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const { container } = render(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewOnly={false}
     />,
   );
   const input = container.querySelector('input');
   if (!input) throw new Error('input missing');
-  fireEvent.keyDown(input, { key: 'h', code: 'KeyH', keyCode: 72 });
-  expect(onRequestControl).toHaveBeenCalledTimes(1);
-  expect(sent.filter((m) => m.type === 'observe')).toEqual([]);
-  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
-  expect(sent.filter((m) => m.type === 'observe').length).toBeGreaterThan(0);
+  fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 });
+  expect(sent).toEqual([{ type: 'input', payload: expect.objectContaining({ type: 'keyDown' }) }]);
 });
 
 it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the screen — the newest waiting frame paints next', () => {
@@ -271,12 +382,7 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
   vi.stubGlobal('WebSocket', Socket);
   vi.stubGlobal('Image', FakeImage);
   render(
-    <CdpScreencastViewport
-      wsUrl="ws://localhost/screencast-ws/tsk_test"
-      streamToken="test"
-      viewOnly
-      controlLease={null}
-    />,
+    <CdpScreencastViewport wsUrl="ws://localhost/screencast-ws/tsk_test" streamToken="test" />,
   );
   const socket = sockets.at(-1);
   if (!socket?.onmessage) throw new Error('socket not connected');
@@ -297,272 +403,84 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
   expect(images).toHaveLength(3);
 });
 
-/**
- * DEPLOY-61 第 0 步 #2: an ended task's screen whose size the server has not applied yet (the
- * assistant's 1280x800 page is shown). The user presses on it; taking control applies this
- * screen's size, then a fresh frame comes and the held press is delivered or not.
- * DEPLOY-61 重跑 第 0 步 #2: the held press now goes out on the layout the user saw, named by a
- * fresh frame asked for once control arrives, before this screen's size. `seenScrollY` moves the
- * page in that fresh frame (it no longer shows what was pressed on); `refused` has the server
- * refuse the replayed press as stale.
- */
-async function heldPressAcrossTakeover(
-  host: { width: number; height: number; mobile: boolean },
-  { seenScrollY = 0, refused = false }: { seenScrollY?: number; refused?: boolean } = {},
-) {
-  const sent: Array<{
-    type?: string;
-    payload?: { type: string; width?: number; height?: number };
-    observation?: { frameId?: string };
-  }> = [];
-  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    onmessage: ((e: { data: string }) => void) | null = null;
-    constructor() {
-      sockets.push(this);
-    }
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  const images: Array<{ onload: (() => void) | null }> = [];
-  class FakeImage {
-    src = '';
-    onload: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    width = 100;
-    height = 60;
-    constructor() {
-      images.push(this);
-    }
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  vi.stubGlobal('Image', FakeImage);
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-    drawImage() {},
-  } as never);
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(host.width);
-  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(host.height);
-  const onRequestControl = vi.fn();
-  const onHeldInputDropped = vi.fn();
-  const props = {
-    wsUrl: 'ws://localhost/screencast-ws/tsk_test',
-    streamToken: 'test',
-    viewportV2: true,
-    replayAfterControl: true,
-    mobileViewport: host.mobile,
-    onHeldInputDropped,
-  };
-  const { container, rerender } = render(
-    <CdpScreencastViewport
-      {...props}
-      viewOnly
-      controlLease={null}
-      onRequestControl={onRequestControl}
-    />,
-  );
-  const socket = sockets.at(-1);
-  if (!socket?.onmessage) throw new Error('socket not connected');
-  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
-  receive({ type: 'viewport-v2-ready', controlReady: true });
-  let n = 0;
-  const frame = (cssWidth: number, cssHeight: number, scrollY = 0) => {
-    n++;
-    receive({
-      type: 'frame',
-      data: `f${n}`,
-      metadata: {},
-      geometry: {
-        frameId: `f${n}`,
-        tabId: 't',
-        viewportRevision: n,
-        cssWidth,
-        cssHeight,
-        imageWidth: 100,
-        imageHeight: 60,
-        pageScaleFactor: 1,
-        offsetTop: 0,
-        scrollOffset: { x: 0, y: scrollY },
-        capturedAt: Date.now(),
-      },
-    });
-    images.at(-1)?.onload?.();
-  };
-  const viewports = () => sent.filter((m) => m.payload?.type === 'viewport');
-  await vi.waitFor(() => expect(viewports().length).toBe(1));
-  // The server does not apply a watcher's size on an ended task: the frames still show the
-  // assistant's 1280x800 page, and that is what the user presses on.
-  frame(1280, 800);
-  const canvas = container.querySelector('canvas');
-  if (!canvas) throw new Error('canvas missing');
-  canvas.setPointerCapture = () => {};
-  canvas.releasePointerCapture = () => {};
-  canvas.getBoundingClientRect = () =>
-    ({ left: 0, top: 0, x: 0, y: 0, width: 100, height: 60, right: 100, bottom: 60 }) as DOMRect;
-  const pointer = {
-    clientX: 20,
-    clientY: 30,
-    button: 0,
-    detail: 1,
-    pointerId: 1,
-    pointerType: 'mouse',
-  };
-  fireEvent.pointerDown(canvas, pointer);
-  fireEvent.pointerUp(canvas, pointer);
-  expect(onRequestControl).toHaveBeenCalledTimes(1);
-  // Control arrives (the panel hands the lease over and lifts view-only in separate renders).
-  rerender(
-    <CdpScreencastViewport
-      {...props}
-      viewOnly
-      controlLease="granted"
-      onRequestControl={onRequestControl}
-    />,
-  );
-  rerender(<CdpScreencastViewport {...props} viewOnly={false} controlLease="granted" />);
-  // The size this screen sent while watching was never applied (nor confirmed): it changes
-  // nothing on the page. The screen asks for a fresh frame, still the 1280x800 layout.
-  await vi.waitFor(() => expect(sent.some((m) => m.type === 'observe')).toBe(true));
-  expect(viewports()).toHaveLength(1);
-  frame(1280, 800, seenScrollY);
-  if (refused) receive({ type: 'input-expired' });
-  // Then the screen's size is sent, applied, and a frame of the new layout comes.
-  await vi.waitFor(() => expect(viewports().length).toBe(2), { timeout: 6000 });
-  const size = viewports()[1]?.payload;
-  receive({ type: 'viewport-applied', width: size?.width, height: size?.height });
-  frame(size?.width ?? 0, size?.height ?? 0);
-  const isPointer = (m: (typeof sent)[number]) => /^mouse/.test(m.payload?.type ?? '');
-  const pointerIndexes = sent.flatMap((m, i) => (isPointer(m) ? [i] : []));
-  return {
-    size,
-    pointer: sent.filter(isPointer),
-    /** Every press/release went out before this screen's size message (under the lease). */
-    pointerBeforeSize:
-      pointerIndexes.length > 0 &&
-      Math.max(...pointerIndexes) < sent.indexOf(viewports()[1] as (typeof sent)[number]),
-    onHeldInputDropped,
-  };
-}
-
-it('DEPLOY-61 重跑 #2: on a finished task the first press lands on the layout the user saw, then the phone width is applied', async () => {
-  const { size, pointer, pointerBeforeSize, onHeldInputDropped } = await heldPressAcrossTakeover({
-    width: 390,
-    height: 760,
-    mobile: true,
-  });
-  expect(size?.width).not.toBe(1280);
-  expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
-  // Named by the fresh 1280x800 frame asked for after control arrived (f2), same layout as seen.
-  expect(pointer.every((m) => m.observation?.frameId === 'f2')).toBe(true);
-  expect(pointerBeforeSize).toBe(true);
-  expect(onHeldInputDropped).not.toHaveBeenCalled();
+it('复审 #1 #1: a waiting press is not sent on another page of the same size and scroll (the assistant navigated)', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.receive({ type: 'viewport-v2-ready' });
+  screen.frame();
+  // The page has been still over 5 s: the press waits for a fresh frame.
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  expect(screen.pointer()).toEqual([]);
+  // Meanwhile the assistant goes to another page, also 1280×800 at scroll 0.
+  screen.invalidate();
+  screen.frame();
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
 });
 
-it('DEPLOY-61 重跑 #2: a taller desktop panel (the centred Google box would move) — the press lands first, on the layout seen', async () => {
-  const { size, pointer, pointerBeforeSize, onHeldInputDropped } = await heldPressAcrossTakeover({
-    width: 640,
-    height: 420,
-    mobile: false,
-  });
-  expect(size).toMatchObject({ width: 1280, height: 840 });
-  expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
-  expect(pointerBeforeSize).toBe(true);
-  expect(onHeldInputDropped).not.toHaveBeenCalled();
-});
-
-it('DEPLOY-61 重跑 #2: the press is mapped on the layout seen (same point as before the re-layout)', async () => {
-  const { pointer } = await heldPressAcrossTakeover({ width: 640, height: 420, mobile: false });
-  // 20,30 on a 100x60 image of the 1280x800 page the user saw: at the image's own scale
-  // (12.8 px per image px) it covers the top 768 rows → 256,384, the point shown under the press.
-  expect(pointer[0]?.payload).toMatchObject({ x: 256, y: 384 });
-});
-
-it('DEPLOY-61 重跑 #2: the page moved before the press could go out — not delivered, 「请再点一次」', async () => {
-  const { pointer, onHeldInputDropped } = await heldPressAcrossTakeover(
-    { width: 640, height: 400, mobile: false },
-    { seenScrollY: 120 },
-  );
-  expect(pointer).toEqual([]);
-  expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
-});
-
-it('DEPLOY-61 重跑 #2: the server refuses the replayed press as stale — 「请再点一次」', async () => {
-  const { pointer, onHeldInputDropped } = await heldPressAcrossTakeover(
-    { width: 640, height: 420, mobile: false },
-    { refused: true },
-  );
-  expect(pointer.map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
-  expect(onHeldInputDropped).toHaveBeenCalledTimes(1);
-});
-
-it('FIX-61B P1-5: a key the server refused is said once («请再按一次»), never dropped silently', async () => {
-  const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    onmessage: ((e: { data: string }) => void) | null = null;
-    constructor() {
-      sockets.push(this);
-    }
-    send() {}
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const onKeyRefused = vi.fn();
-  const onHeldInputDropped = vi.fn();
-  render(
-    <CdpScreencastViewport
-      wsUrl="ws://localhost/screencast-ws/tsk_test"
-      streamToken="test"
-      viewportV2
-      viewOnly={false}
-      controlLease="granted"
-      onKeyRefused={onKeyRefused}
-      onHeldInputDropped={onHeldInputDropped}
-    />,
-  );
-  const socket = sockets.at(-1);
-  if (!socket?.onmessage) throw new Error('socket not connected');
-  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
-  receive({ type: 'input-expired', input: 'key' });
-  receive({ type: 'input-expired', input: 'key' });
-  receive({ type: 'input-expired', input: 'pointer' });
-  expect(onKeyRefused).toHaveBeenCalledTimes(1);
-  expect(onHeldInputDropped).not.toHaveBeenCalled();
-});
-
-it('FIX-62 P1-4: the text bar channel sends insertText under control, and says false when it cannot', () => {
-  const sent: Array<{ controlLease?: string; payload: { type: string; text?: string } }> = [];
-  class Socket {
-    static OPEN = 1;
-    readyState = 1;
-    send(raw: string) {
-      sent.push(JSON.parse(raw));
-    }
-    close() {}
-  }
-  vi.stubGlobal('WebSocket', Socket);
-  const channel = { current: null as ((text: string) => boolean) | null };
-  const props = { wsUrl: 'ws://localhost/screencast-ws/tsk_test', streamToken: 'test' };
-  const { rerender } = render(
-    <CdpScreencastViewport {...props} viewOnly controlLease={null} textChannel={channel} />,
-  );
-  // Only watching, no way to ask for control: nothing is sent and the bar is told so.
-  expect(channel.current?.('你好')).toBe(false);
-  expect(sent.filter((m) => m.payload?.type === 'insertText')).toEqual([]);
-  rerender(
-    <CdpScreencastViewport
-      {...props}
-      viewOnly={false}
-      controlLease="granted"
-      textChannel={channel}
-    />,
-  );
-  expect(channel.current?.('你好')).toBe(true);
-  expect(sent.filter((m) => m.payload?.type === 'insertText')).toMatchObject([
-    { controlLease: 'granted', payload: { type: 'insertText', text: '你好' } },
+it('复审 #1 #1: … nor on another tab with the same revision; the same still page re-captured is fine', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const other = sharedScreen();
+  other.frame();
+  now.mockReturnValue(start + 6_000);
+  other.press();
+  other.frame(0, 1280, 800, { tabId: 't2' });
+  expect(other.pointer()).toEqual([]);
+  expect(other.onInputRefused).toHaveBeenCalledWith('pointer');
+  cleanup();
+  now.mockReturnValue(start);
+  const same = sharedScreen();
+  same.frame();
+  now.mockReturnValue(start + 6_000);
+  same.press();
+  same.frame();
+  expect(same.pointer().map((m) => m.observation)).toEqual([
+    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
+    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
   ]);
+  expect(same.onInputRefused).not.toHaveBeenCalled();
+});
+
+it('复审 #1 #1: waiting keys on a page the assistant replaced are not typed into it', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame();
+  now.mockReturnValue(start + 6_000);
+  fireEvent.keyDown(screen.input, { key: 'a', code: 'KeyA' });
+  screen.invalidate();
+  screen.frame();
+  expect(screen.sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('key');
+});
+
+it('复审 #1 #1: a press that has to wait says 「busy」 at once — no coordinates — so the assistant yields', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame();
+  // A press sent at once needs no busy signal: the input itself tells the server.
+  screen.press();
+  expect(screen.sent.filter((m) => m.type === 'busy')).toEqual([]);
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  screen.press();
+  const busy = screen.sent.filter((m) => m.type === 'busy');
+  expect(busy).toEqual([{ type: 'busy' }]);
+  now.mockReturnValue(start + 6_600);
+  screen.press();
+  expect(screen.sent.filter((m) => m.type === 'busy')).toHaveLength(2);
+});
+
+it('复审 #1 (建议修 #3): an input refused while the task stops is said', () => {
+  const screen = sharedScreen();
+  screen.receive({ type: 'input-closed' });
+  expect(screen.onInputRefused).toHaveBeenCalledWith('closed');
 });

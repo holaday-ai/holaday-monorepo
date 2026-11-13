@@ -180,7 +180,7 @@ export function PlanPage(): JSX.Element {
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {zh
-            ? '所有套餐都包含高质量模型、浏览器画面同步、随时接管。'
+            ? '所有套餐都包含高质量模型、浏览器画面同步、随时直接操作。'
             : 'All plans include premium models, browser view sync, and instant takeover.'}
         </p>
       </div>

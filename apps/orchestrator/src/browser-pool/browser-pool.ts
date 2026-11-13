@@ -579,10 +579,11 @@ export class BrowserPool {
       ...session,
       capabilities: Object.freeze({ ...(session?.capabilities ?? browserCapabilities(userId)) }),
     };
+    // REBUILD-4 第 4 条: the assistant's page is always at least 1280×800 — a phone viewer sees a
+    // scaled frame; the page is never sized to the viewer.
     if (
-      session.capabilities?.viewportV2 &&
-      (dimensionsForProfile(viewportProfile).width < 1280 ||
-        dimensionsForProfile(viewportProfile).height < 800)
+      dimensionsForProfile(viewportProfile).width < 1280 ||
+      dimensionsForProfile(viewportProfile).height < 800
     )
       viewportProfile = 'desktop';
 

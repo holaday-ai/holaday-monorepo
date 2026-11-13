@@ -152,7 +152,7 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       messagesAdapter: scripted([
         () => [call('request_human', { reason: 'login', message: '请先登录' })],
         (request) => {
-          expect(JSON.stringify(request.messages.at(-1))).toContain('用户已完成接管');
+          expect(JSON.stringify(request.messages.at(-1))).toContain('用户已在画面上处理完这一步');
           return [call('finish', { status: 'failed', summary: '登录后仍无订单' })];
         },
       ]),

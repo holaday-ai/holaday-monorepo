@@ -336,8 +336,6 @@ import { taskDrainMiddleware } from '../task-drain.js';
 import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import {
   browserCaptchaProcedure,
-  browserControlProcedure,
-  browserControlStateProcedure,
   browserNavProcedure,
   browserProfileClearProcedure,
   browserProfileStatusProcedure,
@@ -6727,6 +6725,17 @@ export const tasksRouter = router({
                   onAwaitingReplyRelease() {
                     if (ctx.browserPool && perUserExec) ctx.browserPool.unretain(taskId);
                   },
+                  // REBUILD-4 第 6 条: the person passed a login / permission wall on the page.
+                  async onWallPassed() {
+                    const persisted = await repo.markAwaitingReplyResumed(taskId, userRow.id);
+                    if (!persisted.persisted) return false;
+                    broadcastToUser(userId, {
+                      type: 'server.task.progress',
+                      taskId,
+                      message: '页面过了这一步，我接着做…',
+                    });
+                    return true;
+                  },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {
                       captchaNeedsRelease = true;
@@ -11899,9 +11908,7 @@ export const tasksRouter = router({
   browserCaptcha: browserCaptchaProcedure,
   browserProfileStatus: browserProfileStatusProcedure,
   browserProfileClear: browserProfileClearProcedure,
-  browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
-  browserControl: browserControlProcedure,
   browserNav: browserNavProcedure,
 
   /**
