@@ -73,7 +73,15 @@ function sharedScreen(
   if (!socket?.onmessage) throw new Error('socket not connected');
   const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
   let n = 0;
-  const frame = (scrollY = 0, cssWidth = 1280, cssHeight = 800) => {
+  // As the server: a re-captured still page keeps its revision; only an invalidation (navigation,
+  // tab change) moves it.
+  let revision = 1;
+  const frame = (
+    scrollY = 0,
+    cssWidth = 1280,
+    cssHeight = 800,
+    at: { tabId?: string; revision?: number } = {},
+  ) => {
     n++;
     receive({
       type: 'frame',
@@ -81,8 +89,8 @@ function sharedScreen(
       metadata: {},
       geometry: {
         frameId: `f${n}`,
-        tabId: 't',
-        viewportRevision: n,
+        tabId: at.tabId ?? 't',
+        viewportRevision: at.revision ?? revision,
         cssWidth,
         cssHeight,
         imageWidth: 100,
@@ -109,11 +117,18 @@ function sharedScreen(
     fireEvent.pointerUp(canvas, pointer);
   };
   const pointer = () => sent.filter((m) => /^mouse(Down|Up)$/.test(m.payload?.type ?? ''));
+  /** The assistant navigated: the server invalidates the frame and moves the revision. */
+  const invalidate = (url = 'https://example.com/other') => {
+    receive({ type: 'url-changed', url });
+    receive({ type: 'observation-invalidated' });
+    revision++;
+  };
   return {
     ...view,
     sent,
     receive,
     frame,
+    invalidate,
     canvas,
     input,
     press,
@@ -386,4 +401,86 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
   expect(images).toHaveLength(2);
   frame('f6');
   expect(images).toHaveLength(3);
+});
+
+it('复审 #1 #1: a waiting press is not sent on another page of the same size and scroll (the assistant navigated)', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.receive({ type: 'viewport-v2-ready' });
+  screen.frame();
+  // The page has been still over 5 s: the press waits for a fresh frame.
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  expect(screen.pointer()).toEqual([]);
+  // Meanwhile the assistant goes to another page, also 1280×800 at scroll 0.
+  screen.invalidate();
+  screen.frame();
+  expect(screen.pointer()).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+});
+
+it('复审 #1 #1: … nor on another tab with the same revision; the same still page re-captured is fine', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const other = sharedScreen();
+  other.frame();
+  now.mockReturnValue(start + 6_000);
+  other.press();
+  other.frame(0, 1280, 800, { tabId: 't2' });
+  expect(other.pointer()).toEqual([]);
+  expect(other.onInputRefused).toHaveBeenCalledWith('pointer');
+  cleanup();
+  now.mockReturnValue(start);
+  const same = sharedScreen();
+  same.frame();
+  now.mockReturnValue(start + 6_000);
+  same.press();
+  same.frame();
+  expect(same.pointer().map((m) => m.observation)).toEqual([
+    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
+    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
+  ]);
+  expect(same.onInputRefused).not.toHaveBeenCalled();
+});
+
+it('复审 #1 #1: waiting keys on a page the assistant replaced are not typed into it', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame();
+  now.mockReturnValue(start + 6_000);
+  fireEvent.keyDown(screen.input, { key: 'a', code: 'KeyA' });
+  screen.invalidate();
+  screen.frame();
+  expect(screen.sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
+  expect(screen.onInputRefused).toHaveBeenCalledWith('key');
+});
+
+it('复审 #1 #1: a press that has to wait says 「busy」 at once — no coordinates — so the assistant yields', () => {
+  const now = vi.spyOn(Date, 'now');
+  const start = 1_000_000;
+  now.mockReturnValue(start);
+  const screen = sharedScreen();
+  screen.frame();
+  // A press sent at once needs no busy signal: the input itself tells the server.
+  screen.press();
+  expect(screen.sent.filter((m) => m.type === 'busy')).toEqual([]);
+  now.mockReturnValue(start + 6_000);
+  screen.press();
+  screen.press();
+  const busy = screen.sent.filter((m) => m.type === 'busy');
+  expect(busy).toEqual([{ type: 'busy' }]);
+  now.mockReturnValue(start + 6_600);
+  screen.press();
+  expect(screen.sent.filter((m) => m.type === 'busy')).toHaveLength(2);
+});
+
+it('复审 #1 (建议修 #3): an input refused while the task stops is said', () => {
+  const screen = sharedScreen();
+  screen.receive({ type: 'input-closed' });
+  expect(screen.onInputRefused).toHaveBeenCalledWith('closed');
 });
