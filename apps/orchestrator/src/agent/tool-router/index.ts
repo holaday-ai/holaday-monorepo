@@ -22,6 +22,7 @@ export {
   type ComposedFallback,
   composeFallback,
   fallbackAnswer,
+  fallbackGaveFields,
   fallbackIntent,
   fallbackQuery,
   retrievalLine,

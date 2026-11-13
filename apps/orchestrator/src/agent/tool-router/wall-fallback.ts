@@ -326,3 +326,16 @@ export function composeFallback(opts: {
     : composed;
   return { deliver: true, summary, checks };
 }
+
+/**
+ * REBUILD-2 协调方 08:20 判定: whether a public-source answer gave what the request asked, from the
+ * small judge model's per-field verdicts (scrape-field-judge). Every named field must have a value;
+ * a request naming none (「总结一下」) is answered by any answer. No verdict (the call failed, timed
+ * out or was malformed) is taken as not answered — the wall outcome stands.
+ */
+export function fallbackGaveFields(
+  verdicts: ReadonlyArray<{ field: string; hasValue: boolean }> | null,
+): boolean {
+  if (!verdicts) return false;
+  return verdicts.every((v) => v.hasValue);
+}

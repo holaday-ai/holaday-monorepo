@@ -3,6 +3,7 @@ import { checkFallbackPrices } from './wall-checks.js';
 import {
   composeFallback,
   fallbackAnswer,
+  fallbackGaveFields,
   fallbackIntent,
   fallbackQuery,
   retrievalLine,
@@ -329,5 +330,31 @@ describe('复审 #2-2 + 协调方判定: freshness and the closing line', () => 
     expect(retrievalLine('Source: Bailian · 2026-11-12 13:15 (Beijing time)', true)).toBe(
       "Retrieved via Bailian · 2026-11-12 13:15 (Beijing time) (retrieval time, not the data's time)",
     );
+  });
+});
+
+// REBUILD-2 协调方 08:20 判定 (bench r4 a1 dm-tmall-apple / fc-g2): a public-source answer that says
+// the results do not have it is not delivered as completed. The judge model reads the fields.
+describe('fallbackGaveFields: the judge’s verdicts decide whether the fallback answered', () => {
+  it('every asked field with a value → answered', () => {
+    expect(
+      fallbackGaveFields([
+        { field: 'star rating', hasValue: true },
+        { field: 'number of reviews', hasValue: true },
+      ]),
+    ).toBe(true);
+  });
+  it('a field without a value (「搜索结果里没有…具体价格」) → not answered', () => {
+    expect(fallbackGaveFields([{ field: '价格', hasValue: false }])).toBe(false);
+    expect(
+      fallbackGaveFields([
+        { field: '问题标题', hasValue: true },
+        { field: '回答数', hasValue: false },
+      ]),
+    ).toBe(false);
+  });
+  it('the judge failed (null) → not answered; a request naming no field → answered', () => {
+    expect(fallbackGaveFields(null)).toBe(false);
+    expect(fallbackGaveFields([])).toBe(true);
   });
 });

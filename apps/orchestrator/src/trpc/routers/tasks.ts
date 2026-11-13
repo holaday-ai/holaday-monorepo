@@ -61,7 +61,7 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import { generateNextStepsWithTitle } from '../../agent/next-steps-generator.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
-import { createAskedFieldJudge } from '../../agent/scrape-field-judge.js';
+import { type AskedFieldJudge, createAskedFieldJudge } from '../../agent/scrape-field-judge.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import {
   type SearchFallbackEvent,
@@ -146,6 +146,7 @@ import {
 import {
   composeFallback,
   decideExecutionRoute,
+  fallbackGaveFields,
   fallbackIntent,
   fallbackQuery,
   formatSourceLine,
@@ -7462,8 +7463,26 @@ export const tasksRouter = router({
                             return null;
                           });
                         const source = lane.lastSource();
+                        // REBUILD-2 协调方 08:20 判定: whether the public-source answer gives what the
+                        // request asked is read by the small judge model (qwen3.8-flash, structured
+                        // output), not by wording rules. Not given, or the judge failed → not
+                        // completed, no wall_fallback; the wall outcome stands.
+                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
+                        if (fallback?.status === 'completed' && fallback.summary.trim()) {
+                          const judgeRuntime = tasksModelGateway.resolve(
+                            'judge',
+                            personalModelContext(ctx.userId, userRow.modelDataRegion),
+                          );
+                          fieldVerdicts =
+                            judgeRuntime.kind === 'ready'
+                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
+                                  logger: ctx.logger,
+                                })({ request: input.intent, answer: fallback.summary })
+                              : null;
+                        }
+                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
                         const composed =
-                          fallback?.status === 'completed' && fallback.summary.trim()
+                          fallback?.status === 'completed' && fallback.summary.trim() && answered
                             ? composeFallback({
                                 wall,
                                 intent: input.intent,
@@ -7484,6 +7503,7 @@ export const tasksRouter = router({
                             status: fallback?.status ?? 'error',
                             delivered: composed?.deliver ?? false,
                             checks: composed?.checks ?? null,
+                            fields: fieldVerdicts ?? null,
                             laneFailure: lane.lastFailure(),
                           },
                           'tool-router: read task ended on a wall, tried public sources',
