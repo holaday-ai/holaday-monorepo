@@ -2,6 +2,7 @@ import type { DraftAttachment } from '@/components/AttachmentChip';
 import { ApprovedSkillsCatalog } from '@/components/skills/ApprovedSkillsCatalog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import {
   normalizeSkillRows,
@@ -13,7 +14,6 @@ import {
   skillTaskDraft,
 } from '@/lib/skills-page-state';
 import { supportMailtoHref } from '@/lib/support-links';
-import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';

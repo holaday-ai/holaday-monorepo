@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/sidebar';
 import { useToast } from '@/components/ui/toast';
 import { copyTextToClipboard } from '@/lib/copy-text';
+import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import {
   deletableTaskIdsForBatchSelection,
@@ -38,7 +39,6 @@ import {
   isPartnerNavEnabled,
   preloadSidebarFeatureNavItem,
 } from '@/lib/sidebar-feature-nav';
-import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import { preloadStockTasksPageRoute } from '@/lib/stock-page-preload';
 import { cn } from '@/lib/utils';
 import { useTaskStore } from '@/stores/task-store';

@@ -2,11 +2,11 @@ import { AdminLayout } from '@/components/AdminLayout';
 import { AppShell } from '@/components/AppShell';
 import { LazyLoadBoundary, RouteLoadingFallback } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
+import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import {
   type PartnerWorkbenchSection,
   partnerWorkbenchRedirectTarget,
 } from '@/lib/partner-page-state';
-import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import { loadStockTasksPageRoute } from '@/lib/stock-page-preload';
 import {
   AccountClosureRecoveryPage,

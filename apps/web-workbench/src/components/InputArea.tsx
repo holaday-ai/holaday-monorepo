@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { isEnglishTask } from '@/lib/assistant-turn';
 import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import {
   detectSkillMentionTrigger,
@@ -36,7 +37,6 @@ import {
   skillSelectionFromTaskDraft,
   skillTaskAttachmentHandoffs,
 } from '@/lib/skills-page-state';
-import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { trpc } from '@/lib/trpc';
 import { uploadFailureMessage, uploadFile } from '@/lib/upload-file';
 import { cn } from '@/lib/utils';

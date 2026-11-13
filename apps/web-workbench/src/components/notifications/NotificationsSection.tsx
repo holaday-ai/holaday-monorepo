@@ -16,6 +16,7 @@
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { isAshareEntryEnabled } from '@/lib/feature-entries';
 import {
   NOTIFICATION_PLATFORM_LABEL,
   maskWebhookUrl,
@@ -28,7 +29,6 @@ import {
   notificationChannelsLoadErrorMessage,
 } from '@/lib/notification-channel-state';
 import { pageActionError } from '@/lib/page-error-copy';
-import { isAshareEntryEnabled } from '@/lib/feature-entries';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { Row, Section } from '@/pages/PageShell';
