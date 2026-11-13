@@ -27,8 +27,8 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useToast } from '@/components/ui/toast';
-import { isCosmicEnabled } from '@/lib/astrology';
 import { copyTextToClipboard } from '@/lib/copy-text';
+import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import {
   deletableTaskIdsForBatchSelection,
@@ -1146,7 +1146,9 @@ function FeatureNav({
       <SidebarGroupContent>
         <SidebarMenu>
           {filterSidebarFeatureNavItems(FEATURES, {
-            cosmicEnabled: isCosmicEnabled(),
+            // HIDE-1: 今日能量 / 股市任务 entries hidden unless their build flags are on.
+            cosmicEnabled: isDailyEnergyEntryEnabled(),
+            ashareEnabled: isAshareEntryEnabled(),
             partnerEnabled: isPartnerNavEnabled(),
           }).map((item) => {
             const { icon: Icon, label, href } = item;

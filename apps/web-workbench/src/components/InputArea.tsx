@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { isEnglishTask } from '@/lib/assistant-turn';
 import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import {
   detectSkillMentionTrigger,
@@ -252,7 +253,9 @@ export function InputArea({
       .query()
       .then((rows) => {
         if (cancelled || !mountedRef.current) return;
-        setMentionSkills(normalizeSkillRows(rows).filter((skill) => skill.enabled));
+        setMentionSkills(
+          withoutHiddenEntrySkills(normalizeSkillRows(rows)).filter((skill) => skill.enabled),
+        );
       })
       .catch(() => {
         if (!cancelled && mountedRef.current) {

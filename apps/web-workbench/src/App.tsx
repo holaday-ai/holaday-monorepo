@@ -2,6 +2,7 @@ import { AdminLayout } from '@/components/AdminLayout';
 import { AppShell } from '@/components/AppShell';
 import { LazyLoadBoundary, RouteLoadingFallback } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
+import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import {
   type PartnerWorkbenchSection,
   partnerWorkbenchRedirectTarget,
@@ -139,7 +140,14 @@ export function App(): JSX.Element {
           <Route path="/privacy" element={lazyElement(<PrivacyPage />)} />
           <Route path="/terms" element={lazyElement(<TermsPage />)} />
           <Route path="/500" element={lazyElement(<ServerErrorPage />)} />
-          <Route path="/cosmic-preview" element={lazyElement(<AstrologyPage />)} />
+          <Route
+            path="/cosmic-preview"
+            element={
+              <HiddenEntryGate enabled={isDailyEnergyEntryEnabled()}>
+                {lazyElement(<AstrologyPage />)}
+              </HiddenEntryGate>
+            }
+          />
           <Route path="/app" element={<AppAliasRedirect />} />
           <Route path="/roles" element={<LegacyRolesRedirect />} />
           <Route path="/tasks" element={<LegacyPathRedirect pathname="/history" />} />
@@ -207,11 +215,32 @@ export function App(): JSX.Element {
             <Route path="/plan" element={lazyElement(<PlanPage />)} />
             <Route path="/billing" element={lazyElement(<BillingPage />)} />
             <Route path="/usage" element={lazyElement(<UsagePage />)} />
-            <Route path="/cosmic" element={lazyElement(<AstrologyPage />)} />
+            <Route
+              path="/cosmic"
+              element={
+                <HiddenEntryGate enabled={isDailyEnergyEntryEnabled()}>
+                  {lazyElement(<AstrologyPage />)}
+                </HiddenEntryGate>
+              }
+            />
             <Route path="/history" element={lazyElement(<HistoryPage />)} />
             <Route path="/skills" element={lazyElement(<SkillsPage />)} />
-            <Route path="/stocks" element={lazyElement(<StockTasksPage />)} />
-            <Route path="/stocks/discovery" element={lazyElement(<StockDiscoveryPage />)} />
+            <Route
+              path="/stocks"
+              element={
+                <HiddenEntryGate enabled={isAshareEntryEnabled()}>
+                  {lazyElement(<StockTasksPage />)}
+                </HiddenEntryGate>
+              }
+            />
+            <Route
+              path="/stocks/discovery"
+              element={
+                <HiddenEntryGate enabled={isAshareEntryEnabled()}>
+                  {lazyElement(<StockDiscoveryPage />)}
+                </HiddenEntryGate>
+              }
+            />
             <Route path="/projects" element={lazyElement(<ProjectsPage />)} />
             <Route path="/projects/:projectId" element={lazyElement(<TeamProjectPage />)} />
             <Route
@@ -249,6 +278,21 @@ export function App(): JSX.Element {
 function AppAliasRedirect(): JSX.Element {
   const location = useLocation();
   return <Navigate to={{ pathname: '/', search: location.search, hash: location.hash }} replace />;
+}
+
+/**
+ * HIDE-1: a deep link to a hidden entry (股市任务 / 今日能量) goes back to the home page, no error.
+ * The page itself is not loaded.
+ */
+export function HiddenEntryGate({
+  enabled,
+  children,
+}: {
+  enabled: boolean;
+  children: ReactNode;
+}): JSX.Element {
+  if (!enabled) return <Navigate to="/" replace />;
+  return <>{children}</>;
 }
 
 function LegacyRolesRedirect(): JSX.Element {
