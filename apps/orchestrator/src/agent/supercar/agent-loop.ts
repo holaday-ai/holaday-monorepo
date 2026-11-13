@@ -74,7 +74,7 @@ import type {
 } from '../vision-loop/playwright-executor.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
-import type { BrowserControl } from './browser-control.js';
+import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from './browser-control.js';
 import { toBrowserPixels } from './browser-coordinates.js';
 import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
@@ -4008,6 +4008,7 @@ async function runSupercarTaskInternal(
             if (actVeto) return actVeto;
           }
         }
+        const actedSince = Date.now();
         const execResult = await executeComputerAction(
           executor,
           computerInput,
@@ -4117,6 +4118,8 @@ async function runSupercarTaskInternal(
         // with "all content must be type `text` if `is_error` is true".
         // So split the shape: on failure we send a text description,
         // on success we send the fresh screenshot.
+        // 协调方判定 (复审 #1): the person also used the page while this action ran.
+        const humanAlsoActed = opts.browserControl?.humanBusySince(actedSince) === true;
         if (execResult.ok) {
           toolResults.push({
             type: 'tool_result',
@@ -4130,6 +4133,14 @@ async function runSupercarTaskInternal(
                   data: shot.base64,
                 },
               },
+              ...(humanAlsoActed
+                ? [
+                    {
+                      type: 'text' as const,
+                      text: HUMAN_ALSO_ACTED_NOTE,
+                    },
+                  ]
+                : []),
             ],
           });
         } else {
@@ -4139,7 +4150,7 @@ async function runSupercarTaskInternal(
             content: [
               {
                 type: 'text',
-                text: `computer action failed: ${execResult.summary}`,
+                text: `computer action failed: ${execResult.summary}${humanAlsoActed ? `\n${HUMAN_ALSO_ACTED_NOTE}` : ''}`,
               },
             ],
             is_error: true,

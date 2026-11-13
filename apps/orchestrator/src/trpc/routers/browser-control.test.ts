@@ -95,7 +95,7 @@ describe('browser control route integration (REBUILD-4 共同操作)', () => {
           taskId: f.instance.taskId,
           direction: 'reload',
           controlLease: 'stale-lease',
-        }),
+        } as Parameters<typeof f.caller.browserNav>[0]),
       ).toEqual({ ok: true });
       expect(f.effects).toEqual(['reload', 'reload']);
       expect(binding.control.humanInputLog().count).toBe(2);

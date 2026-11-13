@@ -136,6 +136,5 @@ function actionKey(a: BrowserActionRequest): string {
     a.origin,
     a.observationRevision,
     a.actionDigest,
-    a.lease,
   ]);
 }

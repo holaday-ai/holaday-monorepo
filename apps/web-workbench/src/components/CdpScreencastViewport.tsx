@@ -60,7 +60,7 @@ import * as React from 'react';
 export type CdpScreencastStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
 /** What kind of input the server refused (the page changed under it). */
-export type CdpRefusedInput = 'key' | 'pointer';
+export type CdpRefusedInput = 'key' | 'pointer' | 'closed';
 
 /**
  * An input made while the newest frame is too old to name (a still page sends no frames by
@@ -74,6 +74,13 @@ interface WaitingInput {
   pointer: boolean;
   /** The layout (CSS size + scroll) of the frame the person acted on. */
   layout?: string;
+  /**
+   * 复审 #1 #1: the tab and revision of that frame. A fresh frame of another page (the assistant
+   * navigated meanwhile) may have the same layout; the input is sent only on the same tab and
+   * revision (a still page re-captured keeps its revision).
+   */
+  tabId?: string;
+  revision?: number;
 }
 /** What decides where a point on the screen lands on the page. */
 function layoutKey(g: BrowserFrameGeometry | null | undefined): string | undefined {
@@ -87,6 +94,8 @@ const OBSERVE_GAP_MS = 1000;
 const WAITING_INPUT_MS = 3000;
 const WAITING_INPUT_LIMIT = 64;
 const REFUSED_NOTICE_GAP_MS = 2000;
+/** 复审 #1 #1: how often a held input says 「busy」 to the server (the assistant yields 2 s). */
+const BUSY_SIGNAL_GAP_MS = 500;
 
 interface Props {
   /** Stable WS URL to /screencast-ws/:taskId, without credentials. */
@@ -192,6 +201,7 @@ export function CdpScreencastViewport({
   const waitingInputsRef = React.useRef<WaitingInput[]>([]);
   const lastObserveAtRef = React.useRef(0);
   const refusedNoticeAtRef = React.useRef(0);
+  const busySentAtRef = React.useRef(0);
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
     observationEpochRef.current++;
@@ -355,13 +365,21 @@ export function CdpScreencastViewport({
     }
     waitingInputsRef.current = [];
     // The page moved (a scroll, a navigation) since the press: that point now shows something
-    // else. Deliver none of it and ask the person to press again.
-    const current = layoutKey(geometryRef.current);
+    // else. Deliver none of it and ask the person to press again. 复审 #1 #1: another page of the
+    // same size and scroll is still another page — the tab and revision must be the pressed frame's.
+    const geometry = geometryRef.current;
+    const current = layoutKey(geometry);
+    const samePage = (item: WaitingInput): boolean =>
+      item.tabId !== undefined &&
+      item.tabId === geometry?.tabId &&
+      item.revision === geometry?.viewportRevision;
     if (
       viewportV2 &&
-      waiting.some((item) => item.pointer && (!item.layout || item.layout !== current))
+      waiting.some(
+        (item) => !samePage(item) || (item.pointer && (!item.layout || item.layout !== current)),
+      )
     ) {
-      notifyRefused('pointer');
+      notifyRefused(waiting.some((item) => item.pointer) ? 'pointer' : 'key');
       return;
     }
     for (const item of waiting) {
@@ -385,10 +403,28 @@ export function CdpScreencastViewport({
         return payload ? sendInput(payload) : false;
       }
       const now = Date.now();
+      const pressed = geometryRef.current;
       waitingInputsRef.current = [
         ...waitingInputsRef.current.filter((item) => now - item.at <= WAITING_INPUT_MS),
-        { at: now, build, pointer, layout: layoutKey(geometryRef.current) },
+        {
+          at: now,
+          build,
+          pointer,
+          layout: layoutKey(pressed),
+          tabId: pressed?.tabId,
+          revision: pressed?.viewportRevision,
+        },
       ].slice(-WAITING_INPUT_LIMIT);
+      // 复审 #1 #1: say 「busy」 now (no coordinates, no contents) so the assistant yields before
+      // this input can be sent; then ask for the fresh frame that names it.
+      if (viewportV2 && now - busySentAtRef.current >= BUSY_SIGNAL_GAP_MS) {
+        busySentAtRef.current = now;
+        try {
+          wsRef.current?.send('{"type":"busy"}');
+        } catch {
+          /* socket closing in this tick */
+        }
+      }
       requestObservation();
       return true;
     },
@@ -576,6 +612,11 @@ export function CdpScreencastViewport({
           const kind = msg.input ?? '';
           if (/^(mouse)?move$|^scroll$|^wheel$/i.test(kind)) return;
           notifyRefused(kind === 'key' ? 'key' : 'pointer');
+          return;
+        }
+        // 复审 #1 (建议修 #3): the task is stopping (or a run is starting) — the input was not sent.
+        if (viewportV2 && msg.type === 'input-closed') {
+          notifyRefused('closed');
           return;
         }
         if (viewportV2 && msg.type === 'observation-invalidated') {

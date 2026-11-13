@@ -365,4 +365,30 @@ describe('BrowserControl (REBUILD-4 共同操作)', () => {
     });
     expect(control.isSettled()).toBe(true);
   });
+  it('复审 #1 #1: a held input (pending) makes the person busy, not acting; humanBusySince', async () => {
+    const control = makeControl();
+    const since = Date.now();
+    expect(control.humanBusySince(since)).toBe(false);
+    control.noteHumanInput('pending');
+    expect(control.humanBusy()).toBe(true);
+    expect(control.humanInputLog().count).toBe(0);
+    expect(control.humanBusySince(since)).toBe(true);
+    const yielded = track(control.yieldToHuman());
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(yielded.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(yielded.done).toBe(true);
+    // A later window sees nothing; a scroll in it counts as busy too.
+    const later = Date.now() + 1;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(control.humanBusySince(later)).toBe(false);
+    control.noteHumanInput('scroll');
+    expect(control.humanBusySince(later)).toBe(true);
+    // A running input counts whatever its start.
+    const finish = deferred();
+    const input = control.runHuman(() => finish.promise);
+    expect(control.humanBusySince(Date.now() + 10_000)).toBe(true);
+    finish.resolve();
+    await input;
+  });
 });

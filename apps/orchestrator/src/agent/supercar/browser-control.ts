@@ -47,18 +47,26 @@ export type HumanInputKind =
   | 'keyDown'
   | 'keyUp'
   | 'insertText'
-  | 'navigate';
+  | 'navigate'
+  /**
+   * 复审 #1 #1: the viewer holds a press or key until a fresh frame names it — no coordinates, no
+   * contents. The person is busy (the assistant yields), not yet acting.
+   */
+  | 'pending';
 const ACTING_INPUTS: ReadonlySet<HumanInputKind> = new Set([
   'mouseDown',
   'keyDown',
   'insertText',
   'navigate',
 ]);
-const BUSY_INPUTS: ReadonlySet<HumanInputKind> = new Set([...ACTING_INPUTS, 'scroll']);
+const BUSY_INPUTS: ReadonlySet<HumanInputKind> = new Set([...ACTING_INPUTS, 'scroll', 'pending']);
 /** The times kept, enough for any one wait. */
 const INPUT_TIMES_KEPT = 1_000;
 /** REBUILD-4 第 2 条: the assistant's next action waits until the person has been still this long. */
 export const HUMAN_IDLE_MS = 2_000;
+/** 协调方判定 (复审 #1): said in the tool result when the person used the page while an action ran. */
+export const HUMAN_ALSO_ACTED_NOTE =
+  '（执行这一步时用户也在画面上操作，请重读页面：页面上的变化可能是用户造成的，不一定是这一步的结果。）';
 /** A person who never stops (holding a key, scrolling a long page) does not hold the task forever. */
 const MAX_YIELD_MS = 120_000;
 
@@ -122,6 +130,14 @@ export class BrowserControl {
   /** Whether the person was busy within the last `idleMs`. */
   humanBusy(idleMs = HUMAN_IDLE_MS): boolean {
     return this.pendingInputs > 0 || (this.lastBusyAt > 0 && this.now() - this.lastBusyAt < idleMs);
+  }
+
+  /**
+   * 协调方判定 (复审 #1): whether the person was busy (acting, scrolling, or an input still running)
+   * at any time since `since` (epoch ms) — e.g. while the assistant's own action ran.
+   */
+  humanBusySince(since: number): boolean {
+    return this.pendingInputs > 0 || this.lastBusyAt >= since;
   }
 
   /**

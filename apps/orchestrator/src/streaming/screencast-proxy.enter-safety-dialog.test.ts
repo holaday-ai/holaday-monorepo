@@ -68,7 +68,6 @@ it('FIX-61B 复审 #1: a dialog opened since typing — Enter on a stale frame n
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'key',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),

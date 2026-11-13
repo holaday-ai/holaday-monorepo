@@ -17,7 +17,7 @@ import type {
   SupercarAwaitingKind,
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
-import type { BrowserControl } from '../supercar/browser-control.js';
+import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from '../supercar/browser-control.js';
 import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
@@ -590,51 +590,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
       if (said)
         await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
-      if (waited.yielded && control.canAgentAct()) {
-        lastSnapshot = '';
-        const fresh = await tools.recoverObservation().catch(() => null);
-        return {
-          kind: 'skip',
-          message: `用户刚在画面上操作过（点击、打字或滚动），原计划的动作没有执行。按页面现在的样子重新判断：把用户的操作当线索（例如用户打开的页面、填过的框），不要撤回用户的操作，也不要重放旧动作；用户填过的输入框不要读、不要改。\nfresh_observation (未执行原动作):\n${fresh?.text ?? '无法重新观察当前页，请先 snapshot'}`,
-        };
-      }
+      if (waited.yielded && control.canAgentAct()) return humanActedSkip();
     }
-    if (phase === 'before' && control && !control.canAgentAct()) {
-      // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
-      // run then stopped as 「已取消」 on JD's login page, with no handover. A
-      // control closed by a failure (not by the user) is said. It cannot be
-      // handed to the user (review() refuses a control closed with an error,
-      // PR #291 review): a wall in front of the page is named, with a rerun,
-      // which pauses at the wall with a working control.
-      const state = control.snapshot();
-      logger.warn(
-        { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
-        'supercar: browser control unavailable at an action boundary',
-      );
-      // The user's cancel comes first, also when an input was cut off by it (review 4).
-      if (
-        !state.error ||
-        controller.signal.aborted ||
-        (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
-      )
-        return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
-      // The page may be mid-navigation: the wall probe gets 5 s (review).
-      const blocker = await Promise.race([
-        tools.blocker().catch(() => null),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
-      ]);
-      const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
-      return {
-        kind: 'stop',
-        outcome: {
-          status: 'failed',
-          reason: walled
-            ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次没法让你在画面上处理；请重新执行任务，遇到这个页面时我会停下，请你直接在画面上操作。`
-            : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
-          steps: 0,
-        },
-      };
-    }
+    if (phase === 'before' && control && !control.canAgentAct()) return controlClosedStop();
     if (phase === 'before' && tools.observation) {
       try {
         await tools.observation.validate(action);
@@ -679,6 +637,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
     const targetPage = changedTab ? tools.page : (resolvedPage() ?? tools.page);
     const result = await baseGateAction(targetPage)(action, phase);
+    // 复审 #1 #2: the checks above awaited (the page read, the policy, maybe the person's
+    // confirmation of a sensitive step). The person may have acted meanwhile: check again right
+    // before the action is sent — nothing awaits between here and execute (unified-browser-loop).
+    if (phase === 'before' && result.kind === 'proceed' && control) {
+      if (!control.canAgentAct()) return controlClosedStop();
+      if (control.humanBusy()) {
+        await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
+        await control.yieldToHuman();
+        if (!control.canAgentAct()) return controlClosedStop();
+        return humanActedSkip();
+      }
+    }
     if (result.kind === 'proceed' && replay) {
       try {
         // Authorization comes from the host gate, never from page text.
@@ -688,6 +658,54 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       } catch {}
     }
     return result;
+  };
+  /** The person used the page: the planned action is void; re-read and decide again. */
+  const humanActedSkip = async (): Promise<{ kind: 'skip'; message: string }> => {
+    lastSnapshot = '';
+    const fresh = await tools.recoverObservation().catch(() => null);
+    return {
+      kind: 'skip',
+      message: `用户刚在画面上操作过（点击、打字或滚动），原计划的动作没有执行。按页面现在的样子重新判断：把用户的操作当线索（例如用户打开的页面、填过的框），不要撤回用户的操作，也不要重放旧动作；用户填过的输入框不要读、不要改。\nfresh_observation (未执行原动作):\n${fresh?.text ?? '无法重新观察当前页，请先 snapshot'}`,
+    };
+  };
+  const controlClosedStop = async (): Promise<
+    Extract<Awaited<ReturnType<typeof gateAction>>, { kind: 'stop' }>
+  > => {
+    if (!control) return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
+    // run then stopped as 「已取消」 on JD's login page, with no handover. A
+    // control closed by a failure (not by the user) is said. It cannot be
+    // handed to the user (review() refuses a control closed with an error,
+    // PR #291 review): a wall in front of the page is named, with a rerun,
+    // which pauses at the wall with a working control.
+    const state = control.snapshot();
+    logger.warn(
+      { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
+      'supercar: browser control unavailable at an action boundary',
+    );
+    // The user's cancel comes first, also when an input was cut off by it (review 4).
+    if (
+      !state.error ||
+      controller.signal.aborted ||
+      (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
+    )
+      return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    // The page may be mid-navigation: the wall probe gets 5 s (review).
+    const blocker = await Promise.race([
+      tools.blocker().catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+    const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
+    return {
+      kind: 'stop',
+      outcome: {
+        status: 'failed',
+        reason: walled
+          ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次没法让你在画面上处理；请重新执行任务，遇到这个页面时我会停下，请你直接在画面上操作。`
+          : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
+        steps: 0,
+      },
+    };
   };
   try {
     binding = opts.browserControlFactory?.();
@@ -909,8 +927,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             submit: action.tool === 'type' && action.submit === true,
             role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
           };
+        const actedSince = Date.now();
         const result = await tools.execute(action);
         page = tools.page;
+        // 协调方判定 (复审 #1): the person also used the page while this action ran — what changed
+        // may be theirs, not this action's result.
+        if (control?.humanBusySince(actedSince))
+          result.text = `${result.text}\n${HUMAN_ALSO_ACTED_NOTE}`;
         lastTriggers = result.effect?.triggers ?? [];
         // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
         // logged and passed (read-only-effect-policy); anything that may change something asks.

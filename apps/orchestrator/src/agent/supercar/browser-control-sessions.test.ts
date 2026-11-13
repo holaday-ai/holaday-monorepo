@@ -112,4 +112,37 @@ describe('task browser control sessions', () => {
     expect(() => sessions.review(instance)).toThrow('browser_input_outcome_unknown');
     expect(sessions.openForViewer(instance)).toBeNull();
   });
+  it('复审 #1: a viewer holding an input makes the running assistant yield; never opens a control', () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'task', userId: 'owner' };
+    sessions.noteViewerBusy(instance);
+    expect(sessions.openForViewer(instance)).toBeNull();
+    const run = sessions.start(instance);
+    expect(run.control.humanBusy()).toBe(false);
+    sessions.noteViewerBusy(instance);
+    expect(run.control.humanBusy()).toBe(true);
+    expect(run.control.humanInputLog().count).toBe(0);
+    run.finish();
+    // After the run, nothing to yield: no review control is opened by it.
+    sessions.noteViewerBusy(instance);
+    expect(sessions.get(instance, 'owner', 'task')?.control).toBe(run.control);
+  });
+
+  it('复审 #1 (建议修 #2/#3): while a stop winds down the closed control refuses; review only after finish', async () => {
+    const sessions = new BrowserControlSessions();
+    const instance = { taskId: 'task', userId: 'owner' };
+    const run = sessions.start(instance);
+    run.control.close();
+    // The runner has not finished: the viewer gets the closed control, which refuses the input.
+    const winding = sessions.openForViewer(instance);
+    expect(winding?.control).toBe(run.control);
+    await expect(winding?.control.runHuman(async () => {}, 'mouseDown')).rejects.toThrow(
+      'browser_control_closed',
+    );
+    expect(() => sessions.review(instance)).toThrow('browser_runner_active');
+    run.finish();
+    const review = sessions.openForViewer(instance);
+    expect(review?.control).not.toBe(run.control);
+    expect(review?.control.canAgentAct()).toBe(true);
+  });
 });

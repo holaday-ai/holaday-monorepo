@@ -1088,7 +1088,11 @@ function CloudBrowserPanel({
   const handleInputRefused = React.useCallback(
     (input: CdpRefusedInput) => {
       toast.show(
-        input === 'key' ? '页面刚变了，这一下没发出去，请再按一次' : '页面刚变了，再点一次',
+        input === 'closed'
+          ? '任务正在停止，这一下没发出去，稍等再操作'
+          : input === 'key'
+            ? '页面刚变了，这一下没发出去，请再按一次'
+            : '页面刚变了，再点一次',
         'info',
       );
     },

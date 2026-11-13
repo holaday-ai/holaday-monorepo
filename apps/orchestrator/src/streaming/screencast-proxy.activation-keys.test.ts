@@ -58,7 +58,6 @@ it('real proxy: Enter/Space on a superseded frame do not fire a button focus mov
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'key',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),

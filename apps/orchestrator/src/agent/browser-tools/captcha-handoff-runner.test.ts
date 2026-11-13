@@ -357,3 +357,97 @@ it('REBUILD-4: an input from the person within 2 s voids the planned action; the
     await f.run;
   }
 }, 20000);
+
+it('复审 #1 #2: the person acting while the policy check runs voids the action, checked right before it is sent', async () => {
+  const requests: unknown[] = [];
+  let control: BrowserControl | undefined;
+  let acted = false;
+  const f = await scenario(
+    3000,
+    [
+      { name: 'navigate', input: { url: 'https://alt.example/fact' } },
+      { name: 'navigate', input: { url: 'https://alt.example/stale-plan' } },
+      { name: 'read_page', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: 'Alternate public fact',
+          evidence: 'Alternate public fact',
+        },
+      },
+    ],
+    {
+      timeoutMs: 15_000,
+      // The policy check of the second navigation awaits; the person clicks meanwhile.
+      onBeforeAction: async (item) => {
+        if (item.kind === 'navigate' && /stale-plan/.test(item.url ?? '') && !acted) {
+          acted = true;
+          await control?.runHuman(async () => {}, 'mouseDown');
+        }
+        return { allowed: true };
+      },
+    },
+    async (_turn, c, request) => {
+      control = c;
+      requests.push(request);
+    },
+  );
+  try {
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    expect(acted).toBe(true);
+    // The navigation whose check the person's click overlapped never ran.
+    expect(f.requested).toEqual(['https://alt.example/fact']);
+    const third = JSON.stringify(requests[2]);
+    expect(third).toContain('用户刚在画面上操作过');
+    expect(third).toContain('fresh_observation');
+  } finally {
+    f.control.close();
+    await f.run;
+  }
+}, 20000);
+
+it('协调方判定 (复审 #1): the person acting while the assistant’s action runs is said in its result', async () => {
+  const requests: unknown[] = [];
+  const f = await scenario(
+    3000,
+    [
+      { name: 'read_page', input: {} },
+      { name: 'navigate', input: { url: 'https://alt.example/slow' } },
+      { name: 'read_page', input: {} },
+      { name: 'read_page', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: 'Alternate public fact',
+          evidence: 'Alternate public fact',
+        },
+      },
+    ],
+    { timeoutMs: 15_000 },
+    async (_turn, _c, request) => {
+      requests.push(request);
+    },
+  );
+  // While the page loads, the person scrolls it.
+  await f.page.route('https://alt.example/slow', async (route) => {
+    f.control.noteHumanInput('scroll');
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: '<h1>Alternate source</h1><p>Alternate public fact</p>',
+    });
+  });
+  try {
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    const third = JSON.stringify(requests[2]);
+    expect(third).toContain('执行这一步时用户也在画面上操作，请重读页面');
+    // An action with no input from the person says nothing of the kind.
+    expect(JSON.stringify(requests[1])).not.toContain('执行这一步时用户也在画面上操作');
+  } finally {
+    f.control.close();
+    await f.run;
+  }
+}, 20000);

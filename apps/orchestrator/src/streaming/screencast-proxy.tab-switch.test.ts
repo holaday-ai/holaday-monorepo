@@ -48,7 +48,6 @@ it('input aimed at a tab the assistant left is dropped, the stream follows, the 
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'click',
-        lease: '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),

@@ -74,7 +74,6 @@ it('FIX-61B 复审 #1: in a frame, Enter on a stale frame never fires the button
         origin: 'https://fixture.example',
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'key',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),

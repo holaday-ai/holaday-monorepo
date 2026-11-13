@@ -110,7 +110,6 @@ it.each([false, true])(
           origin: 'https://fixture.example',
           observationRevision: currentFrame().viewportRevision,
           actionDigest: 'exact-button',
-          lease: envelope.controlLease ?? '',
         },
         decision: { kind: 'allow', sensitive: true },
       });
@@ -132,7 +131,6 @@ it.each([false, true])(
           origin: 'https://fixture.example',
           observationRevision: currentFrame().viewportRevision,
           actionDigest: 'search-button',
-          lease: envelope.controlLease ?? '',
         },
         decision: { kind: 'allow', sensitive: false },
       });

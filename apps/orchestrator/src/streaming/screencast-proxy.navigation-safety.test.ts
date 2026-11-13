@@ -158,7 +158,6 @@ async function harness(path: string) {
         origin,
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'input',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),

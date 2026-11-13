@@ -7,12 +7,10 @@ import type { BrowserInstance } from '../browser-pool/types.js';
 import type { InputEnvelope } from './screencast-input-bridge.js';
 
 /**
- * Manual-input grant for the user who holds the human lease of this task's
- * browser. FIX-61 P0: this used to require an active CAPTCHA hand-off, so every
- * other takeover (the user's own 「我来操作」, or pressing the screen) was
- * silently refused with every click and key dropped. The grant is still bound
- * to the live lease, the human phase, the current observation and the target
- * node; AI input never passes here.
+ * Manual-input grant for the task owner's input on this task's browser. FIX-61 P0: this used to
+ * require an active CAPTCHA hand-off, so every other input was silently refused. REBUILD-4: no lease —
+ * the grant is bound to the task's open control, the current observation and the target node; AI
+ * input never passes here.
  */
 export async function authorizeHumanViewportInput(
   instance: BrowserInstance,
@@ -77,10 +75,9 @@ export async function authorizeHumanViewportInput(
         actionDigest: createHash('sha256')
           .update(JSON.stringify([target, envelope.observation, payload]))
           .digest('hex'),
-        lease: envelope.controlLease!,
       },
-      // The human controls this lease explicitly. This grants no AI input and
-      // is revoked immediately when the user hands back or the session ends.
+      // The person's own input on the task's open control. This grants no AI input and ends
+      // when the task's run is stopped or the browser session changes.
       decision: { kind: 'allow', sensitive: false },
     };
   } finally {

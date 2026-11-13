@@ -481,6 +481,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         streamer?.requestFrameRefresh();
         return;
       }
+      // 复审 #1 #1: the person pressed while this screen waits for a fresh frame — the assistant
+      // yields now, before the input itself can be sent. Only on the task owner's own stream.
+      if (args.viewportV2 && raw.toString() === '{"type":"busy"}') {
+        if (opts.pool.peek(args.instance.taskId) === args.instance)
+          browserControlSessions.noteViewerBusy(args.instance);
+        streamer?.requestFrameRefresh();
+        return;
+      }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
         // DEPLOY-61 重跑 第 0 步 #2: the checks are unchanged; this screen is only told that its
@@ -500,6 +508,21 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               /* unreadable: pointer */
             }
             args.ws.send(JSON.stringify({ type: 'input-expired', input: kind }));
+          } catch {
+            /* socket closed between readyState and send */
+          }
+        }
+        // 复审 #1 (建议修 #3): a stop still winding down (control closed, runner not finished) or a
+        // run starting refuses the input — say so instead of nothing happening.
+        if (
+          args.viewportV2 &&
+          /^(?:browser_control_closed|browser_control_unavailable|browser_runner_active)$/.test(
+            errMsg(err),
+          ) &&
+          args.ws.readyState === WebSocket.OPEN
+        ) {
+          try {
+            args.ws.send(JSON.stringify({ type: 'input-closed' }));
           } catch {
             /* socket closed between readyState and send */
           }

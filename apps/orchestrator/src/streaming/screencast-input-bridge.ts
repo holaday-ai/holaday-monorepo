@@ -24,8 +24,6 @@ interface DeferredScreencastInputBridgeOptions {
 export interface InputEnvelope {
   type?: string;
   payload?: InputMessage;
-  /** REBUILD-4: no longer used (no lease); ignored when an old client still sends it. */
-  controlLease?: string;
   observation?: BrowserFrameReference;
   confirmationNonce?: string;
 }

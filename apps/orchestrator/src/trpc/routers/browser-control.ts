@@ -48,9 +48,8 @@ export const browserNavProcedure = protectedProcedure
     z.object({
       taskId: z.string().optional(),
       direction: z.enum(['back', 'forward', 'reload', 'goto']),
+      // REBUILD-4: no lease. An old client's extra controlLease key is stripped by zod (accepted).
       url: z.string().max(2048).optional(),
-      /** REBUILD-4: ignored (no lease); still accepted from an old client. */
-      controlLease: z.string().optional(),
     }),
   )
   .mutation(async ({ ctx, input }) => {
