@@ -1,5 +1,5 @@
 import { AdminLayout } from '@/components/AdminLayout';
-import { AppShell } from '@/components/AppShell';
+import { AppShell, useAppShellContext } from '@/components/AppShell';
 import { LazyLoadBoundary, RouteLoadingFallback } from '@/components/LazyLoadBoundary';
 import { ToastProvider } from '@/components/ui/toast';
 import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
@@ -98,6 +98,9 @@ const VideoEditingRoute = lazy(() =>
   import('@/features/video-editing/VideoEditingPanel').then((module) => ({
     default: module.VideoEditingRoute,
   })),
+);
+const BrowserHomePage = lazy(() =>
+  import('@/pages/BrowserHomePage').then((module) => ({ default: module.BrowserHomePage })),
 );
 const VideoPage = lazy(() =>
   import('@/pages/VideoPage').then((module) => ({ default: module.VideoPage })),
@@ -249,6 +252,7 @@ export function App(): JSX.Element {
             />
             <Route path="/starred" element={lazyElement(<StarredPage />)} />
             <Route path="/files" element={lazyElement(<FilesPage />)} />
+            <Route path="/browser" element={<BrowserHomeRoute />} />
             <Route path="/video" element={<VideoGate />} />
             <Route path="/video/edit/:projectId" element={lazyElement(<VideoEditingRoute />)} />
             <Route path="/image" element={lazyElement(<ImagePage />)} />
@@ -293,6 +297,33 @@ export function HiddenEntryGate({
 }): JSX.Element {
   if (!enabled) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * BROWSER-HOME-1:「云浏览器」is reachable only with auth.me.browserHomeEnabled (server flag +
+ * allowlist). Off → back to the home page like a hidden entry; null = auth.me not loaded yet.
+ */
+export function BrowserHomeGate({
+  enabled,
+  children,
+}: {
+  enabled: boolean | null;
+  children: ReactNode;
+}): JSX.Element {
+  if (enabled === null) return <RouteLoadingFallback />;
+  if (!enabled) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function BrowserHomeRoute(): JSX.Element {
+  const { me } = useAppShellContext();
+  return (
+    <BrowserHomeGate enabled={me ? me.browserHomeEnabled : null}>
+      {lazyElement(
+        <BrowserHomePage region={me?.modelDataRegion ?? null} plan={me?.plan ?? 'free'} />,
+      )}
+    </BrowserHomeGate>
+  );
 }
 
 function LegacyRolesRedirect(): JSX.Element {

@@ -117,6 +117,24 @@ export class BrowserControlSessions {
     return entry;
   }
 
+  /**
+   * BROWSER-HOME-1: wait (at most `timeoutMs`) for the person's inputs on this browser's current
+   * control to settle, so a run can start() on it. True when nothing is in flight (or no control).
+   */
+  async inputSettledWithin(instance: BrowserBinding, timeoutMs: number): Promise<boolean> {
+    const entry = this.entries.get(instance);
+    if (!entry || entry.control.isSettled()) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+    });
+    try {
+      return await Promise.race([entry.control.settled().then(() => true as const), timedOut]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async quarantine(instance: BrowserBinding, stop: () => Promise<boolean>): Promise<void> {
     const entry = this.entries.get(instance);
     if (!entry) return;

@@ -72,6 +72,11 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    */
   retentionTtlMs?: number;
   /**
+   * BROWSER-HOME-1: this instance's own idle timeout (pool.setIdleTimeout). Unset = the pool's
+   * configured idleTimeoutMs. Only the idle GC reads it; retention leases are unaffected.
+   */
+  idleTimeoutMs?: number;
+  /**
    * Optimization #3 R1 — viewport profile this instance was spawned
    * with. Used by the CDP streamer to cap frame dimensions to the
    * Brave's logical viewport, and by /screencast-ws/ handlers to
@@ -81,6 +86,13 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    */
   viewportProfile?: BrowserViewportProfile;
 }
+
+/**
+ * BROWSER-HOME-1: pool key prefix of a user's task-less cloud browser (`bhs_<userId>`). These
+ * instances have no tasks row; peekActiveForUser never returns them, so legacy user-keyed routes
+ * keep reaching the user's task browsers only.
+ */
+export const BROWSER_HOME_SESSION_PREFIX = 'bhs_';
 
 /** What the task will browse; only a matching site grant applies to it. */
 /**
