@@ -70,8 +70,34 @@ export async function serveSearchResults(
       pages.set(at, searchResultsHtml(page));
       return at;
     },
-    dispose: () => context.unroute(pattern, handler),
+    dispose: () => unrouteWithin(context, pattern, handler),
   };
+}
+
+/**
+ * DEPLOY-R5 (BestBuy hang, 4/4 on the candidate): on some pages Playwright's `context.unroute`
+ * never settles — the run itself had finished and the task then waited for the watchdog
+ * (~10 min). Taking a route down is cleanup: it is given a few seconds and never holds up the
+ * result. The task's browser context goes with the task; a later fallback registers its own
+ * route, which takes precedence over a leftover one.
+ */
+export const UNROUTE_WAIT_MS = 3_000;
+export async function unrouteWithin(
+  context: BrowserContext,
+  url: Parameters<BrowserContext['unroute']>[0],
+  handler: Parameters<BrowserContext['unroute']>[1],
+  ms = UNROUTE_WAIT_MS,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([context.unroute(url, handler).catch(() => {}), late]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**

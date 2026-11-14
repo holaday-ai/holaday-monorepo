@@ -2,7 +2,12 @@ import type { BrowserContext, Route } from 'playwright';
 import { TEXT_URL_RE, trimTextUrl } from '../../execution/text-urls.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from '../supercar/index.js';
 import type { SearchProvider, WebSearchResult } from './search-provider.js';
-import { engineResultsQuery, redirectHtml, serveSearchResults } from './search-results-page.js';
+import {
+  engineResultsQuery,
+  redirectHtml,
+  serveSearchResults,
+  unrouteWithin,
+} from './search-results-page.js';
 
 type Engine = 'Google' | 'Bing' | 'DuckDuckGo' | '百度';
 export interface SearchWall {
@@ -275,7 +280,7 @@ async function guardEngineSearches(
     });
   };
   await context.route(matcher, handler);
-  return () => context.unroute(matcher, handler);
+  return () => unrouteWithin(context, matcher, handler);
 }
 
 /**
