@@ -105,6 +105,14 @@ describe('G2g s01: a search answer about a name like the assistant’s own comes
     expect(outcome.summary).toContain('Day of AI');
   });
 
+  it('a price sentence with 「也是我」 in it is kept whole (G2g review)', async () => {
+    const answer = `${CLEAN}这也是我看到的最低价 ¥99。`;
+    const { adapter, requests } = adapterSaying([answer]);
+    const outcome = await run(adapter);
+    expect(requests).toHaveLength(1);
+    expect(outcome.summary).toContain('这也是我看到的最低价 ¥99。');
+  });
+
   it('an answer that is only a self-description goes to the browser (no page said it)', async () => {
     const only = 'HOLA DAY AI 是 HOLA DAY 推出的智能助手（也就是我）。';
     const { adapter } = adapterSaying([only, only]);
@@ -121,6 +129,14 @@ describe('G2g s01: a search answer about a name like the assistant’s own comes
     expect(selfIdentitySentences('它的口号是“我就是你的浏览器”。', [])).toEqual([]);
     expect(selfIdentitySentences('电影《我的名字》于 2020 年上映。', [])).toEqual([]);
     expect(selfIdentitySentences('我们团队发布了新版。', [])).toEqual([]);
+    // G2g review: 「也是我」 inside a sentence about something else is no self-description.
+    expect(selfIdentitySentences('这也是我看到的最低价 ¥99。', [])).toEqual([]);
+    expect(selfIdentitySentences('这就是我找到的第一条结果：Day of AI。', [])).toEqual([]);
+    expect(selfIdentitySentences('我就是在官网上读到这个价格的。', [])).toEqual([]);
+    expect(
+      selfIdentitySentences('HOLA DAY AI 是 HOLA DAY 推出的智能助手（也就是我）。', []),
+    ).toHaveLength(1);
+    expect(selfIdentitySentences('你问的 HOLA DAY，正是我。', [])).toHaveLength(1);
     expect(
       selfIdentitySentences('**"HOLA DAY"** 是我自己的名字——我是一个浏览器任务执行助手。', []),
     ).toHaveLength(1);
