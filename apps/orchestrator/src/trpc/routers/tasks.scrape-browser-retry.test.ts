@@ -473,6 +473,17 @@ describe('a web lookup the scrape lane could not answer', () => {
     expect(write).not.toContain('web_search');
   });
 
+  it('复审: a writing task that searched first keeps the generate fallback after a timeout', async () => {
+    const WRITE = '搜索最新资料，帮我写一篇关于新能源汽车的3000字深度报告';
+    const spies = setup('', [], failedSearch('synthesis', '内容整理超时，请简化任务后重试。'));
+    const generate = vi
+      .spyOn(generating, 'runGenerateTask')
+      .mockResolvedValue(generated('# 新能源汽车深度报告\n\n正文……'.repeat(20)));
+    await tasksRouter.createCaller(context()).create({ intent: WRITE, expertMode: 'normal' });
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(spies.retryCreate).not.toHaveBeenCalled();
+  });
+
   it('a search with no query is not handed to the browser', async () => {
     const spies = setup('', [], failedSearch('input', '请输入要搜索的内容。', []));
     vi.spyOn(generating, 'runGenerateTask').mockResolvedValue(

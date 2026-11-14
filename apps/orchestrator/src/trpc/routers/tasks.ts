@@ -46,7 +46,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { explainExecutionMode, asksForWriting } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -4967,10 +4967,13 @@ export const tasksRouter = router({
                   // web_search call as the answer): a web lookup the scrape lane could not
                   // answer goes to the cloud browser; if that cannot start it fails honestly.
                   // It is never answered by generate. A search with no query is not a lookup.
+                  // 复审: a task that writes from what it searched (「搜索最新资料，帮我写一篇…报告」)
+                  // is not a lookup — it keeps the generate fallback (300 s, the writing lane).
                   const searchLookup =
                     scrapeOutcome.status === 'failed' &&
                     scrapeOutcome.source === 'search' &&
-                    scrapeOutcome.failureKind !== 'input';
+                    scrapeOutcome.failureKind !== 'input' &&
+                    !asksForWriting(input.intent);
                   if (
                     searchLookup &&
                     !pageUnreadable &&
