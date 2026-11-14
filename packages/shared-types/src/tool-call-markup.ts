@@ -112,12 +112,20 @@ function stripToolJson(text: string): string {
     const start = match.index ?? 0;
     if (start < from) continue;
     // An inline call (`BROWSE:web_search{…}`) goes from its label; its JSON starts at the brace.
-    const end = jsonBlockEnd(text, text.indexOf('{', start));
-    // An unclosed call (truncated stream) runs to the end of its line.
+    const brace = text.indexOf('{', start);
+    const end = jsonBlockEnd(text, brace);
+    // An unclosed call (truncated stream) runs to the end of its line — or, after a tool-named
+    // opener (「web_search>\n{"query": …」, LEAK-2 复审), to the end of the text: the stream
+    // stopped inside the arguments.
     // `web_search({…})`: the closing parenthesis goes with it.
     const close = end > 0 ? /^[ \t]*\)/.exec(text.slice(end)) : null;
+    const namedOpener = text.slice(start, brace).includes('>');
     const stop =
-      end > 0 ? end + (close?.[0].length ?? 0) : text.indexOf('\n', start) + 1 || text.length;
+      end > 0
+        ? end + (close?.[0].length ?? 0)
+        : namedOpener
+          ? text.length
+          : text.indexOf('\n', start) + 1 || text.length;
     out += text.slice(from, start);
     from = stop;
   }

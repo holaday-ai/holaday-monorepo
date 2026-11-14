@@ -271,3 +271,20 @@ describe('LEAK-2 复审', () => {
     expect(deliverableAnswer(text)).toBe(shown);
   });
 });
+
+describe('LEAK-2 复审 #2 · a stream cut off inside the arguments', () => {
+  it.each([
+    'web_search>\n{"query": "2025年诺贝尔文学奖得主"',
+    '......\n<web_search>\n{"query": "x", "n": 3',
+  ])('%s is no answer and none of it is shown', (text) => {
+    expect(deliverableAnswer(text)).toBeNull();
+    expect(stripToolCallMarkup(text)).not.toContain('query');
+  });
+  it('an answer before a truncated call stays', () => {
+    expect(
+      deliverableAnswer(
+        '2025 年诺贝尔文学奖得主是 László Krasznahorkai。\n<web_search>\n{"query": "x"',
+      ),
+    ).toBe('2025 年诺贝尔文学奖得主是 László Krasznahorkai。');
+  });
+});
