@@ -47,7 +47,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode, asksForWriting } from '../../agent/intent-classifier.js';
+import { asksForWriting, explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
