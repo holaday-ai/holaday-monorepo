@@ -2,6 +2,7 @@ import type {
   CoreModelRuntimeEnvironment,
   CoreModelRuntimeInput,
   CoreModelRuntimeUnavailableReason,
+  QwenEndpointOverride,
 } from '../llm/core-model-runtime.js';
 import { modelGateway } from '../llm/gateway/model-gateway.js';
 import type { ModelGatewayEnvironment } from '../llm/gateway/settings.js';
@@ -28,6 +29,8 @@ export function resolveSuggestionsProviderRoute(input: {
   environment: SuggestionsProviderEnvironment;
   userExternalId: string;
   userModelDataRegion: unknown;
+  /** BROWSER-HOME-1: set by tasks.create for an admitted cloud-browser task only. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: CoreModelRuntimeInput['createMessages'];
 }): SuggestionsProviderRoute {
   const runtime = modelGateway({
@@ -38,6 +41,7 @@ export function resolveSuggestionsProviderRoute(input: {
       scope: 'personal',
       userRegion: input.userModelDataRegion,
     },
+    ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
   });
 
   if (runtime.kind === 'unavailable') {

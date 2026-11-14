@@ -17,7 +17,7 @@ import type {
   SupercarAwaitingKind,
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
-import type { BrowserControl } from '../supercar/browser-control.js';
+import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from '../supercar/browser-control.js';
 import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
@@ -453,7 +453,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         execution: {
           actionKind,
           actionSummary: message,
-          ok: actionKind === 'browser_local_wall' || actionKind === 'browser_rescue',
+          ok:
+            actionKind === 'browser_local_wall' ||
+            actionKind === 'browser_rescue' ||
+            actionKind === 'browser_human_wait',
           message,
           ...(errorCode ? { errorCode } : {}),
           ...(blockerEvidence ? { blockerEvidence } : {}),
@@ -487,19 +490,52 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         }),
       );
       if (controller.signal.aborted) return null;
+      const since = Date.now();
+      let watch: ReturnType<typeof setInterval> | undefined;
       return await new Promise<string | null>((resolve) => {
         const timer = setTimeout(() => {
           parked.delete(opts.taskId);
+          if (watch) clearInterval(watch);
           resolve(null);
         }, HANDOFF_WAIT_MS);
-        parked.set(opts.taskId, {
+        const entry: ParkedTask = {
           resolve: (value) => {
             clearTimeout(timer);
+            if (watch) clearInterval(watch);
             resolve(value);
           },
-          abort: () => resolve(null),
+          abort: () => {
+            if (watch) clearInterval(watch);
+            resolve(null);
+          },
           intent: opts.intent,
-        });
+        };
+        parked.set(opts.taskId, entry);
+        // REBUILD-4 第 6 条: at a login / permission wall the person works the page directly (no
+        // takeover). Once they have acted, are still, and the wall is gone, the assistant goes on
+        // by itself — a reply in the chat still works as before.
+        if (control && (awaitingKind === 'login' || awaitingKind === 'permission')) {
+          let checking = false;
+          watch = setInterval(() => {
+            if (checking || parked.get(opts.taskId) !== entry || !control?.canAgentAct()) return;
+            if (control.humanInputLog(since).count === 0 || control.humanBusy()) return;
+            checking = true;
+            void (async () => {
+              try {
+                const hit = await tools.blocker().catch(() => undefined);
+                const gone =
+                  hit === null ||
+                  (hit !== undefined && 'disposition' in hit && hit.disposition === 'continue');
+                if (!gone || parked.get(opts.taskId) !== entry) return;
+                if (!((await opts.onWallPassed?.().catch(() => false)) ?? false)) return;
+                parked.delete(opts.taskId);
+                entry.resolve('（用户已在画面上完成了这一步，页面已经过了）');
+              } finally {
+                checking = false;
+              }
+            })();
+          }, 1_500);
+        }
       });
     } finally {
       await safe(() => opts.onAwaitingReplyRelease?.());
@@ -541,54 +577,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         },
       };
 
-    if (phase === 'before' && control && !control.canAgentAct()) {
-      await replay?.pause();
-      const boundary = await control.checkpoint(async () => {
-        lastSnapshot = '';
+    // REBUILD-4 第 2、3、7 条: the person may use the page at any time. While they are busy (an
+    // input in the last 2 s) the assistant's planned action is void: it waits until they have been
+    // still 2 s, re-reads the page and decides again from what it now shows — the person's change
+    // is a clue to follow, never undone.
+    if (phase === 'before' && control?.canAgentAct()) {
+      let said = false;
+      const waited = await control.yieldToHuman({
+        onWait: () => {
+          said = true;
+        },
       });
-      if (boundary.resumed) replay?.resume();
-      if (boundary.resumed)
-        return {
-          kind: 'skip',
-          message: '用户已交还控制权；从当前页面重新 snapshot，不重放旧动作。',
-        };
-      if (!control.canAgentAct()) {
-        // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
-        // run then stopped as 「已取消」 on JD's login page, with no handover. A
-        // control closed by a failure (not by the user) is said. It cannot be
-        // handed to the user (review() refuses a control closed with an error,
-        // PR #291 review): a wall in front of the page is named, with a rerun,
-        // which pauses at the wall with a working control.
-        const state = control.snapshot();
-        logger.warn(
-          { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
-          'supercar: browser control unavailable at an action boundary',
-        );
-        // The user's cancel comes first, also when an input was cut off by it (review 4).
-        if (
-          !state.error ||
-          controller.signal.aborted ||
-          (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
-        )
-          return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
-        // The page may be mid-navigation: the wall probe gets 5 s (review).
-        const blocker = await Promise.race([
-          tools.blocker().catch(() => null),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
-        ]);
-        const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
-        return {
-          kind: 'stop',
-          outcome: {
-            status: 'failed',
-            reason: walled
-              ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次无法交给你接管；请重新执行任务，遇到这个页面时会暂停交给你处理。`
-              : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
-            steps: 0,
-          },
-        };
-      }
+      if (said)
+        await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
+      if (waited.yielded && control.canAgentAct()) return humanActedSkip();
     }
+    if (phase === 'before' && control && !control.canAgentAct()) return controlClosedStop();
     if (phase === 'before' && tools.observation) {
       try {
         await tools.observation.validate(action);
@@ -633,6 +637,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
     const targetPage = changedTab ? tools.page : (resolvedPage() ?? tools.page);
     const result = await baseGateAction(targetPage)(action, phase);
+    // 复审 #1 #2: the checks above awaited (the page read, the policy, maybe the person's
+    // confirmation of a sensitive step). The person may have acted meanwhile: check again right
+    // before the action is sent — nothing awaits between here and execute (unified-browser-loop).
+    if (phase === 'before' && result.kind === 'proceed' && control) {
+      if (!control.canAgentAct()) return controlClosedStop();
+      if (control.humanBusy()) {
+        await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
+        await control.yieldToHuman();
+        if (!control.canAgentAct()) return controlClosedStop();
+        return humanActedSkip();
+      }
+    }
     if (result.kind === 'proceed' && replay) {
       try {
         // Authorization comes from the host gate, never from page text.
@@ -642,6 +658,54 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       } catch {}
     }
     return result;
+  };
+  /** The person used the page: the planned action is void; re-read and decide again. */
+  const humanActedSkip = async (): Promise<{ kind: 'skip'; message: string }> => {
+    lastSnapshot = '';
+    const fresh = await tools.recoverObservation().catch(() => null);
+    return {
+      kind: 'skip',
+      message: `用户刚在画面上操作过（点击、打字或滚动），原计划的动作没有执行。按页面现在的样子重新判断：把用户的操作当线索（例如用户打开的页面、填过的框），不要撤回用户的操作，也不要重放旧动作；用户填过的输入框不要读、不要改。\nfresh_observation (未执行原动作):\n${fresh?.text ?? '无法重新观察当前页，请先 snapshot'}`,
+    };
+  };
+  const controlClosedStop = async (): Promise<
+    Extract<Awaited<ReturnType<typeof gateAction>>, { kind: 'stop' }>
+  > => {
+    if (!control) return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    // FIX-29 (Deploy-29 fc-jd): a viewer connecting mid-run queued a resize; the
+    // run then stopped as 「已取消」 on JD's login page, with no handover. A
+    // control closed by a failure (not by the user) is said. It cannot be
+    // handed to the user (review() refuses a control closed with an error,
+    // PR #291 review): a wall in front of the page is named, with a rerun,
+    // which pauses at the wall with a working control.
+    const state = control.snapshot();
+    logger.warn(
+      { taskId: opts.taskId, phase: state.phase, error: state.error, url: page.url() },
+      'supercar: browser control unavailable at an action boundary',
+    );
+    // The user's cancel comes first, also when an input was cut off by it (review 4).
+    if (
+      !state.error ||
+      controller.signal.aborted ||
+      (await Promise.resolve(opts.isTaskCancelled?.()).catch(() => false))
+    )
+      return { kind: 'stop', outcome: { status: 'cancelled', steps: 0 } };
+    // The page may be mid-navigation: the wall probe gets 5 s (review).
+    const blocker = await Promise.race([
+      tools.blocker().catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+    const walled = blocker && !('disposition' in blocker && blocker.disposition === 'continue');
+    return {
+      kind: 'stop',
+      outcome: {
+        status: 'failed',
+        reason: walled
+          ? `${blocker.message.replace(/；?当前任务尚未完成。?$/, '')}。但云端浏览器的画面同步中断，这次没法让你在画面上处理；请重新执行任务，遇到这个页面时我会停下，请你直接在画面上操作。`
+          : '云端浏览器的画面同步中断，任务没能继续执行；已打开的页面仍保留，请重新执行。',
+        steps: 0,
+      },
+    };
   };
   try {
     binding = opts.browserControlFactory?.();
@@ -702,7 +766,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                   onWaiting: async () => {
                     await opts.onAwaitingUser?.({
                       question:
-                        '网站要求人机验证，请在下方浏览器中完成验证。AI 已暂停，最多等待 10 分钟。',
+                        '网站要求人机验证：这一步需要你来，请直接在画面上完成，过了我会自动继续（最多等 10 分钟）。',
                       at: new Date(),
                       currentUrl: page.url(),
                       awaitingKind: 'captcha',
@@ -736,7 +800,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                       : result === 'error'
                         ? (tools.observation?.page ?? page).isClosed()
                           ? '等待验证时云端浏览器已关闭，任务未完成，请重新执行。'
-                          : '验证码接管通道异常关闭，任务未完成，请稍后重试。'
+                          : '等待验证时画面通道异常关闭，任务未完成，请稍后重试。'
                         : '用户已放弃验证，任务未完成。';
                   handoffPlatform = result === 'error';
                   await opts.onCaptchaHandoffEnd?.(false);
@@ -863,8 +927,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             submit: action.tool === 'type' && action.submit === true,
             role: 'ref' in action && action.ref ? refRole(lastSnapshot, action.ref) : null,
           };
+        const actedSince = Date.now();
         const result = await tools.execute(action);
         page = tools.page;
+        // 协调方判定 (复审 #1): the person also used the page while this action ran — what changed
+        // may be theirs, not this action's result.
+        if (control?.humanBusySince(actedSince))
+          result.text = `${result.text}\n${HUMAN_ALSO_ACTED_NOTE}`;
         lastTriggers = result.effect?.triggers ?? [];
         // FIX-61B P1-4: a read-only task's background-request pause after an ordinary step is
         // logged and passed (read-only-effect-policy); anything that may change something asks.

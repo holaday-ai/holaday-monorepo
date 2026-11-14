@@ -5,7 +5,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { BrowserViewportRenderMode } from '@/lib/browser-workspace-viewport';
 import { cn } from '@/lib/utils';
 import {
   Check,
@@ -17,6 +16,9 @@ import {
   Move,
   ZoomIn,
 } from 'lucide-react';
+
+/** How the (VNC) remote page is laid out; the CDP screen no longer chooses a size. */
+type BrowserViewportRenderMode = 'auto' | 'desktop' | 'panel';
 
 interface Props {
   mode: 'contain' | 'original';

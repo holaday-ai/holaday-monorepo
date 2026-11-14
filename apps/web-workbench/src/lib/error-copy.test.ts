@@ -180,6 +180,10 @@ describe('FIX-53 #4 · captcha handoff endings', () => {
     '等待验证时云端浏览器已关闭，任务未完成，请重新执行。',
     '验证码接管通道异常关闭，任务未完成，请稍后重试。',
     '验证码等待已结束，任务未完成。',
+    // REBUILD-4 wording, and the older 「验证码接管已结束」 kept for recorded tasks.
+    '等待验证时画面通道异常关闭，任务未完成，请稍后重试。',
+    '等待验证已结束，任务未完成。',
+    '验证码接管已结束，任务未完成。',
   ])('stay as they are: %s', (reason) => {
     expect(humaniseTaskError(reason)).toBe(reason);
   });

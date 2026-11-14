@@ -4,6 +4,7 @@ import { apiKeysRouter } from './routers/api-keys.js';
 import { astrologyRouter } from './routers/astrology.js';
 import { authRouter } from './routers/auth.js';
 import { batchTasksRouter } from './routers/batch-tasks.js';
+import { browserHomeRouter } from './routers/browser-home.js';
 import { browserReplayRouter } from './routers/browser-replay.js';
 import { connectionsRouter } from './routers/connections.js';
 import { energyRouter } from './routers/energy.js';
@@ -35,6 +36,7 @@ import { publicProcedure, router } from './trpc.js';
 
 export const appRouter = router({
   browserReplay: browserReplayRouter,
+  browserHome: browserHomeRouter,
   health: publicProcedure.query(() => ({
     status: 'ok' as const,
     time: new Date().toISOString(),

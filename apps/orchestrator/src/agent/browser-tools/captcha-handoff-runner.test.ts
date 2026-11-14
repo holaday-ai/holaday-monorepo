@@ -35,7 +35,13 @@ afterEach(async () => {
   await browser?.close();
 });
 type Call = { name: string; input: Record<string, unknown> };
-async function scenario(timeout = 3000, script?: Call[], extra: Partial<RunSupercarOptions> = {}) {
+async function scenario(
+  timeout = 3000,
+  script?: Call[],
+  extra: Partial<RunSupercarOptions> = {},
+  /** Runs inside each model call (turn = 1-based), with the request the model sees. */
+  onModelCall?: (turn: number, control: BrowserControl, request: unknown) => Promise<void>,
+) {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.route('https://www.google.com/**', (route) =>
@@ -44,12 +50,14 @@ async function scenario(timeout = 3000, script?: Call[], extra: Partial<RunSuper
       body: `<h1>Verify you are human</h1><div class="g-recaptcha"></div><input aria-label="Private input"><button onclick="history.replaceState({},'', '/search?q=fixture');document.body.innerHTML='<h1>Public result</h1><p>Verified fixture content</p>'">Complete fixture</button>`,
     }),
   );
-  await page.route('https://alt.example/**', (route) =>
-    route.fulfill({
+  const requested: string[] = [];
+  await page.route('https://alt.example/**', (route) => {
+    requested.push(route.request().url());
+    return route.fulfill({
       contentType: 'text/html; charset=utf-8',
       body: '<h1>Alternate source</h1><p>Alternate public fact</p>',
-    }),
-  );
+    });
+  });
   const control = new BrowserControl();
   const calls: string[] = [];
   const events: unknown[] = [];
@@ -80,7 +88,8 @@ async function scenario(timeout = 3000, script?: Call[], extra: Partial<RunSuper
     ...extra,
     messagesAdapter: {
       metadata: { provider: 'anthropic', model: 'fixture' },
-      async create() {
+      async create(request: unknown) {
+        await onModelCall?.(calls.length + 1, control, request);
         const scripted = script?.[Math.min(calls.length, script.length - 1)];
         const name =
           scripted?.name ??
@@ -119,25 +128,33 @@ async function scenario(timeout = 3000, script?: Call[], extra: Partial<RunSuper
       },
     },
   } as RunSupercarOptions);
-  return { page, control, calls, events, waiting, run };
+  return { page, control, calls, events, waiting, run, requested };
 }
-it('retains one runner and excludes AI while user clears the wall, even beyond the execution budget', async () => {
-  const f = await scenario();
+it('retains one runner and keeps AI waiting while the user clears the wall, even beyond the execution budget', async () => {
+  // The wait outlasts the 2 s execution budget, the 2.2 s pause and the 2 s the assistant gives the
+  // person to be still after their click (REBUILD-4).
+  const f = await scenario(6000);
   try {
     await Promise.race([
       f.waiting,
       new Promise((_, reject) => setTimeout(() => reject(Error('No handoff')), 3000)),
     ]);
-    await expect.poll(() => f.control.snapshot().phase, { timeout: 1000 }).toBe('human');
+    await expect
+      .poll(() => captchaHandoffs.active('captcha-fixture', 'fixture-user', f.control), {
+        timeout: 1000,
+      })
+      .toBe(true);
+    // REBUILD-4: no takeover — the control stays open; the assistant itself waits at the wall.
+    expect(f.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
     const count = f.calls.length;
     const captures = replay.captures;
     expect(replay.paused).toBe(true);
     await new Promise((r) => setTimeout(r, 2200));
     expect(f.calls).toHaveLength(count);
     expect(replay.captures).toBe(captures);
-    await f.control.runHuman(f.control.snapshot().lease!, async () => {
+    await f.control.runHuman(async () => {
       await f.page.getByRole('button', { name: 'Complete fixture' }).click();
-    });
+    }, 'mouseDown');
     const outcome = await f.run;
     expect(outcome.status).toBe('completed');
     expect(replay.resumes).toBe(1);
@@ -244,7 +261,11 @@ it('an answer after 换个方式继续 says it does not come from the walled pag
   ]);
   try {
     await f.waiting;
-    await expect.poll(() => f.control.snapshot().phase, { timeout: 1000 }).toBe('human');
+    await expect
+      .poll(() => captchaHandoffs.active('captcha-fixture', 'fixture-user', f.control), {
+        timeout: 1000,
+      })
+      .toBe(true);
     for (let round = 0; round < 2; round++)
       expect(await captchaHandoffs.proceed('captcha-fixture', 'fixture-user', f.control)).toBe(
         false,
@@ -296,3 +317,137 @@ it('FIX-52 #8: the browser is kept from idle reclaim for as long as the wait las
     vi.useRealTimers();
   }
 });
+
+it('REBUILD-4: an input from the person within 2 s voids the planned action; the model gets a fresh observation', async () => {
+  const requests: unknown[] = [];
+  const f = await scenario(
+    3000,
+    [
+      { name: 'navigate', input: { url: 'https://alt.example/fact' } },
+      { name: 'navigate', input: { url: 'https://alt.example/stale-plan' } },
+      { name: 'read_page', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: 'Alternate public fact',
+          evidence: 'Alternate public fact',
+        },
+      },
+    ],
+    { timeoutMs: 15_000 },
+    async (turn, control, request) => {
+      requests.push(request);
+      // While the model plans its second step, the person clicks on the shared page.
+      if (turn === 2) await control.runHuman(async () => {}, 'mouseDown');
+    },
+  );
+  try {
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    // The navigation planned before the person's click never ran.
+    expect(f.requested).toEqual(['https://alt.example/fact']);
+    const third = JSON.stringify(requests[2]);
+    expect(third).toContain('用户刚在画面上操作过');
+    expect(third).toContain('fresh_observation');
+    expect(third).toContain('Alternate public fact');
+    expect(f.control.snapshot()).toMatchObject({ lease: null });
+  } finally {
+    f.control.close();
+    await f.run;
+  }
+}, 20000);
+
+it('复审 #1 #2: the person acting while the policy check runs voids the action, checked right before it is sent', async () => {
+  const requests: unknown[] = [];
+  let control: BrowserControl | undefined;
+  let acted = false;
+  const f = await scenario(
+    3000,
+    [
+      { name: 'navigate', input: { url: 'https://alt.example/fact' } },
+      { name: 'navigate', input: { url: 'https://alt.example/stale-plan' } },
+      { name: 'read_page', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: 'Alternate public fact',
+          evidence: 'Alternate public fact',
+        },
+      },
+    ],
+    {
+      timeoutMs: 15_000,
+      // The policy check of the second navigation awaits; the person clicks meanwhile.
+      onBeforeAction: async (item) => {
+        if (item.kind === 'navigate' && /stale-plan/.test(item.url ?? '') && !acted) {
+          acted = true;
+          await control?.runHuman(async () => {}, 'mouseDown');
+        }
+        return { allowed: true };
+      },
+    },
+    async (_turn, c, request) => {
+      control = c;
+      requests.push(request);
+    },
+  );
+  try {
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    expect(acted).toBe(true);
+    // The navigation whose check the person's click overlapped never ran.
+    expect(f.requested).toEqual(['https://alt.example/fact']);
+    const third = JSON.stringify(requests[2]);
+    expect(third).toContain('用户刚在画面上操作过');
+    expect(third).toContain('fresh_observation');
+  } finally {
+    f.control.close();
+    await f.run;
+  }
+}, 20000);
+
+it('协调方判定 (复审 #1): the person acting while the assistant’s action runs is said in its result', async () => {
+  const requests: unknown[] = [];
+  const f = await scenario(
+    3000,
+    [
+      { name: 'read_page', input: {} },
+      { name: 'navigate', input: { url: 'https://alt.example/slow' } },
+      { name: 'read_page', input: {} },
+      { name: 'read_page', input: {} },
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: 'Alternate public fact',
+          evidence: 'Alternate public fact',
+        },
+      },
+    ],
+    { timeoutMs: 15_000 },
+    async (_turn, _c, request) => {
+      requests.push(request);
+    },
+  );
+  // While the page loads, the person scrolls it.
+  await f.page.route('https://alt.example/slow', async (route) => {
+    f.control.noteHumanInput('scroll');
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: '<h1>Alternate source</h1><p>Alternate public fact</p>',
+    });
+  });
+  try {
+    const outcome = await f.run;
+    expect(outcome.status).toBe('completed');
+    const third = JSON.stringify(requests[2]);
+    expect(third).toContain('执行这一步时用户也在画面上操作，请重读页面');
+    // An action with no input from the person says nothing of the kind.
+    expect(JSON.stringify(requests[1])).not.toContain('执行这一步时用户也在画面上操作');
+  } finally {
+    f.control.close();
+    await f.run;
+  }
+}, 20000);

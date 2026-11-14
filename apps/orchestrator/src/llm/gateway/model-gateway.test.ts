@@ -133,6 +133,7 @@ function recordingWiring() {
     brainId: 'qwen',
     provider: 'alibaba-model-studio' as const,
     region: 'cn' as const,
+    qwenEndpoint: 'cn' as const,
     messages: vi.fn((purpose: string) => {
       const adapter = { metadata: { provider: 'openai', model: purpose } } as MessagesAdapter;
       messagesByPurpose.set(purpose, adapter);

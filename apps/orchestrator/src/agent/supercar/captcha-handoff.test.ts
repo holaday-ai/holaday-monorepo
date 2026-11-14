@@ -1,12 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { BrowserControl } from './browser-control.js';
+import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
 import { CaptchaHandoffs } from './captcha-handoff.js';
 afterEach(() => vi.useRealTimers());
-async function fixture() {
+async function fixture(options: { control?: BrowserControl; registry?: CaptchaHandoffs } = {}) {
   vi.useFakeTimers();
-  const registry = new CaptchaHandoffs();
-  const control = new BrowserControl();
+  const registry = options.registry ?? new CaptchaHandoffs();
+  const control = options.control ?? new BrowserControl(() => Date.now());
   let wall = true;
+  const hasWall = vi.fn(async () => wall);
   const waiting = vi.fn(async () => {});
   const resumed = vi.fn(async () => true);
   const activity = vi.fn();
@@ -14,12 +15,16 @@ async function fixture() {
     taskId: 't',
     userId: 'u',
     control,
-    hasWall: async () => wall,
+    hasWall,
     onWaiting: waiting,
     onResumed: resumed,
-    timeoutMs: 1000,
+    timeoutMs: 60_000,
     pollMs: 50,
     onActivity: activity,
+  });
+  let done = false;
+  void result.then(() => {
+    done = true;
   });
   await vi.advanceTimersByTimeAsync(0);
   return {
@@ -27,92 +32,182 @@ async function fixture() {
     registry,
     control,
     result,
+    hasWall,
     waiting,
     resumed,
+    done: () => done,
     clear: () => {
       wall = false;
     },
+    raise: () => {
+      wall = true;
+    },
   };
 }
-it('wall → human lease → clear wall → automatic resume; agent is excluded while waiting', async () => {
+it('REBUILD-4: the wait takes no lease; the person may use the page and the assistant is not paused', async () => {
   const f = await fixture();
-  expect(f.control.canAgentAct()).toBe(false);
-  expect(f.control.snapshot().phase).toBe('human');
   expect(f.waiting).toHaveBeenCalledOnce();
+  expect(f.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
+  expect(f.control.canAgentAct()).toBe(true);
+  expect(await f.control.runHuman(async () => 'clicked', 'mouseDown')).toBe('clicked');
+  f.registry.cancel('t', 'u', f.control);
+  await f.result;
+});
+it('wall cleared with no input from the person → cleared (the page cleared it, not the user)', async () => {
+  const f = await fixture();
   await vi.advanceTimersByTimeAsync(100);
   expect(f.resumed).not.toHaveBeenCalled();
   f.clear();
   await vi.advanceTimersByTimeAsync(50);
   // FIX-53 #1: the person sent nothing, so the wall cleared itself — not 「用户已完成验证」.
   expect(await f.result).toBe('cleared');
-  expect(f.control.canAgentAct()).toBe(true);
   expect(f.resumed).toHaveBeenCalledOnce();
   expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 0, confirmed: false }));
 });
-it('FIX-53 #1: input from the person during the wait makes the automatic resume theirs', async () => {
+it('wall cleared by the person → waits for them to be still, re-checks, then resumed', async () => {
   const f = await fixture();
-  const lease = f.control.snapshot().lease!;
-  await f.control.runHuman(lease, async () => {}, 'mouseDown');
-  await f.control.runHuman(lease, async () => {}, 'insertText');
+  await f.control.runHuman(async () => {}, 'mouseDown');
+  await f.control.runHuman(async () => {}, 'insertText');
   f.clear();
   await vi.advanceTimersByTimeAsync(50);
+  // The wall is gone but the person typed just now: the assistant waits 2 s for them.
+  expect(f.done()).toBe(false);
+  expect(f.resumed).not.toHaveBeenCalled();
+  const checksBefore = f.hasWall.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS);
   expect(await f.result).toBe('resumed');
+  expect(f.hasWall.mock.calls.length).toBeGreaterThan(checksBefore);
+  expect(f.resumed).toHaveBeenCalledOnce();
   const logged = f.activity.mock.calls[0]![0];
   expect(logged).toMatchObject({ inputs: 2, confirmed: false, count: 2 });
   expect(logged.firstAt).toBeTypeOf('number');
 });
-it('FIX-53 #1: a wait that times out still logs what the person did', async () => {
+it('a wall that reappears after the yield keeps the wait open', async () => {
   const f = await fixture();
-  await f.control.runHuman(f.control.snapshot().lease!, async () => {}, 'keyDown');
-  await vi.advanceTimersByTimeAsync(1000);
+  await f.control.runHuman(async () => {}, 'keyDown');
+  f.clear();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(f.done()).toBe(false);
+  // The page put the wall back while the assistant waited for the person to be still.
+  f.raise();
+  await vi.advanceTimersByTimeAsync(HUMAN_IDLE_MS + 500);
+  expect(f.done()).toBe(false);
+  expect(f.resumed).not.toHaveBeenCalled();
+  f.clear();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await f.result).toBe('resumed');
+  expect(f.resumed).toHaveBeenCalledOnce();
+});
+it('a wait that times out still logs what the person did and closes the control', async () => {
+  const f = await fixture();
+  await f.control.runHuman(async () => {}, 'keyDown');
+  await vi.advanceTimersByTimeAsync(60_000);
   expect(await f.result).toBe('timeout');
+  expect(f.control.snapshot().phase).toBe('closed');
+  expect(f.resumed).not.toHaveBeenCalled();
   expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 1 }));
 });
-it('manual continue checks the wall and owner before handback', async () => {
+it('我已完成 checks the wall and the owner', async () => {
   const f = await fixture();
   expect(await f.registry.proceed('t', 'other', f.control)).toBe(false);
+  expect(await f.registry.proceed('t', 'u', new BrowserControl())).toBe(false);
   expect(await f.registry.proceed('t', 'u', f.control)).toBe(false);
   f.clear();
   expect(await f.registry.proceed('t', 'u', f.control)).toBe(true);
   expect(await f.result).toBe('resumed');
+  expect(f.activity).toHaveBeenCalledWith(expect.objectContaining({ inputs: 0, confirmed: true }));
 });
-it('cancel and timeout close admission without claiming completion', async () => {
+it('cancel closes the control without claiming completion', async () => {
   const f = await fixture();
   expect(f.registry.cancel('t', 'other', f.control)).toBe(false);
   expect(f.registry.cancel('t', 'u', f.control)).toBe(true);
   expect(await f.result).toBe('cancelled');
+  expect(f.control.snapshot().phase).toBe('closed');
   expect(f.control.canAgentAct()).toBe(false);
-  const g = await fixture();
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(await g.result).toBe('timeout');
-  expect(g.control.snapshot().phase).toBe('closed');
-  expect(g.resumed).not.toHaveBeenCalled();
+  expect(f.resumed).not.toHaveBeenCalled();
+  expect(f.registry.active('t', 'u')).toBe(false);
 });
+it('an aborted signal cancels and closes the control', async () => {
+  vi.useFakeTimers();
+  const registry = new CaptchaHandoffs();
+  const control = new BrowserControl(() => Date.now());
+  const abort = new AbortController();
+  const result = registry.wait({
+    taskId: 't',
+    userId: 'u',
+    control,
+    hasWall: async () => true,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+    signal: abort.signal,
+    pollMs: 50,
+  });
+  await vi.advanceTimersByTimeAsync(100);
+  abort.abort();
+  expect(await result).toBe('cancelled');
+  expect(control.snapshot().phase).toBe('closed');
+});
+it('换个方式继续 only after two failed 我已完成 rounds', async () => {
+  const f = await fixture();
+  expect(f.registry.alternate('t', 'u', f.control)).toBe(false);
+  expect(await f.registry.proceed('t', 'u', f.control)).toBe(false);
+  expect(f.registry.status('t', 'u', f.control)).toMatchObject({
+    failedRounds: 1,
+    alternateAvailable: false,
+  });
+  expect(f.registry.alternate('t', 'u', f.control)).toBe(false);
+  expect(await f.registry.proceed('t', 'u', f.control)).toBe(false);
+  expect(f.registry.status('t', 'u', f.control)).toMatchObject({
+    failedRounds: 2,
+    alternateAvailable: true,
+  });
+  expect(f.registry.alternate('t', 'u', f.control)).toBe(true);
+  expect(await f.result).toBe('alternate');
+  expect(f.resumed).toHaveBeenCalledOnce();
+});
+// REBUILD-4 (found while rewriting these tests, fixed in wait()): a control that closes on its own
+// during the wait (input outcome unknown, observation failure) ends it as 'error' at the next poll.
 it('FIX-35 复审 #2: the control channel closing on its own is an error, not the user giving up', async () => {
   const f = await fixture();
   f.control.close('observation_failed');
-  await vi.advanceTimersByTimeAsync(50);
+  f.clear();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(f.done()).toBe(true);
   expect(await f.result).toBe('error');
-  // The user's cancel is still 'cancelled'.
-  const g = await fixture();
-  expect(g.registry.cancel('t', 'u', g.control)).toBe(true);
-  expect(await g.result).toBe('cancelled');
+  expect(f.resumed).not.toHaveBeenCalled();
 });
-it('keeps the user lease when the resume persistence fails', async () => {
+it('FIX-52 #8: the page going away ends the wait as an error', async () => {
+  vi.useFakeTimers();
+  const registry = new CaptchaHandoffs();
+  const control = new BrowserControl(() => Date.now());
+  let gone = false;
+  const result = registry.wait({
+    taskId: 't',
+    userId: 'u',
+    control,
+    hasWall: async () => true,
+    onWaiting: async () => {},
+    onResumed: async () => true,
+    pageGone: () => gone,
+    pollMs: 50,
+  });
+  await vi.advanceTimersByTimeAsync(100);
+  gone = true;
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await result).toBe('error');
+  expect(control.snapshot().phase).toBe('closed');
+});
+it('a failed resume persistence is an error', async () => {
   const f = await fixture();
   f.resumed.mockResolvedValue(false);
   f.clear();
   await vi.advanceTimersByTimeAsync(100);
-  expect(f.control.canAgentAct()).toBe(false);
-  expect(f.control.snapshot().phase).toBe('human');
-  f.registry.cancel('t', 'u', f.control);
-  await f.result;
+  expect(await f.result).toBe('error');
 });
-it('waits for accepted human input to settle before resuming or releasing', async () => {
+it('waits for accepted human input to settle before resuming', async () => {
   const f = await fixture();
   let finish!: () => void;
   const input = f.control.runHuman(
-    f.control.snapshot().lease!,
     async () =>
       new Promise<void>((r) => {
         finish = r;
@@ -121,12 +216,14 @@ it('waits for accepted human input to settle before resuming or releasing', asyn
   await vi.advanceTimersByTimeAsync(0);
   f.clear();
   await f.registry.proceed('t', 'u', f.control);
+  await vi.advanceTimersByTimeAsync(10_000);
   expect(f.resumed).not.toHaveBeenCalled();
   finish();
   await input;
+  await vi.advanceTimersByTimeAsync(0);
   expect(await f.result).toBe('resumed');
 });
-
+// REBUILD-4 (fixed in wait()): a cancel that lands while onResumed() is persisting wins.
 it('cancellation wins a race with resume persistence', async () => {
   const f = await fixture();
   f.resumed.mockImplementation(async () => {
@@ -138,14 +235,14 @@ it('cancellation wins a race with resume persistence', async () => {
   expect(await f.result).toBe('cancelled');
   expect(f.control.snapshot().phase).toBe('closed');
 });
-it('FIX-53 #1 (协调方): moving, scrolling and the viewport are not the person acting', async () => {
+it('FIX-53 #1 (协调方): moving, scrolling and key/button releases are not the person acting', async () => {
   const f = await fixture();
-  const lease = f.control.snapshot().lease!;
-  for (const kind of ['mouseMove', 'scroll', 'viewport', 'mouseUp', 'keyUp'] as const)
-    await f.control.runHuman(lease, async () => {}, kind);
-  await f.control.runHuman(lease, async () => {});
+  for (const kind of ['mouseMove', 'scroll', 'mouseUp', 'keyUp'] as const)
+    await f.control.runHuman(async () => {}, kind);
+  await f.control.runHuman(async () => {});
   f.clear();
-  await vi.advanceTimersByTimeAsync(50);
+  // A scroll still makes the person busy: the assistant waits for them before going on.
+  await vi.advanceTimersByTimeAsync(50 + HUMAN_IDLE_MS);
   expect(await f.result).toBe('cleared');
   expect(f.activity).toHaveBeenCalledWith(
     expect.objectContaining({ inputs: 0, count: 0, firstAt: null, lastAt: null }),
@@ -153,7 +250,7 @@ it('FIX-53 #1 (协调方): moving, scrolling and the viewport are not the person
 });
 it('FIX-53 #1 (协调方): first and last are of this wait, not of the session', async () => {
   vi.useFakeTimers();
-  const control = new BrowserControl();
+  const control = new BrowserControl(() => Date.now());
   const registry = new CaptchaHandoffs();
   const run = async (act: boolean) => {
     let wall = true;
@@ -166,14 +263,14 @@ it('FIX-53 #1 (协调方): first and last are of this wait, not of the session',
       onWaiting: async () => {},
       onResumed: async () => true,
       onActivity: activity,
-      timeoutMs: 1000,
+      timeoutMs: 60_000,
       pollMs: 50,
     });
     await vi.advanceTimersByTimeAsync(10);
-    if (act) await control.runHuman(control.snapshot().lease!, async () => {}, 'navigate');
+    if (act) await control.runHuman(async () => {}, 'navigate');
     await vi.advanceTimersByTimeAsync(100);
     wall = false;
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(50 + HUMAN_IDLE_MS);
     return { result: await result, logged: activity.mock.calls[0]![0] };
   };
   const first = await run(true);

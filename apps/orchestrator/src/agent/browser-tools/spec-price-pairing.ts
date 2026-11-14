@@ -42,6 +42,26 @@ const GUESS_RE =
  */
 const NOT_READ_RE =
   /(?:没|未|没有|未能|没能|无法)(?:读到|获取|读取|找到|拿到)|读不到|拿不到|没有显示|未显示|没显示|没有列出|未列出|没列出|找不到|看不到|还缺|not (?:shown|found|listed|displayed)|no price|(?:could ?n[o']t|unable to|did ?n[o']t) (?:read|find|get)/iu;
+/**
+ * FIX-63 P0-1 (DEPLOY-62 iPhone 3/3): the check is for a sentence that gives this model / capacity a
+ * price number. A sentence saying the price is not this one's (「该数字并非 …256GB 的当前售价」) or
+ * that it is a refurbished unit's (its own page, 「官方翻新 / Refurbished …」) gives none — it is
+ * never sent back. When unsure, nothing is sent back.
+ */
+const NOT_THIS_RE = /并非|不是|而非|翻新|\brefurbished\b|\brenewed\b/iu;
+/** Any negation: a sentence saying what was not read or is not so is never taken as a pairing. */
+const NEGATED_RE =
+  /[不没未无非别]|\b(?:not|no|unable|cannot|can't|couldn't|didn't|isn't|wasn't)\b/iu;
+/**
+ * FIX-63 P0-1: a sentence with no price number of its own that pairs the sentence before's price
+ * with a configuration — 「这是 / 对应 128GB 版」 or a guess 「通常更高 / usually more expensive」 —
+ * and says nothing is missing or not so.
+ */
+function pointsBack(sentence: string, before: readonly number[]): boolean {
+  if (!before.length || NEGATED_RE.test(sentence)) return false;
+  if (!capacitiesOf(sentence).length && !CONFIG_WORD_RE.test(sentence)) return false;
+  return POINTS_AT_RE.test(sentence) || GUESS_RE.test(sentence);
+}
 /** Lines on either side of a price within which a capacity written beside it must appear. */
 const PAIR_LINES = 8;
 
@@ -316,7 +336,15 @@ export function unsupportedSpecPricePairings(
     const sentencePrices = pricesOf(sentence);
     // 「…起售价为 RMB 9,999。这是 128GB 版的起售价格」: 「这」 is the sentence before's price.
     const nearby = sentencePrices.length ? sentencePrices : previousPrices;
+    const before = previousPrices;
     previousPrices = sentencePrices;
+    // FIX-63 P0-1: a sentence about another unit's price, or one with no price number — nothing is
+    // paired, nothing sent back (「因此无法在苹果官方商店选定 256GB 并读取对应售价」). The one sentence
+    // without a number still checked points, unnegated, at the price the sentence before gave
+    // (the sp-iphone-zh red line: 「…起售价为 RMB 9,999。这是 128GB 入门版的起售价格，256GB 版本
+    // 的价格通常会更高」).
+    if (NOT_THIS_RE.test(sentence)) continue;
+    if (!sentencePrices.length && !pointsBack(sentence, before)) continue;
     for (const clause of clausesOf(sentence)) {
       if (NOT_READ_RE.test(clause)) continue;
       const prices = pricesOf(clause);

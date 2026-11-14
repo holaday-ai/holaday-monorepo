@@ -564,3 +564,55 @@ describe('FIX-62 复审 #10: the model search goes past a section heading', () =
     ).not.toMatch(/9,299/);
   });
 });
+
+// FIX-63 P0-1 (DEPLOY-62 线上 iPhone ×3, answers verbatim): honest answers were sent back. A sentence
+// with no price number, one saying the price is not this one's, or a refurbished unit's own page
+// price is never sent back; 「这款 / 这个容量 = 价格数字」 is still checked (f62j2 above).
+describe('FIX-63 P0-1: only a sentence giving this one a price number is checked', () => {
+  const INTENT_16 = 'iPhone 16 Pro Max 256GB 多少钱';
+  const COMPARE = [
+    'iPhone 机型比较',
+    'iPhone 16 Pro Max',
+    '于授权经销商处 有售',
+    'iPhone 18 Pro Max',
+    'RMB 9,999 起',
+    'iPhone 18 Pro',
+    'RMB 8,999 起',
+  ].join('\n');
+  it('线上第 3 次：「无法…选定 256GB 并读取对应售价」「并非 …256GB 的当前售价」 pass', () => {
+    const answer =
+      '部分完成：iPhone 16 Pro Max 已不在苹果官方商店直接销售，因此无法在苹果官方商店选定 256GB 并读取对应售价。京东搜索页触发了登录/验证拦截，未登录状态下无法打开商品详情页获取 256GB 的具体价格。目前已拿到的信息是：iPhone 16 Pro Max 在官网仅显示起售价为 RMB 9,999（对比页中 iPhone 18 Pro Max 的起售价），但该数字并非 iPhone 16 Pro Max 256GB 的当前售价；缺的是 iPhone 16 Pro Max 256GB 在授权经销商或电商平台上的实时标价。';
+    expect(check(answer, [COMPARE], INTENT_16)).toEqual([]);
+  });
+  it('线上第 1 次：官方翻新店自己页面的 256GB 价格 passes', () => {
+    const refurb = [
+      'Refurbished iPhone 16 Pro 128GB Natural Titanium (Unlocked)',
+      '$799.00',
+      'Refurbished iPhone 16 Pro Max 256GB Black Titanium (Unlocked)',
+      '$1,019.00',
+      'Save $180.00 from $1,199.00',
+      'Refurbished iPhone 15 Pro Max 256GB Blue Titanium (Unlocked)',
+      '$869.00',
+    ].join('\n');
+    const answer =
+      '- Apple 官方翻新店页面显示：Refurbished iPhone 16 Pro Max 256GB Black Titanium (Unlocked) 价格为 $1,019.00（Save $180.00 from $1,199.00）。';
+    expect(check(answer, [refurb], INTENT_16)).toEqual([]);
+  });
+  it('f62j2 is still sent back: 18 Pro Max’s price said as the 16 Pro Max’s', () => {
+    expect(
+      check(
+        'iPhone 16 Pro Max 256GB 在 Apple 中国官网机型比较页显示的价格为 RMB 9,999 起。',
+        [COMPARE],
+        INTENT_16,
+      ).join(),
+    ).toMatch(/挨着的是别的机型/);
+  });
+  it('a sentence with no number is not checked — unless it points the sentence before’s price at a capacity', () => {
+    expect(check('256GB 的价格要登录京东才能看。', [COMPARE], INTENT_16)).toEqual([]);
+    expect(check('官网对比页列出了 256GB、512GB 和 1TB。', [COMPARE], INTENT_16)).toEqual([]);
+    // Negated, it says nothing is so: never sent back.
+    expect(
+      check('起售价 RMB 9,999。这不是 256GB 版的价格。', [COMPARE], INTENT_16).join(),
+    ).not.toMatch(/256GB 和价格对应/);
+  });
+});

@@ -9,6 +9,7 @@ import { MfaError, MfaService } from '../../auth/mfa-service.js';
 import { authenticateAccessTokenSession } from '../../auth/middleware.js';
 import { AuthError, AuthService } from '../../auth/service.js';
 import { issueSessionAccessToken, revokeAllSessions, revokeSession } from '../../auth/sessions.js';
+import { isBrowserHomeEnabledFor } from '../../browser-home/browser-home-access.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
 import {
@@ -495,6 +496,9 @@ export const authRouter = router({
       // this to show/hide the「视频任务」sidebar entry + guard /video.
       // Single source with the tasks.ts fork (agent/video/video-access.ts).
       videoEnabled: isVideoEnabledFor(ctx.userId),
+      // BROWSER-HOME-1 — the「云浏览器」entry gate (sidebar entry + /browser route). Single source
+      // with the browserHome router (browser-home/browser-home-access.ts).
+      browserHomeEnabled: isBrowserHomeEnabledFor(ctx.userId),
       // Capability recovery — image/video model choices this deployment can
       // serve (credential presence only). The SPA hides everything else.
       mediaModels: currentMediaModels(),

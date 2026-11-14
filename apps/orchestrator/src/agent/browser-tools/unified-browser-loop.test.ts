@@ -126,7 +126,7 @@ describe('unified browser loop', () => {
       () => [call('request_human', { reason: 'login', message: '请先登录淘宝' }, 'h1')],
       (request) => {
         const last = request.messages.at(-1);
-        expect(JSON.stringify(last)).toContain('用户已完成接管');
+        expect(JSON.stringify(last)).toContain('用户已在画面上处理完这一步');
         return [call('finish', { status: 'failed', summary: '登录后未找到订单' }, 'f1')];
       },
     ]);

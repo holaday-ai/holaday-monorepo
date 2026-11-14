@@ -168,6 +168,7 @@ describe('auth router — profile rollout state', () => {
         modelDataRegion: null,
         modelDataRegionSelection: false,
         videoEnabled: false,
+        browserHomeEnabled: false,
         mediaModels: {
           image: expect.any(Array),
           video: expect.any(Array),
@@ -180,4 +181,46 @@ describe('auth router — profile rollout state', () => {
       expect(teamTaskLifecycleEnabledForUser).toHaveBeenCalledWith(userId);
     },
   );
+});
+
+describe('auth.me — BROWSER-HOME-1 browserHomeEnabled', () => {
+  it('follows BROWSER_HOME_ENABLED + BROWSER_HOME_ALLOWLIST', async () => {
+    const { env: appEnv } = await import('../../config/env.js');
+    const previous = [appEnv.BROWSER_HOME_ENABLED, appEnv.BROWSER_HOME_ALLOWLIST] as const;
+    const me = (userId: string) =>
+      authRouter
+        .createCaller({
+          db: {
+            select: () => ({
+              from: () => ({
+                where: () => ({
+                  limit: async () => [
+                    {
+                      externalId: userId,
+                      plan: 'pro',
+                      selectedRoles: [],
+                      role: 'user',
+                      modelDataRegion: null,
+                    },
+                  ],
+                }),
+              }),
+            }),
+          },
+          logger: { error: vi.fn() },
+          userId,
+          browserPool: null,
+        } as never)
+        .me();
+    try {
+      appEnv.BROWSER_HOME_ENABLED = true;
+      appEnv.BROWSER_HOME_ALLOWLIST = 'usr_listed';
+      expect((await me('usr_listed')).browserHomeEnabled).toBe(true);
+      expect((await me('usr_other')).browserHomeEnabled).toBe(false);
+      appEnv.BROWSER_HOME_ENABLED = false;
+      expect((await me('usr_listed')).browserHomeEnabled).toBe(false);
+    } finally {
+      [appEnv.BROWSER_HOME_ENABLED, appEnv.BROWSER_HOME_ALLOWLIST] = previous;
+    }
+  });
 });

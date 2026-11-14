@@ -59,10 +59,10 @@ export function stepRecordStatusText(step: Pick<UiStep, 'actionKind' | 'status'>
       });
     case 'selected_chrome_handoff':
       return executionStatusText(step.status, {
-        done: '人工已交还',
-        failed: '交还失败',
-        running: '等待人工交还',
-        cancelled: '交还未确认',
+        done: '你已操作完',
+        failed: '你的操作未完成',
+        running: '等你操作',
+        cancelled: '你的操作未确认',
       });
     case 'browser_act':
     case 'browser_observe':
@@ -181,7 +181,7 @@ export function stepDisplayTitle(step: Pick<UiStep, 'actionKind' | 'tickIndex'>)
     case 'selected_chrome_plan_discarded':
       return '未执行计划';
     case 'selected_chrome_handoff':
-      return '人工交还记录';
+      return '你在页面上的操作';
     case 'browser_act':
       return '历史浏览器轮次（未验证）';
     case 'browser_observe':
@@ -358,7 +358,7 @@ export function stepDetailSummary(
     if (count > 0) parts.push(`${count} ${suffix}`);
   }
   if (discardedPlans > 0) parts.push(`${discardedPlans} 项计划未执行`);
-  if (handoffs > 0) parts.push(`${handoffs} 次人工交还`);
+  if (handoffs > 0) parts.push(`${handoffs} 次由你操作`);
   if (historicalUnverified > 0) {
     parts.push(`${historicalUnverified} 条历史轮次（未验证）`);
   }

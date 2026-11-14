@@ -254,6 +254,7 @@ const UNAVAILABLE_STATUS: Record<ModelTaskUnavailableReason, CheckStatus> = {
   MODEL_MIGRATION_IN_PROGRESS: 'warn',
   MODEL_ROLLOUT_NOT_ALLOWED: 'warn',
   MODEL_PROVIDER_NOT_CONFIGURED: 'fail',
+  QWEN_INTL_ENDPOINT_NOT_CONFIGURED: 'fail',
 };
 
 export async function checkModelLanes(deps: SelfCheckDeps): Promise<{

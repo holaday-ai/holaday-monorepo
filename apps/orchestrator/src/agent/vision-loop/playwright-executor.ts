@@ -38,6 +38,7 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { SENSITIVE_SCREENSHOT_STYLE } from '../browser-tools/full-page-read.js';
 import { REDACTION_FAILED_COPY, redactPageText } from '../browser-tools/page-redaction.js';
 import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
@@ -115,6 +116,7 @@ export interface PageLike {
     quality?: number;
     fullPage?: boolean;
     timeout?: number;
+    style?: string;
   }): Promise<Buffer>;
   mouse: {
     click(x: number, y: number, opts?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
@@ -1127,7 +1129,15 @@ export class PlaywrightExecutor {
     const timeout = opts.timeoutMs ?? SCREENSHOT_TIMEOUT_MS;
     try {
       const buf = await runBrowserOperation(() =>
-        page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout }),
+        // 协调方判定 (复审 #1): the assistant's screenshots (the rollback loop's observations) never
+        // show what the person typed — boxes they filled, passwords, codes — as the unified loop's.
+        page.screenshot({
+          type: 'jpeg',
+          quality: 80,
+          fullPage: false,
+          timeout,
+          style: SENSITIVE_SCREENSHOT_STYLE,
+        }),
       );
       // `page.viewportSize()` returns null when Playwright is attached
       // via `connectOverCDP` to an externally-launched Chrome (the

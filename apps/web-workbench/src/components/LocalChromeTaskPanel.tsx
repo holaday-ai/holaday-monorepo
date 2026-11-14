@@ -1,10 +1,9 @@
 import { Button } from '@/components/ui/button';
-import { useBrowserOwnership } from '@/hooks/useBrowserOwnership';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTaskStatus } from '@/types/task';
-import { Globe, Loader2, X } from 'lucide-react';
+import { Globe, X } from 'lucide-react';
 import * as React from 'react';
 
 export function LocalChromeTaskPanel({
@@ -12,7 +11,8 @@ export function LocalChromeTaskPanel({
   status,
   onClose,
 }: { taskId: string; status?: UiTaskStatus | null; onClose?: () => void }) {
-  const ownership = useBrowserOwnership(taskId, true);
+  // REBUILD-4 共同操作: the page is in the person's own Chrome; they can use it at any time and
+  // the assistant waits until they are still before it continues. No takeover, no handback.
   // FIX-PR259-2 — a task parked before any Chrome session exists (extension
   // offline / no page selected) shows the same connect-the-extension copy as
   // the task stream instead of the in-session control states.
@@ -22,8 +22,6 @@ export function LocalChromeTaskPanel({
   const terminal = ['completed', 'failed', 'cancelled', 'timeout', 'partial_success'].includes(
     status ?? '',
   );
-  const phase = ownership.state?.phase;
-  const transitioning = phase === 'requested' || phase === 'resuming' || ownership.pending;
   const waitingForExtension = Boolean(connection) && !terminal;
   async function stop() {
     setStopping(true);
@@ -74,48 +72,21 @@ export function LocalChromeTaskPanel({
               ? '任务已结束，页面保留在 Chrome。'
               : stopping
                 ? '正在停止，等待执行结果确认…'
-                : phase === 'human'
-                  ? '你在操作，我先停下；在 Chrome 里操作完，点「交还给我」。'
-                  : phase === 'requested'
-                    ? '正在等待当前动作结束，请稍候再操作。'
-                    : phase === 'resuming'
-                      ? '正在重新读取页面…'
-                      : phase === 'agent'
-                        ? 'AI 正在处理你选择的页面。'
-                        : '正在确认 Chrome 会话…'}
+                : 'AI 正在处理你选择的页面，你也可以直接在 Chrome 里操作。'}
         </p>
         {waitingForExtension ? (
           <p className="max-w-xs text-xs text-muted-foreground">
             {awaitingUserStreamMessage('permission', null, connection).followUp}
           </p>
         ) : null}
-        {!waitingForExtension && transitioning ? (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : null}
-        {error || (!terminal && !waitingForExtension && ownership.error) ? (
+        {error ? (
           <p role="alert" className="max-w-xs text-xs text-muted-foreground">
-            {error || '暂时无法确认控制状态，请等待恢复或停止任务。'}
+            {error}
           </p>
         ) : null}
       </div>
       {!terminal ? (
         <footer className="flex justify-center gap-2">
-          {waitingForExtension ? null : (
-            <Button
-              variant="secondary"
-              disabled={
-                !ownership.supported ||
-                transitioning ||
-                stopping ||
-                (phase !== 'agent' && phase !== 'human')
-              }
-              onClick={() => {
-                void ownership.request(phase === 'human' ? 'return' : 'takeover');
-              }}
-            >
-              {phase === 'human' ? '交还给我' : '我来操作'}
-            </Button>
-          )}
           <Button
             variant="ghost"
             disabled={stopping}

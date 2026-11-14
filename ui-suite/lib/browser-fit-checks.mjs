@@ -8,7 +8,9 @@ import { BROWSER_FRAME, edgeMarkedFrame } from './frame.mjs';
  * asks for on w3schools html_forms, YouTube and a JD item page — must be seen whole:
  * inside every clipping ancestor, aspect kept, no horizontal scrollbar, with the
  * sidebar open or closed, at a phone width, and with viewport v2 on or off. 「100%
- * 原尺寸」 shows the page 1:1 and scrolls; a takeover click lands where it was aimed.
+ * 原尺寸」 shows the page 1:1 and scrolls. REBUILD-4: no viewport request is ever sent
+ * (the page stays at least 1280×800, also on a phone); the old takeover step runs only if
+ * such a button still exists.
  */
 const PAGES = [
   ['w3schools-html-forms', 1280, 800],
@@ -116,12 +118,10 @@ export async function browserPanelFitChecks(page, server, width, out) {
         }
       }
       if (v2) {
-        // The panel asks the remote browser for a desktop-width page, never the narrow
-        // panel width that made wide pages overflow inside the remote browser.
+        // REBUILD-4: the page size never changes — the panel never asks the remote browser
+        // for a viewport (the pool keeps it at least 1280×800); the panel only scales the frame.
         const sent = (await requests(server)).filter((r) => r.input.type === 'viewport');
-        assert.ok(sent.length > 0, 'v2: no viewport request');
-        for (const r of sent)
-          assert.ok(r.input.width >= 1280, `v2: remote viewport too narrow ${JSON.stringify(r.input)}`);
+        assert.equal(sent.length, 0, `v2: viewport request sent ${JSON.stringify(sent.map((r) => r.input))}`);
       }
     }
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=0`);
@@ -179,28 +179,22 @@ export async function browserPanelFitChecks(page, server, width, out) {
     items.push({ item: 'browser-panel-fit', label: 'phone 390x844' });
 
     step = 'phone-v2';
-    // FIX-34: with viewport v2 the phone sheet asks for a mobile-width page (scale ≈ 1),
-    // not a 1280-wide desktop page shrunk to ~0.3.
+    // REBUILD-4: with viewport v2 the phone sheet shows the same 1280×800 page, scaled to fit,
+    // and asks for no mobile viewport (FIX-34's mobile-width page is gone on purpose).
     await page.request.get(`${server.origin}/__ui_seed/viewport-v2?on=1`);
     const beforePhone = (await requests(server)).length;
-    server.setFrame(edgeMarkedFrame(390, 760));
+    server.setFrame(edgeMarkedFrame(1280, 800));
     await page.goto(baseUrl);
     await openPhoneSheet(page);
-    await waitForFrame(page, 390, 760);
+    await waitForFrame(page, 1280, 800);
     const phoneSent = (await requests(server))
       .slice(beforePhone)
       .filter((r) => r.input.type === 'viewport');
-    assert.ok(phoneSent.length > 0, 'phone v2: no viewport request');
-    for (const r of phoneSent)
-      assert.ok(
-        r.input.width >= 320 && r.input.width <= 600,
-        `phone v2: not a mobile viewport ${JSON.stringify(r.input)}`,
-      );
+    assert.equal(phoneSent.length, 0, `phone v2: viewport request sent ${JSON.stringify(phoneSent.map((r) => r.input))}`);
     const phoneFit = await measure(page);
     assertWhole(phoneFit, `phone v2@390 from ${width}`);
-    assert.ok(phoneFit.scale > 0.8, `phone v2: page shrunk to ${phoneFit.scale}`);
-    await page.screenshot({ path: path.join(out, `after-fix34-${width}-phone-v2.png`), animations: 'disabled' });
-    items.push({ item: 'browser-panel-fit', label: `phone v2 mobile viewport ${phoneSent.at(-1).input.width}` });
+    await page.screenshot({ path: path.join(out, `after-rebuild4-${width}-phone-v2.png`), animations: 'disabled' });
+    items.push({ item: 'browser-panel-fit', label: 'phone v2 keeps 1280x800' });
   } catch (error) {
     if (error instanceof Error) error.message = `browser-fit[${step}]: ${error.message}`;
     throw error;
