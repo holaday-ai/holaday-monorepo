@@ -277,8 +277,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           controlReady: Boolean(opts.beforeViewportAction),
         }),
       );
+    /** 复审 P2-1: when each input reached the server (the Enter / Space navigation guard). */
+    const receivedAt = new WeakMap<object, number>();
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      onInputReceived: (envelope) => {
+        if (envelope.payload) receivedAt.set(envelope.payload, performance.now());
+        return undefined;
+      },
       runWithStableViewport: (action) =>
         streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
       beforeDispatch: args.viewportV2
@@ -293,8 +299,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             // client that sends none is refused, as before. Its age is no longer checked.
             if (!envelope.observation) throw new Error('browser_observation_missing');
             if (!streamer.matchesPage(await args.instance.executor.getPage()))
-              // The assistant moved to another tab: this input lands on the page the person sees;
-              // the screen then follows the assistant's page.
+              // The assistant moved to another tab: the screen follows it. This input goes to
+              // whichever page the stream is bound to when it is sent (or is dropped while the
+              // stream rebinds); the person sees the new page and acts on it.
               void streamer
                 .followCurrentPage()
                 .catch((err: unknown) =>
@@ -468,6 +475,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       const streamRef = streamer;
       inputHandler.setNavigationGuard({
         lastNavigationAt: () => streamRef.lastNavigationAt(),
+        receivedAt: (message) => receivedAt.get(message),
         pending: () => streamRef.historyPending(),
         settled: (ms) => streamRef.historySettled(ms),
       });

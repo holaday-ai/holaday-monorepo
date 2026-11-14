@@ -164,6 +164,7 @@ export class CdpStreamer {
   /**
    * HOTFIX-R4A（协调方改）: when the page last changed document — a main-frame navigation, a
    * pushState new history entry (timed at its event, not when it was classified), a tab rebind.
+   * Monotonic (performance.now()): a clock set back never makes it look recent.
    */
   private lastNavigation = 0;
   lastNavigationAt(): number {
@@ -240,7 +241,7 @@ export class CdpStreamer {
   private async noteHistoryEntry(
     session: CDPSession,
     retire: boolean,
-    at = Date.now(),
+    at = performance.now(),
   ): Promise<void> {
     const generation = this.historyGeneration;
     if (retire) this.historyReads++;
@@ -286,7 +287,7 @@ export class CdpStreamer {
     this.historyGeneration++;
     for (const wake of [...this.historyWaiters]) wake();
     // Another tab replacing the one shown is a page change; the first page of a stream is not.
-    if (this.boundPage && this.boundPage !== page) this.lastNavigation = Date.now();
+    if (this.boundPage && this.boundPage !== page) this.lastNavigation = performance.now();
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
@@ -415,7 +416,7 @@ export class CdpStreamer {
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
       this.loader = params.frame.loaderId;
-      this.lastNavigation = Date.now();
+      this.lastNavigation = performance.now();
       this.historyEntry = null;
       void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
@@ -457,7 +458,7 @@ export class CdpStreamer {
       // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
       // history entry retires the old frames; replaceState (a search box mirroring each letter
       // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
-      void this.noteHistoryEntry(cdp, true, Date.now());
+      void this.noteHistoryEntry(cdp, true, performance.now());
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.

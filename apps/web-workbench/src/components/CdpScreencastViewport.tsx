@@ -175,14 +175,6 @@ export function CdpScreencastViewport({
     observationEpochRef.current++;
     if (canvasRef.current) delete canvasRef.current.dataset.frameId;
   }, []);
-  /**
-   * HOTFIX-R4A（协调方改）: the page changed (a navigation): frames decoded for the old one are not
-   * painted, but the last picture's geometry still maps the person's input — like a remote
-   * desktop, what is on screen is what they act on.
-   */
-  const retireFrames = React.useCallback(() => {
-    observationEpochRef.current++;
-  }, []);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
   const inputBridgeStateRef = React.useRef<CdpInputBridgeState>(INITIAL_CDP_INPUT_BRIDGE_STATE);
   /** Host <div> ref — the box the fixed-size page frame is scaled into. */
@@ -525,10 +517,10 @@ export function CdpScreencastViewport({
           notifyRefused('closed');
           return;
         }
-        if (viewportV2 && msg.type === 'observation-invalidated') {
-          retireFrames();
-          return;
-        }
+        // HOTFIX-R4A（复审 P1-1）: the page changed (a navigation, a replaceState). The picture
+        // on screen still maps the person's input until the next one arrives — like a remote
+        // desktop; nothing is dropped meanwhile.
+        if (viewportV2 && msg.type === 'observation-invalidated') return;
         // Older servers confirm a size this screen no longer sends; nothing to do.
         if (msg.type === 'viewport-applied') return;
         // Optimization #3 R2 — `Page.frameNavigated` events from
@@ -537,7 +529,6 @@ export function CdpScreencastViewport({
         // remote navigation (user clicked a link, JS pushState,
         // page reloaded, etc.).
         if (msg.type === 'url-changed' && typeof msg.url === 'string') {
-          if (viewportV2) retireFrames();
           onUrlChangeRef.current?.(msg.url);
           return;
         }
@@ -612,15 +603,7 @@ export function CdpScreencastViewport({
       decodingImgRef.current = null;
       pendingFrameRef.current = null;
     };
-  }, [
-    hasStreamToken,
-    reconnectSignal,
-    wsUrl,
-    viewportV2,
-    invalidateGeometry,
-    retireFrames,
-    notifyRefused,
-  ]);
+  }, [hasStreamToken, reconnectSignal, wsUrl, viewportV2, invalidateGeometry, notifyRefused]);
 
   // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
   // fresh Image so a delayed decode cannot inherit another frame's handlers.
@@ -680,15 +663,15 @@ export function CdpScreencastViewport({
       ctx.drawImage(img, 0, 0);
       if (viewportV2) {
         // Every frame is accepted and scaled to fit, whatever its size: the page keeps its own
-        // fixed layout. Its geometry names input only while it matches the image painted and
-        // no navigation / invalidation happened since it was sent.
-        geometryRef.current =
+        // fixed layout. Its geometry maps input when it matches the image painted (and the
+        // connection it came on is still this one); otherwise the last picture's geometry stays.
+        if (
           observationEpoch === observationEpochRef.current &&
           geometry &&
           geometry.imageWidth === img.width &&
           geometry.imageHeight === img.height
-            ? geometry
-            : null;
+        )
+          geometryRef.current = geometry;
         if (geometryRef.current) writeReadyRef.current = true;
       }
       if (geometryRef.current) geometryReceivedAtRef.current = Date.now();

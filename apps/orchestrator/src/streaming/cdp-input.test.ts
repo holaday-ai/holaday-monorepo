@@ -493,7 +493,7 @@ describe('CdpInputHandler navigation guard', () => {
   it('long after a navigation every input goes through — presses, Enter, Space, letters', async () => {
     const { effects, session } = recording();
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    handler.setNavigationGuard({ lastNavigationAt: () => Date.now() - 5_000 });
+    handler.setNavigationGuard({ lastNavigationAt: () => performance.now() - 5_000 });
     const signal = new AbortController().signal;
     await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
     await handler.handle({ type: 'mouseUp', x: 5, y: 5 }, signal);
@@ -514,7 +514,7 @@ describe('CdpInputHandler navigation guard', () => {
   it('within 300 ms of a navigation: Enter / Space are dropped with their key-ups; clicks and letters are not', async () => {
     const { effects, session } = recording();
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    handler.setNavigationGuard({ lastNavigationAt: () => Date.now() - 100 });
+    handler.setNavigationGuard({ lastNavigationAt: () => performance.now() - 100 });
     const signal = new AbortController().signal;
     await expect(handler.handle({ ...ENTER }, signal)).rejects.toThrow(
       'browser_page_just_navigated',
@@ -539,7 +539,7 @@ describe('CdpInputHandler navigation guard', () => {
       pending: () => pending,
       settled: async () => {
         // The read finds a new history entry: a navigation, timed at its event.
-        navigatedAt = Date.now() - 50;
+        navigatedAt = performance.now() - 50;
         pending = false;
       },
     });
@@ -547,6 +547,36 @@ describe('CdpInputHandler navigation guard', () => {
       'browser_page_just_navigated',
     );
     expect(effects).toEqual([]);
+  });
+
+  it('复审 P2-1: an Enter that arrived before the page left, and waited behind other input, is still dropped', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const enter = { ...ENTER };
+    const arrived = performance.now() - 2_000; // queued for 2 s
+    handler.setNavigationGuard({
+      lastNavigationAt: () => arrived + 1_000, // the page left while it waited
+      receivedAt: (m) => (m === enter ? arrived : undefined),
+    });
+    await expect(handler.handle(enter, new AbortController().signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    expect(effects).toEqual([]);
+  });
+
+  it("复审 P2-3: an auto-repeated Enter dropped after the page left keeps the first one's release", async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    let navigatedAt = 0;
+    handler.setNavigationGuard({ lastNavigationAt: () => navigatedAt });
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal); // sent; it makes the page leave
+    navigatedAt = performance.now();
+    await expect(handler.handle({ ...ENTER }, signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    ); // the repeat
+    await handler.handle({ ...ENTER_UP }, signal); // the held key is released
+    expect(effects).toEqual(['keyDown:Enter', 'keyUp:Enter']);
   });
 
   it('a release of a button the browser does not hold is dropped (no lone mouse-up)', async () => {

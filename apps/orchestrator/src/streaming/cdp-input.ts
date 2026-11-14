@@ -52,8 +52,14 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
  * another tab) is dropped, because it was meant for the page before.
  */
 export interface InputNavigationGuard {
-  /** When the page last changed document (ms since epoch; 0 = never). */
+  /** When the page last changed document (performance.now() ms; 0 = never). */
   lastNavigationAt(): number;
+  /**
+   * 复审 P2-1: when this input reached the server (performance.now() ms). A navigation from 300 ms
+   * before it arrived until it is sent counts — an Enter that waited behind other input while the
+   * page left is still the old page's.
+   */
+  receivedAt?(msg: InputMessage): number | undefined;
   /** A same-document navigation whose kind (push or replace) is still being read. */
   pending?(): boolean;
   /** Waits (bounded) until no such navigation is being read. */
@@ -326,6 +332,7 @@ export class CdpInputHandler {
     if (session !== this.activeSession) {
       this.activeSession = session;
       this.activeModifiers = 0;
+      this.droppedKeys.clear();
     }
     const guard = this.navigationGuard;
     if (guard && msg.type !== 'viewport') {
@@ -345,8 +352,10 @@ export class CdpInputHandler {
       if (msg.type === 'keyDown' && activates(msg)) {
         // A pushState being classified right now is waited for (bounded) before deciding.
         if (guard.pending?.()) await guard.settled?.(NAVIGATION_KEY_GUARD_MS);
-        if (Date.now() - guard.lastNavigationAt() <= NAVIGATION_KEY_GUARD_MS) {
-          this.droppedKeys.add(keyId);
+        const arrived = guard.receivedAt?.(msg) ?? performance.now();
+        if (guard.lastNavigationAt() >= arrived - NAVIGATION_KEY_GUARD_MS) {
+          // 复审 P2-3: an auto-repeat of a key already sent keeps that key's release.
+          if (!this.pressedKeys.has(keyId)) this.droppedKeys.add(keyId);
           this.logger.info(where, 'cdp-input: human input refused (page just navigated)');
           throw new Error(PAGE_CHANGED_ERROR);
         }
@@ -449,6 +458,7 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.set(msg.code ?? msg.key ?? String(msg.keyCode), msg);
+          this.droppedKeys.delete(msg.code ?? msg.key ?? String(msg.keyCode));
           break;
         }
         case 'keyUp': {

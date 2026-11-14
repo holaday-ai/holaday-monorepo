@@ -393,3 +393,17 @@ it('复审 #1 (建议修 #3): an input refused while the task stops is said', ()
   screen.receive({ type: 'input-closed' });
   expect(screen.onInputRefused).toHaveBeenCalledWith('closed');
 });
+
+it('HOTFIX-R4A 复审 P1-1: a frame decoded across a navigation keeps the picture mapping input — no letter is dropped', () => {
+  const screen = sharedScreen();
+  screen.frame();
+  // A search box mirrors each letter into the URL (replaceState): the server says the page changed.
+  screen.receive({ type: 'url-changed', url: 'https://example.com/?q=h' });
+  screen.receive({ type: 'observation-invalidated' });
+  screen.frame();
+  fireEvent.keyDown(screen.input, { key: 'o', code: 'KeyO', keyCode: 79 });
+  screen.press();
+  expect(screen.sent.filter((m) => m.payload?.type === 'keyDown')).toHaveLength(1);
+  expect(screen.pointer()).toHaveLength(2);
+  expect(screen.onInputRefused).not.toHaveBeenCalled();
+});
