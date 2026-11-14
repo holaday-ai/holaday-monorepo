@@ -2,6 +2,7 @@ import { hasToolCallMarkup, stripToolCallMarkup } from '@holaday/shared-types';
 import { stripToolCallBlocks } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { answerQualityFailure, deliverableAnswer } from './generate-answer-guard.js';
+import { explainExecutionMode } from './intent-classifier.js';
 import { sanitizeFinalText } from './text-sanitizer.js';
 
 /**
@@ -169,4 +170,36 @@ describe('LEAK-1 retest run 11 · an invented browser_ tool name', () => {
     expect(hasToolCallMarkup(text)).toBe(true);
     expect(deliverableAnswer(text)).toBeNull();
   });
+});
+
+describe('LEAK-1 root fix · 「搜一下 / 百度一下 / 上网查」 go to the search lane (BOSS 2026-11-14)', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
+  const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
+  it.each([
+    INTENT,
+    '搜一下 OpenAI 最新发布了什么',
+    '帮我百度一下 2026 年春节放假安排',
+    '上网查一下特斯拉 Model Y 的续航',
+    '帮我在网上搜一下杭州明天的天气',
+    '你搜一下 2025 年诺贝尔文学奖得主',
+    '麻烦搜一下 Python 3.14 发布日期',
+    '问题：帮我搜一下杭州天气',
+  ])('%s → scrape', async (intent) => {
+    expect(await route(intent)).toBe('scrape');
+  });
+  it.each([
+    '帮我写一段关于搜索引擎的介绍',
+    '帮我写个广告语：百度一下，你就知道',
+    '把这句翻译成英文：搜一下就知道了',
+    '帮我润色这段：大家可以去搜一下相关资料',
+    '写一篇作文，题目：去搜一下',
+  ])('writing / translating stays in generate: %s', async (intent) => {
+    expect(await route(intent)).toBe('generate');
+  });
+  it.each(['请使用云端浏览器，搜一下 HOLA DAY AI 是什么', '在小红书上搜一下露营装备'])(
+    'browser requests stay in the browser: %s',
+    async (intent) => {
+      expect(await route(intent)).toBe('browser');
+    },
+  );
 });
