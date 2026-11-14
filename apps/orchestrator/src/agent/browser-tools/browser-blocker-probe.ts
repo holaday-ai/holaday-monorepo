@@ -266,20 +266,18 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
 }
 
 /**
- * CAPTCHA-UX-1（协调方追加）: a captcha is judged by its box on the page, not by the address. On a
- * page with a known captcha component (reCAPTCHA / hCaptcha / Turnstile frame or response field),
- * the wall stands only while a challenge is open or a visible box has no response; passed (or the
- * box gone) is no wall — the reCAPTCHA demo page's own address contains /recaptcha, so after it was
- * passed the assistant waited out its 10 minutes. Pages without a known component (sliders, a
- * site's own check) keep the address / title / text rules.
+ * CAPTCHA-UX-1（协调方追加）: a captcha matched only by the page's address (the reCAPTCHA demo page's
+ * own address contains /recaptcha) is judged by its box on the page: once the provider's response
+ * is filled and no challenge is open, it is no wall — after it was passed the assistant used to
+ * wait out its 10 minutes. 复审 P0: only then — every other captcha (a Cloudflare check, text, a
+ * frame, a slider) keeps its rules, and not seeing a box is never taken as passed.
  */
-async function captchaByBox<T extends { reason: string } | null | undefined>(
-  page: Page,
-  hit: T,
-): Promise<T | null> {
-  if (hit?.reason !== 'captcha') return hit;
+async function captchaByBox<
+  T extends { reason: string; evidence?: { rule?: string } } | null | undefined,
+>(page: Page, hit: T): Promise<T | null> {
+  if (hit?.reason !== 'captcha' || !hit.evidence?.rule?.includes(':url-path:')) return hit;
   const state = await captchaWidgetState(page);
-  return state?.known && !state.unpassed ? null : hit;
+  return state?.known && state.passed ? null : hit;
 }
 
 /**

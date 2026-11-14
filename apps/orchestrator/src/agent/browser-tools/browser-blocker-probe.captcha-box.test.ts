@@ -81,3 +81,47 @@ it('a page without a known captcha component keeps the address / text rules (a s
     await page.close();
   }
 }, 30000);
+
+it('复审 P0: not seeing a box is never "passed" — the box below the fold with no response is still a wall', async () => {
+  const page = await demoPage();
+  try {
+    await page.evaluate(() => {
+      document.getElementById('anchor')!.style.cssText = 'position:absolute;top:5000px';
+    });
+    expect((await probeBrowserBlocker(page))?.reason).toBe('captcha');
+  } finally {
+    await page.close();
+  }
+}, 30000);
+
+it('复审 P0: a Cloudflare check with a Turnstile field (no box in the document) keeps its rules', async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  try {
+    await page.route('https://cf.fixture.test/', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<!doctype html><title>Just a moment...</title><body><div id="challenge-running">Checking your browser before accessing the site.</div><input type="hidden" name="cf-turnstile-response" value=""></body>',
+      }),
+    );
+    await page.goto('https://cf.fixture.test/');
+    expect((await probeBrowserBlocker(page))?.reason).toBe('captcha');
+  } finally {
+    await page.close();
+  }
+}, 30000);
+
+it('复审 P1-2: an invisible reCAPTCHA badge with its own response does not clear the demo page box', async () => {
+  const page = await demoPage();
+  try {
+    await page.evaluate(() => {
+      const f = document.createElement('iframe');
+      f.src = 'https://www.google.com/recaptcha/api2/anchor?k=v3&size=invisible';
+      f.style.cssText = 'width:256px;height:60px;border:0;position:fixed;right:0;bottom:0';
+      document.body.appendChild(f);
+    });
+    // The visible box is not done; the badge is no box to do and does not count as one.
+    expect((await probeBrowserBlocker(page))?.reason).toBe('captcha');
+  } finally {
+    await page.close();
+  }
+}, 30000);

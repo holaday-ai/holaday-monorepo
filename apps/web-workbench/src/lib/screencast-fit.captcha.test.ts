@@ -21,14 +21,15 @@ describe('CAPTCHA-UX-1 captcha zoom placement', () => {
     expect((tl.x + br.x) / 2).toBeCloseTo(450);
     expect(p.scale).toBeGreaterThan(900 / 1280); // larger than the whole-page fit
   });
-  it('phone: the box fills the width, top-aligned', () => {
-    const p = placeScreencastCaptchaZoom({ hostWidth: 375, hostHeight: 700, ...base, box })!;
+  it('phone: the whole box fits (复审 P1-3: the grid with its Verify button is not cut off), top-aligned', () => {
+    const p = placeScreencastCaptchaZoom({ hostWidth: 375, hostHeight: 500, ...base, box })!;
     const m = CAPTCHA_ZOOM_MARGIN;
     const tl = shown(p, box.x - m, box.y - m);
-    const br = shown(p, box.x + box.width + m, box.y);
-    expect(tl.x).toBeCloseTo(0);
-    expect(br.x).toBeCloseTo(375);
+    const br = shown(p, box.x + box.width + m, box.y + box.height + m);
     expect(tl.y).toBeCloseTo(0);
+    expect(br.y).toBeLessThanOrEqual(500 + 1e-6);
+    expect(tl.x).toBeGreaterThanOrEqual(-1e-6);
+    expect(br.x).toBeLessThanOrEqual(375 + 1e-6);
   });
   it('a device-scale capture (frame twice the CSS width) zooms on the same CSS box', () => {
     const p1 = placeScreencastCaptchaZoom({ hostWidth: 900, hostHeight: 700, ...base, box })!;

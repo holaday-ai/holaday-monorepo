@@ -320,20 +320,24 @@ async function guardRunSearches(
   provider: SearchProvider,
   args: RunSupercarOptions,
 ): Promise<(() => Promise<void>) | null> {
+  let served: Awaited<ReturnType<typeof serveSearchResults>> | undefined;
   try {
     const page = await args.executor?.getPage();
     if (!page) return null;
-    const served = await serveSearchResults(page.context(), {
+    served = await serveSearchResults(page.context(), {
       query: '',
       label: provider.label,
       results: [],
     });
-    const unguard = await guardEngineSearches(page.context(), provider, args, served);
+    const pages = served;
+    const unguard = await guardEngineSearches(page.context(), provider, args, pages);
     return async () => {
       await unguard().catch(() => {});
-      await served.dispose();
+      await pages.dispose();
     };
   } catch {
+    // 复审 P2: a guard that could not be installed leaves no results-page route behind.
+    await served?.dispose().catch(() => {});
     return null;
   }
 }

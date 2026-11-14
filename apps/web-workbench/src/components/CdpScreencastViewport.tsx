@@ -937,6 +937,29 @@ export function CdpScreencastViewport({
         className,
       )}
     >
+      {viewportV2 && captchaBox && displayMode !== 'actual' ? (
+        // CAPTCHA-UX-1 第 2 条 (复审 P1-4): above the picture, never over it — the hint must not
+        // cover the challenge's Verify button. Zoom on / off; the picture follows the box and
+        // restores itself when the verification is gone. Outside the canvas: never sent to the page.
+        <div className="flex shrink-0 items-center gap-2 border-b bg-background px-2 py-1.5">
+          <p
+            role="status"
+            data-testid="captcha-zoom-hint"
+            className="min-w-0 flex-1 text-xs leading-5 text-foreground"
+          >
+            请在放大的画面里完成验证；看不清可以点验证框里的耳机图标改听语音
+          </p>
+          <button
+            type="button"
+            data-testid="captcha-zoom-toggle"
+            aria-pressed={captchaZoom}
+            onClick={() => setCaptchaZoom((on) => !on)}
+            className="shrink-0 rounded-md border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+          >
+            {captchaZoom ? '缩小' : '放大'}
+          </button>
+        </div>
+      ) : null}
       <div
         ref={hostRef}
         className={cn(
@@ -1092,28 +1115,6 @@ export function CdpScreencastViewport({
           style={{ pointerEvents: 'none', top: 0, left: 0 }}
         />
       </div>
-      {viewportV2 && captchaBox ? (
-        <>
-          {/* CAPTCHA-UX-1 第 2 条: zoom on / off; the picture follows the box and restores itself
-              when the verification is gone. Outside the canvas, so it never reaches the page. */}
-          <button
-            type="button"
-            data-testid="captcha-zoom-toggle"
-            aria-pressed={captchaZoom}
-            onClick={() => setCaptchaZoom((on) => !on)}
-            className="absolute right-2 top-2 z-10 rounded-md border bg-background/95 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
-          >
-            {captchaZoom ? '缩小' : '放大'}
-          </button>
-          <div
-            role="status"
-            data-testid="captcha-zoom-hint"
-            className="pointer-events-none absolute inset-x-2 bottom-2 z-10 rounded-md border bg-background/95 px-3 py-2 text-xs leading-5 text-foreground shadow-sm"
-          >
-            请在放大的画面里完成验证；看不清可以点验证框里的耳机图标改听语音
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }

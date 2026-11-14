@@ -335,7 +335,7 @@ const CAPTCHA_ZOOM_MAX_CSS_SCALE = 6;
 
 /**
  * CAPTCHA-UX-1 第 2 条: place the frame so the captcha box (plus a margin) fills the panel — on a
- * phone, its width. Only this screen's picture is scaled; the page keeps its size. Points still map
+ * phone it is top-aligned, and it always fits whole. Only this screen's picture is scaled; the page keeps its size. Points still map
  * through the canvas's displayed rect, so a click lands where it is shown.
  */
 export function placeScreencastCaptchaZoom(input: {
@@ -358,10 +358,9 @@ export function placeScreencastCaptchaZoom(input: {
   const bh = Math.min(sourceHeight - by, (box.height + 2 * m) * k);
   if (bw <= 0 || bh <= 0) return null;
   const phone = hostWidth < CAPTCHA_ZOOM_PHONE_WIDTH;
-  const scale = Math.min(
-    CAPTCHA_ZOOM_MAX_CSS_SCALE / k,
-    phone ? hostWidth / bw : Math.min(hostWidth / bw, hostHeight / bh),
-  );
+  // 复审 P1-3: the whole box fits — width and height — on a phone too (the image grid with its
+  // Verify button is taller than wide; a width-only fit cut its last row off).
+  const scale = Math.min(CAPTCHA_ZOOM_MAX_CSS_SCALE / k, hostWidth / bw, hostHeight / bh);
   return {
     scale,
     width: hostWidth,

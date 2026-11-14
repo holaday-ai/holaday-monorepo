@@ -29,6 +29,11 @@ export interface CaptchaWidgetState {
   known: boolean;
   /** Still to be done: a challenge (image grid) is open, or a visible box has no response yet. */
   unpassed: boolean;
+  /**
+   * 复审 P0: positively passed — a provider's response field is filled and no challenge is open.
+   * Not seeing a box is never taken as passed.
+   */
+  passed: boolean;
   /** Where to zoom (CSS px of the viewport): the open challenge, else the box; null when passed. */
   box: CaptchaBoxRect | null;
 }
@@ -49,6 +54,8 @@ export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
   for (const f of frames) {
     const r = f.getBoundingClientRect();
     if (r.width < 40 || r.height < 40 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh || !seen(f)) continue;
+    // 复审 P1-2: an invisible reCAPTCHA's badge is not a box to do.
+    if (/[?&]size=invisible/i.test(f.src || '')) continue;
     shown.push({ f, r, challenge: /\\/bframe|[?&#]frame=challenge/i.test(f.src || '') });
   }
   const fields = [...document.querySelectorAll('textarea[name="g-recaptcha-response"],textarea[name="h-captcha-response"],input[name="cf-turnstile-response"]')];
@@ -60,13 +67,20 @@ export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
   return {
     known: frames.length > 0 || fields.length > 0,
     unpassed,
+    passed: answered && !challenge,
     box: pick ? { x: Math.round(pick.r.left), y: Math.round(pick.r.top), width: Math.round(pick.r.width), height: Math.round(pick.r.height) } : null,
   };
 })()`;
 
 function parse(value: unknown): CaptchaWidgetState | null {
   const v = value as Partial<CaptchaWidgetState> | null | undefined;
-  if (!v || typeof v.known !== 'boolean' || typeof v.unpassed !== 'boolean') return null;
+  if (
+    !v ||
+    typeof v.known !== 'boolean' ||
+    typeof v.unpassed !== 'boolean' ||
+    typeof v.passed !== 'boolean'
+  )
+    return null;
   const b = v.box;
   const box =
     b &&
@@ -75,7 +89,7 @@ function parse(value: unknown): CaptchaWidgetState | null {
     b.height > 0
       ? { x: b.x, y: b.y, width: b.width, height: b.height }
       : null;
-  return { known: v.known, unpassed: v.unpassed, box };
+  return { known: v.known, unpassed: v.unpassed, passed: v.passed, box };
 }
 
 /** The captcha component's state on a Playwright page; null when it cannot be read. */
@@ -91,13 +105,21 @@ export async function captchaWidgetState(page: Page): Promise<CaptchaWidgetState
 export async function captchaWidgetStateCdp(
   session: CDPSession,
 ): Promise<CaptchaWidgetState | null> {
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const evaluated = (await session.send('Runtime.evaluate', {
+    const read = session.send('Runtime.evaluate', {
       expression: CAPTCHA_WIDGET_EXPRESSION,
       returnByValue: true,
-    })) as { result?: { value?: unknown } };
-    return parse(evaluated.result?.value);
+    }) as Promise<{ result?: { value?: unknown } }>;
+    // A JS dialog blocks the page: no answer in time is no reading.
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 1_000);
+      timer.unref?.();
+    });
+    return parse((await Promise.race([read, late]))?.result?.value);
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

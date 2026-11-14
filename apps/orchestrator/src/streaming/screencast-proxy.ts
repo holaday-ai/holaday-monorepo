@@ -277,8 +277,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
      */
     let captchaBoxTimer: NodeJS.Timeout | null = null;
     let lastCaptchaBox = 'null';
+    let captchaBoxReading = false;
     const watchCaptchaBox = (): void => {
+      // 复审 P2: a stream torn down while it was starting never gets a timer.
+      if (stopped) return;
       captchaBoxTimer = setInterval(() => {
+        // 复审 P2: one reading at a time (a busy page or a JS dialog must not pile them up).
+        if (captchaBoxReading) return;
+        captchaBoxReading = true;
         void (async () => {
           if (stopped || args.ws.readyState !== WebSocket.OPEN) return;
           const binding = browserControlSessions.get(
@@ -297,7 +303,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           if (key === lastCaptchaBox || stopped || args.ws.readyState !== WebSocket.OPEN) return;
           lastCaptchaBox = key;
           args.ws.send(JSON.stringify({ type: 'captcha-box', rect: box }));
-        })().catch(() => {});
+        })()
+          .catch(() => {})
+          .finally(() => {
+            captchaBoxReading = false;
+          });
       }, CAPTCHA_BOX_POLL_MS);
       captchaBoxTimer.unref?.();
     };
