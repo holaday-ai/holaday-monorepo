@@ -203,3 +203,88 @@ describe('LEAK-1 root fix · 「搜一下 / 百度一下 / 上网查」 go to th
     },
   );
 });
+
+describe('LEAK-2 · tags named after a tool (online s04 on production after DEPLOY-R5)', () => {
+  const PROD = '......\n\nweb_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>';
+  it.each([
+    ['verbatim from production (opening 「<」 missing)', PROD],
+    ['a well-formed pair', '<web_search>{"query": "2025年诺贝尔文学奖得主"}</web_search>'],
+    ['a pair with attributes', '<browser_navigate url="https://x.test"></browser_navigate>'],
+    [
+      'an opener on its own line',
+      '我来搜一下。\nweb_search>\nquery: 2025年诺贝尔文学奖\n</web_search>',
+    ],
+  ])('%s is tool syntax and no answer', (_label, text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+  it('a stray closing tag after a real answer goes; the answer stays', () => {
+    expect(
+      deliverableAnswer('2025 年诺贝尔文学奖得主是 László Krasznahorkai。\n</web_search>'),
+    ).toBe('2025 年诺贝尔文学奖得主是 László Krasznahorkai。');
+  });
+  it.each([
+    [
+      'the HTML search element',
+      'HTML 里可以用 <search> 包住搜索表单：<search><form></form></search>。',
+    ],
+    [
+      'a snake_case word followed by 「>」 in prose',
+      '比较 page_size> 0 的情况时要小心，例如 page_size>0。',
+    ],
+    ['a tool tag named in inline code', '模型有时会输出 `</web_search>` 这样的标签，需要过滤。'],
+  ])('%s stays', (_label, text) => {
+    expect(stripToolCallMarkup(text)).toBe(text);
+  });
+});
+
+describe('LEAK-2 复审', () => {
+  it.each([
+    [
+      'P1-1: opener right after Chinese punctuation',
+      '我查一下。web_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>',
+    ],
+    [
+      'P1-2: truncated, no closing tag',
+      '......\n\nweb_search>\n{"query": "2025年诺贝尔文学奖得主"}',
+    ],
+    [
+      'P1-2: truncated well-formed opener',
+      '......\n\n<web_search>\n{"query": "2025年诺贝尔文学奖得主"}',
+    ],
+  ])('%s is no answer', (_label, text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+  it.each([
+    [
+      'a tool named mid-line does not eat the text down to a closing tag',
+      '流程: new_tab -> read_page，然后整理。\n\n这里是正文第一段。\n\n这里是正文第二段。\n\n</read_page>',
+      '流程: new_tab -> read_page，然后整理。\n\n这里是正文第一段。\n\n这里是正文第二段。',
+    ],
+    [
+      'a list item with 「>」 after a space',
+      '- read_page > list\n正文段落\n</read_page>',
+      '- read_page > list\n正文段落',
+    ],
+  ])('%s', (_label, text, shown) => {
+    expect(deliverableAnswer(text)).toBe(shown);
+  });
+});
+
+describe('LEAK-2 复审 #2 · a stream cut off inside the arguments', () => {
+  it.each([
+    'web_search>\n{"query": "2025年诺贝尔文学奖得主"',
+    '......\n<web_search>\n{"query": "x", "n": 3',
+  ])('%s is no answer and none of it is shown', (text) => {
+    expect(deliverableAnswer(text)).toBeNull();
+    expect(stripToolCallMarkup(text)).not.toContain('query');
+  });
+  it('an answer before a truncated call stays', () => {
+    expect(
+      deliverableAnswer(
+        '2025 年诺贝尔文学奖得主是 László Krasznahorkai。\n<web_search>\n{"query": "x"',
+      ),
+    ).toBe('2025 年诺贝尔文学奖得主是 László Krasznahorkai。');
+  });
+});
