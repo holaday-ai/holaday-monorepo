@@ -11,6 +11,8 @@ export interface NormalizedAuthMeProfile {
   /** Phase 1 #4 — video-creation reachable for this user (flag on + in
    *  allowlist). Gates the「视频任务」sidebar entry + /video route. */
   readonly videoEnabled: boolean;
+  /** BROWSER-HOME-1 — BROWSER_HOME_ENABLED + allowlist; gates the「云浏览器」entry + /browser. */
+  readonly browserHomeEnabled: boolean;
   readonly teamProjectsEnabled: boolean;
   readonly teamTaskLifecycleEnabled: boolean;
   readonly modelDataRegion: 'cn' | 'intl' | null;
@@ -35,6 +37,7 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     selectedRoles: normalizeSelectedRoles(raw.selectedRoles),
     role: raw.role === 'admin' ? 'admin' : 'user',
     videoEnabled: Boolean(raw.videoEnabled),
+    browserHomeEnabled: raw.browserHomeEnabled === true,
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
     modelDataRegion:

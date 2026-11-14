@@ -58,6 +58,7 @@ import {
   readableScreencastAutoScrollKey,
   readableScreencastStartScrollLeft,
 } from '@/lib/screencast-fit';
+import { buildScreencastWsUrl } from '@/lib/screencast-url';
 import { trpc } from '@/lib/trpc';
 import { useStreamToken } from '@/lib/use-stream-token';
 import { cn } from '@/lib/utils';
@@ -160,11 +161,7 @@ function buildVncUrl(
  * task is selected — keeps the panel populated on idle dashboards.
  */
 function buildScreencastUrl(activeTaskId: string | null, poolUserId: string | null): string | null {
-  if (typeof window === 'undefined') return null;
-  const arg = activeTaskId ?? poolUserId;
-  if (!arg) return null;
-  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${window.location.host}/screencast-ws/${encodeURIComponent(arg)}`;
+  return buildScreencastWsUrl(activeTaskId ?? poolUserId);
 }
 
 /**

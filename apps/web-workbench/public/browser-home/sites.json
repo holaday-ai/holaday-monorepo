@@ -1,0 +1,69 @@
+{
+  "_comment": "BROWSER-HOME-1 推荐网站。BOSS 名单到之前是 8 个占位格（placeholder: true，生产构建不显示）。字段：name 网站名、url 网址（http/https）、logo 本站静态图 /browser-home/logos/<文件>（不引用对方网站图片）、regions 显示的入口 cn / intl、order 排序（小的在前）。",
+  "sites": [
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 1,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 2,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 3,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 4,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 5,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 6,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 7,
+      "placeholder": true
+    },
+    {
+      "name": "待添加",
+      "url": "",
+      "logo": null,
+      "regions": ["cn", "intl"],
+      "order": 8,
+      "placeholder": true
+    }
+  ]
+}

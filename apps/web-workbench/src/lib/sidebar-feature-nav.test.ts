@@ -58,4 +58,38 @@ describe('filterSidebarFeatureNavItems', () => {
     expect(sidebarSource).toContain('else visit(href)');
     expect(compact(sidebarSource)).toContain(compact('navigate(href); onNavigate?.()'));
   });
+
+  it('BROWSER-HOME-1: 云浏览器 shows only with auth.me.browserHomeEnabled', () => {
+    const items = [
+      { label: '技能', href: '/skills' },
+      { label: '云浏览器', href: '/browser' },
+      { label: '视频任务', href: '/video' },
+    ];
+    expect(
+      filterSidebarFeatureNavItems(items, { cosmicEnabled: false }).map((item) => item.href),
+    ).toEqual(['/skills', '/video']);
+    expect(
+      filterSidebarFeatureNavItems(items, {
+        cosmicEnabled: false,
+        browserHomeEnabled: true,
+      }).map((item) => item.href),
+    ).toEqual(['/skills', '/browser', '/video']);
+  });
+
+  it('BROWSER-HOME-1: 云浏览器 (Globe) sits directly above 视频任务, fed by the auth.me flag', () => {
+    const sidebar = compact(
+      readFileSync(new URL('../components/Sidebar.tsx', import.meta.url), 'utf8'),
+    );
+    expect(sidebar).toMatch(
+      /\{icon:Globe,label:'云浏览器',href:'\/browser'\},\{icon:Clapperboard,label:'视频任务',href:'\/video'\}/,
+    );
+    expect(sidebar).toContain('browserHomeEnabled,}).map');
+    // HIDE-1 entries keep their own flags.
+    expect(sidebar).toContain('cosmicEnabled:isDailyEnergyEntryEnabled()');
+    expect(sidebar).toContain('ashareEnabled:isAshareEntryEnabled()');
+    const shell = compact(
+      readFileSync(new URL('../components/AppShell.tsx', import.meta.url), 'utf8'),
+    );
+    expect(shell).toContain('browserHomeEnabled={me?.browserHomeEnabled??false}');
+  });
 });

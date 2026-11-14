@@ -793,6 +793,7 @@ export function AppShell(): JSX.Element {
         userRole={me?.role ?? 'user'}
         userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
+        browserHomeEnabled={me?.browserHomeEnabled ?? false}
         onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
@@ -1142,6 +1143,7 @@ function WorkbenchBreadcrumb() {
     '/skills': '技能',
     '/stocks': '股市任务',
     '/cosmic': '今日能量',
+    '/browser': '云浏览器',
     '/video': '视频',
     '/image': '图片',
     '/planned': '规划任务',
