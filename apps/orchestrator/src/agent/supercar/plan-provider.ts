@@ -2,6 +2,7 @@ import type {
   CoreModelRuntimeEnvironment,
   CoreModelRuntimeInput,
   CoreModelRuntimeUnavailableReason,
+  QwenEndpointOverride,
 } from '../../llm/core-model-runtime.js';
 import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { ModelGatewayEnvironment } from '../../llm/gateway/settings.js';
@@ -28,6 +29,8 @@ export function resolvePlanProviderRoute(input: {
   environment: PlanProviderEnvironment;
   userExternalId: string;
   userModelDataRegion: unknown;
+  /** BROWSER-HOME-1: set by tasks.create for an admitted cloud-browser task only. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: CoreModelRuntimeInput['createMessages'];
   /** `environment` already names an explicitly selected planning model (browser brain). */
   modelPinned?: boolean;
@@ -41,6 +44,7 @@ export function resolvePlanProviderRoute(input: {
       userRegion: input.userModelDataRegion,
     },
     ...(input.modelPinned ? { modelPinned: true } : {}),
+    ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
   });
 
   if (runtime.kind === 'unavailable') {

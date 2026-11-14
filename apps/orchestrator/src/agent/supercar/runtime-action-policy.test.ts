@@ -59,7 +59,8 @@ describe('classifyRuntimeAction', () => {
     expect(verdict.requiresConfirmation).not.toBe(true);
     expect(verdict.requiresTakeover).toBe(true);
     expect(verdict.awaitingKind).toBe('login');
-    expect(verdict.reason).toContain('接管');
+    expect(verdict.reason).toContain('这一步需要你来');
+    expect(verdict.reason).not.toContain('接管');
   });
 });
 

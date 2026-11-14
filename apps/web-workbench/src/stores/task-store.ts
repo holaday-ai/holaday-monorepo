@@ -53,6 +53,11 @@ export interface TaskCreateOverrides {
   /** Server idempotency key; a repeated request replays the first task. */
   clientRequestId?: string;
   publicCloudContinuationOf?: string;
+  /**
+   * BROWSER-HOME-1 step 4: run in the person's open cloud browser (the「云浏览器」page). The
+   * Chrome selection and the global browser preference never apply to such a task.
+   */
+  browserHomeSession?: true;
 }
 
 export interface StockTaskContextInput {
@@ -1790,7 +1795,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return { error: msg };
       }
       const generation = captureSessionGeneration();
-      const chromeSelection = get().localChromeSelection;
+      const browserHomeSession = overrides?.browserHomeSession === true;
+      const chromeSelection = browserHomeSession ? null : get().localChromeSelection;
       if (
         replyToTaskId &&
         get().tasks.find((task) => task.taskId === replyToTaskId)?.browserSource === 'local-chrome'
@@ -1874,7 +1880,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               }
             : {}),
           intent,
-          ...((overrides?.browserPreference ?? get().browserPreference)
+          ...(browserHomeSession ? { browserHomeSession: true } : {}),
+          ...(!browserHomeSession && (overrides?.browserPreference ?? get().browserPreference)
             ? {
                 browserPreference:
                   overrides?.browserPreference ?? get().browserPreference ?? undefined,
@@ -2003,8 +2010,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         }));
         // Pin URL to the new task — same direct-navigate path as
         // selectTask. The deleted outbound effect used to do this off
-        // the selectedTaskId dep change.
-        storeNavigate?.(res.taskId);
+        // the selectedTaskId dep change. BROWSER-HOME-1: a cloud-browser task stays on /browser
+        // (its progress shows in the page's own card).
+        if (!browserHomeSession) storeNavigate?.(res.taskId);
         // Fire-and-forget refresh so the row's server-authored fields
         // (createdAt, status) replace the optimistic stub once available.
         if (creationUnconfirmed) return { error: uncertainWriteMessage };
@@ -2610,12 +2618,28 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     : { subStatus: typedSubStatus, since: Date.now() },
               }
             : prev.subStatusByTask;
+          // REBUILD-4 共同操作: the person can pass a login / captcha wall right on the shared
+          // page; the run then resumes with no chat reply and says so with a progress note
+          // (「页面过了这一步，我接着做…」). A progress note after such a wall means the task runs
+          // again: close the waiting card instead of leaving it up until the next status change.
+          const wait = prev.awaitingUserByTask[msg.taskId];
+          const row = prev.tasks.find((t) => t.taskId === msg.taskId);
+          const wallKind = wait ? wait.awaitingKind : row?.awaitingKind;
+          const resumedFromWall =
+            (wallKind === 'login' || wallKind === 'captcha') &&
+            (Boolean(wait) || row?.status === 'awaiting_user');
           return {
             progressByTask: {
               ...prev.progressByTask,
               [msg.taskId]: msg.message,
             },
             subStatusByTask: nextSubStatus,
+            ...(resumedFromWall
+              ? {
+                  awaitingUserByTask: omitRuntimeKey(prev.awaitingUserByTask, msg.taskId),
+                  captchaWaitByTask: omitRuntimeKey(prev.captchaWaitByTask, msg.taskId),
+                }
+              : {}),
             // Progress phases are shared by browser and generate lanes:
             // browser runs emit planning → browsing → verifying. Never
             // overwrite an execution mode that was already decided by
@@ -2623,7 +2647,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             // only the lane-specific phases are strong enough to infer one.
             tasks: prev.tasks.map((t) => {
               if (t.taskId !== msg.taskId) return t;
-              const liveTask = markTaskRunningFromLiveSignal(t);
+              const liveTask = markTaskRunningFromLiveSignal(
+                resumedFromWall && t.status === 'awaiting_user'
+                  ? { ...t, status: 'executing' as const, awaitingKind: undefined }
+                  : t,
+              );
               if (liveTask.executionMode) return liveTask;
               if (typedSubStatus === 'browsing') {
                 return { ...liveTask, executionMode: 'browser' as const };

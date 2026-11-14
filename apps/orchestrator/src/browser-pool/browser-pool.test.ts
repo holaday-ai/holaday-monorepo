@@ -135,14 +135,15 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       expect(b.userDataDir).toContain('tsk_b');
     });
 
-    it('preserves the viewport profile on allocated instances', async () => {
+    // REBUILD-4 第 4 条: the assistant's page is never smaller than 1280×800, whoever watches.
+    it('lifts a smaller viewport profile to the desktop floor', async () => {
       const inst = await pool.allocate('tsk_panel', 'usr_panel', 'sidepanel');
 
-      expect(inst.viewportProfile).toBe('sidepanel');
+      expect(inst.viewportProfile).toBe('desktop');
       expect(spawnSpy).toHaveBeenCalledWith(
         'tsk_panel',
         'usr_panel',
-        'sidepanel',
+        'desktop',
         expect.objectContaining({ capabilities: expect.objectContaining({ viewportV2: false }) }),
       );
     });

@@ -26,7 +26,6 @@ export interface BrowserActionRequest {
   observationRevision: number;
   /** Server-derived digest of the action AND exact target object. */
   actionDigest: string;
-  lease: string;
 }
 export type BrowserActionDecision =
   | { kind: 'allow'; sensitive: boolean }

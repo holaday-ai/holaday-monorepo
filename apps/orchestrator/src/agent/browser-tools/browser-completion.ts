@@ -63,8 +63,8 @@ export function detectBrowserBlocker(page: {
     reason,
     message:
       reason === 'captcha'
-        ? '页面遇到机器人验证或验证码，需要你接管完成验证；当前任务尚未完成。'
-        : '页面遇到登录墙，需要你接管登录；当前任务尚未完成。',
+        ? '页面遇到机器人验证或验证码，这一步需要你来：请直接在画面上完成验证；当前任务尚未完成。'
+        : '页面遇到登录墙，这一步需要你来：请直接在画面上登录；当前任务尚未完成。',
     evidence: {
       frameHost,
       framePath,

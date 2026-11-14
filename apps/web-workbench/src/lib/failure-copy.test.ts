@@ -12,8 +12,12 @@ describe('classifyFriendlyFailure', () => {
     ['等待用户完成验证码已超时，任务未完成。', '等待验证超时'],
     ['用户已放弃验证，任务未完成。', '已放弃验证'],
     ['等待验证时云端浏览器已关闭，任务未完成，请重新执行。', '等待验证时浏览器已关闭'],
-    ['验证码接管通道异常关闭，任务未完成，请稍后重试。', '验证接管中断'],
+    ['验证码接管通道异常关闭，任务未完成，请稍后重试。', '等待验证中断'],
     ['验证码等待已结束，任务未完成。', '验证等待已结束'],
+    // REBUILD-4 wording, and the older 「验证码接管已结束」 kept for recorded tasks.
+    ['等待验证时画面通道异常关闭，任务未完成，请稍后重试。', '等待验证中断'],
+    ['等待验证已结束，任务未完成。', '验证等待已结束'],
+    ['验证码接管已结束，任务未完成。', '验证等待已结束'],
   ])('a captcha handoff ending shows its own sentence: %s', (reason, title) => {
     const copy = classifyFriendlyFailure(reason, { executionMode: 'browser' });
     expect(copy.title).toBe(title);

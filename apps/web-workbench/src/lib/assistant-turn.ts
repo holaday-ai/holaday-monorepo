@@ -772,8 +772,8 @@ export function failureTurn(input: {
           )
         : `${site ?? ''}页面被一个引导层挡住了，我没能关掉它${tried}，${notGot}。`,
       why: en
-        ? 'You can press 「我来操作」, close it yourself, and hand it back.'
-        : '你可以点「我来操作」自己关掉它，再交还给我接着看。',
+        ? 'You can close it yourself right on the browser screen; I will carry on once it is gone.'
+        : '你可以直接在画面上把它关掉，关掉后我接着看。',
       options: [retry, others].filter((o): o is TurnOption => Boolean(o)),
     };
   }

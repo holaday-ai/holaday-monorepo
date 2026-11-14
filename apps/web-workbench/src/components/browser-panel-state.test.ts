@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  browserControlAction,
+  USER_INPUT_QUIET_MS,
+  browserCoopStatusCopy,
   browserFrameCanPanInPortraitSheet,
   browserInputFallbackMode,
   browserLiveOverlayCopy,
@@ -42,44 +43,25 @@ import {
 } from './browser-panel-state';
 
 describe('BrowserPanel state helpers', () => {
-  it('turns a terminal takeover handoff into a focused AI follow-up', () => {
-    expect(browserControlAction({ interactive: true, taskIsTerminal: true })).toEqual({
-      nextInteractive: false,
-      focusFollowUp: true,
-      label: '交还给我',
-      ariaLabel: '交还给我',
-      title: '交还给我 — 输入下一步指令，我从当前页面继续',
-    });
-    expect(browserControlAction({ interactive: true, taskIsTerminal: false })).toEqual({
-      nextInteractive: false,
-      focusFollowUp: false,
-      label: '交还给我',
-      ariaLabel: '交还给我',
-      title: '交还给我 — 我从当前页面接着做这个任务',
-    });
-    expect(browserControlAction({ interactive: false, taskIsTerminal: true })).toEqual({
-      nextInteractive: true,
-      focusFollowUp: false,
-      label: '我来操作',
-      ariaLabel: '我来操作',
-      title: '我来操作 — 也可以直接点画面，你的鼠标键盘直接操作这个页面',
-    });
-  });
-
-  it('explains that a terminal browser needs a follow-up before AI resumes', () => {
-    expect(
-      browserPanelHeaderStatus({
-        dotStatus: 'live',
-        liveStatus: 'connected',
-        browserAwaiting: false,
-        interactiveActive: true,
-        showReconnect: false,
-        taskIsTerminal: true,
-      }),
-    ).toMatchObject({
-      label: '接管中',
-      tooltip: '你在操作这个页面；需要我接着做时，点「交还给我」并输入下一步指令。',
-    });
+  it('REBUILD-4: says plainly who is working on the shared browser, with no takeover', () => {
+    expect(USER_INPUT_QUIET_MS).toBe(2_000);
+    expect(browserCoopStatusCopy({ taskRunning: true, userActive: true })).toBe(
+      '你在操作，我等你停下再继续',
+    );
+    expect(browserCoopStatusCopy({ taskRunning: true, userActive: false })).toBe(
+      'AI 正在操作，你也可以直接点画面',
+    );
+    expect(browserCoopStatusCopy({ taskRunning: false, userActive: false })).toBe(
+      '浏览器还开着，可以直接操作',
+    );
+    expect(browserCoopStatusCopy({ taskRunning: false, userActive: true })).toBe(
+      '浏览器还开着，可以直接操作',
+    );
+    for (const taskRunning of [true, false])
+      for (const userActive of [true, false])
+        expect(browserCoopStatusCopy({ taskRunning, userActive })).not.toMatch(
+          /我来操作|交还|接管/,
+        );
   });
 
   it('keeps the CDP text fallback compact until the user asks for it', () => {
@@ -425,7 +407,7 @@ describe('BrowserPanel state helpers', () => {
     ).toBe(false);
   });
 
-  it('allows takeover on a retained terminal stream but never on its screenshot fallback', () => {
+  it('allows input on a retained terminal stream but never on its screenshot fallback', () => {
     expect(
       isBrowserInteractionActive({
         interactive: true,
@@ -707,7 +689,6 @@ describe('BrowserPanel state helpers', () => {
         dotStatus: 'live',
         liveStatus: 'disconnected',
         browserAwaiting: false,
-        interactiveActive: false,
         showReconnect: false,
         hasPresentedFrame: true,
       }),
@@ -722,7 +703,6 @@ describe('BrowserPanel state helpers', () => {
         dotStatus: 'live',
         liveStatus: 'connecting',
         browserAwaiting: false,
-        interactiveActive: false,
         showReconnect: false,
       }),
     ).toMatchObject({
@@ -736,7 +716,6 @@ describe('BrowserPanel state helpers', () => {
         dotStatus: 'live',
         liveStatus: 'disconnected',
         browserAwaiting: false,
-        interactiveActive: false,
         showReconnect: false,
       }),
     ).toMatchObject({
@@ -750,7 +729,6 @@ describe('BrowserPanel state helpers', () => {
         dotStatus: 'live',
         liveStatus: 'disconnected',
         browserAwaiting: false,
-        interactiveActive: false,
         showReconnect: true,
       }),
     ).toMatchObject({
@@ -776,7 +754,7 @@ describe('BrowserPanel state helpers', () => {
       intent: '打开 https://example.com/final?from=task',
       label: '恢复可操作浏览器',
       pendingLabel: '正在恢复浏览器…',
-      description: '在当前任务恢复到最后页面，可以直接点击、输入，或交还给我。',
+      description: '在当前任务恢复到最后页面，可以直接点击、输入，也可以让我继续。',
     });
     expect(terminalEvidenceContinuation('chrome-error://chromewebdata/')).toBeNull();
     expect(terminalEvidenceContinuation('javascript:alert(1)')).toBeNull();
@@ -853,33 +831,18 @@ describe('BrowserPanel state helpers', () => {
     ).toBe(true);
   });
 
-  it('prioritises awaiting-user and takeover states over transport labels', () => {
+  it('prioritises the awaiting-user state over transport labels', () => {
     expect(
       browserPanelHeaderStatus({
         dotStatus: 'live',
         liveStatus: 'connected',
         browserAwaiting: true,
-        interactiveActive: true,
         showReconnect: false,
       }),
     ).toMatchObject({
       label: '待操作',
       tone: 'attention',
       dotStatus: 'error',
-    });
-    expect(
-      browserPanelHeaderStatus({
-        dotStatus: 'live',
-        liveStatus: 'disconnected',
-        browserAwaiting: false,
-        interactiveActive: false,
-        interactiveOwned: true,
-        showReconnect: false,
-      }),
-    ).toMatchObject({
-      label: '接管保留',
-      tone: 'recovering',
-      dotStatus: 'live',
     });
   });
 

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ query: vi.fn(), mutate: vi.fn(), abort: vi.fn() }));
+const api = vi.hoisted(() => ({ abort: vi.fn() }));
 vi.mock('@/lib/trpc', () => ({
   trpc: {
     browserReplay: {
@@ -15,8 +15,6 @@ vi.mock('@/lib/trpc', () => ({
       },
     },
     tasks: {
-      browserControlState: { query: api.query },
-      browserControl: { mutate: api.mutate },
       abort: { mutate: api.abort },
     },
   },
@@ -49,8 +47,6 @@ const localTask: UiTask = {
   browserSource: 'local-chrome',
 };
 beforeEach(() => {
-  // No Chrome session exists for a routing wait: the ownership probe fails.
-  api.query.mockRejectedValue(new Error('no session'));
   useTaskStore.setState({ tasks: [localTask], awaitingUserByTask: {} });
 });
 afterEach(cleanup);

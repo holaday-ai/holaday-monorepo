@@ -26,8 +26,17 @@ const CAPTCHA_HANDOFF_ENDINGS: ReadonlyArray<readonly [RegExp, string, string]> 
   ],
   [/用户已放弃验证[^。]*。?/, '已放弃验证', '需要时重新执行，并在下方浏览器里完成验证。'],
   [/等待验证时云端浏览器已关闭[^。]*。?/, '等待验证时浏览器已关闭', '重新执行当前任务。'],
-  [/验证码接管通道异常关闭[^。]*。?/, '验证接管中断', '稍后重新执行当前任务。'],
-  [/验证码等待已结束[^。]*。?/, '验证等待已结束', '重新执行；出现验证时，在下方浏览器里完成。'],
+  // REBUILD-4 renamed 「验证码接管…」 to 「等待验证…」; the old wording stays for older tasks.
+  [
+    /(?:等待验证时画面通道异常关闭|验证码接管通道异常关闭)[^。]*。?/,
+    '等待验证中断',
+    '稍后重新执行当前任务。',
+  ],
+  [
+    /(?:等待验证已结束|验证码接管已结束|验证码等待已结束)[^。]*。?/,
+    '验证等待已结束',
+    '重新执行；出现验证时，在下方浏览器里完成。',
+  ],
 ];
 
 /**
@@ -310,7 +319,7 @@ export function classifyFriendlyFailure(
     return {
       title: '页面被一个引导层挡住了',
       subtitle: '网站在页面上盖了一层引导提示，没能关掉它，挡住了要读的内容。',
-      nextStep: '重新执行；如果还是被挡住，可以点「我来操作」自己关掉它。',
+      nextStep: '重新执行；如果还是被挡住，可以直接在画面上把它关掉。',
     };
   }
   const asserted = assertedFailureText(errorText).toLowerCase();

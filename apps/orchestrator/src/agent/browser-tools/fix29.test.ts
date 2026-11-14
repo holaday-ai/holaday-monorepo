@@ -579,7 +579,7 @@ describe('core-07: the return names a tab only listed by list_tabs (no "undefine
 });
 
 describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page', () => {
-  async function scenario(failViewport: boolean, target: string, cancelAtTurn2 = false) {
+  async function scenario(loseControl: boolean, target: string, cancelAtTurn2 = false) {
     const page = await browser.newPage();
     // As on JD: the item page opens, then sends the anonymous visitor to the login page.
     await page.route('https://item.jd.com/**', (route) =>
@@ -602,7 +602,7 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
     const run = runUnifiedSupercarTask({
       // FIX-57: this tests the handover itself (as after a rescue is used up).
       browserRescue: false,
-      taskId: `fix29-jd-${failViewport}-${target}`,
+      taskId: `fix29-jd-${loseControl}-${target}`,
       userExternalId: 'fixture-user',
       intent: `打开 ${target} 读商品标题和页面显示的价格`,
       executor: { getPage: async () => page } as never,
@@ -621,11 +621,9 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
           turn += 1;
           if (turn === 2)
             await page.waitForURL(/passport|plain/, { timeout: 6000 }).catch(() => {});
-          // A viewer connects after the navigation: its resize fails (the page moved on).
-          if (turn === 2 && failViewport)
-            control.queueViewport(async () => {
-              throw new Error('browser_session_changed');
-            });
+          // After the navigation the control is lost to a failure, not to the user (REBUILD-4:
+          // a failed re-read; the viewer's resize that used to fail here no longer exists).
+          if (turn === 2 && loseControl) control.close('observation_failed');
           const call =
             turn === 1
               ? { name: 'navigate', input: { url: target } }
@@ -660,7 +658,7 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
     expect(outcome.status).toBe('failed');
     expect(outcome.status === 'failed' && outcome.reason).toMatch(/登录/);
     expect(outcome.status === 'failed' && outcome.reason).toContain('请重新执行任务');
-    expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'viewport_failed' });
+    expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'observation_failed' });
   }, 20000);
   it('without a wall, it fails and says why', async () => {
     const { outcome } = await scenario(true, 'https://plain.example/item');
@@ -671,7 +669,7 @@ describe('Deploy-29 fc-jd: a run whose browser control is lost on a login page',
     const { outcome } = await scenario(true, 'https://item.jd.com/100142621606.html', true);
     expect(outcome.status).toBe('cancelled');
   }, 20000);
-  it('a viewport that applies does not stop the run', async () => {
+  it('a control that stays open does not stop the run', async () => {
     const { outcome } = await scenario(false, 'https://item.jd.com/100142621606.html');
     expect(outcome.status).toBe('awaiting_user');
   }, 20000);

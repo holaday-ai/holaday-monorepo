@@ -3,6 +3,7 @@ import {
   type CoreModelRuntimeEnvironment,
   type CoreModelRuntimeInput,
   type CoreModelRuntimeUnavailableReason,
+  type QwenEndpointOverride,
   resolveCoreModelRuntime,
 } from '../core-model-runtime.js';
 import type { MessagesAdapter } from '../messages-adapter.js';
@@ -58,6 +59,8 @@ export type ModelGatewayRuntime =
       brainId: string;
       provider: BrainProvider;
       region: 'cn' | 'intl' | null;
+      /** BROWSER-HOME-1: the Qwen endpoint the calls go to (intl override), null for other providers. */
+      qwenEndpoint: 'cn' | 'intl' | null;
       /** The role this runtime was resolved for, or another role ref of the same lane. */
       messages(role?: ModelRoleRef): MessagesAdapter;
       responses(role?: ModelRoleRef): ResponsesAdapter;
@@ -98,6 +101,8 @@ export interface CoreModelGatewayContext {
    * planning selection). With the gateway on it keeps that model instead of the role model.
    */
   modelPinned?: boolean;
+  /** BROWSER-HOME-1: the Qwen endpoint override of an admitted cloud-browser task (cn accounts only). */
+  qwenEndpoint?: QwenEndpointOverride;
 }
 
 export type CoreModelGatewayRuntime =
@@ -140,6 +145,7 @@ function wiringGateway(wiring: ProductionModelRuntimeWiring): ModelGateway {
       brainId: resolution.brainId,
       provider: resolution.provider,
       region: resolution.region,
+      qwenEndpoint: resolution.qwenEndpoint ?? null,
       messages: settings.enabled
         ? (ref) =>
             normalizeMessagesAdapter(
@@ -179,6 +185,7 @@ function coreGateway(deps: CoreModelGatewayDeps): CoreModelGateway {
         actorExternalId: context.actorExternalId,
         lane: binding.lane,
         ownership: context.ownership,
+        ...(context.qwenEndpoint ? { qwenEndpoint: context.qwenEndpoint } : {}),
         ...(deps.createMessages ? { createMessages: deps.createMessages } : {}),
         ...(deps.createResponses ? { createResponses: deps.createResponses } : {}),
         ...(deps.observe ? { observe: deps.observe } : {}),

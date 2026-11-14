@@ -71,12 +71,6 @@ export interface CdpStreamerOptions {
   maxWidth?: number;
   /** Cap frame height. Default 1200 — matches the largest workbench viewport. */
   maxHeight?: number;
-  /**
-   * Re-applies the latest client viewport after a renderer-changing event.
-   * Chromium can discard device metrics during cross-origin navigation even
-   * while the CDP socket itself remains connected.
-   */
-  onViewportMayReset?: () => Promise<void> | void;
 }
 
 export interface ScreencastFrameMessage {
@@ -167,6 +161,15 @@ export class CdpStreamer {
    * events last reported it. Empty until the first read or navigation of the bound page.
    */
   private loader = '';
+  /**
+   * HOTFIX-R4A（协调方改）: when the page last changed document — a main-frame navigation, a
+   * pushState new history entry (timed at its event, not when it was classified), a tab rebind.
+   * Monotonic (performance.now()): a clock set back never makes it look recent.
+   */
+  private lastNavigation = 0;
+  lastNavigationAt(): number {
+    return this.lastNavigation;
+  }
   /** The current history entry (pushState makes a new one; replaceState keeps it). */
   private historyEntry: number | null = null;
   documentLoader(): string {
@@ -235,7 +238,11 @@ export class CdpStreamer {
    * swapped the page and, when `retire`, the old frames go. A read that fails or takes longer
    * than 1.5s retires too (复审 #3 #2: the pending flag can never stay up).
    */
-  private async noteHistoryEntry(session: CDPSession, retire: boolean): Promise<void> {
+  private async noteHistoryEntry(
+    session: CDPSession,
+    retire: boolean,
+    at = performance.now(),
+  ): Promise<void> {
     const generation = this.historyGeneration;
     if (retire) this.historyReads++;
     let timer: NodeJS.Timeout | undefined;
@@ -251,13 +258,19 @@ export class CdpStreamer {
       if (session !== this.cdpSession || generation !== this.historyGeneration) return;
       const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
       this.historyEntry = id ?? this.unknownEntry();
-      if (retire && changed) this.invalidateObservation();
+      if (retire && changed) {
+        this.lastNavigation = Math.max(this.lastNavigation, at);
+        this.invalidateObservation();
+      }
     } catch {
       if (session === this.cdpSession && generation === this.historyGeneration) {
         // 复审 #4 #1: a new entry no press can be bound to — an earlier press is never released on
         // whatever the page now shows; later presses bind to this one and release normally.
         this.historyEntry = this.unknownEntry();
-        if (retire) this.invalidateObservation();
+        if (retire) {
+          this.lastNavigation = Math.max(this.lastNavigation, at);
+          this.invalidateObservation();
+        }
       }
     } finally {
       if (timer) clearTimeout(timer);
@@ -273,6 +286,8 @@ export class CdpStreamer {
     this.historyReads = 0;
     this.historyGeneration++;
     for (const wake of [...this.historyWaiters]) wake();
+    // Another tab replacing the one shown is a page change; the first page of a stream is not.
+    if (this.boundPage && this.boundPage !== page) this.lastNavigation = performance.now();
     this.boundPage = page;
     let id = this.pageIds.get(page);
     if (!id) {
@@ -309,15 +324,11 @@ export class CdpStreamer {
   private readonly inputRefreshDelayMs = 16;
   private readonly captureScreenshotTimeoutMs = 2500;
   private readonly opts: Required<
-    Omit<
-      CdpStreamerOptions,
-      'logger' | 'onViewportMayReset' | 'onFrame' | 'onObservationInvalidated'
-    >
+    Omit<CdpStreamerOptions, 'logger' | 'onFrame' | 'onObservationInvalidated'>
   > & {
     logger: Logger;
     onFrame?: CdpStreamerOptions['onFrame'];
     onObservationInvalidated?: CdpStreamerOptions['onObservationInvalidated'];
-    onViewportMayReset?: () => Promise<void> | void;
   };
 
   constructor(opts: CdpStreamerOptions) {
@@ -405,6 +416,7 @@ export class CdpStreamer {
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
       this.loader = params.frame.loaderId;
+      this.lastNavigation = performance.now();
       this.historyEntry = null;
       void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
@@ -446,7 +458,7 @@ export class CdpStreamer {
       // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
       // history entry retires the old frames; replaceState (a search box mirroring each letter
       // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
-      void this.noteHistoryEntry(cdp, true);
+      void this.noteHistoryEntry(cdp, true, performance.now());
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.
@@ -472,11 +484,6 @@ export class CdpStreamer {
 
   private async rearmAfterNavigation(reason: string, url: string | null): Promise<void> {
     await this.armScreencast(reason, url);
-    try {
-      await this.opts.onViewportMayReset?.();
-    } catch (err) {
-      this.opts.logger.debug({ reason, err: errMsg(err) }, 'cdp-streamer: viewport reapply failed');
-    }
   }
 
   /**
@@ -901,7 +908,6 @@ export class CdpStreamer {
     this.mainFrameId = tree?.frameTree?.frame?.id;
     this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
     await this.armScreencast('hard-restart', page.url());
-    await this.opts.onViewportMayReset?.();
   }
 
   /**

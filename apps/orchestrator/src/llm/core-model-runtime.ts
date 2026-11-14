@@ -70,12 +70,26 @@ export type CoreModelRuntimeUnavailableReason =
   | 'LANE_DISABLED'
   | 'ROLLOUT_NOT_ALLOWED'
   | 'MODEL_DATA_REGION_UNASSIGNED'
-  | 'REGION_SERVICE_NOT_CONFIGURED';
+  | 'REGION_SERVICE_NOT_CONFIGURED'
+  | 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED';
+
+/**
+ * BROWSER-HOME-1 (BOSS 2026-11-14「我们不是还有国际千问嘛」): a narrowly-scoped endpoint override.
+ * `'intl'` sends a `cn` account's Qwen calls to the DashScope INTERNATIONAL endpoint with the
+ * INTERNATIONAL credentials only (DASHSCOPE_INTL_API_KEY / DASHSCOPE_INTL_WORKSPACE_ID /
+ * DASHSCOPE_INTL_*_BASE_URL — never the legacy alias, never the domestic ones), same model names.
+ * The account's data region is not changed. An `intl` account is untouched (already there).
+ * Set only by tasks.create for an admitted `browserHomeSession` task — never from client input.
+ */
+export type QwenEndpointOverride = 'intl';
 
 export type CoreModelRuntimeResolution =
   | {
       kind: 'ready';
+      /** The account's (or organization's) model data region — never changed by an override. */
       region: 'cn' | 'intl';
+      /** The DashScope endpoint these adapters call. */
+      qwenEndpoint: 'cn' | 'intl';
       messages(purpose: QwenPurpose): MessagesAdapter;
       responses(purpose: QwenPurpose): ResponsesAdapter;
     }
@@ -107,6 +121,8 @@ export interface CoreModelRuntimeInput {
   actorExternalId: string;
   lane: CoreModelLane;
   ownership: ModelDataRegionOwnershipInput;
+  /** See QwenEndpointOverride. Server-set only; absent everywhere but cloud-browser tasks. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: MessagesFactory;
   createResponses?: ResponsesFactory;
   observe?: (observation: CoreModelObservation) => void;
@@ -146,26 +162,49 @@ export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModel
     region = fallback;
   }
 
+  // The override applies to a `cn` account only; an `intl` account keeps its route as it is.
+  const overridden = input.qwenEndpoint === 'intl' && region === 'cn';
+  const endpoint: 'cn' | 'intl' = overridden ? 'intl' : region;
+  const environment = overridden
+    ? internationalOnlyEnvironment(input.environment)
+    : input.environment;
+
   try {
     if (input.lane === 'browser') {
-      resolveQwenRoute(input.environment, region, 'vision', 'messages');
+      resolveQwenRoute(environment, endpoint, 'vision', 'messages');
     } else {
-      resolveQwenRoute(input.environment, region, 'standard', 'messages');
-      resolveQwenRoute(input.environment, region, 'standard', 'responses');
+      resolveQwenRoute(environment, endpoint, 'standard', 'messages');
+      resolveQwenRoute(environment, endpoint, 'standard', 'responses');
     }
   } catch (error) {
     if (error instanceof QwenRouteError && error.code === 'MISSING_REGION_CREDENTIALS') {
-      return { kind: 'unavailable', reason: 'REGION_SERVICE_NOT_CONFIGURED' };
+      // No fallback to the domestic endpoint: the override fails like a missing provider.
+      return {
+        kind: 'unavailable',
+        reason: overridden ? 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED' : 'REGION_SERVICE_NOT_CONFIGURED',
+      };
     }
     throw error;
   }
 
-  return createReadyRuntime(input, region);
+  return createReadyRuntime({ ...input, environment }, region, endpoint);
+}
+
+/**
+ * The environment the override routes with: the legacy `DASHSCOPE_API_KEY` /
+ * `DASHSCOPE_WORKSPACE_ID` aliases are cleared so only the DASHSCOPE_INTL_* credentials count
+ * (a missing DASHSCOPE_INTL_API_KEY fails clearly). Model names are left exactly as they are.
+ */
+function internationalOnlyEnvironment(
+  environment: CoreModelRuntimeEnvironment,
+): CoreModelRuntimeEnvironment {
+  return { ...environment, DASHSCOPE_API_KEY: '', DASHSCOPE_WORKSPACE_ID: '' };
 }
 
 function createReadyRuntime(
   input: CoreModelRuntimeInput,
   region: 'cn' | 'intl',
+  endpoint: 'cn' | 'intl',
 ): Extract<CoreModelRuntimeResolution, { kind: 'ready' }> {
   const createMessages = input.createMessages ?? createQwenMessagesAdapter;
   const createResponses = input.createResponses ?? createQwenResponsesAdapter;
@@ -185,15 +224,22 @@ function createReadyRuntime(
   return {
     kind: 'ready',
     region,
+    qwenEndpoint: endpoint,
     messages(purpose) {
-      const adapter = createMessages({ environment: environmentFor(purpose), region, purpose });
-      assertQwenAdapterMetadata(adapter.metadata, region, 'messages');
+      // Gateway (REBUILD-2): the model per role, chosen by the user's region; BROWSER-HOME-1: the
+      // endpoint (cn / intl override) the call is routed to.
+      const adapter = createMessages({
+        environment: environmentFor(purpose),
+        region: endpoint,
+        purpose,
+      });
+      assertQwenAdapterMetadata(adapter.metadata, endpoint, 'messages');
       return observeMessagesAdapter(adapter, input.lane, purpose, observe, now, recording(purpose));
     },
     responses(purpose) {
-      const route = resolveQwenRoute(environmentFor(purpose), region, purpose, 'responses');
+      const route = resolveQwenRoute(environmentFor(purpose), endpoint, purpose, 'responses');
       const adapter = createResponses({ route });
-      assertQwenAdapterMetadata(adapter.metadata, region, 'responses');
+      assertQwenAdapterMetadata(adapter.metadata, endpoint, 'responses');
       return observeResponsesAdapter(
         adapter,
         input.lane,

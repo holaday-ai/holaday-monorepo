@@ -163,40 +163,52 @@ describe('controlled selected Chrome client', () => {
       ]);
   });
 
-  it('grants human control only after the real action settles and observes before handback', async () => {
-    const h = harness();
-    await h.client.open(target);
-    let settle!: (reply: ExtensionToolCallOutcome) => void;
-    h.send.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          settle = resolve;
-        }),
-    );
-    const oldRevision = h.client.revision;
-    const action = h.client.execute({ kind: 'key', payload: { key: 'Enter' } }, oldRevision);
-    await vi.waitFor(() => expect(settle).toBeTypeOf('function'));
-    h.control.requestHuman();
-    const checkpoint = h.client.checkpoint();
-    expect(h.control.snapshot().phase).toBe('requested');
-    settle({
-      ok: true,
-      result: { ok: true, sessionId: sid, observation, actionOutcome: 'applied' },
-    });
-    await action;
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    expect(
-      await h.client.execute({ kind: 'key', payload: { key: 'Enter' } }, oldRevision),
-    ).toMatchObject({ ok: false, error: 'replan_required' });
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('no human lease');
-    h.control.returnToAgent(lease);
-    expect(await checkpoint).toMatchObject({ resumed: true });
-    expect(
-      await h.client.execute({ kind: 'key', payload: { key: 'Enter' } }, oldRevision),
-    ).toMatchObject({ ok: false, error: 'replan_required' });
-    expect(h.commands).toEqual(['open', 'observe']);
-    await h.client.close();
+  it('checkpoint waits for the real action, yields to a busy person, then re-observes (REBUILD-4)', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      await h.client.open(target);
+      // A person who is not using the browser: the checkpoint neither waits nor observes.
+      expect(await h.client.checkpoint()).toEqual({ resumed: false, waitedMs: 0 });
+      expect(h.commands).toEqual(['open']);
+      let settle!: (reply: ExtensionToolCallOutcome) => void;
+      h.send.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      );
+      const oldRevision = h.client.revision;
+      const action = h.client.execute({ kind: 'key', payload: { key: 'Enter' } }, oldRevision);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settle).toBeTypeOf('function');
+      // The person clicks in Chrome while the assistant's action is in flight.
+      h.control.noteHumanInput('mouseDown');
+      let done = false;
+      const checkpoint = h.client.checkpoint().then((result) => {
+        done = true;
+        return result;
+      });
+      settle({
+        ok: true,
+        result: { ok: true, sessionId: sid, observation, actionOutcome: 'applied' },
+      });
+      await action;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(done).toBe(false);
+      expect(h.commands).toEqual(['open']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await checkpoint).toMatchObject({ resumed: true });
+      expect(h.commands).toEqual(['open', 'observe']);
+      // The plan made before the person acted is void.
+      expect(
+        await h.client.execute({ kind: 'key', payload: { key: 'Enter' } }, oldRevision),
+      ).toMatchObject({ ok: false, error: 'replan_required' });
+      expect(h.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
+      await h.client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not retry an input when the transport receipt is lost', async () => {
