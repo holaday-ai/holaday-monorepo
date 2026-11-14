@@ -7590,7 +7590,11 @@ export const tasksRouter = router({
                       // where each fact came from. Writes and personal data still go to the user;
                       // the browser is not used again. TOOL_ROUTER_V2 only.
                       // 复审 #2: nothing runs for a task the user cancelled.
+                      // PR #348 review: never in the person's own browser (local Chrome, cloud
+                      // browser) — they keep the chance to pass the check themselves.
                       const wall =
+                        !input.localChrome &&
+                        !input.browserHomeSession &&
                         taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                         !(await repo.isTaskCancelled(taskId))
                           ? wallEnd(outcome, input.intent)
@@ -7653,22 +7657,11 @@ export const tasksRouter = router({
                         // request asked is read by the small judge model (qwen3.8-flash, structured
                         // output), not by wording rules. Not given, or the judge failed → not
                         // completed, no wall_fallback; the wall outcome stands.
-                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
-                        if (fallback?.status === 'completed' && fallback.summary.trim()) {
-                          const judgeRuntime = gatewayFor(taskModelWiring).resolve(
-                            'judge',
-                            personalModelContext(ctx.userId, userRow.modelDataRegion),
-                          );
-                          fieldVerdicts =
-                            judgeRuntime.kind === 'ready'
-                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
-                                  logger: ctx.logger,
-                                })({ request: input.intent, answer: fallback.summary })
-                              : null;
-                        }
-                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
-                        const composed =
-                          fallback?.status === 'completed' && fallback.summary.trim() && answered
+                        // PR #348 review: the judge reads the answer as it would be delivered — after
+                        // the price / freshness checks may have removed lines — so a requested field
+                        // the filters dropped is not delivered as answered.
+                        const filtered =
+                          fallback?.status === 'completed' && fallback.summary.trim()
                             ? composeFallback({
                                 wall,
                                 intent: input.intent,
@@ -7679,6 +7672,21 @@ export const tasksRouter = router({
                                 sourceLine: source ? formatSourceLine(source, language) : null,
                               })
                             : null;
+                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
+                        if (filtered?.deliver && filtered.summary.trim()) {
+                          const judgeRuntime = gatewayFor(taskModelWiring).resolve(
+                            'judge',
+                            personalModelContext(ctx.userId, userRow.modelDataRegion),
+                          );
+                          fieldVerdicts =
+                            judgeRuntime.kind === 'ready'
+                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
+                                  logger: ctx.logger,
+                                })({ request: input.intent, answer: filtered.summary })
+                              : null;
+                        }
+                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
+                        const composed = filtered?.deliver && answered ? filtered : null;
                         ctx.logger.info(
                           {
                             taskId,
