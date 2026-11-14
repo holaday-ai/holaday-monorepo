@@ -32,15 +32,23 @@ const TOOL_ONLY_NAMES = MODEL_TOOL_NAMES.filter((name) => name.includes('_'));
 const TOOL_WORD_NAMES = MODEL_TOOL_NAMES.filter((name) => !name.includes('_'));
 /**
  * 61.80 (s04 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」, delivered as completed on prod and
- * candidate): a call written as `BROWSE:web_search{"query":…}` — a capitalised channel label and
- * a tool name glued to its JSON arguments — or a bare `web_search{"query":…}` /
- * `browser_use{…}`. A word-like tool name (`click`, `type`) counts only behind such a label.
+ * candidate): a call written as `BROWSE:web_search{"query":…}` — a channel label and a tool
+ * name glued to its JSON arguments — or a bare `web_search{"query":…}` / `browser_use({…})`.
+ * Only names the model is offered count (复审: `INFO: user.login{…}` in a log is data); the label
+ * goes with the call, its colon may be full-width, and nothing spans a line.
  */
-const INLINE_CALL = String.raw`(?<![\w.])(?:[A-Z][A-Z_]{2,}\s*:\s*[a-z][\w.-]*|(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')}))\s*\{\s*"`;
+const CALL_NAMES = `(?:(?:browser|computer|tool)_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})`;
+const INLINE_CALL = String.raw`(?<![\w.])(?:[A-Za-z][A-Za-z_]{2,}[ \t]*[:：][ \t]*(?:${CALL_NAMES}|${TOOL_WORD_NAMES.join('|')})|${CALL_NAMES})[ \t]*\(?[ \t]*\{\s*"`;
 const TOOL_JSON_START_RE = new RegExp(
-  String.raw`${INLINE_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
+  String.raw`${INLINE_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|${CALL_NAMES})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
   'g',
 );
+/**
+ * 61.80 (s04 run 2): a pseudo-tool written in square brackets —
+ * `[SEARCH]\nquery: "2025年诺贝尔文学奖得主"\n[/SEARCH]` — open and close tag with the same name.
+ */
+const BRACKET_CALL_RE =
+  /\[(SEARCH|WEB_SEARCH|SEARCH_QUERY|BROWSE|BROWSER|BROWSER_USE|TOOL|TOOL_CALLS?|TOOL_USE|FUNCTION_CALLS?|CALL)\][\s\S]*?\[\/\1\]/gi;
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;
 
 /** End index (exclusive) of the balanced `{…}` starting at `start`, or -1. */
@@ -68,7 +76,10 @@ function stripToolJson(text: string): string {
     // An inline call (`BROWSE:web_search{…}`) goes from its label; its JSON starts at the brace.
     const end = jsonBlockEnd(text, text.indexOf('{', start));
     // An unclosed call (truncated stream) runs to the end of its line.
-    const stop = end > 0 ? end : text.indexOf('\n', start) + 1 || text.length;
+    // `web_search({…})`: the closing parenthesis goes with it.
+    const close = end > 0 ? /^[ \t]*\)/.exec(text.slice(end)) : null;
+    const stop =
+      end > 0 ? end + (close?.[0].length ?? 0) : text.indexOf('\n', start) + 1 || text.length;
     out += text.slice(from, start);
     from = stop;
   }
@@ -88,6 +99,7 @@ const STRUCTURE_RE =
 function hasStructure(text: string): boolean {
   return (
     STRUCTURE_RE.test(text) ||
+    new RegExp(BRACKET_CALL_RE.source, 'i').test(text) ||
     new RegExp(TOOL_JSON_START_RE.source).test(text) ||
     new RegExp(TOOL_NAME_LINE_RE.source, 'im').test(text)
   );
@@ -95,10 +107,9 @@ function hasStructure(text: string): boolean {
 
 function stripPlain(text: string, structured = hasStructure(text)): string {
   if (!structured) return text;
-  return stripToolJson(text.replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
-    TOOL_NAME_LINE_RE,
-    '',
-  );
+  return stripToolJson(
+    text.replace(BRACKET_CALL_RE, '').replace(PAIRED_RE, '').replace(TAG_RE, ''),
+  ).replace(TOOL_NAME_LINE_RE, '');
 }
 
 /**
@@ -141,7 +152,7 @@ function stripRefs(text: string): string {
  * `{"action":"deploy"}` explained in prose stays.
  */
 const TOOL_CALL_JSON_RE =
-  /"(?:name|type)"\s*:\s*"[\w.-]*(?:_use|_call|browser|computer)[\w.-]*"|"(?:tool|tool_name|tool_use|function|function_call)"\s*:|"action"\s*:\s*"(?:navigate|goto|open|click|left_click|double_click|right_click|type|key|scroll|screenshot|snapshot|read_page|get_page_text|wait|wait_for|mouse_move|finish)"/i;
+  /"name"\s*:\s*"[\w.-]*(?:_use|_call|browser|computer)[\w.-]*"|"type"\s*:\s*"(?:browser|computer)_use"|"(?:tool|tool_name|tool_use|function|function_call)"\s*:|"action"\s*:\s*"(?:navigate|goto|open|click|left_click|double_click|right_click|type|key|scroll|screenshot|snapshot|read_page|get_page_text|wait|wait_for|mouse_move|finish)"/i;
 const FENCED_RE = /```[\w-]*[ \t]*\n?([\s\S]*?)(?:```|$)/g;
 
 /**

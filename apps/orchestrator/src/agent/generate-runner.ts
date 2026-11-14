@@ -1,4 +1,4 @@
-import { replyLanguageRule } from '@holaday/shared-types';
+import { hasToolCallMarkup, replyLanguageRule } from '@holaday/shared-types';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import { articleUrl, fetchResearchArticles } from './fresh-research-fallback.js';
 /**
@@ -673,6 +673,18 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
         });
+      }
+      // 61.80 (s04 run 2): a "question" that is a tool call written out as text
+      // (「[SEARCH] query: … [/SEARCH] 我需要等待搜索结果」) is not asked; the text goes on as
+      // the answer, where the no-answer guard hands it to the browser or fails it honestly.
+      if (
+        !opts.planOnly &&
+        status === 'completed' &&
+        AWAITING_USER_MARKER_RE.test(combined) &&
+        hasToolCallMarkup(combined)
+      ) {
+        accumulatedSummary = stripAwaitingUserMarker(combined);
+        break;
       }
       if (!opts.planOnly && status === 'completed' && AWAITING_USER_MARKER_RE.test(combined)) {
         return {
