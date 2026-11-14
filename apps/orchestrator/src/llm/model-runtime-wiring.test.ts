@@ -106,6 +106,8 @@ describe('createProductionModelRuntimeWiring', () => {
       MODEL_MIGRATION_IN_PROGRESS: '这项能力正在迁移到千问，暂时不可用。',
       MODEL_ROLLOUT_NOT_ALLOWED: '这项能力正在小范围验证，暂未对当前账号开放。',
       MODEL_PROVIDER_NOT_CONFIGURED: '所选模型的服务尚未配置，请切换到千问后重试。',
+      QWEN_INTL_ENDPOINT_NOT_CONFIGURED:
+        '云浏览器使用的国际站千问服务尚未配置，任务没有执行，未扣除额度。请联系管理员。',
     });
   });
 

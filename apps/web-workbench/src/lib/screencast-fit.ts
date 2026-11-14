@@ -318,3 +318,54 @@ export function mapClientPointToFramebuffer(input: {
     return null;
   return { x, y };
 }
+
+/** CAPTCHA-UX-1 第 2 条: the captcha box, in CSS pixels of the page's viewport. */
+export interface ScreencastCaptchaBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+/** Margin around the captcha box when zoomed, in CSS pixels of the page. */
+export const CAPTCHA_ZOOM_MARGIN = 24;
+/** Below this panel width (a phone) the box fills the width, top-aligned. */
+export const CAPTCHA_ZOOM_PHONE_WIDTH = 640;
+/** At most this many screen pixels per CSS pixel of the page (a tiny checkbox stays legible). */
+const CAPTCHA_ZOOM_MAX_CSS_SCALE = 6;
+
+/**
+ * CAPTCHA-UX-1 第 2 条: place the frame so the captcha box (plus a margin) fills the panel — on a
+ * phone it is top-aligned, and it always fits whole. Only this screen's picture is scaled; the page keeps its size. Points still map
+ * through the canvas's displayed rect, so a click lands where it is shown.
+ */
+export function placeScreencastCaptchaZoom(input: {
+  hostWidth: number;
+  hostHeight: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  cssWidth: number;
+  box: ScreencastCaptchaBox;
+}): ScreencastContainPlacement | null {
+  const { hostWidth, hostHeight, sourceWidth, sourceHeight, cssWidth, box } = input;
+  if (hostWidth <= 0 || hostHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0 || cssWidth <= 0)
+    return null;
+  if (!(box.width > 0 && box.height > 0)) return null;
+  const k = sourceWidth / cssWidth;
+  const m = CAPTCHA_ZOOM_MARGIN;
+  const bx = Math.max(0, box.x - m) * k;
+  const by = Math.max(0, box.y - m) * k;
+  const bw = Math.min(sourceWidth - bx, (box.width + 2 * m) * k);
+  const bh = Math.min(sourceHeight - by, (box.height + 2 * m) * k);
+  if (bw <= 0 || bh <= 0) return null;
+  const phone = hostWidth < CAPTCHA_ZOOM_PHONE_WIDTH;
+  // 复审 P1-3: the whole box fits — width and height — on a phone too (the image grid with its
+  // Verify button is taller than wide; a width-only fit cut its last row off).
+  const scale = Math.min(CAPTCHA_ZOOM_MAX_CSS_SCALE / k, hostWidth / bw, hostHeight / bh);
+  return {
+    scale,
+    width: hostWidth,
+    height: hostHeight,
+    offsetX: (hostWidth - bw * scale) / 2 - bx * scale,
+    offsetY: phone ? -by * scale : Math.max(0, (hostHeight - bh * scale) / 2) - by * scale,
+  };
+}

@@ -16,6 +16,7 @@
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { isAshareEntryEnabled } from '@/lib/feature-entries';
 import {
   NOTIFICATION_PLATFORM_LABEL,
   maskWebhookUrl,
@@ -110,6 +111,7 @@ export function NotificationsSection(): JSX.Element {
   // S2 — 每日 A股简报 opt-in（null=加载中）。后端 watchlists.briefingStatus/enable/disable。
   const [briefingEnabled, setBriefingEnabled] = React.useState<boolean | null>(null);
   const [briefingPending, setBriefingPending] = React.useState(false);
+  const showBriefing = isAshareEntryEnabled();
 
   const refresh = React.useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -133,16 +135,18 @@ export function NotificationsSection(): JSX.Element {
   React.useEffect(() => {
     mountedRef.current = true;
     void refresh();
-    void (async () => {
-      try {
-        const res = await trpc.watchlists.briefingStatus.query();
-        if (mountedRef.current) {
-          setBriefingEnabled(Boolean((res as { enabled?: boolean }).enabled));
+    // HIDE-1: the daily A-share briefing setting is an A-share entry; hidden, it is not read.
+    if (isAshareEntryEnabled())
+      void (async () => {
+        try {
+          const res = await trpc.watchlists.briefingStatus.query();
+          if (mountedRef.current) {
+            setBriefingEnabled(Boolean((res as { enabled?: boolean }).enabled));
+          }
+        } catch {
+          if (mountedRef.current) setBriefingEnabled(false);
         }
-      } catch {
-        if (mountedRef.current) setBriefingEnabled(false);
-      }
-    })();
+      })();
     return () => {
       mountedRef.current = false;
       requestIdRef.current += 1;
@@ -253,20 +257,22 @@ export function NotificationsSection(): JSX.Element {
         <Row label="站内通知" description="任务开始、提前提醒、完成或失败时在右上角铃铛收到通知。">
           <span className="text-xs text-muted-foreground">默认开启</span>
         </Row>
-        <Row
-          label="每日 A股简报"
-          description="开启后每个交易日盘前 08:30、盘后 15:30 自动生成自选股简报推送到站内通知（非交易日自动跳过）。"
-        >
-          {briefingEnabled === null ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="加载中" />
-          ) : (
-            <DailyBriefingToggle
-              enabled={briefingEnabled}
-              pending={briefingPending}
-              onToggle={() => void handleBriefingToggle()}
-            />
-          )}
-        </Row>
+        {showBriefing && (
+          <Row
+            label="每日 A股简报"
+            description="开启后每个交易日盘前 08:30、盘后 15:30 自动生成自选股简报推送到站内通知（非交易日自动跳过）。"
+          >
+            {briefingEnabled === null ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="加载中" />
+            ) : (
+              <DailyBriefingToggle
+                enabled={briefingEnabled}
+                pending={briefingPending}
+                onToggle={() => void handleBriefingToggle()}
+              />
+            )}
+          </Row>
+        )}
         <div className="-mx-4 mt-3 border-t border-border/50">
           <div className="flex items-center justify-between px-4 py-3">
             <div>

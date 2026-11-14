@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { isEnglishTask } from '@/lib/assistant-turn';
 import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import {
   detectSkillMentionTrigger,
@@ -50,6 +51,7 @@ import {
   ListChecks,
   Loader2,
   Maximize2,
+  MessageSquare,
   Minimize2,
   Paperclip,
   Plus,
@@ -131,6 +133,31 @@ interface Props {
   /** Compact terminal follow-up composer so mobile result cards keep more room. */
   compact?: boolean;
   approved?: boolean;
+  /**
+   * BROWSER-HOME-1 — the same composer floating over the cloud browser: a single line by default
+   * (about 44–48px), growing with its content to at most 5 lines, and collapsible into a small
+   * button. The caller positions it (centred over the bottom of the browser area).
+   */
+  floating?: boolean;
+}
+
+/** Floating variant geometry: one 22px line + 11px top/bottom padding = 44px (+1px borders). */
+export const FLOATING_COMPOSER_LINE_HEIGHT_PX = 22;
+export const FLOATING_COMPOSER_MAX_LINES = 5;
+const FLOATING_COMPOSER_PADDING_Y_PX = 11;
+export const FLOATING_COMPOSER_MIN_HEIGHT_PX =
+  FLOATING_COMPOSER_LINE_HEIGHT_PX + FLOATING_COMPOSER_PADDING_Y_PX * 2;
+export const FLOATING_COMPOSER_MAX_HEIGHT_PX =
+  FLOATING_COMPOSER_LINE_HEIGHT_PX * FLOATING_COMPOSER_MAX_LINES +
+  FLOATING_COMPOSER_PADDING_Y_PX * 2;
+
+/** The floating textarea's height for its content height: one line at least, five at most. */
+export function floatingComposerHeight(scrollHeight: number): number {
+  if (!Number.isFinite(scrollHeight)) return FLOATING_COMPOSER_MIN_HEIGHT_PX;
+  return Math.min(
+    FLOATING_COMPOSER_MAX_HEIGHT_PX,
+    Math.max(FLOATING_COMPOSER_MIN_HEIGHT_PX, Math.ceil(scrollHeight)),
+  );
 }
 
 const ACCEPT_FILES = '.csv,.xlsx,.xls,.docx,.pdf,.txt,.json,.md';
@@ -203,6 +230,7 @@ export function InputArea({
   fullBleed,
   compact,
   approved = false,
+  floating = false,
 }: Props): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
@@ -219,6 +247,7 @@ export function InputArea({
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
   const [dragActive, setDragActive] = React.useState(false);
   const [expanded, setExpanded] = React.useState(false);
+  const [floatingCollapsed, setFloatingCollapsed] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const mountedRef = React.useRef(false);
   // Local ref for the textarea so we can focus it from inside on
@@ -252,7 +281,9 @@ export function InputArea({
       .query()
       .then((rows) => {
         if (cancelled || !mountedRef.current) return;
-        setMentionSkills(normalizeSkillRows(rows).filter((skill) => skill.enabled));
+        setMentionSkills(
+          withoutHiddenEntrySkills(normalizeSkillRows(rows)).filter((skill) => skill.enabled),
+        );
       })
       .catch(() => {
         if (!cancelled && mountedRef.current) {
@@ -288,6 +319,16 @@ export function InputArea({
     });
     onPrefillConsumed?.();
   }, [prefillIntent, onPrefillConsumed]);
+
+  // BROWSER-HOME-1 — the floating composer grows with its content (1 → 5 lines, then scrolls);
+  // `value` is a dependency so it re-measures whenever the text changes.
+  React.useLayoutEffect(() => {
+    if (!floating || floatingCollapsed) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${floatingComposerHeight(el.scrollHeight)}px`;
+  }, [floating, floatingCollapsed, value]);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Product polish #6 — + button menu state. Radix DropdownMenu
@@ -454,6 +495,32 @@ export function InputArea({
   // here is duplicate work that breaks the user.
   if (quotaExhausted && !replyMode && !followUpTarget) {
     return <QuotaExhaustedCard plan={quotaPlan ?? 'free'} navigate={navigate} />;
+  }
+
+  if (floating && floatingCollapsed) {
+    return (
+      <div className="pointer-events-none flex w-full justify-center">
+        <button
+          type="button"
+          aria-label="展开输入框"
+          title="展开输入框"
+          aria-expanded={false}
+          onClick={() => {
+            setFloatingCollapsed(false);
+            requestAnimationFrame(() => textareaRef.current?.focus());
+          }}
+          className={cn(
+            'pointer-events-auto inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium text-[#595757] transition-colors',
+            COMPOSER_SURFACE,
+            'shadow-[0_8px_24px_rgba(17,24,39,0.14)] hover:border-[#FF0061]/30 hover:text-[#FF0061] dark:text-foreground/80',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25',
+          )}
+        >
+          <MessageSquare className="h-4 w-4 text-[#FF0061]" aria-hidden />
+          {value.trim() ? '继续输入' : '问 HOLA DAY'}
+        </button>
+      </div>
+    );
   }
 
   async function ingestFiles(files: FileList | File[]): Promise<void> {
@@ -675,8 +742,13 @@ export function InputArea({
         'w-full',
         approved && 'hd-approved-input',
         approved && expanded && 'hd-input-expanded',
-        fullBleed ? '' : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
+        floating
+          ? 'hd-floating-input pointer-events-auto'
+          : fullBleed
+            ? ''
+            : 'mx-auto max-w-[760px] px-3 pb-4 sm:px-6 sm:pb-6',
       )}
+      data-floating={floating ? 'true' : undefined}
       onDragEnter={(e) => {
         if (!attachmentsAllowed) return;
         if (e.dataTransfer.types.includes('Files')) {
@@ -704,16 +776,24 @@ export function InputArea({
       <div
         className={cn(
           'hd-task-composer relative overflow-hidden border transition-[border-color,box-shadow]',
-          fullBleed
-            ? compact
-              ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(255,0,97,0.065)]'
-              : 'rounded-[26px] border-[#FF0061]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(255,0,97,0.08)]'
-            : cn('rounded-lg', COMPOSER_SURFACE),
-          fullBleed
-            ? compact
-              ? 'focus-within:border-[#F4A9BE] focus-within:shadow-[0_12px_30px_rgba(255,0,97,0.075)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.045]'
-              : 'focus-within:border-[#FF0061]/30 focus-within:shadow-[0_20px_46px_rgba(255,0,97,0.11)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.08]'
-            : COMPOSER_FIELD_FOCUS,
+          floating
+            ? cn(
+                'rounded-[23px] backdrop-blur',
+                COMPOSER_SURFACE,
+                'shadow-[0_10px_30px_rgba(17,24,39,0.16)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.45)]',
+              )
+            : fullBleed
+              ? compact
+                ? 'rounded-[22px] border-[#F8CAD7] bg-[#FFF9FC] shadow-[0_14px_32px_rgba(255,0,97,0.065)]'
+                : 'rounded-[26px] border-[#FF0061]/[0.18] bg-[#FFF4F8] shadow-[0_18px_42px_rgba(255,0,97,0.08)]'
+              : cn('rounded-lg', COMPOSER_SURFACE),
+          floating
+            ? COMPOSER_FIELD_FOCUS
+            : fullBleed
+              ? compact
+                ? 'focus-within:border-[#F4A9BE] focus-within:shadow-[0_12px_30px_rgba(255,0,97,0.075)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.045]'
+                : 'focus-within:border-[#FF0061]/30 focus-within:shadow-[0_20px_46px_rgba(255,0,97,0.11)] focus-within:ring-2 focus-within:ring-[#FF0061]/[0.08]'
+              : COMPOSER_FIELD_FOCUS,
           dragActive ? 'border-[#42C0EF]/60 ring-2 ring-[#42C0EF]/15' : '',
         )}
       >
@@ -790,7 +870,7 @@ export function InputArea({
             ) : null}
           </div>
         )}
-        {!approved && showChromePicker && !replyMode && !followUpTarget ? (
+        {!approved && !floating && showChromePicker && !replyMode && !followUpTarget ? (
           <LocalChromePicker disabled={disabled} />
         ) : null}
         <Textarea
@@ -801,31 +881,42 @@ export function InputArea({
           placeholder={
             replyMode
               ? awaitingComposerPlaceholder(replyKind, englishTask)
-              : followUpTarget || hasExistingTask
-                ? englishTask
-                  ? 'Ask a follow-up or say what to do next...'
-                  : '补充问题或下一步指令...'
-                : expertWorkflow
-                  ? '补充直播场次、数据来源或你想要的报告形式...'
-                  : approved
-                    ? '说说你想做的事...'
-                    : '描述你想让 HOLA DAY 做什么...'
+              : floating
+                ? '描述你想让 HOLA DAY 做什么...'
+                : followUpTarget || hasExistingTask
+                  ? englishTask
+                    ? 'Ask a follow-up or say what to do next...'
+                    : '补充问题或下一步指令...'
+                  : expertWorkflow
+                    ? '补充直播场次、数据来源或你想要的报告形式...'
+                    : approved
+                      ? '说说你想做的事...'
+                      : '描述你想让 HOLA DAY 做什么...'
           }
-          rows={compact ? 1 : 2}
+          rows={floating || compact ? 1 : 2}
           className={cn(
             'resize-none border-0 bg-transparent leading-relaxed shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0',
-            fullBleed
-              ? compact
-                ? 'min-h-[212px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#A5ACBA]/80 sm:min-h-[218px]'
-                : 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
-              : cn(
-                  'px-4 pr-14 text-[15px]',
-                  compact
-                    ? 'min-h-[76px] pb-10 pt-3 sm:min-h-[92px] sm:pb-12 sm:pt-4'
-                    : 'min-h-[92px] pb-12 pt-4',
-                ),
+            floating
+              ? 'min-h-[44px] overflow-y-auto rounded-[22px] py-[11px] pl-12 pr-[84px] text-[14px] leading-[22px]'
+              : fullBleed
+                ? compact
+                  ? 'min-h-[212px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#A5ACBA]/80 sm:min-h-[218px]'
+                  : 'min-h-[190px] px-7 pb-[68px] pr-[150px] pt-8 text-[15px] font-normal placeholder:text-[#9CA3AF]/80 sm:min-h-[198px]'
+                : cn(
+                    'px-4 pr-14 text-[15px]',
+                    compact
+                      ? 'min-h-[76px] pb-10 pt-3 sm:min-h-[92px] sm:pb-12 sm:pt-4'
+                      : 'min-h-[92px] pb-12 pt-4',
+                  ),
           )}
-          style={{ maxHeight: fullBleed ? 'none' : '10rem' }}
+          style={
+            floating
+              ? {
+                  maxHeight: `${FLOATING_COMPOSER_MAX_HEIGHT_PX}px`,
+                  lineHeight: `${FLOATING_COMPOSER_LINE_HEIGHT_PX}px`,
+                }
+              : { maxHeight: fullBleed ? 'none' : '10rem' }
+          }
           disabled={disabled}
         />
         {/* F2 — attachment + plus menu now available in replyMode too.
@@ -841,7 +932,13 @@ export function InputArea({
         <div
           className={cn(
             'hd-composer-tools absolute',
-            fullBleed ? (compact ? 'bottom-7 left-7' : 'bottom-7 left-8') : 'bottom-2.5 left-2.5',
+            floating
+              ? 'bottom-1.5 left-1.5'
+              : fullBleed
+                ? compact
+                  ? 'bottom-7 left-7'
+                  : 'bottom-7 left-8'
+                : 'bottom-2.5 left-2.5',
           )}
         >
           <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
@@ -1108,24 +1205,38 @@ export function InputArea({
             e.target.value = '';
           }}
         />
+        {floating && (
+          <button
+            type="button"
+            aria-label="收起输入框"
+            title="收起输入框"
+            aria-expanded
+            onClick={() => setFloatingCollapsed(true)}
+            className="absolute bottom-1.5 right-[42px] inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/20 dark:hover:bg-white/10"
+          >
+            <ChevronDown className="h-4 w-4" aria-hidden />
+          </button>
+        )}
         <Button
-          size={fullBleed ? undefined : 'icon'}
+          size={fullBleed && !floating ? undefined : 'icon'}
           onClick={() => void handleSubmit()}
           disabled={disabled || value.trim().length === 0}
           className={cn(
             'hd-prompt-send absolute rounded-full focus-visible:ring-[#FF0061]/25',
-            fullBleed
-              ? compact
-                ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#FF0061]/45 bg-white/60 px-5 pr-[50px] text-[#FF0061] shadow-[0_10px_22px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/80'
-                : 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#FF0061]/45 bg-white/55 px-5 pr-[52px] text-[#FF0061] shadow-[0_10px_24px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/75'
-              : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90',
+            floating
+              ? 'bottom-1.5 right-1.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90'
+              : fullBleed
+                ? compact
+                  ? 'bottom-5 right-5 h-11 w-[116px] justify-between border border-[#FF0061]/45 bg-white/60 px-5 pr-[50px] text-[#FF0061] shadow-[0_10px_22px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/80'
+                  : 'bottom-6 right-7 h-12 w-[116px] justify-between border border-[#FF0061]/45 bg-white/55 px-5 pr-[52px] text-[#FF0061] shadow-[0_10px_24px_rgba(255,0,97,0.12)] backdrop-blur hover:bg-white/75'
+                : 'bottom-2.5 right-2.5 h-8 w-8 bg-[#FF0061] text-white shadow-[0_4px_12px_rgba(255,0,97,0.18)] hover:bg-[#FF0061]/90',
           )}
           aria-label={submitting ? submittingStatus : '发送'}
           title={submitting ? submittingStatus : '发送'}
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : fullBleed && !approved ? (
+          ) : fullBleed && !approved && !floating ? (
             <>
               <span className="text-[15px] font-medium leading-none">Enter</span>
               <span
@@ -1148,7 +1259,7 @@ export function InputArea({
           <span>{submitting ? submittingStatus : ''}</span>
         </div>
       )}
-      {!fullBleed && (
+      {!fullBleed && !floating && (
         <div className="mt-2 flex min-h-[28px] items-center justify-between gap-3 px-1 text-[11px] text-muted-foreground/70">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {submitting ? (
@@ -1175,6 +1286,7 @@ export function InputArea({
           (the dialog reads `initialPrompts` from history state). */}
       {!replyMode &&
         !followUpTarget &&
+        !floating &&
         (() => {
           const lines = value
             .split('\n')

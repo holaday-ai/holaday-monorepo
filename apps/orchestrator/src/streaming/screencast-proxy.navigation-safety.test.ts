@@ -14,8 +14,8 @@ import { createScreencastProxy } from './screencast-proxy.js';
  * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): after a person's search left Google's start page, the
  * page restored later had Google's 「Share public link」 dialog open — nobody had pressed 分享.
  * Human input may only ever reach the document the person was looking at:
- *   - a key or button still held when the page changed is not released onto the NEW page at
- *     handback (the release used to be sent to whatever page was current);
+ *   - the release of a key or button pressed on a page that has since changed is not sent onto
+ *     the NEW page (REBUILD-4: there is no handback; the person's own release names the old frame);
  *   - a same-document navigation (pushState swapping the content) retires the old frames, so an
  *     Enter made on the old frame never reaches the new page's focused control.
  */
@@ -77,7 +77,7 @@ const PAGE_PUSH = `<!doctype html><input id="q" style="position:absolute;left:40
 <script>
 window.hits = [];
 let n = 0; setInterval(() => { document.getElementById('tick').textContent = String(++n); }, 40);
-const swap = () => {
+const swap = window.swap = () => {
   history.pushState({}, '', '/push?swapped=1');
   document.body.innerHTML = '<button id="share" style="position:absolute;left:0;top:0;width:1280px;height:800px">Share</button>';
   const b = document.getElementById('share');
@@ -142,10 +142,6 @@ async function harness(path: string) {
     executor: { getPage: async () => page },
   } as unknown as BrowserInstance;
   const binding = browserControlSessions.start(instance);
-  binding.control.requestHuman();
-  const parked = binding.control.checkpoint(async () => undefined);
-  const lease = binding.control.snapshot().lease;
-  if (!lease) throw new Error('fixture lease missing');
   let frame: BrowserFrameGeometry | undefined;
   const server = createServer();
   const proxy = createScreencastProxy({
@@ -162,7 +158,6 @@ async function harness(path: string) {
         origin,
         observationRevision: envelope.observation?.viewportRevision ?? 0,
         actionDigest: 'input',
-        lease: envelope.controlLease ?? '',
       },
       decision: { kind: 'allow', sensitive: false },
     }),
@@ -173,30 +168,24 @@ async function harness(path: string) {
   const ws = new WebSocket(
     `ws://127.0.0.1:${(server.address() as { port: number }).port}/screencast-ws/${taskId}?token=fixture&viewportV2=1`,
   );
+  const expired: string[] = [];
   ws.on('message', (raw) => {
     const m = JSON.parse(String(raw));
     if (m.geometry) frame = m.geometry;
+    if (m.type === 'input-expired') expired.push(m.input);
   });
-  let handedBack = false;
-  const handBack = async () => {
-    if (handedBack) return;
-    handedBack = true;
-    binding.control.returnToAgent(lease);
-    await parked;
-  };
   cleanups.push(async () => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.close();
       await once(ws, 'close');
     }
-    await handBack();
     binding.finish();
     await new Promise<void>((r) => server.close(() => r()));
   });
   await once(ws, 'open');
   await vi.waitFor(() => expect(frame).toBeDefined(), { timeout: 5000 });
   const send = (payload: Record<string, unknown>, ref: BrowserFrameGeometry | undefined = frame) =>
-    ws.send(JSON.stringify({ type: 'input', controlLease: lease, observation: ref, payload }));
+    ws.send(JSON.stringify({ type: 'input', observation: ref, payload }));
   const key = (
     type: 'keyDown' | 'keyUp',
     k: string,
@@ -210,62 +199,57 @@ async function harness(path: string) {
     );
   const hits = async (): Promise<string[]> =>
     page.evaluate(() => (window as unknown as { hits?: string[] }).hits ?? []);
-  return { page, origin, send, key, hits, handBack, frame: () => frame };
+  return { page, origin, send, key, hits, expired, frame: () => frame };
 }
 
-it('an Enter still held when the search left the page is not released onto the new page', async () => {
-  const h = await harness('/a');
-  for (const ch of 'xy') {
-    h.key('keyDown', ch);
-    h.key('keyUp', ch);
-  }
-  await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe('xy'), {
-    timeout: 5000,
-  });
+it('HOTFIX-R4A 保留: an Enter within 300 ms of a pushState page swap does not reach the new focused button; later it does', async () => {
+  const h = await harness('/push');
   const before = h.frame();
+  // The page swaps its content in place (pushState) and focuses 「Share」; an Enter the person
+  // pressed on the old picture arrives right after.
+  await h.page.evaluate(() => (window as unknown as { swap: () => void }).swap());
+  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
   h.key('keyDown', 'Enter', before);
-  await h.page.waitForURL(/\/b\?q=xy/, { timeout: 5000 });
-  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
-  // The release arrives naming the old page's frame (it is refused: that page is gone).
   h.key('keyUp', 'Enter', before);
-  await new Promise((r) => setTimeout(r, 300));
-  // Handing back releases whatever is still held — never onto a page the person never saw.
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
+  await vi.waitFor(() => expect(h.expired).toEqual(['key']), { timeout: 3000 });
+  await new Promise((r) => setTimeout(r, 400));
   expect(await h.hits()).toEqual([]);
+  // Past 300 ms, the person sees the new page and an Enter is theirs for it.
+  h.key('keyDown', 'Enter');
+  h.key('keyUp', 'Enter');
+  await vi.waitFor(async () => expect(await h.hits()).toContain('keydown:Enter'), {
+    timeout: 3000,
+  });
+  expect(h.expired).toEqual(['key']);
 }, 30000);
 
-it('a press on a link that leaves on mousedown is not released onto the new page', async () => {
-  const h = await harness('/a');
-  const before = h.frame();
-  h.send({ type: 'mouseDown', x: 500, y: 350, button: 'left', clickCount: 1 }, before);
-  await h.page.waitForURL(/\/b$/, { timeout: 5000 });
-  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
-  h.send({ type: 'mouseUp', x: 500, y: 350, button: 'left', clickCount: 1 }, before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
-  expect(await h.hits()).toEqual([]);
+it('HOTFIX-R4A: on a page animating every 40 ms, 20 clicks naming an old frame all land', async () => {
+  const h = await harness('/mirror');
+  const old = h.frame();
+  await new Promise((r) => setTimeout(r, 1500)); // many newer frames since
+  for (let i = 0; i < 20; i++) {
+    h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 }, old);
+    h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 }, old);
+  }
+  await vi.waitFor(
+    async () => expect((await h.hits()).filter((x) => x === 'down').length).toBe(20),
+    { timeout: 10000 },
+  );
+  expect(h.expired).toEqual([]);
 }, 30000);
 
-it('after a pushState page swap, an Enter made on the old frame does not reach the new focused button', async () => {
+it('HOTFIX-R4A: Enter that submits a search (the page swaps) shows no notice', async () => {
   const h = await harness('/spa');
   h.key('keyDown', 'z');
   h.key('keyUp', 'z');
   await vi.waitFor(async () => expect(await h.page.locator('#q').inputValue()).toBe('z'), {
     timeout: 5000,
   });
-  const before = h.frame();
-  // The first Enter swaps the page (the person meant it); a second one, pressed at once while
-  // the screen still shows the search box, names that same old frame.
-  h.key('keyDown', 'Enter', before);
-  h.key('keyUp', 'Enter', before);
+  h.key('keyDown', 'Enter');
+  h.key('keyUp', 'Enter');
   await h.page.waitForURL(/\/spa\?q=z/, { timeout: 5000 });
-  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
-  h.key('keyDown', 'Enter', before);
-  h.key('keyUp', 'Enter', before);
   await new Promise((r) => setTimeout(r, 500));
-  expect(await h.hits()).toEqual([]);
+  expect(h.expired).toEqual([]);
 }, 30000);
 
 it('a search box that writes each letter into the URL (replaceState) still gets every letter (复审 #1 #1)', async () => {
@@ -284,7 +268,8 @@ it('a drag on a page that writes its position into the URL is released there (�
   const h = await harness('/mirror');
   h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 });
   await vi.waitFor(async () => expect(await h.hits()).toEqual(['down']), { timeout: 5000 });
-  await h.handBack();
+  // The person's release, on the frame now shown (the URL changed, the document did not).
+  h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 });
   await vi.waitFor(async () => expect(await h.hits()).toEqual(['down', 'up']), { timeout: 5000 });
 }, 30000);
 
@@ -309,31 +294,6 @@ it('the audit description names buttons only, never options, links or fields, an
   expect(await at(10, 310)).toEqual({ role: 'input', name: null, page: origin });
   await page.goto('data:text/html,<p>private</p>');
   expect(await at(5, 5)).toMatchObject({ page: 'data:' });
-}, 30000);
-
-it('an Enter whose press swapped the page in place (pushState) is not released onto the new content (复审 #2 A)', async () => {
-  const h = await harness('/push');
-  const before = h.frame();
-  h.key('keyDown', 'Enter', before);
-  await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
-  await h.page.waitForFunction(() => document.activeElement?.id === 'share');
-  h.key('keyUp', 'Enter', before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
-  expect(await h.hits()).toEqual([]);
-}, 30000);
-
-it('a mouse press that swapped the page in place is not released onto the new content (复审 #2 A)', async () => {
-  const h = await harness('/push');
-  const before = h.frame();
-  h.send({ type: 'mouseDown', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
-  await h.page.waitForURL(/swapped=1/, { timeout: 5000 });
-  h.send({ type: 'mouseUp', x: 500, y: 450, button: 'left', clickCount: 1 }, before);
-  await new Promise((r) => setTimeout(r, 300));
-  await h.handBack();
-  await new Promise((r) => setTimeout(r, 300));
-  expect(await h.hits()).toEqual([]);
 }, 30000);
 
 it('a page that replaceStates every frame loses no letter and keeps no button held (复审 #3 #1)', async () => {

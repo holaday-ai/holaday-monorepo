@@ -51,7 +51,7 @@ describe('step-card-state', () => {
       running: 0,
       cancelled: 0,
       label:
-        '1 项操作已应用 · 1 项操作未确认完成 · 1 次页面观察 · 1 次验证通过 · 1 项计划未执行 · 1 次人工交还 · 3 条历史轮次（未验证）',
+        '1 项操作已应用 · 1 项操作未确认完成 · 1 次页面观察 · 1 次验证通过 · 1 项计划未执行 · 1 次由你操作 · 3 条历史轮次（未验证）',
       tone: 'failed',
     });
   });
@@ -64,7 +64,7 @@ describe('step-card-state', () => {
         { actionKind: 'selected_chrome_handoff', status: 'done' },
       ]),
     ).toMatchObject({
-      label: '1 次页面观察 · 1 项计划未执行 · 1 次人工交还',
+      label: '1 次页面观察 · 1 项计划未执行 · 1 次由你操作',
       tone: 'idle',
     });
   });
@@ -180,7 +180,7 @@ describe('step-card-state', () => {
       }),
     ).toBe('未执行计划');
     expect(stepDisplayTitle({ actionKind: 'selected_chrome_handoff', tickIndex: 4 })).toBe(
-      '人工交还记录',
+      '你在页面上的操作',
     );
     expect(stepDisplayTitle({ actionKind: 'browser_act', tickIndex: 5 })).toBe(
       '历史浏览器轮次（未验证）',

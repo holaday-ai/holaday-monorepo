@@ -1,7 +1,6 @@
 import { pino } from 'pino';
-import type { CDPSession, Page } from 'playwright';
+import type { CDPSession } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
-import { BrowserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { BrowserControl } from '../agent/supercar/browser-control.js';
 import { CdpInputHandler } from './cdp-input.js';
 import { DeferredScreencastInputBridge } from './screencast-input-bridge.js';
@@ -25,35 +24,7 @@ describe('CdpInputHandler owned cancellation', () => {
     expect(quarantine).toHaveBeenCalledTimes(1);
   });
 
-  it('releases held keys and mouse buttons before AI can observe the handed-back page', async () => {
-    const effects: string[] = [];
-    const session = {
-      send: async (method: string, params: { type?: string }) => {
-        // FIX-61: the typed-field marker is not an input effect.
-        if (method === 'Runtime.evaluate') return;
-        effects.push(params.type ?? 'other');
-      },
-      detach: async () => undefined,
-    } as unknown as CDPSession;
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const control = new BrowserControl();
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      effects.push('observe');
-    });
-    control.beforeHandback((signal) => handler.releasePressed(signal));
-    const lease = control.snapshot().lease ?? '';
-    await control.runHuman(lease, (signal) =>
-      handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal),
-    );
-    await control.runHuman(lease, (signal) =>
-      handler.handle({ type: 'mouseDown', x: 20, y: 30 }, signal),
-    );
-    control.returnToAgent(lease);
-    await parked;
-    expect(effects).toEqual(['keyDown', 'mousePressed', 'keyUp', 'mouseReleased', 'observe']);
-  });
-  it('revokes the lease at timeout even when the transport cannot confirm detach', async () => {
+  it('closes the control at timeout even when the transport cannot confirm detach', async () => {
     vi.useFakeTimers();
     const control = new BrowserControl();
     let rejectSend!: (error: Error) => void;
@@ -72,14 +43,9 @@ describe('CdpInputHandler owned cancellation', () => {
       undefined,
       () => control.close('input_outcome_unknown'),
     );
-    control.requestHuman();
-    let observed = false;
-    const parked = control.checkpoint(async () => {
-      observed = true;
-    });
-    const token = control.snapshot().lease ?? '';
-    const input = control.runHuman(token, (signal) =>
-      handler.handle({ type: 'insertText', text: 'x' }, signal),
+    const input = control.runHuman(
+      (signal) => handler.handle({ type: 'insertText', text: 'x' }, signal),
+      'insertText',
     );
     let settled = false;
     const result = input.then(
@@ -98,15 +64,13 @@ describe('CdpInputHandler owned cancellation', () => {
         error: 'input_outcome_unknown',
       });
       expect(settled).toBe(false);
-      expect(observed).toBe(false);
-      await expect(control.runHuman(token, async () => undefined)).rejects.toThrow(
-        'browser_control_not_owned',
+      expect(control.isSettled()).toBe(false);
+      await expect(control.runHuman(async () => undefined, 'mouseDown')).rejects.toThrow(
+        'browser_control_closed',
       );
     } finally {
-      control.close();
       rejectSend(new Error('test transport closed'));
       await result;
-      await parked;
       vi.useRealTimers();
     }
   });
@@ -183,19 +147,12 @@ describe('CdpInputHandler owned cancellation', () => {
     );
     const control = new BrowserControl();
     const bridge = new DeferredScreencastInputBridge({
-      runOwnedInput: (lease, action) => control.runHuman(lease ?? '', action),
+      runOwnedInput: (action, kind) =>
+        control.runHuman(action, kind === 'viewport' ? undefined : kind),
     });
     await bridge.attach(handler);
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      effects.push('observe');
-    });
     const input = bridge.receive(
-      JSON.stringify({
-        type: 'input',
-        controlLease: control.snapshot().lease,
-        payload: { type: 'insertText', text: 'x' },
-      }),
+      JSON.stringify({ type: 'input', payload: { type: 'insertText', text: 'x' } }),
     );
     const rejected = input.then(
       () => 'success',
@@ -206,13 +163,11 @@ describe('CdpInputHandler owned cancellation', () => {
     try {
       await vi.waitFor(() => expect(effects).toContain('detached'));
       expect(await rejected).toBe('browser_input_outcome_unknown');
-      expect(await parked).toMatchObject({ resumed: false });
       expect(effects).toEqual(['dispatch', 'detached']);
-      expect(control.snapshot().error).toBe('input_outcome_unknown');
+      expect(control.snapshot()).toMatchObject({ phase: 'closed', error: 'input_outcome_unknown' });
     } finally {
       rejectSend(new Error('test cleanup'));
       await rejected;
-      await parked;
     }
   });
 
@@ -289,25 +244,12 @@ function handlerWithSend() {
   };
 }
 
-describe('CdpInputHandler responsive viewport', () => {
-  it('reflows the remote page to the visible browser workspace', async () => {
+describe('CdpInputHandler viewport message (REBUILD-4 第 4 条)', () => {
+  it('never resizes the page for a viewer, whatever the size', async () => {
     const { handler, send } = handlerWithSend();
 
     await handler.handle({ type: 'viewport', width: 612, height: 844 });
-
-    expect(send).toHaveBeenCalledWith('Emulation.setDeviceMetricsOverride', {
-      width: 612,
-      height: 844,
-      deviceScaleFactor: 1,
-      mobile: false,
-      screenWidth: 612,
-      screenHeight: 844,
-    });
-  });
-
-  it('drops invalid or abusive viewport messages', async () => {
-    const { handler, send } = handlerWithSend();
-
+    await handler.handle({ type: 'viewport', width: 390, height: 760, deviceScaleFactor: 2 });
     await handler.handle({ type: 'viewport', width: 0, height: 844 });
     await handler.handle({ type: 'viewport', width: 10_000, height: 844 });
     await handler.handle({ type: 'viewport', width: 612, height: Number.NaN });
@@ -505,93 +447,12 @@ describe('CdpInputHandler keyboard input', () => {
   });
 });
 
-it('V2 viewport resize preserves the current remote DPR instead of silently resetting to one', async () => {
-  const send = vi.fn(async (method: string) =>
-    method === 'Runtime.evaluate' ? { result: { value: 2 } } : {},
-  );
-  const handler = new CdpInputHandler(
-    () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-    pino({ level: 'silent' }),
-    undefined,
-    undefined,
-    true,
-  );
-  await handler.handle({ type: 'viewport', width: 1600, height: 900 });
-  expect(send).toHaveBeenCalledWith(
-    'Emulation.setDeviceMetricsOverride',
-    expect.objectContaining({ width: 1600, height: 900, deviceScaleFactor: 2, mobile: false }),
-  );
-});
-
-it('V2 reconnect restores the same Page DPR after a parallel CDP detach reset', async () => {
-  const page = {} as Page;
-  for (const ratio of [2, 1]) {
-    const send = vi.fn(async (method: string) =>
-      method === 'Runtime.evaluate' ? { result: { value: ratio } } : {},
-    );
-    const h = new CdpInputHandler(
-      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-      pino({ level: 'silent' }),
-      undefined,
-      undefined,
-      true,
-      async () => page,
-    );
-    await h.handle({ type: 'viewport', width: 1600, height: 900 });
-    expect(send).toHaveBeenCalledWith(
-      'Emulation.setDeviceMetricsOverride',
-      expect.objectContaining({ deviceScaleFactor: 2 }),
-    );
-  }
-});
-
-it('applies tall V2 device metrics while retaining legacy and maximum bounds', async () => {
-  const send = vi.fn(async (method: string) =>
-    method === 'Runtime.evaluate' ? { result: { value: 1 } } : {},
-  );
-  const session = () => ({ send, detach: async () => {} }) as unknown as CDPSession;
-  await new CdpInputHandler(session, pino({ level: 'silent' })).handle({
-    type: 'viewport',
-    width: 1024,
-    height: 2300,
-  });
-  expect(send).not.toHaveBeenCalled();
-  const v2 = new CdpInputHandler(
-    session,
-    pino({ level: 'silent' }),
-    undefined,
-    undefined,
-    true,
-    undefined,
-    2400,
-  );
-  await v2.handle({ type: 'viewport', width: 1024, height: 2300 });
-  expect(send).toHaveBeenCalledWith(
-    'Emulation.setDeviceMetricsOverride',
-    expect.objectContaining({ width: 1024, height: 2300, mobile: false }),
-  );
-  const before = send.mock.calls.length;
-  await v2.handle({ type: 'viewport', width: 1024, height: 2401 });
-  expect(send).toHaveBeenCalledTimes(before);
-});
-
-it('uses negotiated Retina DPR and retains held buttons through a drag', async () => {
+it('retains held buttons through a drag', async () => {
   const send = vi.fn(async (method: string) =>
     method === 'Runtime.evaluate' ? { result: { value: 1 } } : {},
   );
   const cdp = { send, detach: async () => {} } as unknown as CDPSession;
-  const handler = new CdpInputHandler(
-    () => cdp,
-    pino({ level: 'silent' }),
-    undefined,
-    undefined,
-    true,
-  );
-  await handler.handle({ type: 'viewport', width: 390, height: 600, deviceScaleFactor: 2 });
-  expect(send).toHaveBeenCalledWith(
-    'Emulation.setDeviceMetricsOverride',
-    expect.objectContaining({ width: 390, height: 600, deviceScaleFactor: 2 }),
-  );
+  const handler = new CdpInputHandler(() => cdp, pino({ level: 'silent' }));
   await handler.handle({ type: 'mouseDown', x: 10, y: 20, button: 'left' });
   await handler.handle({ type: 'mouseMove', x: 90, y: 20 });
   expect(send).toHaveBeenCalledWith(
@@ -609,269 +470,121 @@ it('uses negotiated Retina DPR and retains held buttons through a drag', async (
   expect(send).not.toHaveBeenCalled();
 });
 
-describe('FIX-61 P0 + 复审 #1: the user viewport reaches the layout only under the lease', () => {
-  const evaluateWith = (layout: () => [number, number]) =>
-    vi.fn(async (method: string, params?: { expression?: string }) => {
-      if (method !== 'Runtime.evaluate') return {};
-      return params?.expression?.includes('innerWidth')
-        ? { result: { value: layout() } }
-        : { result: { value: 1 } };
-    });
-  /** The agent's Playwright page: its own viewport decides the layout. */
-  const agentPage = () => {
-    let size = { width: 1280, height: 800 };
-    const page = {
-      viewportSize: () => size,
-      setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
-        size = next;
-      }),
-    };
-    return { page, layout: (): [number, number] => [size.width, size.height] };
-  };
-  const setup = () => {
-    const sessions = new BrowserControlSessions();
-    const instance = { taskId: 'tsk_a', userId: 'usr_a' };
-    const { page, layout } = agentPage();
-    const send = evaluateWith(layout);
-    const human = () =>
-      sessions.get(instance, 'usr_a', 'tsk_a')?.control.snapshot().phase === 'human';
-    const handler = new CdpInputHandler(
-      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-      pino({ level: 'silent' }),
-      undefined,
-      undefined,
-      true,
-      async () => page as unknown as Page,
-      2400,
-      {
-        mayAlign: human,
-        onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
-      },
-    );
-    return { sessions, instance, page, send, handler };
-  };
-  const phone = { type: 'viewport' as const, width: 390, height: 760, deviceScaleFactor: 2 };
-
-  it('someone only watching a running task never resizes the assistant page', async () => {
-    const { sessions, instance, page, handler } = setup();
-    sessions.start(instance);
-    await handler.handle(phone);
-    expect(page.setViewportSize).not.toHaveBeenCalled();
-    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
-  });
-
-  it('a handler without the lease check never resizes the agent page', async () => {
-    const { page, layout } = agentPage();
-    const send = evaluateWith(layout);
-    const handler = new CdpInputHandler(
-      () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-      pino({ level: 'silent' }),
-      undefined,
-      undefined,
-      true,
-      async () => page as unknown as Page,
-      2400,
-    );
-    await handler.handle(phone);
-    expect(page.setViewportSize).not.toHaveBeenCalled();
-  });
-
-  it('aligns after takeover, then puts back 1280x800 at handback before the assistant observes', async () => {
-    const { sessions, instance, page, send, handler } = setup();
-    const { control } = sessions.start(instance);
-    control.requestHuman();
-    const order: string[] = [];
-    const boundary = control.checkpoint(async () => {
-      order.push(`observe@${page.viewportSize().width}x${page.viewportSize().height}`);
-    });
-    await Promise.resolve();
-    const lease = control.snapshot().lease;
-    expect(lease).toBeTruthy();
-
-    // Observed locally: frames 1280x1807 while the page still laid out at 1280x800.
-    await handler.handle({ type: 'viewport', width: 1280, height: 1807, deviceScaleFactor: 2 });
-    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 1807 });
-    const overrides = send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride');
-    expect(overrides).toHaveLength(2);
-    expect(overrides[1]?.[1]).toEqual(
-      expect.objectContaining({ width: 1280, height: 1807, deviceScaleFactor: 2 }),
-    );
-    // A second resize under the same lease keeps the task's own size to restore.
-    await handler.handle(phone);
-    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
-
-    control.returnToAgent(lease!);
-    await boundary;
-    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 1280, height: 800 });
-    expect(order).toEqual(['observe@1280x800']);
-  });
-
-  it('a follow-up run restores the size a review lease left behind', async () => {
-    const { sessions, instance, page, handler } = setup();
-    sessions.start(instance).finish();
-    const review = sessions.review(instance);
-    await Promise.resolve();
-    expect(review.control.snapshot().phase).toBe('human');
-    await handler.handle(phone);
-    expect(page.viewportSize()).toEqual({ width: 390, height: 760 });
-
-    // The user sends a follow-up without handing back.
-    const { control } = sessions.start(instance);
-    await control.checkpoint(async () => {});
-    expect(page.viewportSize()).toEqual({ width: 1280, height: 800 });
-  });
-
-  it('leaves the agent page alone when the layout already matches', async () => {
-    const { sessions, instance, page, send, handler } = setup();
-    const { control } = sessions.start(instance);
-    control.requestHuman();
-    void control.checkpoint(async () => {});
-    await Promise.resolve();
-    await handler.handle({ type: 'viewport', width: 1280, height: 800 });
-    expect(page.setViewportSize).not.toHaveBeenCalled();
-    expect(
-      send.mock.calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride'),
-    ).toHaveLength(1);
-    control.close();
-  });
-
-  describe('DEPLOY-61 重跑 第 0 步 #1: the real size is checked again before the assistant observes', () => {
-    /** The renderer keeps the user's layout until the launch values have been set `fixedAfter` times. */
-    const stickyPage = (fixedAfter: number) => {
-      let size = { width: 1280, height: 800 };
-      let launchSets = 0;
-      const page = {
-        viewportSize: () => size,
-        setViewportSize: vi.fn(async (next: { width: number; height: number }) => {
-          size = next;
-        }),
-        evaluate: vi.fn(async (fn: () => unknown) =>
-          String(fn).includes('innerWidth')
-            ? launchSets >= fixedAfter
-              ? [1280, 800, 1]
-              : [780, 1520, 1]
-            : 1,
-        ),
-      };
-      const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-        if (
-          method === 'Emulation.setDeviceMetricsOverride' &&
-          params?.width === 1280 &&
-          params?.height === 800
-        )
-          launchSets++;
-        if (method !== 'Runtime.evaluate') return {};
-        return { result: { value: 1 } };
-      });
-      return { page, send };
-    };
-    const run = async (fixedAfter: number) => {
-      const sessions = new BrowserControlSessions();
-      const instance = { taskId: 'tsk_a1b2c3d4e5', userId: 'usr_a' };
-      const { page, send } = stickyPage(fixedAfter);
-      const logger = pino({ level: 'silent' });
-      const warn = vi.spyOn(logger, 'warn');
-      const handler = new CdpInputHandler(
-        () => ({ send, detach: async () => {} }) as unknown as CDPSession,
-        logger,
-        undefined,
-        undefined,
-        true,
-        async () => page as unknown as Page,
-        2400,
-        {
-          mayAlign: () =>
-            sessions.get(instance, 'usr_a', 'tsk_a1b2c3d4e5')?.control.snapshot().phase === 'human',
-          onAligned: (restore) => sessions.noteAgentViewportChanged(instance, restore),
-          taskRef: instance.taskId.slice(0, 8),
-        },
-      );
-      const { control } = sessions.start(instance);
-      control.requestHuman();
-      let observed = 0;
-      const boundary = control.checkpoint(async () => {
-        observed++;
-      });
-      await Promise.resolve();
-      const lease = control.snapshot().lease;
-      await handler.handle({ type: 'viewport', width: 780, height: 1520, deviceScaleFactor: 1 });
-      control.returnToAgent(lease!);
-      await boundary;
-      const launchSets = send.mock.calls.filter(
-        ([m, p]) =>
-          m === 'Emulation.setDeviceMetricsOverride' &&
-          (p as { width?: number }).width === 1280 &&
-          (p as { height?: number }).height === 800,
-      ).length;
-      return { warn, launchSets, observed };
-    };
-
-    it('still the user size after the first fix → set again once; right then → no warning', async () => {
-      const { warn, launchSets, observed } = await run(2);
-      expect(launchSets).toBe(2);
-      expect(warn).not.toHaveBeenCalled();
-      expect(observed).toBe(1);
-    });
-
-    it('right after the first fix → no second set, no warning', async () => {
-      const { warn, launchSets } = await run(1);
-      expect(launchSets).toBe(1);
-      expect(warn).not.toHaveBeenCalled();
-    });
-
-    it('never restored → warn with the first 8 characters of the task id, and the run goes on', async () => {
-      const { warn, launchSets, observed } = await run(Number.POSITIVE_INFINITY);
-      expect(launchSets).toBe(2);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]?.[0]).toMatchObject({
-        task: 'tsk_a1b2',
-        expected: [1280, 800, 1],
-        real: [780, 1520, 1],
-      });
-      expect(observed).toBe(1);
-    });
-  });
-});
-
-// FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document it was made on.
-describe('CdpInputHandler document guard', () => {
+// HOTFIX-R4A（协调方改）: the person's input is delivered like a remote desktop's; only an Enter /
+// Space within 300 ms of a cross-document navigation is dropped.
+describe('CdpInputHandler navigation guard', () => {
   const recording = (
     evaluate: () => Promise<unknown> = async () => ({ result: { value: null } }),
   ) => {
     const effects: string[] = [];
     const session = {
-      send: async (method: string, params: { type?: string }) => {
+      send: async (method: string, params: { type?: string; key?: string }) => {
         if (method === 'Runtime.evaluate') return evaluate();
-        effects.push(params.type ?? method);
+        effects.push(`${params.type ?? method}${params.key ? `:${params.key}` : ''}`);
       },
       detach: async () => undefined,
     } as unknown as CDPSession;
     return { effects, session };
   };
   const ENTER = { type: 'keyDown', key: 'Enter', code: 'Enter', keyCode: 13 } as const;
-  const guardFor = (
-    state: { revision: number; loader: string; entry?: number; pending?: boolean },
-    fresh: () => Promise<string | null>,
-  ) => {
-    const checked = new WeakMap<object, { revision: number; loader: string }>();
-    return {
-      check: (m: object) => checked.set(m, { revision: state.revision, loader: state.loader }),
-      guard: {
-        expected: (m: object) => checked.get(m),
-        revision: () => state.revision,
-        loader: () => state.loader,
-        freshLoader: fresh,
-        entry: () => state.entry ?? 1,
-        pending: () => state.pending ?? false,
-        settled: async () => {
-          state.pending = false;
-        },
-      },
-    };
-  };
+  const ENTER_UP = { type: 'keyUp', key: 'Enter', code: 'Enter', keyCode: 13 } as const;
+  const SPACE = { type: 'keyDown', key: ' ', code: 'Space', keyCode: 32 } as const;
 
-  it('refuses an input whose revision changed since it was checked — no event, no uncertain outcome', async () => {
+  it('long after a navigation every input goes through — presses, Enter, Space, letters', async () => {
     const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setNavigationGuard({ lastNavigationAt: () => performance.now() - 5_000 });
+    const signal = new AbortController().signal;
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    await handler.handle({ type: 'mouseUp', x: 5, y: 5 }, signal);
+    await handler.handle({ ...ENTER }, signal);
+    await handler.handle({ ...ENTER_UP }, signal);
+    await handler.handle({ ...SPACE }, signal);
+    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
+    expect(effects).toEqual([
+      'mousePressed',
+      'mouseReleased',
+      'keyDown:Enter',
+      'keyUp:Enter',
+      'keyDown: ',
+      'keyDown:a',
+    ]);
+  });
+
+  it('within 300 ms of a navigation: Enter / Space are dropped with their key-ups; clicks and letters are not', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    handler.setNavigationGuard({ lastNavigationAt: () => performance.now() - 100 });
+    const signal = new AbortController().signal;
+    await expect(handler.handle({ ...ENTER }, signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    await handler.handle({ ...ENTER_UP }, signal); // quietly dropped: its key-down was
+    await expect(handler.handle({ ...SPACE }, signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
+    await handler.handle({ type: 'mouseUp', x: 5, y: 5 }, signal);
+    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
+    expect(effects).toEqual(['mousePressed', 'mouseReleased', 'keyDown:a']);
+  });
+
+  it('a pushState being classified is waited for (bounded) before an Enter is judged', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    let navigatedAt = 0;
+    let pending = true;
+    handler.setNavigationGuard({
+      lastNavigationAt: () => navigatedAt,
+      pending: () => pending,
+      settled: async () => {
+        // The read finds a new history entry: a navigation, timed at its event.
+        navigatedAt = performance.now() - 50;
+        pending = false;
+      },
+    });
+    await expect(handler.handle({ ...ENTER }, new AbortController().signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    expect(effects).toEqual([]);
+  });
+
+  it('复审 P2-1: an Enter that arrived before the page left, and waited behind other input, is still dropped', async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    const enter = { ...ENTER };
+    const arrived = performance.now() - 2_000; // queued for 2 s
+    handler.setNavigationGuard({
+      lastNavigationAt: () => arrived + 1_000, // the page left while it waited
+      receivedAt: (m) => (m === enter ? arrived : undefined),
+    });
+    await expect(handler.handle(enter, new AbortController().signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    expect(effects).toEqual([]);
+  });
+
+  it("复审 P2-3: an auto-repeated Enter dropped after the page left keeps the first one's release", async () => {
+    const { effects, session } = recording();
+    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
+    let navigatedAt = 0;
+    handler.setNavigationGuard({ lastNavigationAt: () => navigatedAt });
+    const signal = new AbortController().signal;
+    await handler.handle({ ...ENTER }, signal); // sent; it makes the page leave
+    navigatedAt = performance.now();
+    await expect(handler.handle({ ...ENTER }, signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    ); // the repeat
+    await handler.handle({ ...ENTER_UP }, signal); // the held key is released
+    expect(effects).toEqual(['keyDown:Enter', 'keyUp:Enter']);
+  });
+
+  it('复审 #2 P2-a: a navigation while the Enter waits on its audit lookup still drops it — not an uncertain outcome', async () => {
+    let navigatedAt = 0;
+    const { effects, session } = recording(async () => {
+      navigatedAt = performance.now(); // the page leaves during the lookup
+      return { result: { value: null } };
+    });
     const uncertain = vi.fn();
     const handler = new CdpInputHandler(
       () => session,
@@ -879,152 +592,29 @@ describe('CdpInputHandler document guard', () => {
       undefined,
       uncertain,
     );
-    const state = { revision: 5, loader: 'L1' };
-    const g = guardFor(state, async () => state.loader);
-    handler.setDocumentGuard(g.guard);
-    const msg = { ...ENTER };
-    g.check(msg);
-    state.revision = 6;
-    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
-      'browser_observation_expired',
+    handler.setNavigationGuard({ lastNavigationAt: () => navigatedAt });
+    await expect(handler.handle({ ...ENTER }, new AbortController().signal)).rejects.toThrow(
+      'browser_page_just_navigated',
     );
     expect(effects).toEqual([]);
     expect(uncertain).not.toHaveBeenCalled();
   });
 
-  it('a navigation that commits while the document is being read is caught by the last check (复审 #1 #3)', async () => {
+  it('a release of a button the browser does not hold is dropped (no lone mouse-up)', async () => {
     const { effects, session } = recording();
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const state = { revision: 5, loader: 'L1' };
-    // The read's answer arrives after the navigation event was handled — as CDP orders them.
-    const g = guardFor(state, async () => {
-      state.revision = 6;
-      state.loader = 'L2';
-      return 'L2';
-    });
-    handler.setDocumentGuard(g.guard);
-    const msg = { ...ENTER };
-    g.check(msg);
-    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
-      'browser_observation_expired',
-    );
-    expect(effects).toEqual([]);
-  });
-
-  it('a document that cannot be read in time (a JS dialog) refuses instead of hanging (复审 #1 #4)', async () => {
-    const { effects, session } = recording();
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const state = { revision: 5, loader: 'L1' };
-    const g = guardFor(state, async () => null);
-    handler.setDocumentGuard(g.guard);
-    const msg = { type: 'mouseDown', x: 1, y: 1 } as const;
-    g.check(msg);
-    await expect(handler.handle(msg, new AbortController().signal)).rejects.toThrow(
-      'browser_observation_expired',
-    );
+    handler.setNavigationGuard({ lastNavigationAt: () => 0 });
+    await handler.handle({ type: 'mouseUp', x: 5, y: 5 }, new AbortController().signal);
     expect(effects).toEqual([]);
   });
 
   it('a target lookup that never answers does not hold the input', async () => {
-    const { effects, session } = recording(() => new Promise(() => undefined));
+    const { effects, session } = recording(() => new Promise(() => {}));
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const state = { revision: 5, loader: 'L1' };
-    const g = guardFor(state, async () => 'L1');
-    handler.setDocumentGuard(g.guard);
-    const msg = { type: 'mouseDown', x: 1, y: 1 } as const;
-    g.check(msg);
-    const started = Date.now();
-    await handler.handle(msg, new AbortController().signal);
+    handler.setNavigationGuard({ lastNavigationAt: () => 0 });
+    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, new AbortController().signal);
     expect(effects).toEqual(['mousePressed']);
-    expect(Date.now() - started).toBeLessThan(3000);
-  });
-
-  it('moves and ordinary key releases are not read fresh (one round trip saved each)', async () => {
-    const { effects, session } = recording();
-    const fresh = vi.fn(async () => 'L1');
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const state = { revision: 5, loader: 'L1' };
-    const g = guardFor(state, fresh);
-    handler.setDocumentGuard(g.guard);
-    const move = { type: 'mouseMove', x: 1, y: 1 } as const;
-    const up = { type: 'keyUp', key: 'a', code: 'KeyA' } as const;
-    g.check(move);
-    g.check(up);
-    await handler.handle(move, new AbortController().signal);
-    await handler.handle(up, new AbortController().signal);
-    expect(fresh).not.toHaveBeenCalled();
-    expect(effects).toEqual(['mouseMoved', 'keyUp']);
-  });
-
-  it('releases a held key or button only on the document it was pressed on', async () => {
-    const { effects, session } = recording();
-    const state = { revision: 5, loader: 'L1' };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
-    const signal = new AbortController().signal;
-    await handler.handle({ ...ENTER }, signal);
-    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
-    state.loader = 'L2';
-    await handler.releasePressed(signal);
-    expect(effects).toEqual(['keyDown', 'mousePressed']);
-    // Nothing is left held: a later release has nothing to send.
-    await handler.releasePressed(signal);
-    expect(effects).toEqual(['keyDown', 'mousePressed']);
-  });
-
-  it('on the same document (a replaceState meanwhile keeps the loader) the release is sent (复审 #1 #2)', async () => {
-    const { effects, session } = recording();
-    const state = { revision: 5, loader: 'L1' };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
-    const signal = new AbortController().signal;
-    await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
-    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
-    await handler.releasePressed(signal);
-    expect(effects).toEqual(['keyDown', 'mousePressed', 'keyUp', 'mouseReleased']);
-  });
-
-  it('a pushState swap (same loader, new history entry) drops the held release (复审 #2 A)', async () => {
-    const { effects, session } = recording();
-    const state = { revision: 5, loader: 'L1', entry: 1 };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    handler.setDocumentGuard(guardFor(state, async () => state.loader).guard);
-    const signal = new AbortController().signal;
-    await handler.handle({ ...ENTER }, signal);
-    await handler.handle({ type: 'mouseDown', x: 5, y: 5 }, signal);
-    state.entry = 2;
-    await handler.releasePressed(signal);
-    expect(effects).toEqual(['keyDown', 'mousePressed']);
-  });
-
-  it('a same-document navigation being classified is waited for, then judged (复审 #3 #1)', async () => {
-    const { effects, session } = recording();
-    // replaceState meanwhile: the read settles, no revision change → the letter goes through.
-    const state = { revision: 5, loader: 'L1', pending: true };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const g = guardFor(state, async () => state.loader);
-    handler.setDocumentGuard(g.guard);
-    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
-    g.check(letter);
-    await handler.handle(letter, new AbortController().signal);
-    expect(effects).toEqual(['keyDown']);
-    // pushState meanwhile: the read retires the frames (revision bump) → refused.
-    const handler2 = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const g2 = guardFor(state, async () => state.loader);
-    handler2.setDocumentGuard({
-      ...g2.guard,
-      pending: () => true,
-      settled: async () => {
-        state.revision = 6;
-      },
-    });
-    const enter = { ...ENTER };
-    g2.check(enter);
-    await expect(handler2.handle(enter, new AbortController().signal)).rejects.toThrow(
-      'browser_observation_expired',
-    );
-    expect(effects).toEqual(['keyDown']);
-  });
+  }, 5000);
 
   it('a session swap clears held modifiers (restored after 复审 #2 C)', async () => {
     const effects: string[] = [];
@@ -1046,40 +636,5 @@ describe('CdpInputHandler document guard', () => {
     session = mk();
     await handler.handle({ type: 'keyDown', key: 'a', code: 'KeyA' }, signal);
     expect(effects).toEqual(['keyDown:Shift', 'keyDown:a']);
-  });
-
-  it('still undecided after the wait: an activating input is refused (复审 #4 #2)', async () => {
-    const { effects, session } = recording();
-    const state = { revision: 5, loader: 'L1' };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const g = guardFor(state, async () => state.loader);
-    handler.setDocumentGuard({ ...g.guard, pending: () => true, settled: async () => undefined });
-    const enter = { ...ENTER };
-    g.check(enter);
-    await expect(handler.handle(enter, new AbortController().signal)).rejects.toThrow(
-      'browser_observation_expired',
-    );
-    // A letter is no activation: it waits, then goes.
-    const letter = { type: 'keyDown', key: 'a', code: 'KeyA' } as const;
-    g.check(letter);
-    await handler.handle(letter, new AbortController().signal);
-    expect(effects).toEqual(['keyDown']);
-  });
-
-  it('still undecided at handback: held keys and buttons are not released (复审 #4)', async () => {
-    const { effects, session } = recording();
-    const state = { revision: 5, loader: 'L1', pending: false };
-    const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
-    const g = guardFor(state, async () => state.loader);
-    handler.setDocumentGuard({
-      ...g.guard,
-      pending: () => state.pending,
-      settled: async () => undefined,
-    });
-    const signal = new AbortController().signal;
-    await handler.handle({ ...ENTER }, signal);
-    state.pending = true;
-    await handler.releasePressed(signal);
-    expect(effects).toEqual(['keyDown']);
   });
 });

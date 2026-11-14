@@ -27,8 +27,8 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useToast } from '@/components/ui/toast';
-import { isCosmicEnabled } from '@/lib/astrology';
 import { copyTextToClipboard } from '@/lib/copy-text';
+import { isAshareEntryEnabled, isDailyEnergyEntryEnabled } from '@/lib/feature-entries';
 import type { ProjectFilterChipState } from '@/lib/project-task-filter-state';
 import {
   deletableTaskIdsForBatchSelection,
@@ -55,6 +55,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Globe,
   ImagePlus,
   Layers,
   ListPlus,
@@ -133,6 +134,8 @@ interface Props {
   userPlan: string;
   userRole?: 'user' | 'admin';
   videoEnabled?: boolean;
+  /** BROWSER-HOME-1 — auth.me.browserHomeEnabled; shows the「云浏览器」entry. */
+  browserHomeEnabled?: boolean;
   /** Mobile drawer state — ignored at md+ breakpoints. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -199,6 +202,7 @@ export function Sidebar({
   onOpenSearch,
   userPlan,
   userRole = 'user',
+  browserHomeEnabled = false,
   mobileOpen,
   onMobileClose,
   hiddenTaskCount = 0,
@@ -443,6 +447,7 @@ export function Sidebar({
         {/* Main navigation stays visible; only task history scrolls. */}
         <FeatureNav
           userRole={userRole}
+          browserHomeEnabled={browserHomeEnabled}
           projects={projectsProp ?? []}
           onCreateProject={onCreateProject}
           onNavigate={() => {
@@ -1092,6 +1097,8 @@ const FEATURES: readonly FeatureItem[] = [
   },
   { icon: Wallet, label: '合伙人计划', href: '/partner' },
   { icon: MoonStar, label: '今日能量', href: '/cosmic' },
+  // BROWSER-HOME-1: directly above 视频任务; shown only when auth.me.browserHomeEnabled.
+  { icon: Globe, label: '云浏览器', href: '/browser' },
   { icon: Clapperboard, label: '视频任务', href: '/video' },
   { icon: ImagePlus, label: '图片任务', href: '/image' },
   { icon: CalendarClock, label: '规划任务', href: '/planned' },
@@ -1110,11 +1117,13 @@ const FEATURES: readonly FeatureItem[] = [
  */
 function FeatureNav({
   userRole,
+  browserHomeEnabled,
   projects,
   onCreateProject,
   onNavigate,
 }: {
   userRole: 'user' | 'admin';
+  browserHomeEnabled: boolean;
   projects: readonly UiProject[];
   onCreateProject?: () => void;
   onNavigate?: () => void;
@@ -1146,8 +1155,11 @@ function FeatureNav({
       <SidebarGroupContent>
         <SidebarMenu>
           {filterSidebarFeatureNavItems(FEATURES, {
-            cosmicEnabled: isCosmicEnabled(),
+            // HIDE-1: 今日能量 / 股市任务 entries hidden unless their build flags are on.
+            cosmicEnabled: isDailyEnergyEntryEnabled(),
+            ashareEnabled: isAshareEntryEnabled(),
             partnerEnabled: isPartnerNavEnabled(),
+            browserHomeEnabled,
           }).map((item) => {
             const { icon: Icon, label, href } = item;
             if (href) {

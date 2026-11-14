@@ -4682,6 +4682,49 @@ describe('CAPTCHA handoff state', () => {
   });
 });
 
+describe('REBUILD-4 · a wall passed on the shared page', () => {
+  const parked = (awaitingKind: 'login' | 'clarification') => ({
+    tasks: [
+      {
+        taskId: 'tsk_wall',
+        title: 'Wall',
+        intent: 'read',
+        status: 'awaiting_user' as const,
+        tickCount: 2,
+        createdAt: new Date(),
+        awaitingKind,
+      },
+    ],
+    awaitingUserByTask: {
+      tsk_wall: { question: '这一步需要你来', at: 1, awaitingKind },
+      tsk_other: { question: 'Other', at: 1 },
+    },
+  });
+  it('a progress note after a login wall closes the waiting card and the task runs again', () => {
+    useTaskStore.setState(parked('login'));
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_wall',
+      message: '页面过了这一步，我接着做…',
+    });
+    const state = useTaskStore.getState();
+    expect(state.awaitingUserByTask.tsk_wall).toBeUndefined();
+    expect(state.awaitingUserByTask.tsk_other).toBeDefined();
+    expect(state.tasks[0]).toMatchObject({ status: 'executing', awaitingKind: undefined });
+    expect(state.progressByTask.tsk_wall).toBe('页面过了这一步，我接着做…');
+  });
+  it('a question that needs a chat reply stays open', () => {
+    useTaskStore.setState(parked('clarification'));
+    useTaskStore.getState().applyServerMessage({
+      type: 'server.task.progress',
+      taskId: 'tsk_wall',
+      message: '…',
+    });
+    expect(useTaskStore.getState().awaitingUserByTask.tsk_wall).toBeDefined();
+    expect(useTaskStore.getState().tasks[0]?.status).toBe('awaiting_user');
+  });
+});
+
 describe('FIX-34 · generate round handed to the browser lane', () => {
   const core = { executionId: 'gen', executionRevision: 3 };
   it('drops the unusable draft and accepts the browser lane events', () => {

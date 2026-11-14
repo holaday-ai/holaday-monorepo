@@ -117,6 +117,7 @@ import {
   shouldRunSupercarTerminalSideEffects,
 } from '../../agent/supercar/task-state-machine.js';
 import {
+  type UserBrowserRoute,
   browserTaskTargetUrl,
   classifyIdentityNeed,
   decideUserBrowserRoute,
@@ -216,6 +217,16 @@ import {
   finalizeClaim as finalizeTaskCreateClaim,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
+import {
+  type BrowserHomeTaskClaim,
+  browserHomeSessions,
+} from '../../browser-home/browser-home-session.js';
+import {
+  assertBrowserHomeTaskAllowed,
+  claimBrowserHomeTaskOrThrow,
+  finishBrowserHomeTask,
+  lendBrowserHomeToTask,
+} from '../../browser-home/browser-home-task.js';
 import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
@@ -309,8 +320,11 @@ import { entryRequestFrom } from '../../llm/model-data-region-entry.js';
 import { settleFirstTaskModelDataRegion } from '../../llm/model-data-region-first-task.js';
 import {
   type ModelTaskUnavailableReason,
+  type ProductionModelRuntimeWiring,
   createProductionModelRuntimeWiring,
+  withQwenEndpoint,
 } from '../../llm/model-runtime-wiring.js';
+import { notify } from '../../notifications/notification-service.js';
 import {
   createTaskCaptureRecorder,
   extractTaskMemoryAfterSuccess,
@@ -355,8 +369,6 @@ import { taskDrainMiddleware } from '../task-drain.js';
 import { protectedProcedure, pureTaskInput, router } from '../trpc.js';
 import {
   browserCaptchaProcedure,
-  browserControlProcedure,
-  browserControlStateProcedure,
   browserNavProcedure,
   browserProfileClearProcedure,
   browserProfileStatusProcedure,
@@ -639,6 +651,13 @@ const modelRuntimeWiring = createProductionModelRuntimeWiring(
 
 /** REBUILD-2: every model call in this router asks the gateway by role. */
 const tasksModelGateway = modelGateway({ wiring: modelRuntimeWiring });
+/**
+ * BROWSER-HOME-1: an admitted cloud-browser task resolves through its own wiring (the intl Qwen
+ * override, withQwenEndpoint) — behind the same role gateway.
+ */
+function gatewayFor(wiring: ProductionModelRuntimeWiring) {
+  return wiring === modelRuntimeWiring ? tasksModelGateway : modelGateway({ wiring });
+}
 
 /** REBUILD-2 part 2: interface-tool routing, only while TOOL_ROUTER_V2 is on (default off). */
 const taskToolRouter = toolRouterSettings(appEnv, (message) =>
@@ -652,22 +671,31 @@ function personalModelContext(actorExternalId: string, modelDataRegion: unknown)
   };
 }
 
-function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return tasksModelGateway.resolve(
+function resolveGenerateRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return gatewayFor(wiring).resolve(
     'generate',
     personalModelContext(actorExternalId, modelDataRegion),
   );
 }
 
-function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return tasksModelGateway.resolve(
-    'scrape',
-    personalModelContext(actorExternalId, modelDataRegion),
-  );
+function resolveScrapeRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return gatewayFor(wiring).resolve('scrape', personalModelContext(actorExternalId, modelDataRegion));
 }
 
-function resolveVerifierRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return tasksModelGateway.resolve(
+function resolveVerifierRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return gatewayFor(wiring).resolve(
     'verifier',
     personalModelContext(actorExternalId, modelDataRegion),
   );
@@ -749,6 +777,13 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  /**
+   * BROWSER-HOME-1 step 4 — sent from the「云浏览器」floating input: run IN the person's open cloud
+   * browser (`bhs_<userId>`), from the page it shows, always in the browser lane; the browser goes
+   * back to the session on every terminal state. Refused (FORBIDDEN) when the entry is off for the
+   * user, with no open browser, or combined with a follow-up / retry / local Chrome / continuation.
+   */
+  browserHomeSession: z.boolean().optional(),
   browserPreference: z.enum(['cloud-public']).optional(),
   /**
    * FIX-PR259-2 — re-submit a cancelled, non-identity extension wait in the
@@ -1182,6 +1217,7 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId?: unknown;
     publicCloudContinuationOf?: unknown;
     localChrome?: unknown;
+    browserHomeSession?: unknown;
   },
 >(input: T) {
   const {
@@ -1189,6 +1225,7 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId: _retryOfTaskId,
     publicCloudContinuationOf: _publicCloudContinuationOf,
     localChrome: _localChrome,
+    browserHomeSession: _browserHomeSession,
     ...rest
   } = input;
   return rest;
@@ -1249,6 +1286,16 @@ export const tasksRouter = router({
           message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。',
         });
       }
+      // BROWSER-HOME-1 step 4: before anything is created or charged.
+      assertBrowserHomeTaskAllowed({ userId: ctx.userId, input, pool: ctx.browserPool });
+      // BROWSER-HOME-1 (BOSS 2026-11-14「我们不是还有国际千问嘛」): an admitted cloud-browser task
+      // (flag + allowlist + open session, asserted just above) calls Qwen on the INTERNATIONAL
+      // endpoint — a `cn` account's only; same models, no domestic fallback. Every model runtime
+      // this request resolves goes through taskModelWiring; any other task keeps the shared wiring.
+      const qwenEndpoint = input.browserHomeSession ? ('intl' as const) : undefined;
+      const taskModelWiring = qwenEndpoint
+        ? withQwenEndpoint(modelRuntimeWiring, qwenEndpoint)
+        : modelRuntimeWiring;
       // O15 — code-task refusal lands BEFORE user lookup so even an
       // unauthenticated-token-in-fail-path doesn't get scaffolding.
       //
@@ -1313,6 +1360,20 @@ export const tasksRouter = router({
       // and the first task insert of this request links the replacement in the
       // same transaction (see insertWithContinuationLink below).
       let continuationLink: ContinuationLink | null = null;
+      // BROWSER-HOME-1 step 4: one task at a time in the person's cloud browser. Taken only when
+      // this request really creates (not on an idempotent replay); dropped when the request ends
+      // unless the task's dispatch took it over (that dispatch lends the browser).
+      let browserHomeClaim: BrowserHomeTaskClaim | null = null;
+      const withBrowserHomeClaim = async <T>(create: () => Promise<T>): Promise<T> => {
+        if (!input.browserHomeSession) return create();
+        const claim = claimBrowserHomeTaskOrThrow({ userId: ctx.userId, pool: ctx.browserPool });
+        browserHomeClaim = claim;
+        try {
+          return await create();
+        } finally {
+          claim.settle();
+        }
+      };
       const continuationRepo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const withContinuation = <T extends { taskId: string }>(create: () => Promise<T>) =>
         continuationOf
@@ -1361,7 +1422,7 @@ export const tasksRouter = router({
                   'tasks.create: public-cloud continuation claim not released',
                 ),
             })
-          : create();
+          : withBrowserHomeClaim(create);
       return runTaskCreateIdempotently({
         clientRequestId: input.clientRequestId,
         claim: () =>
@@ -1967,7 +2028,7 @@ export const tasksRouter = router({
               ? ('browser' as const)
               : retryCore
                 ? ('generate' as const)
-                : input.localChrome
+                : input.localChrome || input.browserHomeSession
                   ? ('browser' as const)
                   : resolveFollowUpExecutionMode({
                       parentHasBrowserContext,
@@ -1994,20 +2055,23 @@ export const tasksRouter = router({
             // Readable identity decision, kept on the task for later diagnosis.
             const identityDecision =
               executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
-            const browserRoute =
-              executionMode === 'browser'
-                ? decideUserBrowserRoute({
-                    enabled: taskBrowserCapabilities.routingV2,
-                    intent: input.intent,
-                    extensionOnline: hasConnectedExtension(ctx.userId),
-                    selectionOrigin: input.localChrome
-                      ? new URL(input.localChrome.expectedUrl).origin
-                      : undefined,
-                    publicCloudRequested: input.browserPreference === 'cloud-public',
-                    legacyCookieSyncRetired: true,
-                    cloudSessionAvailable,
-                  })
-                : { lane: 'legacy' as const, reason: 'flag_off' as const };
+            const browserRoute: UserBrowserRoute =
+              executionMode === 'browser' && input.browserHomeSession
+                ? // BROWSER-HOME-1: the person's own (anonymous) cloud browser, as it is.
+                  { lane: 'cloud', reason: 'public_site', sessionPolicy: 'anonymous' }
+                : executionMode === 'browser'
+                  ? decideUserBrowserRoute({
+                      enabled: taskBrowserCapabilities.routingV2,
+                      intent: input.intent,
+                      extensionOnline: hasConnectedExtension(ctx.userId),
+                      selectionOrigin: input.localChrome
+                        ? new URL(input.localChrome.expectedUrl).origin
+                        : undefined,
+                      publicCloudRequested: input.browserPreference === 'cloud-public',
+                      legacyCookieSyncRetired: true,
+                      cloudSessionAvailable,
+                    })
+                  : { lane: 'legacy' as const, reason: 'flag_off' as const };
             // D17-P1-01 — which sessions this task's browser may load, fixed here by the
             // server and stored on the task. Only a task that needs the user's own data
             // may load a vault session (and not after a public choice or on a logged-out
@@ -2214,8 +2278,11 @@ export const tasksRouter = router({
             // not a billable task attempt.
             const coreRole = coreRoleForExecutionMode(executionMode);
             let browserMessagesAdapter: MessagesAdapter | undefined;
+            // BROWSER-HOME-1: the Qwen endpoint the browser lane runs on, kept on a cloud-browser
+            // task's row (sourceContext.qwenEndpoint) so acceptance can check it. No key, no URL.
+            let browserQwenEndpoint: 'cn' | 'intl' | null = null;
             if (coreRole) {
-              const preflight = tasksModelGateway.resolve(
+              const preflight = gatewayFor(taskModelWiring).resolve(
                 coreRole,
                 personalModelContext(ctx.userId, userRow.modelDataRegion),
               );
@@ -2247,6 +2314,7 @@ export const tasksRouter = router({
                     executionMode,
                     finalExecutionMode: executionMode,
                     reasonCode: preflight.reasonCode,
+                    ...(qwenEndpoint ? { qwenEndpoint } : {}),
                   },
                 });
                 if (terminal.persisted) {
@@ -2266,6 +2334,7 @@ export const tasksRouter = router({
               }
               if (coreRole === 'brain') {
                 browserMessagesAdapter = preflight.messages();
+                browserQwenEndpoint = preflight.qwenEndpoint;
                 if (input.localChrome)
                   await assertLocalChromeSelection(ctx.userId, input.localChrome);
                 if (
@@ -2287,8 +2356,16 @@ export const tasksRouter = router({
               input.roleId === 'video-creator' ||
               input.videoOptions?.tab !== undefined;
             const mediaServices = resolveMediaModelServices({
-              generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
-              verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+              generate: resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+                taskModelWiring,
+              ),
+              verifier: resolveVerifierRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+                taskModelWiring,
+              ),
             });
             const providerReadiness = {
               hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
@@ -2356,8 +2433,12 @@ export const tasksRouter = router({
                 message: '安全浏览器执行环境尚未就绪，未创建任务。请稍后重试。',
               });
             }
+            // BROWSER-HOME-1: a cloud-browser task always runs the agent loop from the current page.
             const directOpenUrl =
-              !scrapeBrowserRetry && !input.localChrome && executionMode === 'browser'
+              !scrapeBrowserRetry &&
+              !input.localChrome &&
+              !input.browserHomeSession &&
+              executionMode === 'browser'
                 ? extractRunnableDirectOpenUrl(input.intent, input.mode)
                 : null;
             const directOpenSafetyError = directOpenUrl
@@ -3254,6 +3335,7 @@ export const tasksRouter = router({
               const stockRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const { ashareMessagesAdapter, createAshareModelCallers } = await import(
                 '../../agent/a-share/ashare-model-callers.js'
@@ -3632,7 +3714,7 @@ export const tasksRouter = router({
                         const shownAnswer = deliverableAnswer(answer) ?? answer;
                         void runTaskBackground(ctx, async (ctx) =>
                           publishCoreTaskSuggestions({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                             rawIntent: input.intent,
@@ -3766,6 +3848,7 @@ export const tasksRouter = router({
               const templateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const templateResponsesAdapter =
                 templateRuntime.kind === 'ready' ? templateRuntime.responses() : null;
@@ -4050,7 +4133,7 @@ export const tasksRouter = router({
                 ctx,
                 userId: userRow.id,
                 modelDataRegion: userRow.modelDataRegion,
-                wiring: modelRuntimeWiring,
+                wiring: taskModelWiring,
                 taskRepo: repo,
                 requirements: coreCreateRequirements,
                 blocks: attachmentBlocks,
@@ -4098,12 +4181,14 @@ export const tasksRouter = router({
               const generateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const generateResponsesAdapter =
                 generateRuntime.kind === 'ready' ? generateRuntime.responses() : null;
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const semanticVerifierAdapter =
                 verifierRuntime.kind === 'ready' ? verifierRuntime.messages() : null;
@@ -4165,7 +4250,7 @@ export const tasksRouter = router({
                   try {
                     const executionPlan = generateResponsesAdapter
                       ? await prepareCoreTaskPlan({
-                          wiring: modelRuntimeWiring,
+                          wiring: taskModelWiring,
                           actorExternalId: ctx.userId,
                           modelDataRegion: userRow.modelDataRegion,
                           intent: input.intent,
@@ -4548,7 +4633,7 @@ export const tasksRouter = router({
                     const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
-                        wiring: modelRuntimeWiring,
+                        wiring: taskModelWiring,
                         actorExternalId: ctx.userId,
                         modelDataRegion: userRow.modelDataRegion,
                         rawIntent: input.intent,
@@ -4635,12 +4720,14 @@ export const tasksRouter = router({
               const scrapeRuntime = resolveScrapeRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const scrapeResponsesAdapter =
                 scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses() : null;
               const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const fallbackGenerateResponsesAdapter =
                 fallbackGenerateRuntime.kind === 'ready'
@@ -4649,6 +4736,7 @@ export const tasksRouter = router({
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const semanticVerifierAdapter =
                 verifierRuntime.kind === 'ready' ? verifierRuntime.messages() : null;
@@ -4656,7 +4744,7 @@ export const tasksRouter = router({
               // it gives each asked field's value. The catalog sets every purpose of a lane to that
               // lane's model (the verifier lane is qwen3.8-max), so the call runs on the plan lane,
               // whose model is the small one (qwen3.8-flash).
-              const fieldJudgeRuntime = tasksModelGateway.resolve(
+              const fieldJudgeRuntime = gatewayFor(taskModelWiring).resolve(
                 'judge',
                 personalModelContext(ctx.userId, userRow.modelDataRegion),
               );
@@ -4761,7 +4849,7 @@ export const tasksRouter = router({
                   try {
                     const executionPlan = scrapeResponsesAdapter
                       ? await prepareCoreTaskPlan({
-                          wiring: modelRuntimeWiring,
+                          wiring: taskModelWiring,
                           actorExternalId: ctx.userId,
                           modelDataRegion: userRow.modelDataRegion,
                           intent: input.intent,
@@ -5461,7 +5549,7 @@ export const tasksRouter = router({
                     const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
-                        wiring: modelRuntimeWiring,
+                        wiring: taskModelWiring,
                         actorExternalId: ctx.userId,
                         modelDataRegion: userRow.modelDataRegion,
                         rawIntent: input.intent,
@@ -5747,6 +5835,12 @@ export const tasksRouter = router({
                 code: 'PRECONDITION_FAILED',
                 message: 'BROWSER_RETRY_RUNTIME_UNAVAILABLE',
               });
+            // BROWSER-HOME-1: only the agent loop runs in the person's cloud browser.
+            if (input.browserHomeSession && !browserMessagesAdapter)
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '浏览器执行器尚未就绪，未扣除额度。请稍后重试。',
+              });
             if (browserMessagesAdapter) {
               const taskId = scrapeBrowserRetry?.taskId ?? newExternalId('task');
 
@@ -5766,6 +5860,7 @@ export const tasksRouter = router({
                   : generatePlanForUser({
                       browserPlanning: true,
                       planningAdapter: browserMessagesAdapter.browserBrain?.planning,
+                      ...(qwenEndpoint ? { qwenEndpoint } : {}),
                       recorder: {
                         record: async (call) => {
                           pendingPlanCalls.push(call);
@@ -5806,8 +5901,10 @@ export const tasksRouter = router({
               // moment a slot frees; if the queue isn't wired (e.g. legacy
               // boot without MULTI_USER) we fall back to the historical
               // 'executing' seed.
+              // BROWSER-HOME-1: a cloud-browser task needs no new pool slot — never queued for one.
               const willQueueDispatch = Boolean(
                 !input.localChrome &&
+                  !input.browserHomeSession &&
                   ctx.taskQueue &&
                   executionMode === 'browser' &&
                   shouldUseBrowserPool(ctx.userId),
@@ -5815,6 +5912,9 @@ export const tasksRouter = router({
               const browserSourceContext = {
                 ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                 browserSessionPolicy: taskSessionPolicy,
+                ...(input.browserHomeSession && browserQwenEndpoint
+                  ? { qwenEndpoint: browserQwenEndpoint }
+                  : {}),
               };
               if (scrapeBrowserRetry) {
                 // Same task, same charge: take over the scrape task's row.
@@ -5964,14 +6064,23 @@ export const tasksRouter = router({
                     // .finally below calls release(taskId) to tear down
                     // immediately on completion. Per-user concurrency is gated
                     // upstream via getActiveTaskCount + plan limits.
-                    const adopted = input.replyToTaskId
-                      ? ctx.browserPool.adoptRetained(
-                          input.replyToTaskId,
+                    // BROWSER-HOME-1: the person's open cloud browser, lent as it is (its page
+                    // kept); given back on every terminal path (finishBrowserHomeTask below).
+                    const adopted = input.browserHomeSession
+                      ? await lendBrowserHomeToTask({
+                          pool: ctx.browserPool,
+                          userId: ctx.userId,
                           taskId,
-                          ctx.userId,
-                          taskSessionPolicy,
-                        )
-                      : null;
+                          claim: browserHomeClaim,
+                        })
+                      : input.replyToTaskId
+                        ? ctx.browserPool.adoptRetained(
+                            input.replyToTaskId,
+                            taskId,
+                            ctx.userId,
+                            taskSessionPolicy,
+                          )
+                        : null;
                     let allocatedForContinuation = false;
                     const instance = adopted
                       ? adopted
@@ -6039,7 +6148,9 @@ export const tasksRouter = router({
                     taskBrowserCapabilities = instance.capabilities ?? taskBrowserCapabilities;
                     perUserExec = instance.executor;
                     adoptedBrowserSession =
-                      continuation === 'adopted' || continuation === 'restore';
+                      continuation === 'adopted' ||
+                      continuation === 'restore' ||
+                      Boolean(input.browserHomeSession);
                     ctx.logger.info(
                       {
                         taskId,
@@ -6276,7 +6387,7 @@ export const tasksRouter = router({
                 });
                 // Batch 09: unified executor search (Qwen built-in first, Firecrawl
                 // fallback when FIRECRAWL_API_KEY is set) and read-only page reads.
-                const unifiedBrowserRuntime = tasksModelGateway.resolve(
+                const unifiedBrowserRuntime = gatewayFor(taskModelWiring).resolve(
                   'search',
                   personalModelContext(ctx.userId, userRow.modelDataRegion),
                 );
@@ -6301,7 +6412,7 @@ export const tasksRouter = router({
                   : createFirecrawlReadPage(ctx.firecrawl);
                 // FIX-61 复审 #1 #3: FIX-60's small-model field reading (plan lane = the small
                 // model), asked only when a named count looks left out of a browser answer.
-                const browserFieldJudgeRuntime = modelRuntimeWiring.resolveCore({
+                const browserFieldJudgeRuntime = taskModelWiring.resolveCore({
                   actorExternalId: ctx.userId,
                   lane: 'plan',
                   ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -6338,7 +6449,11 @@ export const tasksRouter = router({
                   taskId,
                   // CAPTCHA-REDUCE-1: anonymous cloud sessions keep this user's
                   // verification clearance (profile store off unless configured).
-                  ...(taskSessionPolicy === 'anonymous' && !input.localChrome
+                  // BROWSER-HOME-1: never in the person's own cloud browser (its live cookies are
+                  // neither overwritten from nor saved into the task profile store).
+                  ...(taskSessionPolicy === 'anonymous' &&
+                  !input.localChrome &&
+                  !input.browserHomeSession
                     ? { persistentProfileUser: ctx.userId }
                     : {}),
                   // OPEN-ANY-SITE-1: pool browsers learn sites that refuse their egress.
@@ -6864,6 +6979,17 @@ export const tasksRouter = router({
                   onAwaitingReplyRelease() {
                     if (ctx.browserPool && perUserExec) ctx.browserPool.unretain(taskId);
                   },
+                  // REBUILD-4 第 6 条: the person passed a login / permission wall on the page.
+                  async onWallPassed() {
+                    const persisted = await repo.markAwaitingReplyResumed(taskId, userRow.id);
+                    if (!persisted.persisted) return false;
+                    broadcastToUser(userId, {
+                      type: 'server.task.progress',
+                      taskId,
+                      message: '页面过了这一步，我接着做…',
+                    });
+                    return true;
+                  },
                   async onCaptchaHandoffEnd(resumed) {
                     if (!resumed) {
                       captchaNeedsRelease = true;
@@ -6919,6 +7045,20 @@ export const tasksRouter = router({
                     } catch (err) {
                       ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
                     }
+                    // CAPTCHA-UX-1 第 2 条: a verification the person has to do, said in the inbox
+                    // too (someone not looking at the panel). Inbox only; never blocks the wait.
+                    if (ev.captchaHandoff)
+                      void notify(
+                        { db: ctx.db, logger: ctx.logger },
+                        {
+                          userInternalId: userRow.id,
+                          type: 'task_reminder',
+                          title: '需要你完成人机验证',
+                          message:
+                            '任务遇到网站的人机验证：请回到任务的浏览器画面里完成（画面会自动放大到验证框），过了我会自动继续，最多等 10 分钟。',
+                          delivery: 'in_app_only',
+                        },
+                      ).catch(() => {});
                     // Phase 1 follow-up — stamp `executionMode='browser'`,
                     // `finalUrl`, AND `finalScreenshot` into result on park.
                     //
@@ -7147,6 +7287,11 @@ export const tasksRouter = router({
                   // second call when the slot is already torn down no-ops.
                   if (didAllocatePool && ctx.browserPool) {
                     const releasingPool = ctx.browserPool;
+                    // BROWSER-HOME-1 (P1-1): the wedged run may still be acting in the person's
+                    // cloud browser, so it is never given back here (nor later by the run's own
+                    // ending): the loan is forfeited and the browser released as before. The
+                    // person's next open starts a fresh one at the last address.
+                    if (input.browserHomeSession) releasingPool.forfeitBrowserHomeLoan(taskId);
                     void runTaskBackground(ctx, async (ctx) =>
                       releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
                         ctx.logger.warn(
@@ -7214,7 +7359,9 @@ export const tasksRouter = router({
                   allowedDomains: otaAllowedDomains,
                 });
                 const useOtaUserBrowser =
-                  !taskBrowserCapabilities.routingV2 && otaCanary.lane === 'user-browser';
+                  !input.browserHomeSession &&
+                  !taskBrowserCapabilities.routingV2 &&
+                  otaCanary.lane === 'user-browser';
                 if (otaCanary.lane !== null) {
                   // Rollout audit — every OTA-prefer task records its gate outcome.
                   ctx.logger.info(
@@ -7242,7 +7389,7 @@ export const tasksRouter = router({
                     deps: {
                       ...(() => {
                         // Batch 04: the OTA readonly lane uses the model-catalog brain.
-                        const otaRuntime = tasksModelGateway.resolve(
+                        const otaRuntime = gatewayFor(taskModelWiring).resolve(
                           'brain.text',
                           personalModelContext(ctx.userId, userRow.modelDataRegion),
                         );
@@ -7584,7 +7731,7 @@ export const tasksRouter = router({
                           db: ctx.db,
                           logger: ctx.logger,
                           adapter: resolveUserGenerateAdapter({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                           }),
@@ -7621,6 +7768,7 @@ export const tasksRouter = router({
                         const handoffGenerateRuntime = resolveGenerateRuntimeForUser(
                           ctx.userId,
                           userRow.modelDataRegion,
+                          taskModelWiring,
                         );
                         const handoffGenerateResponsesAdapter =
                           handoffGenerateRuntime.kind === 'ready'
@@ -8459,6 +8607,7 @@ export const tasksRouter = router({
                             environment: appEnv,
                             userExternalId: ctx.userId,
                             userModelDataRegion: userRow.modelDataRegion,
+                            ...(qwenEndpoint ? { qwenEndpoint } : {}),
                           });
                           if (suggestionsRoute.provider === 'unavailable') {
                             ctx.logger.warn(
@@ -8625,12 +8774,22 @@ export const tasksRouter = router({
                       if (didAllocatePool && ctx.browserPool) {
                         const finishingPool = ctx.browserPool;
                         await runTaskBackground(ctx, async () =>
-                          finishTaskBrowser(
-                            finishingPool,
-                            taskId,
-                            appEnv.BROWSER_TERMINAL_RETENTION_MS,
-                            !captchaNeedsRelease,
-                          ),
+                          // BROWSER-HOME-1: every terminal state gives the person's cloud
+                          // browser back to its session (see finishBrowserHomeTask).
+                          input.browserHomeSession
+                            ? finishBrowserHomeTask({
+                                pool: finishingPool,
+                                taskId,
+                                userId: ctx.userId,
+                                retentionMs: appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                                retainForReview: !captchaNeedsRelease,
+                              })
+                            : finishTaskBrowser(
+                                finishingPool,
+                                taskId,
+                                appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                                !captchaNeedsRelease,
+                              ),
                         ).catch((relErr) => {
                           ctx.logger.warn(
                             { err: relErr, taskId, userId: ctx.userId },
@@ -8794,9 +8953,27 @@ export const tasksRouter = router({
                     );
                 }
               };
+              // BROWSER-HOME-1: the dispatch owns the claim from here (it lends the browser). Whatever
+              // way the dispatch ends — including a throw before its run's own release — the
+              // person's browser is given back (a no-op when the run already did).
+              const dispatchBrowserHome = async (
+                executionContext: TaskExecutionContext,
+              ): Promise<void> => {
+                try {
+                  await dispatchToBrave(executionContext);
+                } finally {
+                  browserHomeClaim?.release();
+                  const pool = executionContext.browserPool;
+                  if (pool) browserHomeSessions.giveBack(pool, taskId, ctx.userId);
+                }
+              };
+              const dispatchCloud = input.browserHomeSession
+                ? dispatchBrowserHome
+                : dispatchToBrave;
+              if (input.browserHomeSession) browserHomeClaim?.handOver();
               if (ctx.ordinaryMaintenance) {
                 void runTaskBackground(ctx, async (ctx) =>
-                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchCloud(ctx),
                 ).catch((error) => ctx.logger.error({ error, taskId }, 'browser execution failed'));
               } else if (input.localChrome && ctx.executionLifetime) {
                 const { drain, owner } = ctx.executionLifetime;
@@ -8812,7 +8989,7 @@ export const tasksRouter = router({
                 );
               } else {
                 void runTaskBackground(ctx, async (ctx) =>
-                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchCloud(ctx),
                 );
               }
 
@@ -8906,7 +9083,7 @@ export const tasksRouter = router({
               const taskDbId = taskDbRow?.id;
               // Batch 04: the browser lane's brain (model catalog) drives the unified
               // tool set when a Playwright page is available.
-              const visionRuntime = tasksModelGateway.resolve(
+              const visionRuntime = gatewayFor(taskModelWiring).resolve(
                 'brain',
                 personalModelContext(ctx.userId, userRow.modelDataRegion),
               );
@@ -8930,7 +9107,7 @@ export const tasksRouter = router({
                           db: ctx.db,
                           taskDbId,
                           generateAdapter: resolveUserGenerateAdapter({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                           }),
@@ -9158,7 +9335,7 @@ export const tasksRouter = router({
                             db: ctx.db,
                             logger: ctx.logger,
                             adapter: resolveUserGenerateAdapter({
-                              wiring: modelRuntimeWiring,
+                              wiring: taskModelWiring,
                               actorExternalId: ctx.userId,
                               modelDataRegion: userRow.modelDataRegion,
                             }),
@@ -12184,9 +12361,7 @@ export const tasksRouter = router({
   browserCaptcha: browserCaptchaProcedure,
   browserProfileStatus: browserProfileStatusProcedure,
   browserProfileClear: browserProfileClearProcedure,
-  browserControlState: browserControlStateProcedure,
   localChromeTabs: localChromeTabsProcedure,
-  browserControl: browserControlProcedure,
   browserNav: browserNavProcedure,
 
   /**

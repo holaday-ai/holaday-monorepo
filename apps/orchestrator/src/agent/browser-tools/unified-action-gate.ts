@@ -25,7 +25,7 @@ const userFacing = (text: string): string => stripInternalRefs(stripSnapshotSynt
 const CONFIRM_DEFAULT_QUESTION = '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
 const NOT_CONFIRMED_REASON = '用户未确认不可逆操作，本次任务已停止，页面进度已保留。';
 const TAKEOVER_RESUME_MESSAGE =
-  '用户已完成接管，刚才的操作没有由 Agent 执行。请重新 snapshot 确认页面状态后继续。';
+  '用户已在画面上处理过，刚才的操作没有由 Agent 执行。请重新 snapshot 确认页面状态后继续。';
 const TARGET_CHANGED_MESSAGE =
   '确认期间页面已变化，刚才确认的操作没有执行。请重新 snapshot，需要时会再次请用户确认。';
 

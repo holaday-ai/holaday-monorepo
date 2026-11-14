@@ -30,23 +30,22 @@ import type { Duplex } from 'node:stream';
 import type { BrowserActionDecision, BrowserActionRequest } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
+import { captchaWidgetStateCdp } from '../agent/captcha-widget.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
+import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
 import {
   type AuthenticatedSession,
   authenticateStreamOrAccessSession,
   revalidateAuthenticatedSession,
 } from '../auth/middleware.js';
 import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
+import { isBrowserHomeEnabledFor } from '../browser-home/browser-home-access.js';
 import type { BrowserPool } from '../browser-pool/index.js';
-import type { BrowserInstance } from '../browser-pool/types.js';
+import { BROWSER_HOME_SESSION_PREFIX, type BrowserInstance } from '../browser-pool/types.js';
 import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
-import {
-  BrowserActionConfirmations,
-  BrowserFrameGuard,
-  frameGraceFor,
-} from './browser-viewport-v2.js';
-import { CdpInputHandler } from './cdp-input.js';
+import { BrowserActionConfirmations } from './browser-viewport-v2.js';
+import { CdpInputHandler, PAGE_CHANGED_ERROR } from './cdp-input.js';
 import { CdpStreamer } from './cdp-streamer.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import type { InputEnvelope } from './screencast-input-bridge.js';
@@ -64,6 +63,9 @@ import type { InputEnvelope } from './screencast-input-bridge.js';
  *
  * Pure function — testable without an http.Server.
  */
+/** CAPTCHA-UX-1 第 2 条: how often the captcha box is looked up while a verification is waited for. */
+const CAPTCHA_BOX_POLL_MS = 700;
+
 export type RoutePickResult =
   | { kind: 'instance'; instance: BrowserInstance }
   | { kind: 'forbidden'; reason: string }
@@ -76,12 +78,41 @@ export function pickInstanceForRoute(args: {
   callerUserId: string;
   peek: (taskId: string) => BrowserInstance | null;
   peekActiveForUser: (userId: string) => BrowserInstance | null;
+  /** BROWSER-HOME-1 gate (BROWSER_HOME_ENABLED + allowlist); injectable for tests. */
+  browserHomeAllowed?: (userId: string) => boolean;
+  /**
+   * BROWSER-HOME-1 step 4: the caller's own cloud browser wherever it is — in its session or lent
+   * to one of their tasks (pool.peekBrowserHome). Without it only the session key is looked up.
+   */
+  peekBrowserHome?: (userId: string) => BrowserInstance | null;
 }): RoutePickResult {
   if (args.urlArg.startsWith(TASK_ID_PREFIX)) {
     const inst = args.peek(args.urlArg);
     if (!inst) return { kind: 'no-active', reason: 'task not active' };
     if (inst.userId !== args.callerUserId) {
       return { kind: 'forbidden', reason: 'caller does not own task' };
+    }
+    return { kind: 'instance', instance: inst };
+  }
+  // BROWSER-HOME-1: a user's task-less cloud browser (`bhs_<userId>`). Only its owner may watch
+  // or drive it; the id alone grants nothing.
+  if (args.urlArg.startsWith(BROWSER_HOME_SESSION_PREFIX)) {
+    if (!(args.browserHomeAllowed ?? isBrowserHomeEnabledFor)(args.callerUserId))
+      return { kind: 'forbidden', reason: 'browser home disabled' };
+    // While one of the caller's tasks holds their browser (step 4), the session id still reaches
+    // it, so the screen never drops. Only for the caller's own id; never another user's browser.
+    const ownSession = args.urlArg === `${BROWSER_HOME_SESSION_PREFIX}${args.callerUserId}`;
+    const located =
+      ownSession && args.peekBrowserHome ? args.peekBrowserHome(args.callerUserId) : null;
+    if (located) {
+      if (located.userId !== args.callerUserId)
+        return { kind: 'forbidden', reason: 'caller does not own browser home session' };
+      return { kind: 'instance', instance: located };
+    }
+    const inst = args.peek(args.urlArg);
+    if (!inst) return { kind: 'no-active', reason: 'browser home session not active' };
+    if (inst.userId !== args.callerUserId || inst.taskId !== args.urlArg) {
+      return { kind: 'forbidden', reason: 'caller does not own browser home session' };
     }
     return { kind: 'instance', instance: inst };
   }
@@ -127,34 +158,6 @@ export interface ScreencastProxy {
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
 }
 
-/** FIX-61B P1-5: how long after typing the focus may let an Enter / Space through. */
-const TYPING_FOCUS_MS = 1_500;
-/** FIX-62 复审 #8: how long a size waits for a held press to be released. */
-const HELD_PRESS_WAIT_MS = 1_000;
-/** Where a size arrived among the inputs, and the release of a press it waited for. */
-type SizeArrival = { after: number; release: number | null };
-/** 复审 #1: the text box that really has the focus (through shadow roots); null in a frame or elsewhere. */
-const FOCUSED_TEXT_BOX_EXPRESSION = `(() => {
-  let e = document.activeElement;
-  while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
-  if (!e || /^(?:IFRAME|FRAME|BODY|HTML)$/.test(e.tagName)) return null;
-  const type = (e.getAttribute('type') || 'text').toLowerCase();
-  const editable = e.isContentEditable || e.tagName === 'TEXTAREA' ||
-    (e.tagName === 'INPUT' && /^(?:text|search|email|url|tel|number)$/.test(type));
-  return editable ? e : null;
-})()`;
-/** 复审 #1: dialogs open on the page (a new one may confirm on Enter). */
-const OPEN_DIALOGS_EXPRESSION =
-  "document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]').length";
-
-/** FIX-61B P0-3: a screen size not applied because the agent's page changed under it — not a failure. */
-export class BrowserViewportSkippedError extends Error {
-  constructor() {
-    super('browser_viewport_skipped');
-    this.name = 'BrowserViewportSkippedError';
-  }
-}
-
 export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastProxy {
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
@@ -183,7 +186,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     log.info(
       {
         urlArg,
-        argKind: urlArg.startsWith('tsk_') ? 'taskId' : 'userId',
+        argKind: urlArg.startsWith('tsk_')
+          ? 'taskId'
+          : urlArg.startsWith(BROWSER_HOME_SESSION_PREFIX)
+            ? 'browserHome'
+            : 'userId',
         hasToken: Boolean(extractBearerFromSubprotocol(req)) || Boolean(extractTokenFromQuery(url)),
         ip: req.socket.remoteAddress,
       },
@@ -221,6 +228,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             callerUserId,
             peek: (taskId) => opts.pool.peek(taskId),
             peekActiveForUser: (userId) => opts.pool.peekActiveForUser(userId),
+            peekBrowserHome: (userId) => opts.pool.peekBrowserHome(userId),
           });
           if (picked.kind === 'forbidden') {
             log.warn(
@@ -296,109 +304,51 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let streamer: CdpStreamer | null = null;
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
-    let viewportPending = false;
-    // FIX-62 P1-3: the order inputs arrived in, and the last one before the pending size was asked.
-    let receivedSeq = 0;
-    let sizeAskedAfter = 0;
-    const seqOf = new WeakMap<object, number>();
-    let heldPress: {
-      released: Promise<void>;
-      release: () => void;
-      releaseSeq: number | null;
-    } | null = null;
-    // FIX-62 复审 #8: whether the size being dispatched now is one that changes the page.
-    let viewportApplies = false;
-    // How many sizes have started to apply (a deferred staleness for an applied size is moot).
-    let sizesTaken = 0;
-    // Sizes asked with the lease so far, and how many of them the size being dispatched covers.
-    let sizeRequests = 0;
-    let sizeRequestsCovered = 0;
-    const unsettled = new Map<number, Promise<void>>();
-    // FIX-62 复审 #8: the release of a press held when the size arrived (it waited for it).
-    let sizeRelease: number | null = null;
-    const aimedBeforeSize = (envelope: object): boolean => {
-      if (!viewportPending) return false;
-      const seq = seqOf.get(envelope) ?? Number.POSITIVE_INFINITY;
-      return seq <= sizeAskedAfter || seq === sizeRelease;
-    };
-    // The newest lease a viewport message from this screen carried (DEPLOY-61 第 0 步 #2).
-    let viewportLease: string | null = null;
-    const humanLease = (): string | null => {
-      const control = browserControlSessions
-        .get(args.instance, args.instance.userId, args.instance.taskId)
-        ?.control.snapshot();
-      return control?.phase === 'human' ? control.lease : null;
-    };
-    /**
-     * DEPLOY-61 P0-1: only a size sent with the current lease changes the assistant's page (the
-     * input handler's mayAlign). DEPLOY-61 重跑 第 0 步 #2: so only such a size makes the frames
-     * shown so far stale; a watcher's size changes nothing and must not hold every input back
-     * (on a finished task it was never applied at all, so input stayed refused until the size).
-     */
-    const viewportWillApply = (): boolean => {
-      const lease = humanLease();
-      return lease !== null && viewportLease === lease;
-    };
-    const frameGuard = new BrowserFrameGuard();
-    // FIX-62 P0-1: the frame revision each accepted human input was checked against; the handler
-    // re-checks it (and the document itself) right before the input is sent.
-    const validated = new WeakMap<object, { revision: number; loader: string }>();
-    /**
-     * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
-     * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
-     * element the person typed into, and when. An Enter / Space on a frame superseded within the
-     * lenient grace goes through only when the focus is still exactly that element (a page that
-     * moved focus to 「确认支付」 is refused, as before).
-     */
-    let typingFocus: { node: number; dialogs: number; at: number } | null = null;
-    /**
-     * The element keys go to, as a stable node id, and how many dialogs are open — or null when it
-     * cannot be told for sure (复审 #1): focus inside a frame, or on anything but a text box.
-     * Shadow roots are walked down to the element that really has the focus.
-     */
-    const focusedNode = async (): Promise<{ node: number; dialogs: number } | null> => {
-      const session = streamer?.getSession();
-      if (!session) return null;
-      try {
-        const evaluated = (await session.send('Runtime.evaluate', {
-          expression: FOCUSED_TEXT_BOX_EXPRESSION,
-          returnByValue: false,
-        })) as { result?: { objectId?: string } };
-        const objectId = evaluated.result?.objectId;
-        if (!objectId) return null;
-        const described = (await session.send('DOM.describeNode', { objectId })) as {
-          node?: { backendNodeId?: number };
-        };
-        void session.send('Runtime.releaseObject', { objectId }).catch(() => {});
-        const node = described.node?.backendNodeId;
-        if (!node) return null;
-        const counted = (await session.send('Runtime.evaluate', {
-          expression: OPEN_DIALOGS_EXPRESSION,
-          returnByValue: true,
-        })) as { result?: { value?: unknown } };
-        const dialogs = typeof counted.result?.value === 'number' ? counted.result.value : -1;
-        return { node, dialogs };
-      } catch {
-        return null;
-      }
-    };
-    /** Read where the keys go just before they are sent (read after, the page may have moved focus). */
-    const noteTyping = async (): Promise<void> => {
-      const focus = await focusedNode();
-      typingFocus = focus === null ? null : { ...focus, at: Date.now() };
-    };
-    /** The focus is still the element typed into within the lenient grace. */
-    const stillTypingTarget = async (): Promise<boolean> => {
-      const typed = typingFocus;
-      if (!typed || Date.now() - typed.at > TYPING_FOCUS_MS) return false;
-      // 复审 #1: the same text box, and no dialog opened since (「按回车确认」 on a new modal).
-      const now = await focusedNode();
-      return !!now && now.node === typed.node && now.dialogs === typed.dialogs && now.dialogs >= 0;
-    };
     const confirmations = new BrowserActionConfirmations();
+    /**
+     * CAPTCHA-UX-1 第 2 条: while the task waits for the person to pass a verification, tell this
+     * screen where the captcha box is (null when there is none) so it can zoom in on it. Sent only
+     * on change; the screen only scales its own picture — the page's size never changes.
+     */
+    let captchaBoxTimer: NodeJS.Timeout | null = null;
+    let lastCaptchaBox = 'null';
+    let captchaBoxReading = false;
+    const watchCaptchaBox = (): void => {
+      // 复审 P2: a stream torn down while it was starting never gets a timer.
+      if (stopped) return;
+      captchaBoxTimer = setInterval(() => {
+        // 复审 P2: one reading at a time (a busy page or a JS dialog must not pile them up).
+        if (captchaBoxReading) return;
+        captchaBoxReading = true;
+        void (async () => {
+          if (stopped || args.ws.readyState !== WebSocket.OPEN) return;
+          const binding = browserControlSessions.get(
+            args.instance,
+            args.instance.userId,
+            args.instance.taskId,
+          );
+          const waiting =
+            !!binding &&
+            captchaHandoffs.active(args.instance.taskId, args.instance.userId, binding.control);
+          const session = streamer?.getSession();
+          const state = waiting && session ? await captchaWidgetStateCdp(session) : null;
+          // 复审 #2 P2: a reading that failed (a busy page) keeps what the screen shows.
+          if (waiting && !state) return;
+          // Only a box still to be done is zoomed onto; passed or gone → the whole page again.
+          const box = state?.unpassed ? state.box : null;
+          const key = JSON.stringify(box);
+          if (key === lastCaptchaBox || stopped || args.ws.readyState !== WebSocket.OPEN) return;
+          lastCaptchaBox = key;
+          args.ws.send(JSON.stringify({ type: 'captcha-box', rect: box }));
+        })()
+          .catch(() => {})
+          .finally(() => {
+            captchaBoxReading = false;
+          });
+      }, CAPTCHA_BOX_POLL_MS);
+      captchaBoxTimer.unref?.();
+    };
     const invalidate = () => {
-      typingFocus = null;
-      frameGuard.invalidate();
       confirmations.invalidate();
       if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
         args.ws.send(JSON.stringify({ type: 'observation-invalidated' }));
@@ -410,171 +360,39 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           controlReady: Boolean(opts.beforeViewportAction),
         }),
       );
+    /** 复审 P2-1: when each input reached the server (the Enter / Space navigation guard). */
+    const receivedAt = new WeakMap<object, number>();
     const inputBridge = createOwnedScreencastInputBridge({
       instance: args.instance,
+      onInputReceived: (envelope) => {
+        if (envelope.payload) receivedAt.set(envelope.payload, performance.now());
+        return undefined;
+      },
       runWithStableViewport: (action) =>
         streamer && args.viewportV2 ? streamer.runWithStableViewport(action) : action(),
-      viewportV2: args.viewportV2,
-      maxViewportHeight: args.viewportV2 ? 2400 : 1600,
-      onInputReceived: (envelope) => {
-        const seq = ++receivedSeq;
-        seqOf.set(envelope, seq);
-        // FIX-62 复审 #8: a press held open (mouseDown received, its mouseUp not yet through).
-        const kind = envelope.payload?.type;
-        if (kind === 'mouseDown' && !heldPress) {
-          let release!: () => void;
-          const released = new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          heldPress = { released, release, releaseSeq: null };
-        }
-        const press = kind === 'mouseUp' ? heldPress : null;
-        if (press && press.releaseSeq === null) press.releaseSeq = seq;
-        let settle!: () => void;
-        unsettled.set(
-          seq,
-          new Promise<void>((resolve) => {
-            settle = resolve;
-          }),
-        );
-        return () => {
-          unsettled.delete(seq);
-          settle();
-          if (press) {
-            if (heldPress === press) heldPress = null;
-            press.release();
-          }
-        };
-      },
-      beforeViewportTaken: async (): Promise<SizeArrival> => {
-        // Synchronous up to the first await: the inputs received before this size (a ws chunk can
-        // carry the size and the inputs after it in one tick, 复审 #8).
-        const after = receivedSeq;
-        const press = heldPress;
-        if (!press) return { after, release: null };
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          press.released,
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, HELD_PRESS_WAIT_MS);
-          }),
-        ]);
-        clearTimeout(timer);
-        // A press never released in time is not waited for again.
-        if (heldPress === press) heldPress = null;
-        return { after, release: press.releaseSeq };
-      },
-      onViewportRequested: (envelope, taken) => {
-        if (typeof envelope.controlLease === 'string') viewportLease = envelope.controlLease;
-        if (!args.viewportV2 || !viewportWillApply()) return;
-        const arrival = (taken as SizeArrival | undefined) ?? { after: receivedSeq, release: null };
-        // FIX-62 P1-3 (local repro at a 2x screen; online 4 of 4 「请再点一次」 on a finished task):
-        // the press's mouseUp arrived before the screen's new size, waited behind the mouseDown, and
-        // was refused because the size had been asked for — though it is applied only after it, in
-        // the same queue. Input that arrived before the size is checked against the layout it meets
-        // (still the one it was aimed at); input after it is refused as before. The frames go stale
-        // once that earlier input is through (and again when the size is applied).
-        sizeRequests += 1;
-        if (!viewportPending) {
-          sizeAskedAfter = arrival.after;
-          sizeRelease = arrival.release;
-        }
-        viewportPending = true;
-        const earlier = [...unsettled.entries()]
-          .filter(([seq]) => seq <= sizeAskedAfter || seq === sizeRelease)
-          .map(([, done]) => done);
-        const gen = sizesTaken;
-        const stale = () => {
-          // Applying the size makes the frames stale itself; once it has started, nothing to do.
-          if (!viewportPending || sizesTaken !== gen) return;
-          invalidate();
-          streamer?.invalidateObservation();
-        };
-        if (!earlier.length) stale();
-        else void Promise.allSettled(earlier).then(stale);
-      },
       beforeDispatch: args.viewportV2
         ? async (envelope, signal) => {
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
-            // FIX-61B P0-3: a size that changes nothing (sent while only watching) never fails —
-            // whichever page the agent is on now. Online, such a size queued for a running task
-            // met a new tab, failed as browser_tab_changed and the task with it.
-            if (message.type === 'viewport') {
-              viewportApplies = viewportWillApply();
-              if (viewportApplies) sizesTaken += 1;
-              sizeRequestsCovered = sizeRequests;
-            }
-            if (message.type === 'viewport' && !viewportWillApply()) return;
-            if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
-              invalidate();
-              if (message.type === 'viewport') {
-                // The lease holder's size, for a page the agent has left: drop it, follow the
-                // agent's page, and the size is applied there afresh (onViewportMayReset).
-                void streamer
-                  ?.followCurrentPage()
-                  .catch((err: unknown) =>
-                    userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
-                  );
-                throw new BrowserViewportSkippedError();
-              }
-              // 复审 #1 建议: the lease holder's other input meets the same new page — follow it too
-              // (a screen that did not re-send its size would otherwise stay on the old tab).
-              if (viewportWillApply())
-                void streamer
-                  ?.followCurrentPage()
-                  .catch((err: unknown) =>
-                    userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
-                  );
-              throw new Error('browser_tab_changed');
-            }
-            if (message.type === 'viewport') {
-              if (!viewportWillApply()) return;
-              viewportPending = true;
-              invalidate();
-              streamer?.invalidateObservation();
-              return;
-            }
-            // FIX-61 复审 #2 #2 / DEPLOY-61 #1: keys, text and the release of a press are lenient;
-            // Enter and Space activate the focused element and keep 250ms (frameGraceFor).
-            let inputKind = frameGraceFor(message);
-            let relaxedForTyping = false;
-            // FIX-61B P1-5: Enter / Space on a frame superseded only within the lenient grace go
-            // through when the focus is still the element the person was typing into.
-            if (
-              inputKind === 'pointer' &&
-              message.type === 'keyDown' &&
-              (!viewportPending || aimedBeforeSize(envelope)) &&
-              !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
-              frameGuard.validate(envelope.observation, Date.now(), 'lenient') &&
-              (await stillTypingTarget())
-            ) {
-              inputKind = 'lenient';
-              relaxedForTyping = true;
-            }
-            if (
-              ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
-              (viewportPending && !aimedBeforeSize(envelope)) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
-            ) {
-              streamer?.requestFrameRefresh();
-              throw new Error('browser_observation_expired');
-            }
-            if (envelope.observation)
-              validated.set(message, {
-                revision: envelope.observation.viewportRevision,
-                loader: streamer?.documentLoader() ?? '',
-              });
+            // HOTFIX-R4A（协调方改，减法）: like a remote desktop, the person's input goes where they
+            // see it — no frame freshness, revision or layout check, no 「再点一次」. The one refusal
+            // left (Enter / Space within 300 ms of a cross-document navigation) is in CdpInputHandler.
+            if (!streamer) throw new Error('browser_input_session_unavailable');
+            // A v2 client names the picture it acted on (the audit and policy bind to it); an old
+            // client that sends none is refused, as before. Its age is no longer checked.
+            if (!envelope.observation) throw new Error('browser_observation_missing');
+            if (!streamer.matchesPage(await args.instance.executor.getPage()))
+              // The assistant moved to another tab: the screen follows it. This input goes to
+              // whichever page the stream is bound to when it is sent (or is dropped while the
+              // stream rebinds); the person sees the new page and acts on it.
+              void streamer
+                .followCurrentPage()
+                .catch((err: unknown) =>
+                  userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
+                );
+            if ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y)))
+              throw new Error('browser_input_invalid');
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
-            // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
-            if (
-              message.type === 'insertText' ||
-              (message.type === 'keyDown' &&
-                typeof message.key === 'string' &&
-                message.key.length === 1 &&
-                message.key !== ' ')
-            )
-              await noteTyping();
             if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
             const result = await opts.beforeViewportAction(
               args.instance,
@@ -582,20 +400,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               signal,
               streamer.getSession(),
             );
-            // Recheck after the asynchronous policy: resize/navigation may have happened.
-            if (
-              !streamer.matchesPage(await args.instance.executor.getPage()) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind) ||
-              (relaxedForTyping && !(await stillTypingTarget()))
-            )
-              throw new Error('browser_observation_expired');
             if (
               result.request.taskId !== args.instance.taskId ||
               result.request.actor !== 'human' ||
               result.request.lane !== 'cdp' ||
               result.request.tabId !== envelope.observation?.tabId ||
-              result.request.observationRevision !== envelope.observation?.viewportRevision ||
-              result.request.lease !== envelope.controlLease
+              result.request.observationRevision !== envelope.observation?.viewportRevision
             )
               throw new Error('browser_action_binding_invalid');
             if (result.decision.kind !== 'allow')
@@ -609,37 +419,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         : undefined,
       executionDrain: opts.executionDrain,
       peek: (taskId) => opts.pool.peek(taskId),
-      releasePressed: async (signal) => {
-        await inputHandler?.releasePressed(signal);
-        streamer?.notePointerInput('release');
-      },
-      onViewportApplied: (viewport) => {
-        // FIX-62 复审 #8: a watcher's size changes nothing on the page — it must not make the lease
-        // holder's frames stale or clear a size still to be applied.
-        const applied = viewportApplies;
-        viewportApplies = false;
-        streamer?.setCaptureScale(viewport.deviceScaleFactor ?? 1);
-        // 复审 #9: a size asked with the lease but not applied after all (control handed back while
-        // it waited) leaves nothing to wait for — unless a newer size was asked since.
-        if (args.viewportV2 && !applied && viewportPending && sizeRequests === sizeRequestsCovered)
-          viewportPending = false;
-        if (args.viewportV2 && applied) {
-          viewportPending = false;
-          streamer?.invalidateObservation();
-          streamer?.requestFrameRefresh();
-        }
-        if (args.ws.readyState !== WebSocket.OPEN) return;
-        try {
-          args.ws.send(JSON.stringify({ type: 'viewport-applied', ...viewport }));
-        } catch {
-          /* socket closed between readyState and send */
-        }
-      },
     });
 
     async function teardown(reason: string): Promise<void> {
       if (stopped) return;
       stopped = true;
+      if (captchaBoxTimer) clearInterval(captchaBoxTimer);
       invalidate();
       inputBridge.detach();
       userLog.info({ reason }, 'screencast: tearing down');
@@ -663,36 +448,48 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       userLog.warn({ err: errMsg(err) }, 'screencast: ws error');
       void teardown('ws-error');
     });
-    // Attach before the streamer starts. Chromium/CDP setup can take several
-    // hundred milliseconds; the SPA sends its viewport as soon as the socket
-    // opens, and losing that first message leaves the stream pinned to the
-    // spawn-time 430x760 profile. The bridge retains only the newest viewport
-    // and deliberately drops stale pointer/keyboard input.
+    // Pointer / keyboard input that arrives before the streamer is running is dropped (never
+    // replayed later). REBUILD-4: a viewer's size is never applied to the page.
     args.ws.on('message', (raw) => {
       if (args.ws.readyState !== WebSocket.OPEN) return;
       if (args.viewportV2 && raw.toString() === '{"type":"observe"}') {
         streamer?.requestFrameRefresh();
         return;
       }
+      // 复审 #1 #1: the person pressed while this screen waits for a fresh frame — the assistant
+      // yields now, before the input itself can be sent. Only on the task owner's own stream.
+      if (args.viewportV2 && raw.toString() === '{"type":"busy"}') {
+        if (opts.pool.peek(args.instance.taskId) === args.instance)
+          browserControlSessions.noteViewerBusy(args.instance);
+        streamer?.requestFrameRefresh();
+        return;
+      }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
-        // DEPLOY-61 重跑 第 0 步 #2: the checks are unchanged; this screen is only told that its
-        // input named a frame no longer current, so a replayed first press can say 「请再点一次」.
+        // HOTFIX-R4A（协调方改）: the only refusal left — an Enter / Space within 300 ms of a
+        // cross-document navigation (CdpInputHandler) — is said once: 「页面刚跳转了，请再按一次」.
         if (
           args.viewportV2 &&
-          errMsg(err) === 'browser_observation_expired' &&
+          errMsg(err) === PAGE_CHANGED_ERROR &&
           args.ws.readyState === WebSocket.OPEN
         ) {
           try {
-            // FIX-61B P1-5: which kind of input, so a refused key is said too.
-            let kind = 'pointer';
-            try {
-              const sent = JSON.parse(raw.toString()) as { payload?: { type?: string } };
-              if (/^(?:keyDown|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
-            } catch {
-              /* unreadable: pointer */
-            }
-            args.ws.send(JSON.stringify({ type: 'input-expired', input: kind }));
+            args.ws.send(JSON.stringify({ type: 'input-expired', input: 'key' }));
+          } catch {
+            /* socket closed between readyState and send */
+          }
+        }
+        // 复审 #1 (建议修 #3): a stop still winding down (control closed, runner not finished) or a
+        // run starting refuses the input — say so instead of nothing happening.
+        if (
+          args.viewportV2 &&
+          /^(?:browser_control_closed|browser_control_unavailable|browser_runner_active)$/.test(
+            errMsg(err),
+          ) &&
+          args.ws.readyState === WebSocket.OPEN
+        ) {
+          try {
+            args.ws.send(JSON.stringify({ type: 'input-closed' }));
           } catch {
             /* socket closed between readyState and send */
           }
@@ -726,11 +523,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ws: args.ws,
         logger: userLog,
         viewportV2: args.viewportV2,
-        onFrame: (frame) => {
-          if (!viewportPending) frameGuard.observe(frame);
-        },
         onObservationInvalidated: invalidate,
-        onViewportMayReset: () => inputBridge.reapplyViewport(),
       });
       await streamer.start();
       if (!streamer.getSession()) {
@@ -739,6 +532,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         return;
       }
       userLog.info('screencast: streamer running; input handler attached');
+      if (args.viewportV2) watchCaptchaBox();
       // Pass a getter (not the session itself) so input keeps
       // working across the streamer's hard-restart (phase 19e
       // watchdog) — the streamer swaps in a fresh session, the
@@ -761,35 +555,16 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             );
           void teardown('input-outcome-unknown');
         },
-        args.viewportV2,
-        () => executor.getPage(),
-        args.viewportV2 ? 2400 : 1600,
-        {
-          // FIX-61 复审 #1 / DEPLOY-61 P0-1: only the lease holder's screen — the one whose
-          // viewport message carried the current lease — may change the assistant's page. While
-          // a phone holds control, another screen that only watches still changes nothing.
-          mayAlign: viewportWillApply,
-          lease: () => viewportLease,
-          taskRef: args.instance.taskId.slice(0, 8),
-          onAligned: (restore) =>
-            browserControlSessions.noteAgentViewportChanged(args.instance, restore),
-        },
       );
-      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document its frame
-      // showed: the revision and loader it was validated against, checked again when it is sent.
+      // HOTFIX-R4A（协调方改）: the one guard left — when the last cross-document navigation was.
       const streamRef = streamer;
-      inputHandler.setDocumentGuard({
-        expected: (message) => validated.get(message),
-        revision: () => streamRef.currentRevision(),
-        loader: () => streamRef.documentLoader(),
-        freshLoader: () => streamRef.freshLoader(),
-        entry: () => streamRef.historyEntryId(),
+      inputHandler.setNavigationGuard({
+        lastNavigationAt: () => streamRef.lastNavigationAt(),
+        receivedAt: (message) => receivedAt.get(message),
         pending: () => streamRef.historyPending(),
         settled: (ms) => streamRef.historySettled(ms),
       });
       await inputBridge.attach(inputHandler);
-      // DEPLOY-61 P0-1: the screen that takes control re-sends its size with the new lease (the
-      // workbench does); only that message may change the assistant's page (mayAlign above).
 
       // Keep the pool's idle GC happy — every active screencast
       // counts as activity on its bound task even when the agent
