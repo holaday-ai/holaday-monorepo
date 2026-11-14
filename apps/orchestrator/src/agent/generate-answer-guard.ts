@@ -87,32 +87,9 @@ function openerOnly(text: string): boolean {
     .every((sentence) => MORE_OPENER_RE.test(sentence));
 }
 
-/**
- * 61.80 复审 #2: what is left of a tool call is often a promise to wait (「我需要等待搜索结果。」
- * 「请稍等，搜索结果返回后我会告诉你答案。」) — no more an answer than an opener.
- */
-const WAITING_RE =
-  /(?:等待|稍等|稍候|请等).{0,16}(?:搜索|查询|检索|结果)|(?:搜索|查询|检索)结果(?:返回|出来)(?:后|之后)|\bwait(?:ing)? for (?:the )?(?:search )?results?\b/i;
-function onlyOpenersOrWaiting(text: string): boolean {
-  // 复审 #3: a clause that gives something (「结果是：韩江」「查询结果为…」) is content.
-  if (text.length > 160 || /[：:]|是|显示|结果为|得主为/.test(text)) return false;
-  const sentences = text
-    .split(/[。！!？?\n]+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  return (
-    sentences.length > 0 &&
-    sentences.every(
-      (s) =>
-        (s.length <= 40 && WAITING_RE.test(s)) ||
-        (s.length <= 30 && (OPENER_RE.test(s) || MORE_OPENER_RE.test(s))),
-    )
-  );
-}
-
 function substantive(rest: string): boolean {
   const meaningful = rest.replace(/[\s{}[\]"'`:,，。.!！?？<>/\\-]+/g, '');
-  return meaningful.length >= 6 && !openerOnly(rest.trim()) && !onlyOpenersOrWaiting(rest.trim());
+  return meaningful.length >= 6 && !openerOnly(rest.trim());
 }
 
 /** A legacy-lane result that was only tool-call syntax: failed, refunded as ours. */

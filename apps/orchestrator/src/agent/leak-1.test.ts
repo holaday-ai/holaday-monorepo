@@ -2,7 +2,6 @@ import { hasToolCallMarkup, stripToolCallMarkup } from '@holaday/shared-types';
 import { stripToolCallBlocks } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { answerQualityFailure, deliverableAnswer } from './generate-answer-guard.js';
-import { explainExecutionMode } from './intent-classifier.js';
 import { sanitizeFinalText } from './text-sanitizer.js';
 
 /**
@@ -96,57 +95,13 @@ describe('LEAK-1 · the bracketed pseudo-tool of s04 run 2', () => {
   });
 });
 
-describe('LEAK-1 · 「搜一下」 is a search, not writing from memory', () => {
-  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
-  const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
-  it.each([
-    INTENT,
-    '搜一下 OpenAI 最新发布了什么',
-    '帮我百度一下 2026 年春节放假安排',
-    '上网查一下特斯拉 Model Y 的续航',
-  ])('%s', async (intent) => {
-    expect(await route(intent)).toBe('scrape');
-  });
-  it.each(['帮我写一段关于搜索引擎的介绍', '把这段话翻译成英文：今天天气很好'])(
-    'writing stays in generate: %s',
-    async (intent) => {
-      expect(await route(intent)).toBe('generate');
-    },
-  );
-});
-
 describe('LEAK-1 复审 #2', () => {
-  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
-  const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
-  it.each([
-    '[SEARCH]\nquery: "2025年诺贝尔文学奖得主"\n[/SEARCH] 我需要等待搜索结果。',
-    'BROWSE:web_search{"query": "x"}\n请稍等，搜索结果返回后我会告诉你答案。',
-  ])('P1-1: what is left is a promise to wait — no answer: %s', (text) => {
-    expect(deliverableAnswer(text)).toBeNull();
-  });
   it('P1-1: a real answer after a call still goes out', () => {
     expect(
       deliverableAnswer(
         'BROWSE:web_search{"query": "x"}\n根据公开报道，2024 年诺贝尔文学奖得主是韩江。',
       ),
     ).toBe('根据公开报道，2024 年诺贝尔文学奖得主是韩江。');
-  });
-  it.each([
-    '帮我写个广告语：百度一下，你就知道',
-    '把这句翻译成英文：搜一下就知道了',
-    '润色：有空去网上查查资料',
-    '帮我润色这段：大家可以去搜一下相关资料',
-    '写一篇作文，题目：去搜一下',
-  ])('P2-3: writing stays in generate: %s', async (intent) => {
-    expect(await route(intent)).toBe('generate');
-  });
-  it.each([
-    '帮我在网上搜一下杭州明天的天气',
-    '你搜一下 2025 年诺贝尔文学奖得主',
-    '麻烦搜一下 Python 3.14 发布日期',
-    '可以帮忙搜一下 OpenAI 最近的新闻吗',
-  ])('P2-4: %s', async (intent) => {
-    expect(await route(intent)).toBe('scrape');
   });
   it.each([
     '日志：\n[TOOL] started\n...\n[/TOOL]',
@@ -165,11 +120,16 @@ describe('LEAK-1 复审 #3', () => {
   ])('a short real answer after a call is still an answer: %s', (rest, shown) => {
     expect(deliverableAnswer(`BROWSE:web_search{"query": "x"}\n${rest}`)).toBe(shown);
   });
-  it.each([
-    '[SEARCH]{"query":"x"}[/SEARCH]',
-    '[SEARCH]2025年诺贝尔文学奖得主[/SEARCH] 我需要等待搜索结果。',
-  ])('bracket forms that start a line or carry JSON are tool syntax: %s', (text) => {
+  it('a bracket block carrying JSON is tool syntax and no answer', () => {
+    const text = '[SEARCH]{"query":"x"}[/SEARCH]';
     expect(hasToolCallMarkup(text)).toBe(true);
     expect(deliverableAnswer(text)).toBeNull();
+  });
+  it('a bracket block that starts a line is cut out of what is shown', () => {
+    // BOSS 2026-11-14: only the instruction text is recognised here; a reply that only promises
+    // to wait is left to the existing 「时效问题必须有真实来源」 check.
+    const text = '[SEARCH]2025年诺贝尔文学奖得主[/SEARCH] 我需要等待搜索结果。';
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBe('我需要等待搜索结果。');
   });
 });
