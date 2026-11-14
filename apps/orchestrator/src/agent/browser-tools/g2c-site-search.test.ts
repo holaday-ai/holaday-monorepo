@@ -61,6 +61,10 @@ const FIXTURES: Record<string, string> = {
   '/message-q': page(
     `<div class="composer"><input type="text" id="target" name="q" placeholder="Send a message"></div>${wire('input', post('/suggest', "'q=1'"))}`,
   ),
+  // 复审: a support / chat box named q whose label says so (「联系客服」) is no search box.
+  '/support-label': page(
+    `<label>联系客服 <input type="text" id="target" name="q"></label>${wire('input', post('/suggest', "'q=1'"))}`,
+  ),
   // Still pauses: a login box and a checkout address box.
   '/login': page(
     `<form action="/passport/login" method="post"><input type="text" id="target" name="username" aria-label="账号" placeholder="手机号/邮箱"></form>${wire('input', post('/passport/track', "'x'"))}`,
@@ -166,6 +170,7 @@ describe('G2c · a site search box is a read; real writes still pause', () => {
     ['/search-cart', 'type', 'www.bestbuy.com'],
     ['/search-intent', 'type', 'www.example.test'],
     ['/message-q', 'type', 'www.example.test'],
+    ['/support-label', 'type', 'www.example.test'],
     ['/login', 'type', 'www.example.test'],
     ['/address', 'type', 'www.example.test'],
     ['/addcart-beside-search', 'click', 'www.example.test'],

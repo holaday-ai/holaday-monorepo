@@ -2926,7 +2926,7 @@ export function searchTargetProbe(el: Element, tool: string): boolean {
     .filter(Boolean)
     .join(' ');
   if (
-    /评论|评价|回复|发布|发表|私信|反馈|弹幕|写点|说点|备注|地址|收货|手机|电话|邮箱|密码|验证码|优惠码|兑换码|邀请码|用户名|账号|昵称|comment|reply|review|feedback|\bpost\b|send|message|e-?mail|phone|password|passcode|code\b|coupon|promo|address|user ?name|login|sign ?in|nickname/i.test(
+    /评论|评价|回复|发布|发表|私信|反馈|弹幕|写点|说点|备注|地址|收货|手机|电话|邮箱|密码|验证码|优惠码|兑换码|邀请码|用户名|账号|昵称|消息|登录|登陆|客服|聊天|留言|咨询|提问|对话|comment|reply|review|feedback|\bpost\b|send|message|e-?mail|phone|password|passcode|code\b|coupon|promo|address|user ?name|login|sign ?in|nickname|chat|support|\bask\b/i.test(
       `${words} ${form?.getAttribute('action') || ''}`,
     )
   )
