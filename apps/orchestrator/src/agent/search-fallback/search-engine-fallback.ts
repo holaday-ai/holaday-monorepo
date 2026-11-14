@@ -258,6 +258,8 @@ async function guardEngineSearches(
   args: RunSupercarOptions,
   served: Awaited<ReturnType<typeof serveSearchResults>>,
   labels?: Set<string>,
+  /** G2d: the raw query of every engine results navigation this guard saw (answered or not). */
+  seen?: Set<string>,
 ): Promise<() => Promise<void>> {
   const handler = async (route: Route) => {
     const request = route.request();
@@ -268,7 +270,9 @@ async function guardEngineSearches(
     } catch {
       /* no frame yet: not a page navigation we redirect */
     }
-    const query = engineResultsQuery(request.url())?.trim();
+    const raw = engineResultsQuery(request.url());
+    if (mainFrame && raw !== null) seen?.add(raw);
+    const query = raw?.trim();
     if (!mainFrame || !query || query.length > 500) return route.fallback();
     const results = await provider
       .search(query, { count: 10, signal: AbortSignal.timeout(15_000) })
@@ -347,8 +351,13 @@ const ENGINE_NAMED =
  * taking the last one down stalled on heavy pages (BestBuy). A run that never goes near an engine
  * now has no route at all. The guard goes in (bounded) before a page of the context navigates to an
  * engine results page, and when a page arrives on an engine's own site (its search box is next).
- * A results page reached another way (a link) is opened again once the guard is in, so it is
- * answered by the search API too.
+ * A results page reached another way is opened again once the guard is in, so it is answered by
+ * the search API too.
+ *
+ * Known limit (kept on purpose — no run-wide route again): a link, form or redirect from a
+ * non-engine page straight to an engine results URL reaches the engine once before that reopen
+ * (the old run-wide route intercepted it before the request left); the reopen then serves the
+ * search API page. Only page.goto and the engine's own pages are guarded before the request.
  */
 async function guardRunSearches(
   provider: SearchProvider,
@@ -364,6 +373,8 @@ async function guardRunSearches(
   const context = page.context();
   linkRoutingOwner(context, args.executor);
   let stopped = false;
+  const seen = new Set<string>();
+  const reopened = new Set<string>();
   type Installed = { dispose: () => Promise<void> };
   let installing: Promise<Installed | null> | null = null;
   const install = () => {
@@ -377,7 +388,7 @@ async function guardRunSearches(
           results: [],
         });
         const pages = served;
-        const unguard = await guardEngineSearches(context, provider, args, pages);
+        const unguard = await guardEngineSearches(context, provider, args, pages, undefined, seen);
         return {
           dispose: async () => {
             await unguard().catch(() => {});
@@ -407,10 +418,15 @@ async function guardRunSearches(
     }
     const url = frame.url();
     if (!isEngineHost(url)) return;
-    // Landed on an engine results page before the guard was in (followed a link).
-    const unguarded = installing === null && engineResultsQuery(url) !== null;
+    // Landed on an engine results page the guard never saw: it was not in yet (not started, or
+    // still installing — e.g. started on the engine's home page and the search was submitted at
+    // once) or the page got there another way. Reopened once, through the guard, when it is in.
+    // A query the guard saw and let through (the API had nothing) stays on the engine.
+    const query = engineResultsQuery(url);
+    const reopen = query !== null && !seen.has(query) && !reopened.has(query);
+    if (reopen) reopened.add(query);
     void install().then((installed) => {
-      if (!installed || !unguarded || stopped || target.url() !== url) return;
+      if (!installed || !reopen || stopped || target.url() !== url) return;
       void target.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {});
     });
   };

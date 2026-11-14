@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { RunSupercarOptions, SupercarOutcome } from '../supercar/index.js';
 import { runSearchWithFallback } from './search-engine-fallback.js';
 import { StubSearchProvider } from './search-provider.js';
@@ -9,6 +9,7 @@ import {
   ENGINE_RESULTS_ROUTE,
   SEARCH_RESULTS_ORIGIN,
   engineResultsQuery,
+  routeWithin,
   routingUnreliable,
 } from './search-results-page.js';
 
@@ -49,7 +50,10 @@ const intent = '请使用云端浏览器，在 BestBuy 搜索 usb c cable，告�
 /** Stand-in engines: whatever the guard lets through lands here, nothing goes to the network. */
 async function engineStandIn(context: BrowserContext) {
   await context.route(/^https:\/\/(?:www\.google\.com|www\.bing\.com|cn\.bing\.com)\//, (route) =>
-    route.fulfill({ contentType: 'text/html', body: '<h1>engine page</h1>' }),
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<h1>engine page</h1><a id="s" href="https://cn.bing.com/search?q=race">search</a>',
+    }),
   );
 }
 
@@ -142,6 +146,27 @@ describe('G2d: the run-wide guard is installed only when the run heads for an en
     await context.close();
   });
 
+  it('a search submitted while the guard is still installing is reopened through it', async () => {
+    const context = await browser.newContext();
+    await engineStandIn(context);
+    const route = context.route.bind(context);
+    context.route = (async (...args: Parameters<BrowserContext['route']>) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return route(...args);
+    }) as BrowserContext['route'];
+    const page = await context.newPage();
+    let landed = '';
+    await runGuarded(context, page, async (p) => {
+      // The engine's home page starts the install; the search goes out before it is in.
+      await p.goto('https://www.bing.com/', { waitUntil: 'load' });
+      await p.click('#s');
+      await p.waitForURL((u) => u.origin === SEARCH_RESULTS_ORIGIN, { timeout: 8_000 });
+      landed = p.url();
+    });
+    expect(landed.startsWith(SEARCH_RESULTS_ORIGIN)).toBe(true);
+    await context.close();
+  }, 30_000);
+
   it('the engine matcher covers every engine results page and no other host', () => {
     for (const url of [
       'https://www.google.com/search?q=a',
@@ -181,10 +206,46 @@ describe('G2d: route changes are bounded and a stalled one marks the browser', (
     expect(ms).toBeLessThan(10_000);
     // Without the guard the engine opens as it did before CAPTCHA-UX-1.
     expect(landed).toBe('https://cn.bing.com/search?q=HOLA');
-    expect(routingUnreliable(context)).toBe(true);
-    expect(routingUnreliable(executor)).toBe(true);
+    // A slow install is not a broken route table (review P1-b): only its removal decides.
+    expect(routingUnreliable(executor)).toBe(false);
     await context.close();
   }, 30_000);
+
+  it('a slow install that lands later is taken down in the background; the browser stays usable', async () => {
+    const context = await browser.newContext();
+    await engineStandIn(context);
+    const route = context.route.bind(context);
+    const unroute = context.unroute.bind(context);
+    const removed: unknown[] = [];
+    context.route = (async (...args: Parameters<BrowserContext['route']>) => {
+      await new Promise((resolve) => setTimeout(resolve, 3_500));
+      return route(...args);
+    }) as BrowserContext['route'];
+    context.unroute = (async (...args: Parameters<BrowserContext['unroute']>) => {
+      removed.push(args[0]);
+      return unroute(...args);
+    }) as BrowserContext['unroute'];
+    const page = await context.newPage();
+    const { outcome, executor } = await runGuarded(context, page, async (p) => {
+      await p.goto('https://cn.bing.com/search?q=HOLA', { waitUntil: 'load' });
+    });
+    expect(outcome.status).toBe('completed');
+    await vi.waitFor(() => expect(removed.length).toBeGreaterThan(0), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Not marked: the pool keeps / hands back this browser as usual.
+    expect(routingUnreliable(context)).toBe(false);
+    expect(routingUnreliable(executor)).toBe(false);
+    await context.close();
+  }, 30_000);
+
+  it('the background removal of a given-up install that never settles marks the context', async () => {
+    const context = await browser.newContext();
+    context.route = (() => new Promise<void>(() => {})) as unknown as BrowserContext['route'];
+    expect(await routeWithin(context, /never/, () => {}, 50, 200)).toBeNull();
+    expect(routingUnreliable(context)).toBe(false);
+    await vi.waitFor(() => expect(routingUnreliable(context)).toBe(true), { timeout: 2_000 });
+    await context.close();
+  });
 
   it('taking the guard down stalls: the run returns and its browser is marked unreliable', async () => {
     const context = await browser.newContext();

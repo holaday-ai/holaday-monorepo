@@ -131,10 +131,13 @@ export function routingUnreliable(owner: object | null | undefined): boolean {
 /**
  * G2d: `context.route` is a round trip to the browser too and can stall like unroute. Installing
  * gets a few seconds; when it does not finish the handler is switched off (it lets every request
- * through if the route still lands), the route is taken down in the background, the context is
- * marked unreliable and the caller runs without it. Returns the bounded remover, or null.
+ * through if the route still lands) and the caller runs without it. A slow install usually lands
+ * later and is fine: it is taken down in the background once it has settled. Only when that
+ * removal does not settle within `lateMs` of the give-up (the install never landed, or its
+ * removal stalled) is the context marked unreliable. Returns the bounded remover, or null.
  */
 export const ROUTE_WAIT_MS = 3_000;
+export const LATE_ROUTE_REMOVAL_MS = 30_000;
 type RouteUrl = Parameters<BrowserContext['route']>[0];
 type RouteHandler = (...args: Parameters<Parameters<BrowserContext['route']>[1]>) => unknown;
 export async function routeWithin(
@@ -142,16 +145,24 @@ export async function routeWithin(
   url: RouteUrl,
   handler: RouteHandler,
   ms = ROUTE_WAIT_MS,
+  lateMs = LATE_ROUTE_REMOVAL_MS,
 ): Promise<(() => Promise<boolean>) | null> {
   if (routingUnreliable(context)) return null;
   let live = true;
   const guarded = (route: Route, request: Parameters<RouteHandler>[1]) =>
     live ? handler(route, request) : route.fallback();
-  const outcome = await settleWithin(context.route(url, guarded), ms);
+  const installing = context.route(url, guarded);
+  const outcome = await settleWithin(installing, ms);
   if (outcome === 'done') return () => unrouteWithin(context, url, guarded);
   live = false;
-  if (outcome === 'late') markRoutingUnreliable(context);
-  void context.unroute(url, guarded).catch(() => {});
+  // Removed after the install settled (either way), so the removal is ordered after it.
+  const removing = installing.then(
+    () => context.unroute(url, guarded),
+    () => context.unroute(url, guarded),
+  );
+  void settleWithin(removing, lateMs).then((removal) => {
+    if (removal === 'late') markRoutingUnreliable(context);
+  });
   return null;
 }
 
