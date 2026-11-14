@@ -32,6 +32,7 @@ import {
   unvisitedChecks,
   withoutUnperformed,
 } from './action-claims.js';
+import { misplacedAdLabel } from './ad-label.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import {
@@ -654,6 +655,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let weatherPageAsked = false;
   /** FIX-28 (Deploy-27 core-04): one return for an answer short of the videos asked. */
   let videoCountAsked = false;
+  /** G2g (BestBuy): an ad label put on a result whose own card does not carry it, sent back once. */
+  let adLabelAsked = false;
   let bindingCorrected = false;
   /** FIX-34: one correction for listed prices no read page shows. */
   let pricesCorrected = false;
@@ -1544,6 +1547,22 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               toolResult(
                 call.id,
                 `${why}。只写本次读到的页面上实际有的视频标题，只有链接是 /watch?v=（不带 list=）或 /shorts/ 的才算一个视频。请继续向下滚动（scroll 后再 snapshot）找满 ${shortfall.wanted} 个单个视频，按页面顺序编号列出；确实找不满时，summary 以「部分完成：」开头写明只找到几个、缺几个。`,
+                true,
+              ),
+            );
+            continue;
+          }
+          // G2g (BestBuy 第一个结果): 「Sponsored」 read off the ad slot above the list is not the
+          // first result's label — one correction; what comes back is delivered.
+          const adLabel =
+            adLabelAsked || concludeNow ? null : misplacedAdLabel(summary, pageEvidence);
+          if (adLabel) {
+            adLabelAsked = true;
+            await rejected(summary, given, adLabel);
+            results.push(
+              toolResult(
+                call.id,
+                `${adLabel}。只写该结果自己的条目里实际显示的标识；页面别处（如列表上方的广告位）的标识不属于它。其余内容不变，重新 finish。`,
                 true,
               ),
             );
