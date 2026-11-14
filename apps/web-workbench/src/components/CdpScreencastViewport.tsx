@@ -12,10 +12,12 @@ import {
 import { appendBrowserStreamToken } from '@/lib/browser-stream-url';
 import { hdDebug } from '@/lib/hd-debug';
 import {
+  type ScreencastCaptchaBox,
   framePixelRatio,
   mapClientPointToBrowserFrame,
   mapClientPointToScreencast,
   placeScreencastActual,
+  placeScreencastCaptchaZoom,
   placeScreencastContainTop,
   placeScreencastReadableTop,
   readableScreencastAutoScrollKey,
@@ -179,6 +181,13 @@ export function CdpScreencastViewport({
   const inputBridgeStateRef = React.useRef<CdpInputBridgeState>(INITIAL_CDP_INPUT_BRIDGE_STATE);
   /** Host <div> ref — the box the fixed-size page frame is scaled into. */
   const hostRef = React.useRef<HTMLDivElement>(null);
+  /**
+   * CAPTCHA-UX-1 第 2 条: the captcha box the server reports while a verification is waited for
+   * (CSS px of the page), and whether this screen zooms in on it (the person can switch it off).
+   */
+  const [captchaBox, setCaptchaBox] = React.useState<ScreencastCaptchaBox | null>(null);
+  const [captchaZoom, setCaptchaZoom] = React.useState(true);
+  const captchaBoxRef = React.useRef<ScreencastCaptchaBox | null>(null);
   /** Imperative hook the frame-paint path uses to nudge the scale
    *  effect when canvas.width/height changes (a new source size). */
   const sourceDimsRecomputeRef = React.useRef<(() => void) | null>(null);
@@ -351,8 +360,21 @@ export function CdpScreencastViewport({
           ? placeScreencastReadableTop
           : placeScreencastContainTop;
       const geometry = geometryRef.current;
-      const placement =
-        displayMode === 'actual'
+      const zoomBox = viewportV2 && captchaZoom && displayMode !== 'actual' ? captchaBox : null;
+      const zoomed =
+        zoomBox && geometry?.cssWidth
+          ? placeScreencastCaptchaZoom({
+              hostWidth: host.clientWidth,
+              hostHeight: host.clientHeight,
+              sourceWidth: srcW,
+              sourceHeight: srcH,
+              cssWidth: geometry.cssWidth,
+              box: zoomBox,
+            })
+          : null;
+      const placement = zoomed
+        ? zoomed
+        : displayMode === 'actual'
           ? placeScreencastActual({
               sourceWidth: srcW,
               sourceHeight: srcH,
@@ -414,7 +436,7 @@ export function CdpScreencastViewport({
       window.removeEventListener('resize', onWindowResize);
       sourceDimsRecomputeRef.current = null;
     };
-  }, [fitMode, displayMode, status, wsUrl, viewportV2]);
+  }, [fitMode, displayMode, status, wsUrl, viewportV2, captchaBox, captchaZoom]);
 
   const drawFrameRef = React.useRef(drawFrame);
   drawFrameRef.current = drawFrame;
@@ -495,6 +517,8 @@ export function CdpScreencastViewport({
           geometry?: BrowserFrameGeometry;
           /** FIX-61B P1-5: which kind of input the server refused. */
           input?: string;
+          /** CAPTCHA-UX-1: the captcha box, or null when there is none. */
+          rect?: ScreencastCaptchaBox | null;
         } | null = null;
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
@@ -505,6 +529,18 @@ export function CdpScreencastViewport({
         if (viewportV2 && msg.type === 'viewport-v2-ready') {
           // The stream runs: input can go out as soon as a frame names it.
           writeReadyRef.current = true;
+          return;
+        }
+        if (viewportV2 && msg.type === 'captcha-box') {
+          const r = msg.rect;
+          const box =
+            r && [r.x, r.y, r.width, r.height].every((n) => Number.isFinite(n)) && r.width > 0
+              ? { x: r.x, y: r.y, width: r.width, height: r.height }
+              : null;
+          // A new verification zooms in again even if the last one was zoomed out.
+          if (box && !captchaBoxRef.current) setCaptchaZoom(true);
+          captchaBoxRef.current = box;
+          setCaptchaBox(box);
           return;
         }
         if (viewportV2 && msg.type === 'input-expired') {
@@ -552,6 +588,9 @@ export function CdpScreencastViewport({
         if (disposed || connectionSeq !== connectionSeqRef.current || activeWs !== ws) {
           return;
         }
+        // CAPTCHA-UX-1: a new connection reports its own box; never keep zooming on an old one.
+        captchaBoxRef.current = null;
+        setCaptchaBox(null);
         hdDebug('screencast WS', {
           event: 'close',
           readyState: ws.readyState,
@@ -1053,6 +1092,28 @@ export function CdpScreencastViewport({
           style={{ pointerEvents: 'none', top: 0, left: 0 }}
         />
       </div>
+      {viewportV2 && captchaBox ? (
+        <>
+          {/* CAPTCHA-UX-1 第 2 条: zoom on / off; the picture follows the box and restores itself
+              when the verification is gone. Outside the canvas, so it never reaches the page. */}
+          <button
+            type="button"
+            data-testid="captcha-zoom-toggle"
+            aria-pressed={captchaZoom}
+            onClick={() => setCaptchaZoom((on) => !on)}
+            className="absolute right-2 top-2 z-10 rounded-md border bg-background/95 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+          >
+            {captchaZoom ? '缩小' : '放大'}
+          </button>
+          <div
+            role="status"
+            data-testid="captcha-zoom-hint"
+            className="pointer-events-none absolute inset-x-2 bottom-2 z-10 rounded-md border bg-background/95 px-3 py-2 text-xs leading-5 text-foreground shadow-sm"
+          >
+            请在放大的画面里完成验证；看不清可以点验证框里的耳机图标改听语音
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
