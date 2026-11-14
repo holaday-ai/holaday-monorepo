@@ -46,7 +46,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode, asksForWriting } from '../../agent/intent-classifier.js';
+import { asksForWriting, explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -6374,6 +6374,8 @@ export const tasksRouter = router({
                   // `input.intent` (what the user typed); only the model sees
                   // the prefixed version.
                   intent: effectiveIntent,
+                  // G2g: what the user typed this turn, for the checks of what was asked.
+                  userIntent: input.intent,
                   expertMode: expertModeOverride,
                   ...(memoryPreamble ? { memoryPreamble } : {}),
                   ...(playbookContext ? { playbookContext } : {}),

@@ -875,7 +875,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
         return interruption;
       },
-      userIntent: opts.intent,
+      // G2g: the user's own words this turn — not the follow-up's parent context (its 「填写」
+      // held a read-only follow-up to the form-fill receipt).
+      userIntent: opts.userIntent ?? opts.intent,
       intent: [
         opts.intent,
         guidance ? `【结果要求】\n${guidance}` : '',
