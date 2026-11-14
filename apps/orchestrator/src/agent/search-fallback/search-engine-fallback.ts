@@ -1,7 +1,7 @@
 import type { BrowserContext, Route } from 'playwright';
 import { TEXT_URL_RE, trimTextUrl } from '../../execution/text-urls.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from '../supercar/index.js';
-import type { SearchProvider, WebSearchResult } from './search-provider.js';
+import { type SearchProvider, type WebSearchResult, searchAnswered } from './search-provider.js';
 import {
   engineResultsQuery,
   redirectHtml,
@@ -161,14 +161,14 @@ async function viaSearchApi(
   args: RunSupercarOptions,
   original: string,
   preferred = false,
-): Promise<{ plan: SearchFallbackPlan; dispose: () => Promise<void> } | null> {
+): Promise<{ plan: SearchFallbackPlan; id: string; dispose: () => Promise<void> } | null> {
   try {
-    const results = await searchWithRetry(provider, plan.query);
+    // G2g D16: the provider that answered this search comes back with its results — a chain's
+    // `label` is whichever search on it answered last, possibly another one by now.
+    const { results, id, label } = await searchWithRetry(provider, plan.query);
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
-    await recordApiResults(results, provider, args);
-    // The provider that answered this search (a chain names the one that answered last).
-    const label = provider.label;
+    await recordApiResults(results, id, args);
     const served = await serveSearchResults(page.context(), {
       query: plan.query,
       label,
@@ -191,6 +191,7 @@ async function viaSearchApi(
     );
     return {
       plan: withServedLabels(alternate, label, labels),
+      id,
       dispose: async () => {
         await unguard().catch(() => {});
         await served.dispose();
@@ -208,10 +209,13 @@ async function viaSearchApi(
  */
 async function searchWithRetry(provider: SearchProvider, query: string) {
   try {
-    return await provider.search(query, { count: 10, signal: AbortSignal.timeout(15_000) });
+    return await searchAnswered(provider, query, {
+      count: 10,
+      signal: AbortSignal.timeout(15_000),
+    });
   } catch {
     await new Promise((resolve) => setTimeout(resolve, 1_000));
-    return provider.search(query, { count: 10, signal: AbortSignal.timeout(15_000) });
+    return searchAnswered(provider, query, { count: 10, signal: AbortSignal.timeout(15_000) });
   }
 }
 
@@ -221,14 +225,14 @@ async function searchWithRetry(provider: SearchProvider, query: string) {
  */
 async function recordApiResults(
   results: readonly WebSearchResult[],
-  provider: SearchProvider,
+  providerId: string,
   args: RunSupercarOptions,
 ) {
   for (const result of results)
     await args.onEvidence?.({
       fact: `web_search_url=${result.url}`,
       sourceType: 'tool_result',
-      sourceDetail: `search API result (${provider.id})`,
+      sourceDetail: `search API result (${providerId})`,
       confidence: 'observed',
     });
 }
@@ -259,12 +263,12 @@ async function guardEngineSearches(
     }
     const query = engineResultsQuery(request.url())?.trim();
     if (!mainFrame || !query || query.length > 500) return route.fallback();
-    const results = await provider
-      .search(query, { count: 10, signal: AbortSignal.timeout(15_000) })
-      .catch(() => [] as WebSearchResult[]);
+    const { results, id, label } = await searchAnswered(provider, query, {
+      count: 10,
+      signal: AbortSignal.timeout(15_000),
+    }).catch(() => ({ results: [] as WebSearchResult[], id: provider.id, label: provider.label }));
     if (!results.length) return route.fallback();
-    await recordApiResults(results, provider, args);
-    const label = provider.label;
+    await recordApiResults(results, id, args);
     labels?.add(label);
     const to = served.add({
       query,
@@ -464,6 +468,8 @@ async function searchWithFallback(
   let retryWallObserved = false;
   let endpointRetry = false;
   let apiUsed = false;
+  /** G2g D16: the provider that answered the API search this run used. */
+  let apiId: string | undefined;
   let apiFirst = false;
   let offset = 0;
   const startedAt = Date.now();
@@ -471,7 +477,7 @@ async function searchWithFallback(
     if (plan)
       await deps.onFallback?.({
         from: endpointRetry ? plan.to : plan.from,
-        to: apiUsed && deps.searchProvider ? deps.searchProvider.id : plan.to,
+        to: apiUsed && deps.searchProvider ? (apiId ?? deps.searchProvider.id) : plan.to,
         reason: endpointRetry
           ? 'search_endpoint_unavailable'
           : apiFirst
@@ -584,6 +590,7 @@ async function searchWithFallback(
     if (api) {
       plan = api.plan;
       apiUsed = true;
+      apiId = api.id;
       apiFirst = true;
       // Not a fallback attempt: a wall met on this run is handled as usual.
       retry = true;
@@ -653,6 +660,7 @@ async function searchWithFallback(
       selected = api.plan;
       plan = api.plan;
       apiUsed = true;
+      apiId = api.id;
     }
   }
   if (await args.isTaskCancelled?.()) return { ...first, status: 'cancelled' };
