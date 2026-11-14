@@ -16,7 +16,7 @@
 // Placeholder env only (no DB / Redis is ever contacted): must load before src/config/env.ts.
 import '../vitest.setup.js';
 import { writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
+import { type Server, createServer } from 'node:http';
 import net from 'node:net';
 import { pino } from 'pino';
 import { chromium } from 'playwright';
