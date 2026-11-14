@@ -237,3 +237,37 @@ describe('LEAK-2 · tags named after a tool (online s04 on production after DEPL
     expect(stripToolCallMarkup(text)).toBe(text);
   });
 });
+
+describe('LEAK-2 复审', () => {
+  it.each([
+    [
+      'P1-1: opener right after Chinese punctuation',
+      '我查一下。web_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>',
+    ],
+    [
+      'P1-2: truncated, no closing tag',
+      '......\n\nweb_search>\n{"query": "2025年诺贝尔文学奖得主"}',
+    ],
+    [
+      'P1-2: truncated well-formed opener',
+      '......\n\n<web_search>\n{"query": "2025年诺贝尔文学奖得主"}',
+    ],
+  ])('%s is no answer', (_label, text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+  it.each([
+    [
+      'a tool named mid-line does not eat the text down to a closing tag',
+      '流程: new_tab -> read_page，然后整理。\n\n这里是正文第一段。\n\n这里是正文第二段。\n\n</read_page>',
+      '流程: new_tab -> read_page，然后整理。\n\n这里是正文第一段。\n\n这里是正文第二段。',
+    ],
+    [
+      'a list item with 「>」 after a space',
+      '- read_page > list\n正文段落\n</read_page>',
+      '- read_page > list\n正文段落',
+    ],
+  ])('%s', (_label, text, shown) => {
+    expect(deliverableAnswer(text)).toBe(shown);
+  });
+});
