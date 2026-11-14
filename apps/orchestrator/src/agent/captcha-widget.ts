@@ -49,18 +49,26 @@ export interface CaptchaWidgetState {
   box: CaptchaBoxRect | null;
 }
 
-/** Evaluated in the page's main document (a string, so CDP and Playwright run the same code). */
-export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
+/**
+ * Evaluated in the page's main document (a string, so CDP and Playwright run the same code).
+ * `extra` are provider frame elements the caller found itself — G2e: Cloudflare's challenge page
+ * puts the Turnstile iframe in a CLOSED shadow root, which querySelectorAll never sees; the
+ * browser's own frame tree does, so the callers hand those frame elements in.
+ */
+export const CAPTCHA_WIDGET_FUNCTION = `function (...extra) {
   const re = new RegExp(${JSON.stringify(CAPTCHA_FRAME_URL_SOURCE)}, 'i');
   const vw = innerWidth, vh = innerHeight;
+  // Up one level, out of a shadow root to its host (the frame's container is on the other side).
+  const up = (e) => e.parentElement || (e.parentNode && e.parentNode.host) || null;
   const seen = (el) => {
-    for (let e = el; e; e = e.parentElement) {
+    for (let e = el; e; e = up(e)) {
       const s = getComputedStyle(e);
       if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
     }
     return true;
   };
-  const frames = [...document.querySelectorAll('iframe')].filter((f) => re.test(f.src || ''));
+  const isFrame = (f) => !!f && f.nodeType === 1 && f.tagName === 'IFRAME';
+  const frames = [...new Set([...document.querySelectorAll('iframe'), ...extra.filter(isFrame)])].filter((f) => re.test(f.src || ''));
   const shown = [];
   for (const f of frames) {
     const r = f.getBoundingClientRect();
@@ -74,7 +82,7 @@ export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
   // 复审 #2 P1-2: a box is judged by its OWN response field (in its component's container) —
   // an invisible / v3 token elsewhere on the page never answers a box someone still has to tick.
   const ownField = (frame) => {
-    for (let e = frame.parentElement, depth = 0; e && depth < 4; e = e.parentElement, depth++) {
+    for (let e = up(frame), depth = 0; e && depth < 4; e = up(e), depth++) {
       const found = e.querySelector(FIELD);
       if (found) return found;
     }
@@ -96,7 +104,10 @@ export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
     passed,
     box: pick ? { x: Math.round(pick.r.left), y: Math.round(pick.r.top), width: Math.round(pick.r.width), height: Math.round(pick.r.height) } : null,
   };
-})()`;
+}`;
+
+/** The same, with only the frames the document itself shows (no shadow-root frames). */
+export const CAPTCHA_WIDGET_EXPRESSION = `(${CAPTCHA_WIDGET_FUNCTION})()`;
 
 function parse(value: unknown): CaptchaWidgetState | null {
   const v = value as Partial<CaptchaWidgetState> | null | undefined;
@@ -121,11 +132,88 @@ function parse(value: unknown): CaptchaWidgetState | null {
 /** The captcha component's state on a Playwright page; null when it cannot be read. */
 export async function captchaWidgetState(page: Page): Promise<CaptchaWidgetState | null> {
   try {
-    return parse(await page.mainFrame().evaluate(CAPTCHA_WIDGET_EXPRESSION));
+    const main = page.mainFrame();
+    // G2e: Playwright's frames include those inside closed shadow roots (Cloudflare's Turnstile).
+    const extra = (
+      await Promise.all(
+        page
+          .frames()
+          .filter((f) => f.parentFrame() === main && isCaptchaFrameUrl(f.url()))
+          .map((f) => f.frameElement().catch(() => null)),
+      )
+    ).filter((h) => h !== null);
+    if (extra.length === 0) return parse(await main.evaluate(CAPTCHA_WIDGET_EXPRESSION));
+    const fn = await main.evaluateHandle(`(${CAPTCHA_WIDGET_FUNCTION})`);
+    try {
+      return parse(
+        await fn.evaluate(
+          (widget, frames) => (widget as (...f: unknown[]) => unknown)(...frames),
+          extra,
+        ),
+      );
+    } finally {
+      await Promise.all([fn, ...extra].map((h) => h.dispose().catch(() => {})));
+    }
   } catch {
     return null;
   }
 }
+
+/**
+ * G2e: the provider frames that are direct children of the page's main frame, as remote objects
+ * in its main world — found by the browser's frame tree (same-process frames) and its iframe
+ * targets (out-of-process frames under site isolation), so a frame inside a closed shadow root
+ * counts too. Every lookup that fails is skipped; the document's own iframes are read anyway.
+ */
+async function captchaFrameOwnersCdp(session: CDPSession, group: string): Promise<string[]> {
+  const ids = new Set<string>();
+  let mainId: string | undefined;
+  try {
+    const { frameTree } = (await session.send('Page.getFrameTree')) as {
+      frameTree: {
+        frame: { id: string };
+        childFrames?: { frame: { id: string; url: string } }[];
+      };
+    };
+    mainId = frameTree.frame.id;
+    for (const child of frameTree.childFrames ?? [])
+      if (isCaptchaFrameUrl(child.frame.url)) ids.add(child.frame.id);
+  } catch {
+    return [];
+  }
+  try {
+    const { targetInfos } = (await session.send('Target.getTargets')) as {
+      targetInfos: { targetId: string; type: string; url: string; parentFrameId?: string }[];
+    };
+    for (const t of targetInfos)
+      if (
+        t.type === 'iframe' &&
+        isCaptchaFrameUrl(t.url) &&
+        (t.parentFrameId === undefined || t.parentFrameId === mainId)
+      )
+        ids.add(t.targetId);
+  } catch {
+    // No target listing on this session: same-process frames only.
+  }
+  const objects: string[] = [];
+  for (const frameId of ids) {
+    try {
+      const { backendNodeId } = (await session.send('DOM.getFrameOwner', { frameId })) as {
+        backendNodeId: number;
+      };
+      const { object } = (await session.send('DOM.resolveNode', {
+        backendNodeId,
+        objectGroup: group,
+      })) as { object?: { objectId?: string } };
+      if (object?.objectId) objects.push(object.objectId);
+    } catch {
+      // Another tab's frame, or gone meanwhile.
+    }
+  }
+  return objects;
+}
+
+let cdpReads = 0;
 
 /** The same, over a CDP session (the screencast's); null when it cannot be read. */
 export async function captchaWidgetStateCdp(
@@ -133,10 +221,25 @@ export async function captchaWidgetStateCdp(
 ): Promise<CaptchaWidgetState | null> {
   let timer: NodeJS.Timeout | undefined;
   try {
-    const read = session.send('Runtime.evaluate', {
-      expression: CAPTCHA_WIDGET_EXPRESSION,
-      returnByValue: true,
-    }) as Promise<{ result?: { value?: unknown } }>;
+    const group = `holaday-captcha-widget-${++cdpReads}`;
+    const read = (async () => {
+      try {
+        const frames = await captchaFrameOwnersCdp(session, group);
+        return (await (frames.length === 0
+          ? session.send('Runtime.evaluate', {
+              expression: CAPTCHA_WIDGET_EXPRESSION,
+              returnByValue: true,
+            })
+          : session.send('Runtime.callFunctionOn', {
+              functionDeclaration: CAPTCHA_WIDGET_FUNCTION,
+              objectId: frames[0],
+              arguments: frames.map((objectId) => ({ objectId })),
+              returnByValue: true,
+            }))) as { result?: { value?: unknown } };
+      } finally {
+        void session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => {});
+      }
+    })();
     // A JS dialog blocks the page: no answer in time is no reading.
     const late = new Promise<null>((resolve) => {
       timer = setTimeout(() => resolve(null), 1_000);
