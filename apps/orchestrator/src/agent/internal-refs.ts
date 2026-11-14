@@ -202,19 +202,19 @@ export function stripReasoning(text: string): string {
     // FIX-62 P1-9 (FIX-61B 复审 #2): only a </think> that ends reasoning — at the start, on a line
     // of its own, right after a sentence's end, or ending a line. One named inside a sentence
     // (「再用 </think> 标签结束推理部分」) or in quotes / 书名号 is prose and stays.
-    // 61.80 (LEAK-1 retest, s04 run 8): the model wrote 「</think>」 dozens of times and nothing
-    // else; only the first went, the rest was delivered as the answer. Each lone closing tag that
-    // ends reasoning goes, one after another.
-    for (let round = 0; round < 200; round++) {
-      const close = out.search(/<\/think>/i);
-      if (close < 0 || /<think>/i.test(out.slice(0, close))) break;
+    const close = out.search(/<\/think>/i);
+    if (close >= 0 && !/<think>/i.test(out.slice(0, close))) {
       const before = out.slice(0, close);
       const after = out.slice(close + '</think>'.length);
       const endsReasoning =
         /(?:^|\n|[。！？.!?…])[ \t]*$/u.test(before) || /^[ \t]*(?:\n|$)/.test(after);
       const quoted = /[「“"'《（(]\s*$/u.test(before) || /^\s*[」”"'》）)]/u.test(after);
-      if (!endsReasoning || quoted) break;
-      out = after;
+      if (endsReasoning && !quoted) {
+        // 61.80 (LEAK-1 retest, s04 run 8: 「</think>」 forty times and nothing else): after the
+        // reasoning ends, a further closing tag alone on its line is a leftover — only the tag goes,
+        // never the text around it (复审: an answer between two tags is the answer).
+        out = after.replace(/^[ \t]*<\/think>[ \t]*(?:\n|$)/gim, '');
+      }
     }
   }
   return out

@@ -140,11 +140,33 @@ describe('LEAK-1 retest run 8 · a reply of nothing but closing reasoning tags',
     expect(sanitizeFinalText(RUN8)).toBe('');
   });
   it('an answer after the tags stays; a tag named in a sentence stays', () => {
-    expect(sanitizeFinalText(`</think>\n\n</think>\n\n2024 年得主是韩江。`)).toBe(
+    expect(sanitizeFinalText('</think>\n\n</think>\n\n2024 年得主是韩江。')).toBe(
       '2024 年得主是韩江。',
     );
     expect(sanitizeFinalText('推理结束时模型会输出 </think> 标签。')).toBe(
       '推理结束时模型会输出 </think> 标签。',
     );
+  });
+});
+
+describe('LEAK-1 复审 #5 · an answer between two closing tags is the answer', () => {
+  it.each([
+    ['想好了。\n</think>\n## 结论\n茅台 PE 30 倍。\n</think>\n', '## 结论\n茅台 PE 30 倍。'],
+    ['r</think>\n答案正文。\n</think>', '答案正文。'],
+    ['想一想。</think>\n答案：42。\n</think>\n补充。', '答案：42。\n补充。'],
+    ['reasoning</think>\nANSWER PART 1\n</think>\nmore', 'ANSWER PART 1\nmore'],
+  ])('%s', (text, shown) => {
+    expect(sanitizeFinalText(text)).toBe(shown);
+  });
+});
+
+describe('LEAK-1 retest run 11 · an invented browser_ tool name', () => {
+  it.each([
+    '{"type": "browser_navigate", "url": ""}',
+    'browser_click{"ref": "e12"}',
+    '{"type": "computer_screenshot"}',
+  ])('%s', (text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
   });
 });
