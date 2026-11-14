@@ -125,3 +125,27 @@ it('复审 P1-2: an invisible reCAPTCHA badge with its own response does not cle
     await page.close();
   }
 }, 30000);
+
+it('复审 #2 P1-2: a v3 token filled elsewhere on the page does not answer the visible box still to tick', async () => {
+  const page = await demoPage();
+  try {
+    await page.evaluate(() => {
+      const holder = document.createElement('div');
+      holder.innerHTML =
+        '<iframe src="https://www.google.com/recaptcha/api2/anchor?k=v3&size=invisible" style="width:256px;height:60px;border:0"></iframe>' +
+        '<textarea name="g-recaptcha-response" style="display:none"></textarea>';
+      document.body.appendChild(holder);
+      (holder.querySelector('textarea') as HTMLTextAreaElement).value = 'v'.repeat(400);
+    });
+    expect((await probeBrowserBlocker(page))?.reason).toBe('captcha');
+    // The visible box's own field filled: passed.
+    await page.evaluate(() => {
+      (document.getElementById('g-recaptcha-response') as HTMLTextAreaElement).value = 'x'.repeat(
+        400,
+      );
+    });
+    expect(await probeBrowserBlocker(page)).toBeNull();
+  } finally {
+    await page.close();
+  }
+}, 30000);

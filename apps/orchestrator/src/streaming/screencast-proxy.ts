@@ -297,6 +297,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             captchaHandoffs.active(args.instance.taskId, args.instance.userId, binding.control);
           const session = streamer?.getSession();
           const state = waiting && session ? await captchaWidgetStateCdp(session) : null;
+          // 复审 #2 P2: a reading that failed (a busy page) keeps what the screen shows.
+          if (waiting && !state) return;
           // Only a box still to be done is zoomed onto; passed or gone → the whole page again.
           const box = state?.unpassed ? state.box : null;
           const key = JSON.stringify(box);

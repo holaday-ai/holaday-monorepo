@@ -58,16 +58,31 @@ export const CAPTCHA_WIDGET_EXPRESSION = `(() => {
     if (/[?&]size=invisible/i.test(f.src || '')) continue;
     shown.push({ f, r, challenge: /\\/bframe|[?&#]frame=challenge/i.test(f.src || '') });
   }
-  const fields = [...document.querySelectorAll('textarea[name="g-recaptcha-response"],textarea[name="h-captcha-response"],input[name="cf-turnstile-response"]')];
-  const answered = fields.some((e) => (e.value || '').length >= 20);
+  const FIELD = 'textarea[name="g-recaptcha-response"],textarea[name="h-captcha-response"],input[name="cf-turnstile-response"]';
+  const fields = [...document.querySelectorAll(FIELD)];
+  // 复审 #2 P1-2: a box is judged by its OWN response field (in its component's container) —
+  // an invisible / v3 token elsewhere on the page never answers a box someone still has to tick.
+  const ownField = (frame) => {
+    for (let e = frame.parentElement, depth = 0; e && depth < 4; e = e.parentElement, depth++) {
+      const found = e.querySelector(FIELD);
+      if (found) return found;
+    }
+    return null;
+  };
   const challenge = shown.filter((x) => x.challenge).sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0];
   const boxes = shown.filter((x) => !x.challenge).sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height);
-  const unpassed = !!challenge || (boxes.length > 0 && !answered);
+  const boxAnswered = (x) => {
+    const field = ownField(x.f);
+    return !!field && (field.value || '').length >= 20;
+  };
+  const unpassed = !!challenge || boxes.some((x) => !boxAnswered(x));
+  // Passed only on evidence: at least one visible box, every one answered, no challenge open.
+  const passed = !challenge && boxes.length > 0 && boxes.every(boxAnswered);
   const pick = challenge || (unpassed ? boxes[0] : null);
   return {
     known: frames.length > 0 || fields.length > 0,
     unpassed,
-    passed: answered && !challenge,
+    passed,
     box: pick ? { x: Math.round(pick.r.left), y: Math.round(pick.r.top), width: Math.round(pick.r.width), height: Math.round(pick.r.height) } : null,
   };
 })()`;

@@ -273,9 +273,16 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
  * frame, a slider) keeps its rules, and not seeing a box is never taken as passed.
  */
 async function captchaByBox<
-  T extends { reason: string; evidence?: { rule?: string } } | null | undefined,
+  T extends { reason: string; evidence?: { rule?: string; scope?: string } } | null | undefined,
 >(page: Page, hit: T): Promise<T | null> {
-  if (hit?.reason !== 'captcha' || !hit.evidence?.rule?.includes(':url-path:')) return hit;
+  // 复审 #2 P2: only the page's own address — a subframe matched at /captcha is not judged by a
+  // box in the main document.
+  if (
+    hit?.reason !== 'captcha' ||
+    !hit.evidence?.rule?.includes(':url-path:') ||
+    hit.evidence.scope !== 'document'
+  )
+    return hit;
   const state = await captchaWidgetState(page);
   return state?.known && state.passed ? null : hit;
 }
