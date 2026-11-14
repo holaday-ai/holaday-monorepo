@@ -47,7 +47,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { explainExecutionMode, asksForWriting } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -5076,6 +5076,28 @@ export const tasksRouter = router({
                   ) {
                     return;
                   }
+                  // G2b (production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」: the write-up of
+                  // the search results failed, generate — which cannot search — wrote a
+                  // web_search call as the answer): a web lookup the scrape lane could not
+                  // answer goes to the cloud browser; if that cannot start it fails honestly.
+                  // It is never answered by generate. A search with no query is not a lookup.
+                  // 复审: a task that writes from what it searched (「搜索最新资料，帮我写一篇…报告」)
+                  // is not a lookup — it keeps the generate fallback (300 s, the writing lane).
+                  const searchLookup =
+                    scrapeOutcome.status === 'failed' &&
+                    scrapeOutcome.source === 'search' &&
+                    scrapeOutcome.failureKind !== 'input' &&
+                    !asksForWriting(input.intent);
+                  if (
+                    searchLookup &&
+                    !pageUnreadable &&
+                    !liveFactLookup &&
+                    (await handOverToBrowser(
+                      '搜索结果没能整理成回答，已自动改用云端浏览器去页面上查',
+                    ))
+                  ) {
+                    return;
+                  }
 
                   // A1 — scrape failed → fall back to generate. Generate has
                   // zero infra dependencies (no Brave, no Firecrawl) so it's
@@ -5117,10 +5139,11 @@ export const tasksRouter = router({
                       (scrapeOutcome.source === 'scrape' ||
                         scrapeOutcome.failureKind === 'blocked')) ||
                     liveFactLookup ||
-                    interfaceFailed
+                    interfaceFailed ||
+                    searchLookup
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
-                    // search whose every result was a wall (FIX-32).
+                    // search whose every result was a wall (FIX-32), nor any web lookup (G2b).
                     outcome = {
                       status: 'failed',
                       reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',
