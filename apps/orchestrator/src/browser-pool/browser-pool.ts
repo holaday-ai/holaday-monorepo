@@ -145,6 +145,16 @@ interface PoolProcessRecord {
  */
 export const AWAITING_REPLY = 'awaiting-reply';
 
+/** BROWSER-HOME-1: a user's cloud browser lent to one of their tasks (keyed by that task id). */
+interface BrowserHomeLoan {
+  readonly userId: string;
+  /** `bhs_<userId>` — where the browser goes back to. */
+  readonly homeId: string;
+  readonly instance: BrowserInstance;
+  /** The session's own idle timeout, restored on return. */
+  readonly idleTimeoutMs?: number;
+}
+
 export class BrowserPool {
   readonly #strict: boolean;
   #brokerRuntime?: BrokerPoolRuntime;
@@ -163,6 +173,8 @@ export class BrowserPool {
     { userId: string; promise: Promise<BrowserInstance>; cancelled: boolean }
   >();
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
+  /** BROWSER-HOME-1: task id → the cloud browser it holds (see lendBrowserHome). */
+  private readonly browserHomeLoans = new Map<string, BrowserHomeLoan>();
   private readonly releasePromises = new Map<string, Promise<boolean>>();
   private readonly backgroundWork = new WeakMap<BrowserInstance, PoolBackgroundWork>();
   private readonly processRecords = new Set<PoolProcessRecord>();
@@ -809,6 +821,175 @@ export class BrowserPool {
       }
     }
     return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: lend the user's own cloud browser (`bhs_<userId>`) to one of their tasks.
+   * The process, page, cookies and history stay exactly as they are; only the pool key moves to
+   * the task (as adoptRetained does), so the task's stream, input and touch reach the same
+   * browser. The source id is derived from `userId` — a caller can never name another user's
+   * browser — and the instance must be owned by that user. At most one task holds it: once lent
+   * it is no longer under `bhs_`, so a second lend finds nothing. Returns null when not lent.
+   */
+  lendBrowserHome(
+    userId: string,
+    taskId: string,
+    /** The task's policy: it must match the browser's (a home browser is anonymous). */
+    sessionPolicy: BrowserSessionPolicy,
+  ): BrowserInstance | null {
+    if (this.shuttingDown || !userId) return null;
+    const homeId = `${BROWSER_HOME_SESSION_PREFIX}${userId}`;
+    if (!taskId || taskId === homeId || taskId.startsWith(BROWSER_HOME_SESSION_PREFIX)) return null;
+    const inst = this.instances.get(homeId);
+    if (!inst || inst.taskId !== homeId || inst.userId !== userId || inst.status !== 'ready')
+      return null;
+    if (!this.processesRunning(inst)) return null;
+    if (this.browserHomeHolder(userId)) return null;
+    // A home browser is never on a review lease; one that is would not be the session.
+    if (inst.retainedUntil != null) return null;
+    if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
+    if (!this.destinationFree(taskId) || this.releasePromises.has(homeId)) return null;
+    const broker = this.#brokerBindings.get(inst);
+    if (this.#strict && !broker) return null;
+
+    const loan: BrowserHomeLoan = {
+      userId,
+      homeId,
+      instance: inst,
+      ...(inst.idleTimeoutMs !== undefined ? { idleTimeoutMs: inst.idleTimeoutMs } : {}),
+    };
+    this.moveInstanceKey(inst, homeId, taskId, broker);
+    // While the task holds it the browser follows the task's lifecycle (pool idle default).
+    delete inst.idleTimeoutMs;
+    if (broker) {
+      try {
+        this.#checkBroker(broker);
+      } catch {
+        this.moveInstanceKey(inst, taskId, homeId, broker);
+        if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
+        return null;
+      }
+    }
+    this.browserHomeLoans.set(taskId, loan);
+    this.logger.info({ userId, taskId }, 'pool: lent the cloud browser to a task');
+    return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: give a lent cloud browser back to `bhs_<userId>` when its task ends (any
+   * terminal state). Ends any hold the task left on it (awaiting-reply / review lease) and restores
+   * the session's own idle timeout. Null when there is nothing to give back — the loan is unknown,
+   * belongs to another user, was ended (the person closed the session) or the browser is gone /
+   * stopping — and the caller then finishes the task browser the normal way.
+   */
+  returnBrowserHome(taskId: string, userId: string): BrowserInstance | null {
+    const loan = this.browserHomeLoans.get(taskId);
+    if (!loan || loan.userId !== userId) return null;
+    this.browserHomeLoans.delete(taskId);
+    const inst = this.instances.get(taskId);
+    if (
+      this.shuttingDown ||
+      !inst ||
+      inst !== loan.instance ||
+      inst.taskId !== taskId ||
+      inst.userId !== userId ||
+      inst.status !== 'ready' ||
+      !this.processesRunning(inst) ||
+      this.releasePromises.has(taskId)
+    )
+      return null;
+    if (!this.destinationFree(loan.homeId)) return null;
+    const broker = this.#brokerBindings.get(inst);
+    const retentionTimer = this.retentionTimers.get(taskId);
+    if (retentionTimer) clearTimeout(retentionTimer);
+    this.retentionTimers.delete(taskId);
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    if (broker) {
+      broker.retained = false;
+      broker.retainedUntil = undefined;
+      broker.retentionTtlMs = undefined;
+    }
+    this.moveInstanceKey(inst, taskId, loan.homeId, broker);
+    if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
+    if (broker) {
+      try {
+        this.#checkBroker(broker);
+      } catch {
+        return null;
+      }
+    }
+    this.logger.info({ userId, taskId }, 'pool: cloud browser returned to its session');
+    return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: the person closed their cloud browser while a task holds it. The loan ends
+   * (nothing is given back later); the task keeps the browser until its normal release.
+   */
+  endBrowserHomeLoan(userId: string): string | null {
+    const holder = this.browserHomeHolder(userId);
+    if (holder) this.browserHomeLoans.delete(holder);
+    return holder;
+  }
+
+  /** BROWSER-HOME-1: the task currently holding this user's cloud browser, or null. */
+  browserHomeHolder(userId: string): string | null {
+    for (const [taskId, loan] of this.browserHomeLoans) {
+      if (loan.userId !== userId) continue;
+      const inst = this.instances.get(taskId);
+      if (inst === loan.instance && inst.taskId === taskId && inst.status === 'ready')
+        return taskId;
+      // The browser stopped (or moved) while lent: the loan is over.
+      if (!inst || inst !== loan.instance || inst.taskId !== taskId)
+        this.browserHomeLoans.delete(taskId);
+    }
+    return null;
+  }
+
+  /**
+   * BROWSER-HOME-1: the user's cloud browser wherever it is — under `bhs_<userId>` or lent to one
+   * of their tasks. Never another user's instance.
+   */
+  peekBrowserHome(userId: string): BrowserInstance | null {
+    const homeId = `${BROWSER_HOME_SESSION_PREFIX}${userId}`;
+    const holder = this.browserHomeHolder(userId);
+    const inst = this.peek(holder ?? homeId);
+    if (!inst || inst.userId !== userId || inst.taskId !== (holder ?? homeId)) return null;
+    return inst;
+  }
+
+  /** No instance, allocation, release or process cleanup is pending under this pool key. */
+  private destinationFree(taskId: string): boolean {
+    if (this.instances.has(taskId)) return false;
+    if (this.allocationPromises.has(taskId) || this.releasePromises.has(taskId)) return false;
+    if (
+      Array.from(this.processRecords).some(
+        (record) => record.taskId === taskId && !record.instance,
+      ) ||
+      (this.#strict && Array.from(this.#brokerRecords).some((record) => record.taskId === taskId))
+    )
+      return false;
+    return true;
+  }
+
+  private moveInstanceKey(
+    inst: BrowserInstance,
+    from: string,
+    to: string,
+    broker: BrokerInstanceRecord | undefined,
+  ): void {
+    const now = Date.now();
+    this.instances.delete(from);
+    inst.taskId = to;
+    inst.lastActiveAt = now;
+    this.instances.set(to, inst);
+    if (broker) {
+      broker.revision++;
+      broker.taskId = to;
+      broker.lastActiveAt = now;
+    }
   }
 
   /**

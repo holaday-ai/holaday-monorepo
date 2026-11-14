@@ -6,6 +6,7 @@
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import type { BrowserInstance } from '../../browser-pool/types.js';
 import { env as appEnv } from '../../config/env.js';
@@ -50,6 +51,29 @@ function fakePool() {
     release: vi.fn(async (taskId: string) => instances.delete(taskId)),
     touch: vi.fn(),
     setIdleTimeout: vi.fn(() => true),
+    // Step 4 loans: task id → user (the instance lives under the task id meanwhile).
+    loans: new Map<string, string>(),
+    browserHomeHolder(userId: string) {
+      for (const [taskId, owner] of pool.loans) if (owner === userId) return taskId;
+      return null;
+    },
+    peekBrowserHome(userId: string) {
+      return instances.get(pool.browserHomeHolder(userId) ?? `bhs_${userId}`) ?? null;
+    },
+    endBrowserHomeLoan(userId: string) {
+      const holder = pool.browserHomeHolder(userId);
+      if (holder) pool.loans.delete(holder);
+      return holder;
+    },
+    /** Test helper: what BrowserPool.lendBrowserHome does to the keys. */
+    lend(userId: string, taskId: string) {
+      const inst = instances.get(`bhs_${userId}`)!;
+      instances.delete(`bhs_${userId}`);
+      inst.taskId = taskId;
+      instances.set(taskId, inst);
+      pool.loans.set(taskId, userId);
+      return inst;
+    },
   };
   return { pool, instances, gotos };
 }
@@ -228,5 +252,32 @@ describe('browserHome router — nav', () => {
       'https://www.google.com/search?q=hello',
     ]);
     for (const user of ['usr_cn', 'usr_intl', 'usr_unset']) await caller(user, pool).close();
+  });
+});
+
+describe('browserHome router — while a task holds the browser (step 4)', () => {
+  it('open returns the same browser, nav goes through the task’s control, close ends the session', async () => {
+    const { pool, gotos } = fakePool();
+    const c = caller('usr_lent', pool);
+    await c.open();
+    const inst = pool.lend('usr_lent', 'tsk_running');
+    const run = browserControlSessions.start(inst);
+    try {
+      expect(await c.open()).toEqual({ sessionId: 'bhs_usr_lent', url: null });
+      expect(pool.allocate).toHaveBeenCalledTimes(1);
+      expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/x' })).toEqual({
+        ok: true,
+        url: 'https://1.1.1.1/x',
+      });
+      expect(gotos).toEqual(['https://1.1.1.1/x']);
+      expect(pool.touch).toHaveBeenCalledWith('tsk_running');
+    } finally {
+      run.finish();
+    }
+    expect(await c.close()).toEqual({ released: true });
+    // The task keeps its browser; the session is over.
+    expect(pool.release).not.toHaveBeenCalled();
+    expect(pool.peek('tsk_running')).toBe(inst);
+    expect(pool.browserHomeHolder('usr_lent')).toBeNull();
   });
 });

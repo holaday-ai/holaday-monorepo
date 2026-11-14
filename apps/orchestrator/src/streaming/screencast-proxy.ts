@@ -80,6 +80,11 @@ export function pickInstanceForRoute(args: {
   peekActiveForUser: (userId: string) => BrowserInstance | null;
   /** BROWSER-HOME-1 gate (BROWSER_HOME_ENABLED + allowlist); injectable for tests. */
   browserHomeAllowed?: (userId: string) => boolean;
+  /**
+   * BROWSER-HOME-1 step 4: the caller's own cloud browser wherever it is — in its session or lent
+   * to one of their tasks (pool.peekBrowserHome). Without it only the session key is looked up.
+   */
+  peekBrowserHome?: (userId: string) => BrowserInstance | null;
 }): RoutePickResult {
   if (args.urlArg.startsWith(TASK_ID_PREFIX)) {
     const inst = args.peek(args.urlArg);
@@ -94,6 +99,16 @@ export function pickInstanceForRoute(args: {
   if (args.urlArg.startsWith(BROWSER_HOME_SESSION_PREFIX)) {
     if (!(args.browserHomeAllowed ?? isBrowserHomeEnabledFor)(args.callerUserId))
       return { kind: 'forbidden', reason: 'browser home disabled' };
+    // While one of the caller's tasks holds their browser (step 4), the session id still reaches
+    // it, so the screen never drops. Only for the caller's own id; never another user's browser.
+    const ownSession = args.urlArg === `${BROWSER_HOME_SESSION_PREFIX}${args.callerUserId}`;
+    const located =
+      ownSession && args.peekBrowserHome ? args.peekBrowserHome(args.callerUserId) : null;
+    if (located) {
+      if (located.userId !== args.callerUserId)
+        return { kind: 'forbidden', reason: 'caller does not own browser home session' };
+      return { kind: 'instance', instance: located };
+    }
     const inst = args.peek(args.urlArg);
     if (!inst) return { kind: 'no-active', reason: 'browser home session not active' };
     if (inst.userId !== args.callerUserId || inst.taskId !== args.urlArg) {
@@ -213,6 +228,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             callerUserId,
             peek: (taskId) => opts.pool.peek(taskId),
             peekActiveForUser: (userId) => opts.pool.peekActiveForUser(userId),
+            peekBrowserHome: (userId) => opts.pool.peekBrowserHome(userId),
           });
           if (picked.kind === 'forbidden') {
             log.warn(

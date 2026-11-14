@@ -24,8 +24,44 @@ const MAX_URL_LENGTH = 2048;
 
 export type BrowserHomePool = Pick<
   BrowserPool,
-  'allocate' | 'peek' | 'release' | 'touch' | 'setIdleTimeout'
+  | 'allocate'
+  | 'peek'
+  | 'release'
+  | 'touch'
+  | 'setIdleTimeout'
+  | 'browserHomeHolder'
+  | 'peekBrowserHome'
+  | 'endBrowserHomeLoan'
 >;
+
+/**
+ * Step 4: a task sent from the floating input runs in this browser. Between the request's checks
+ * and the moment the pool lends the browser to the task, this claim keeps a second send out (after
+ * that the pool's loan does). A claim never handed over is dropped by its request; one handed over
+ * but never lent (the dispatch never ran) stops counting after CLAIM_STALE_MS.
+ */
+const CLAIM_STALE_MS = 2 * 60_000;
+
+export interface BrowserHomeTaskClaim {
+  /** The request hands the claim to the task's dispatch, which lends the browser. */
+  handOver(): void;
+  /** Drop it (the browser is lent, or the task never got that far). Idempotent. */
+  release(): void;
+  /** The request ends: drop the claim unless it was handed over. */
+  settle(): void;
+}
+
+export type BrowserHomeClaimResult =
+  | { kind: 'claimed'; claim: BrowserHomeTaskClaim }
+  | { kind: 'busy' }
+  | { kind: 'closed' };
+
+/** Where the user's cloud browser is: in its session, or lent to one of their tasks. */
+export interface BrowserHomeLocation {
+  instance: BrowserInstance;
+  /** The task holding it, or null when it is in the session. */
+  heldBy: string | null;
+}
 
 export function browserHomeSessionId(userId: string): string {
   return `${BROWSER_HOME_SESSION_PREFIX}${userId}`;
@@ -55,12 +91,74 @@ export class BrowserHomeSessions {
   private readonly lastUrls = new Map<string, string>();
   private readonly opening = new Map<string, Promise<BrowserHomeOpenResult>>();
   private readonly watched = new WeakSet<object>();
+  private readonly taskClaims = new Map<string, { token: object; at: number }>();
 
-  /** The user's ready home browser, or null. */
+  /** The user's ready home browser while it is in the session (not lent to a task), or null. */
   instanceFor(pool: Pick<BrowserPool, 'peek'>, userId: string): BrowserInstance | null {
     const instance = pool.peek(browserHomeSessionId(userId));
     if (!instance || instance.userId !== userId || instance.status !== 'ready') return null;
     return instance;
+  }
+
+  /** The user's ready cloud browser wherever it is (in the session or held by their task). */
+  locate(
+    pool: Pick<BrowserPool, 'peek' | 'browserHomeHolder' | 'peekBrowserHome'>,
+    userId: string,
+  ): BrowserHomeLocation | null {
+    const home = this.instanceFor(pool, userId);
+    if (home) return { instance: home, heldBy: null };
+    const heldBy = pool.browserHomeHolder(userId);
+    if (!heldBy) return null;
+    const instance = pool.peekBrowserHome(userId);
+    if (!instance || instance.userId !== userId || instance.taskId !== heldBy) return null;
+    if (instance.status !== 'ready') return null;
+    return { instance, heldBy };
+  }
+
+  /**
+   * Step 4: reserve the user's cloud browser for one new task. `busy` while a task holds it (or
+   * another send is being created); `closed` when there is no open browser to run in.
+   */
+  claimTask(
+    pool: Pick<BrowserPool, 'peek' | 'browserHomeHolder'>,
+    userId: string,
+    now = Date.now(),
+  ): BrowserHomeClaimResult {
+    const existing = this.taskClaims.get(userId);
+    if (existing && now - existing.at < CLAIM_STALE_MS) return { kind: 'busy' };
+    if (pool.browserHomeHolder(userId)) return { kind: 'busy' };
+    if (!this.instanceFor(pool, userId)) return { kind: 'closed' };
+    const token = {};
+    this.taskClaims.set(userId, { token, at: now });
+    let handedOver = false;
+    const release = () => {
+      if (this.taskClaims.get(userId)?.token === token) this.taskClaims.delete(userId);
+    };
+    return {
+      kind: 'claimed',
+      claim: {
+        handOver: () => {
+          handedOver = true;
+        },
+        release,
+        settle: () => {
+          if (!handedOver) release();
+        },
+      },
+    };
+  }
+
+  /**
+   * Step 4 hand-back: the task holding the user's browser ended (any terminal state). The browser
+   * goes back to `bhs_<userId>` with its 15-minute idle and the person's review control. False when
+   * there is nothing to give back (see BrowserPool.returnBrowserHome).
+   */
+  giveBack(pool: Pick<BrowserPool, 'returnBrowserHome'>, taskId: string, userId: string): boolean {
+    const instance = pool.returnBrowserHome(taskId, userId);
+    if (!instance) return false;
+    openPersonControl(instance);
+    void currentUrl(instance).then((url) => this.rememberUrl(userId, url));
+    return true;
   }
 
   lastUrl(userId: string): string | null {
@@ -95,11 +193,12 @@ export class BrowserHomeSessions {
     logger: Logger,
   ): Promise<BrowserHomeOpenResult> {
     const sessionId = browserHomeSessionId(userId);
-    const existing = this.instanceFor(pool, userId);
+    const existing = this.locate(pool, userId);
     if (existing) {
-      pool.touch(sessionId);
-      openPersonControl(existing);
-      const url = await currentUrl(existing);
+      pool.touch(existing.instance.taskId);
+      // While a task holds it, the person's input already goes through the task's control.
+      if (!existing.heldBy) openPersonControl(existing.instance);
+      const url = await currentUrl(existing.instance);
       this.rememberUrl(userId, url);
       return { sessionId, url: rememberable(url) ? url : null };
     }
@@ -179,13 +278,21 @@ export class BrowserHomeSessions {
     }
   }
 
-  /** Release the user's home browser (remembering where it was). False when none was open. */
+  /**
+   * Release the user's home browser (remembering where it was). False when none was open. While a
+   * task holds it, the session ends instead: nothing is given back when that task ends, and the
+   * task's normal release applies to the browser.
+   */
   async close(pool: BrowserHomePool, userId: string): Promise<boolean> {
     await this.opening.get(userId)?.catch(() => {});
-    const instance = this.instanceFor(pool, userId);
-    if (!instance) return false;
-    this.rememberUrl(userId, await currentUrl(instance));
-    return pool.release(instance.taskId, 'browser-home-close');
+    const seen = this.locate(pool, userId);
+    if (!seen) return false;
+    this.rememberUrl(userId, await currentUrl(seen.instance));
+    // Located again after the await: the task may have given it back meanwhile.
+    const location = this.locate(pool, userId);
+    if (!location) return false;
+    if (location.heldBy) return pool.endBrowserHomeLoan(userId) !== null;
+    return pool.release(location.instance.taskId, 'browser-home-close');
   }
 }
 

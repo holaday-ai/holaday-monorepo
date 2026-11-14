@@ -3,7 +3,12 @@
  *
  * open()  → create or reuse `bhs_<userId>`; returns { sessionId, url } (url null = blank page).
  * nav()   → back / forward / reload / goto (an address or search words) as the person's input.
- * close() → release it (the last address is remembered for the next open).
+ * close() → release it (the last address is remembered for the next open). While one of the
+ *           user's tasks holds it (tasks.create browserHomeSession), the session ends and the
+ *           task's normal release applies when it finishes.
+ *
+ * A task sent from the page runs in this same browser (step 4): the pool lends it to the task and
+ * takes it back on every terminal state; open / nav / the stream follow it meanwhile.
  *
  * Behind BROWSER_HOME_ENABLED + BROWSER_HOME_ALLOWLIST: off, every endpoint refuses (FORBIDDEN).
  * The screen streams through /screencast-ws/bhs_<userId> (streaming/screencast-proxy.ts).
@@ -89,8 +94,9 @@ export const browserHomeRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const pool = requirePool(ctx);
-      const instance = browserHomeSessions.instanceFor(pool, ctx.userId);
-      if (!instance) return { ok: false as const, reason: 'no_session' };
+      const location = browserHomeSessions.locate(pool, ctx.userId);
+      if (!location) return { ok: false as const, reason: 'no_session' };
+      const { instance } = location;
       pool.touch(instance.taskId);
       let url: string | undefined;
       if (input.direction === 'goto') {
@@ -102,8 +108,9 @@ export const browserHomeRouter = router({
         pool,
         logger: ctx.logger,
         instance,
-        // No task ever runs on this browser (yet): the person's own review control.
-        reviewAllowed: true,
+        // In the session: the person's own review control. Held by their task: the task's control
+        // (the assistant yields to the person, as for any input on the screen).
+        reviewAllowed: location.heldBy === null,
         direction: input.direction,
         url,
       });

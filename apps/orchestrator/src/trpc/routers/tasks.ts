@@ -116,6 +116,7 @@ import {
   shouldRunSupercarTerminalSideEffects,
 } from '../../agent/supercar/task-state-machine.js';
 import {
+  type UserBrowserRoute,
   browserTaskTargetUrl,
   classifyIdentityNeed,
   decideUserBrowserRoute,
@@ -198,6 +199,16 @@ import {
   finalizeClaim as finalizeTaskCreateClaim,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
+import {
+  type BrowserHomeTaskClaim,
+  browserHomeSessions,
+} from '../../browser-home/browser-home-session.js';
+import {
+  assertBrowserHomeTaskAllowed,
+  claimBrowserHomeTaskOrThrow,
+  finishBrowserHomeTask,
+  lendBrowserHomeToTask,
+} from '../../browser-home/browser-home-task.js';
 import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
@@ -717,6 +728,13 @@ export const imageCreationOptionsInput = z.object({
 
 const createInput = z.object({
   localChrome: localChromeSelectionSchema.optional(),
+  /**
+   * BROWSER-HOME-1 step 4 — sent from the「云浏览器」floating input: run IN the person's open cloud
+   * browser (`bhs_<userId>`), from the page it shows, always in the browser lane; the browser goes
+   * back to the session on every terminal state. Refused (FORBIDDEN) when the entry is off for the
+   * user, with no open browser, or combined with a follow-up / retry / local Chrome / continuation.
+   */
+  browserHomeSession: z.boolean().optional(),
   browserPreference: z.enum(['cloud-public']).optional(),
   /**
    * FIX-PR259-2 — re-submit a cancelled, non-identity extension wait in the
@@ -1150,6 +1168,7 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId?: unknown;
     publicCloudContinuationOf?: unknown;
     localChrome?: unknown;
+    browserHomeSession?: unknown;
   },
 >(input: T) {
   const {
@@ -1157,6 +1176,7 @@ export function scrapeBrowserRetryInput<
     retryOfTaskId: _retryOfTaskId,
     publicCloudContinuationOf: _publicCloudContinuationOf,
     localChrome: _localChrome,
+    browserHomeSession: _browserHomeSession,
     ...rest
   } = input;
   return rest;
@@ -1217,6 +1237,8 @@ export const tasksRouter = router({
           message: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。',
         });
       }
+      // BROWSER-HOME-1 step 4: before anything is created or charged.
+      assertBrowserHomeTaskAllowed({ userId: ctx.userId, input, pool: ctx.browserPool });
       // O15 — code-task refusal lands BEFORE user lookup so even an
       // unauthenticated-token-in-fail-path doesn't get scaffolding.
       //
@@ -1281,6 +1303,20 @@ export const tasksRouter = router({
       // and the first task insert of this request links the replacement in the
       // same transaction (see insertWithContinuationLink below).
       let continuationLink: ContinuationLink | null = null;
+      // BROWSER-HOME-1 step 4: one task at a time in the person's cloud browser. Taken only when
+      // this request really creates (not on an idempotent replay); dropped when the request ends
+      // unless the task's dispatch took it over (that dispatch lends the browser).
+      let browserHomeClaim: BrowserHomeTaskClaim | null = null;
+      const withBrowserHomeClaim = async <T>(create: () => Promise<T>): Promise<T> => {
+        if (!input.browserHomeSession) return create();
+        const claim = claimBrowserHomeTaskOrThrow({ userId: ctx.userId, pool: ctx.browserPool });
+        browserHomeClaim = claim;
+        try {
+          return await create();
+        } finally {
+          claim.settle();
+        }
+      };
       const continuationRepo = new TaskRepository(ctx.db, ctx.taskOrigin);
       const withContinuation = <T extends { taskId: string }>(create: () => Promise<T>) =>
         continuationOf
@@ -1329,7 +1365,7 @@ export const tasksRouter = router({
                   'tasks.create: public-cloud continuation claim not released',
                 ),
             })
-          : create();
+          : withBrowserHomeClaim(create);
       return runTaskCreateIdempotently({
         clientRequestId: input.clientRequestId,
         claim: () =>
@@ -1911,7 +1947,7 @@ export const tasksRouter = router({
               ? ('browser' as const)
               : retryCore
                 ? ('generate' as const)
-                : input.localChrome
+                : input.localChrome || input.browserHomeSession
                   ? ('browser' as const)
                   : resolveFollowUpExecutionMode({
                       parentHasBrowserContext,
@@ -1938,20 +1974,23 @@ export const tasksRouter = router({
             // Readable identity decision, kept on the task for later diagnosis.
             const identityDecision =
               executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
-            const browserRoute =
-              executionMode === 'browser'
-                ? decideUserBrowserRoute({
-                    enabled: taskBrowserCapabilities.routingV2,
-                    intent: input.intent,
-                    extensionOnline: hasConnectedExtension(ctx.userId),
-                    selectionOrigin: input.localChrome
-                      ? new URL(input.localChrome.expectedUrl).origin
-                      : undefined,
-                    publicCloudRequested: input.browserPreference === 'cloud-public',
-                    legacyCookieSyncRetired: true,
-                    cloudSessionAvailable,
-                  })
-                : { lane: 'legacy' as const, reason: 'flag_off' as const };
+            const browserRoute: UserBrowserRoute =
+              executionMode === 'browser' && input.browserHomeSession
+                ? // BROWSER-HOME-1: the person's own (anonymous) cloud browser, as it is.
+                  { lane: 'cloud', reason: 'public_site', sessionPolicy: 'anonymous' }
+                : executionMode === 'browser'
+                  ? decideUserBrowserRoute({
+                      enabled: taskBrowserCapabilities.routingV2,
+                      intent: input.intent,
+                      extensionOnline: hasConnectedExtension(ctx.userId),
+                      selectionOrigin: input.localChrome
+                        ? new URL(input.localChrome.expectedUrl).origin
+                        : undefined,
+                      publicCloudRequested: input.browserPreference === 'cloud-public',
+                      legacyCookieSyncRetired: true,
+                      cloudSessionAvailable,
+                    })
+                  : { lane: 'legacy' as const, reason: 'flag_off' as const };
             // D17-P1-01 — which sessions this task's browser may load, fixed here by the
             // server and stored on the task. Only a task that needs the user's own data
             // may load a vault session (and not after a public choice or on a logged-out
@@ -2301,8 +2340,12 @@ export const tasksRouter = router({
                 message: '安全浏览器执行环境尚未就绪，未创建任务。请稍后重试。',
               });
             }
+            // BROWSER-HOME-1: a cloud-browser task always runs the agent loop from the current page.
             const directOpenUrl =
-              !scrapeBrowserRetry && !input.localChrome && executionMode === 'browser'
+              !scrapeBrowserRetry &&
+              !input.localChrome &&
+              !input.browserHomeSession &&
+              executionMode === 'browser'
                 ? extractRunnableDirectOpenUrl(input.intent, input.mode)
                 : null;
             const directOpenSafetyError = directOpenUrl
@@ -5623,6 +5666,12 @@ export const tasksRouter = router({
                 code: 'PRECONDITION_FAILED',
                 message: 'BROWSER_RETRY_RUNTIME_UNAVAILABLE',
               });
+            // BROWSER-HOME-1: only the agent loop runs in the person's cloud browser.
+            if (input.browserHomeSession && !browserMessagesAdapter)
+              throw new TRPCError({
+                code: 'PRECONDITION_FAILED',
+                message: '浏览器执行器尚未就绪，未扣除额度。请稍后重试。',
+              });
             if (browserMessagesAdapter) {
               const taskId = scrapeBrowserRetry?.taskId ?? newExternalId('task');
 
@@ -5682,8 +5731,10 @@ export const tasksRouter = router({
               // moment a slot frees; if the queue isn't wired (e.g. legacy
               // boot without MULTI_USER) we fall back to the historical
               // 'executing' seed.
+              // BROWSER-HOME-1: a cloud-browser task needs no new pool slot — never queued for one.
               const willQueueDispatch = Boolean(
                 !input.localChrome &&
+                  !input.browserHomeSession &&
                   ctx.taskQueue &&
                   executionMode === 'browser' &&
                   shouldUseBrowserPool(ctx.userId),
@@ -5840,14 +5891,23 @@ export const tasksRouter = router({
                     // .finally below calls release(taskId) to tear down
                     // immediately on completion. Per-user concurrency is gated
                     // upstream via getActiveTaskCount + plan limits.
-                    const adopted = input.replyToTaskId
-                      ? ctx.browserPool.adoptRetained(
-                          input.replyToTaskId,
+                    // BROWSER-HOME-1: the person's open cloud browser, lent as it is (its page
+                    // kept); given back on every terminal path (finishBrowserHomeTask below).
+                    const adopted = input.browserHomeSession
+                      ? lendBrowserHomeToTask({
+                          pool: ctx.browserPool,
+                          userId: ctx.userId,
                           taskId,
-                          ctx.userId,
-                          taskSessionPolicy,
-                        )
-                      : null;
+                          claim: browserHomeClaim,
+                        })
+                      : input.replyToTaskId
+                        ? ctx.browserPool.adoptRetained(
+                            input.replyToTaskId,
+                            taskId,
+                            ctx.userId,
+                            taskSessionPolicy,
+                          )
+                        : null;
                     let allocatedForContinuation = false;
                     const instance = adopted
                       ? adopted
@@ -5915,7 +5975,9 @@ export const tasksRouter = router({
                     taskBrowserCapabilities = instance.capabilities ?? taskBrowserCapabilities;
                     perUserExec = instance.executor;
                     adoptedBrowserSession =
-                      continuation === 'adopted' || continuation === 'restore';
+                      continuation === 'adopted' ||
+                      continuation === 'restore' ||
+                      Boolean(input.browserHomeSession);
                     ctx.logger.info(
                       {
                         taskId,
@@ -6203,7 +6265,11 @@ export const tasksRouter = router({
                   taskId,
                   // CAPTCHA-REDUCE-1: anonymous cloud sessions keep this user's
                   // verification clearance (profile store off unless configured).
-                  ...(taskSessionPolicy === 'anonymous' && !input.localChrome
+                  // BROWSER-HOME-1: never in the person's own cloud browser (its live cookies are
+                  // neither overwritten from nor saved into the task profile store).
+                  ...(taskSessionPolicy === 'anonymous' &&
+                  !input.localChrome &&
+                  !input.browserHomeSession
                     ? { persistentProfileUser: ctx.userId }
                     : {}),
                   // OPEN-ANY-SITE-1: pool browsers learn sites that refuse their egress.
@@ -7034,6 +7100,12 @@ export const tasksRouter = router({
                   // second call when the slot is already torn down no-ops.
                   if (didAllocatePool && ctx.browserPool) {
                     const releasingPool = ctx.browserPool;
+                    // BROWSER-HOME-1: the person's cloud browser goes back to them instead.
+                    if (
+                      input.browserHomeSession &&
+                      browserHomeSessions.giveBack(releasingPool, taskId, ctx.userId)
+                    )
+                      return;
                     void runTaskBackground(ctx, async (ctx) =>
                       releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
                         ctx.logger.warn(
@@ -7101,7 +7173,9 @@ export const tasksRouter = router({
                   allowedDomains: otaAllowedDomains,
                 });
                 const useOtaUserBrowser =
-                  !taskBrowserCapabilities.routingV2 && otaCanary.lane === 'user-browser';
+                  !input.browserHomeSession &&
+                  !taskBrowserCapabilities.routingV2 &&
+                  otaCanary.lane === 'user-browser';
                 if (otaCanary.lane !== null) {
                   // Rollout audit — every OTA-prefer task records its gate outcome.
                   ctx.logger.info(
@@ -8359,12 +8433,22 @@ export const tasksRouter = router({
                       if (didAllocatePool && ctx.browserPool) {
                         const finishingPool = ctx.browserPool;
                         await runTaskBackground(ctx, async () =>
-                          finishTaskBrowser(
-                            finishingPool,
-                            taskId,
-                            appEnv.BROWSER_TERMINAL_RETENTION_MS,
-                            !captchaNeedsRelease,
-                          ),
+                          // BROWSER-HOME-1: every terminal state gives the person's cloud
+                          // browser back to its session (see finishBrowserHomeTask).
+                          input.browserHomeSession
+                            ? finishBrowserHomeTask({
+                                pool: finishingPool,
+                                taskId,
+                                userId: ctx.userId,
+                                retentionMs: appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                                retainForReview: !captchaNeedsRelease,
+                              })
+                            : finishTaskBrowser(
+                                finishingPool,
+                                taskId,
+                                appEnv.BROWSER_TERMINAL_RETENTION_MS,
+                                !captchaNeedsRelease,
+                              ),
                         ).catch((relErr) => {
                           ctx.logger.warn(
                             { err: relErr, taskId, userId: ctx.userId },
@@ -8528,9 +8612,27 @@ export const tasksRouter = router({
                     );
                 }
               };
+              // BROWSER-HOME-1: the dispatch owns the claim from here (it lends the browser). Whatever
+              // way the dispatch ends — including a throw before its run's own release — the
+              // person's browser is given back (a no-op when the run already did).
+              const dispatchBrowserHome = async (
+                executionContext: TaskExecutionContext,
+              ): Promise<void> => {
+                try {
+                  await dispatchToBrave(executionContext);
+                } finally {
+                  browserHomeClaim?.release();
+                  const pool = executionContext.browserPool;
+                  if (pool) browserHomeSessions.giveBack(pool, taskId, ctx.userId);
+                }
+              };
+              const dispatchCloud = input.browserHomeSession
+                ? dispatchBrowserHome
+                : dispatchToBrave;
+              if (input.browserHomeSession) browserHomeClaim?.handOver();
               if (ctx.ordinaryMaintenance) {
                 void runTaskBackground(ctx, async (ctx) =>
-                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchCloud(ctx),
                 ).catch((error) => ctx.logger.error({ error, taskId }, 'browser execution failed'));
               } else if (input.localChrome && ctx.executionLifetime) {
                 const { drain, owner } = ctx.executionLifetime;
@@ -8546,7 +8648,7 @@ export const tasksRouter = router({
                 );
               } else {
                 void runTaskBackground(ctx, async (ctx) =>
-                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchToBrave(ctx),
+                  input.localChrome ? dispatchLocalChrome(ctx) : dispatchCloud(ctx),
                 );
               }
 

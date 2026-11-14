@@ -211,4 +211,91 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
     );
     expect(env.pool.peek('bhs_usr_a')).toBeNull();
   });
+
+  describe('step 4: a task holds the browser', () => {
+    it('open while a task holds it returns the same browser — never a second one', async () => {
+      await sessions.open(env.pool, 'usr_a', logger);
+      const home = env.pool.peek('bhs_usr_a')!;
+      env.executors.get('bhs_usr_a')!.clickTo('https://1.1.1.1/item');
+      expect(env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous')).toBe(home);
+      expect(sessions.locate(env.pool, 'usr_a')).toEqual({ instance: home, heldBy: 'tsk_1' });
+      const again = await sessions.open(env.pool, 'usr_a', logger);
+      expect(again).toEqual({ sessionId: 'bhs_usr_a', url: 'https://1.1.1.1/item' });
+      expect(env.spawnSpy).toHaveBeenCalledTimes(1);
+      expect(sessions.instanceFor(env.pool, 'usr_a')).toBeNull();
+    });
+
+    it('claims: closed when the user has no open browser', () => {
+      expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('closed');
+    });
+
+    it('claims: busy while one is being sent or a task holds it', async () => {
+      await sessions.open(env.pool, 'usr_a', logger);
+      const first = sessions.claimTask(env.pool, 'usr_a');
+      expect(first.kind).toBe('claimed');
+      expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('busy');
+      // Another user is unaffected (and has no browser of their own).
+      expect(sessions.claimTask(env.pool, 'usr_b').kind).toBe('closed');
+      if (first.kind !== 'claimed') throw new Error('unreachable');
+      // The request ended without handing it over: dropped.
+      first.claim.settle();
+      const second = sessions.claimTask(env.pool, 'usr_a');
+      expect(second.kind).toBe('claimed');
+      if (second.kind !== 'claimed') throw new Error('unreachable');
+      second.claim.handOver();
+      second.claim.settle();
+      expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('busy');
+      // The dispatch lent it: from now on the pool's loan keeps others out.
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      second.claim.release();
+      expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('busy');
+      expect(sessions.giveBack(env.pool, 'tsk_1', 'usr_a')).toBe(true);
+      expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('claimed');
+    });
+
+    it('a claim handed over but never lent stops counting after two minutes', async () => {
+      await sessions.open(env.pool, 'usr_a', logger);
+      const t0 = Date.now();
+      const claimed = sessions.claimTask(env.pool, 'usr_a', t0);
+      if (claimed.kind !== 'claimed') throw new Error('unreachable');
+      claimed.claim.handOver();
+      claimed.claim.settle();
+      expect(sessions.claimTask(env.pool, 'usr_a', t0 + 60_000).kind).toBe('busy');
+      expect(sessions.claimTask(env.pool, 'usr_a', t0 + 2 * 60_000).kind).toBe('claimed');
+    });
+
+    it('give back restores the review control and the 15-minute idle', async () => {
+      await sessions.open(env.pool, 'usr_a', logger);
+      const home = env.pool.peek('bhs_usr_a')!;
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      // The task's run takes the control, then finishes.
+      const run = browserControlSessions.start(home);
+      run.finish();
+      expect(sessions.giveBack(env.pool, 'tsk_1', 'usr_a')).toBe(true);
+      expect(home.taskId).toBe('bhs_usr_a');
+      expect(home.idleTimeoutMs).toBe(BROWSER_HOME_IDLE_TIMEOUT_MS);
+      const control = browserControlSessions.get(home, 'usr_a', 'bhs_usr_a');
+      expect(control?.active).toBe(false);
+      expect(control?.control.snapshot().phase).not.toBe('closed');
+      // Another user's give back does nothing.
+      env.pool.lendBrowserHome('usr_a', 'tsk_2', 'anonymous');
+      expect(sessions.giveBack(env.pool, 'tsk_2', 'usr_b')).toBe(false);
+      expect(env.pool.peek('tsk_2')).toBe(home);
+    });
+
+    it('close while a task holds it ends the session; the task keeps the browser', async () => {
+      await sessions.open(env.pool, 'usr_a', logger);
+      const home = env.pool.peek('bhs_usr_a')!;
+      env.executors.get('bhs_usr_a')!.clickTo('https://1.1.1.1/where');
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      expect(await sessions.close(env.pool, 'usr_a')).toBe(true);
+      expect(env.pool.peek('tsk_1')).toBe(home);
+      expect(sessions.locate(env.pool, 'usr_a')).toBeNull();
+      expect(sessions.giveBack(env.pool, 'tsk_1', 'usr_a')).toBe(false);
+      expect(sessions.lastUrl('usr_a')).toBe('https://1.1.1.1/where');
+      // The next open is a fresh session.
+      await sessions.open(env.pool, 'usr_a', logger);
+      expect(env.spawnSpy).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -239,4 +239,60 @@ describe('pickInstanceForRoute — BROWSER-HOME-1 home session path (bhs_…)', 
     ).toBe('forbidden');
     expect(peek).not.toHaveBeenCalled();
   });
+
+  it('step 4: while the owner’s task holds the browser, the session id still reaches it', () => {
+    // Lent: the pool key is the task's, the session key is empty.
+    const inst = fakeInstance({ taskId: 'tsk_running', userId: 'usr_alice' });
+    const peek = vi.fn().mockReturnValue(null);
+    const out = pickInstanceForRoute({
+      urlArg: 'bhs_usr_alice',
+      callerUserId: 'usr_alice',
+      peek,
+      peekActiveForUser: vi.fn(),
+      browserHomeAllowed: () => true,
+      peekBrowserHome: (userId) => (userId === 'usr_alice' ? inst : null),
+    });
+    expect(out.kind).toBe('instance');
+    if (out.kind === 'instance') expect(out.instance).toBe(inst);
+  });
+
+  it('step 4: and again in the session after the task gave it back', () => {
+    const inst = fakeInstance({ taskId: 'bhs_usr_alice', userId: 'usr_alice' });
+    const out = pickInstanceForRoute({
+      urlArg: 'bhs_usr_alice',
+      callerUserId: 'usr_alice',
+      peek: vi.fn().mockReturnValue(inst),
+      peekActiveForUser: vi.fn(),
+      browserHomeAllowed: () => true,
+      peekBrowserHome: () => inst,
+    });
+    expect(out.kind).toBe('instance');
+  });
+
+  it('step 4: another user’s session id never resolves through the lookup', () => {
+    const alices = fakeInstance({ taskId: 'tsk_running', userId: 'usr_alice' });
+    const peekBrowserHome = vi.fn((userId: string) => (userId === 'usr_alice' ? alices : null));
+    const out = pickInstanceForRoute({
+      urlArg: 'bhs_usr_alice',
+      callerUserId: 'usr_mallory',
+      peek: vi.fn().mockReturnValue(null),
+      peekActiveForUser: vi.fn(),
+      browserHomeAllowed: () => true,
+      peekBrowserHome,
+    });
+    expect(out.kind).toBe('no-active');
+    expect(peekBrowserHome).not.toHaveBeenCalled();
+  });
+
+  it('step 4: a lookup returning someone else’s instance is refused', () => {
+    const out = pickInstanceForRoute({
+      urlArg: 'bhs_usr_alice',
+      callerUserId: 'usr_alice',
+      peek: vi.fn().mockReturnValue(null),
+      peekActiveForUser: vi.fn(),
+      browserHomeAllowed: () => true,
+      peekBrowserHome: () => fakeInstance({ taskId: 'tsk_x', userId: 'usr_bob' }),
+    });
+    expect(out.kind).toBe('forbidden');
+  });
 });
