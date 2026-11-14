@@ -203,3 +203,37 @@ describe('LEAK-1 root fix · 「搜一下 / 百度一下 / 上网查」 go to th
     },
   );
 });
+
+describe('LEAK-2 · tags named after a tool (online s04 on production after DEPLOY-R5)', () => {
+  const PROD = '......\n\nweb_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>';
+  it.each([
+    ['verbatim from production (opening 「<」 missing)', PROD],
+    ['a well-formed pair', '<web_search>{"query": "2025年诺贝尔文学奖得主"}</web_search>'],
+    ['a pair with attributes', '<browser_navigate url="https://x.test"></browser_navigate>'],
+    [
+      'an opener on its own line',
+      '我来搜一下。\nweb_search>\nquery: 2025年诺贝尔文学奖\n</web_search>',
+    ],
+  ])('%s is tool syntax and no answer', (_label, text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+  it('a stray closing tag after a real answer goes; the answer stays', () => {
+    expect(
+      deliverableAnswer('2025 年诺贝尔文学奖得主是 László Krasznahorkai。\n</web_search>'),
+    ).toBe('2025 年诺贝尔文学奖得主是 László Krasznahorkai。');
+  });
+  it.each([
+    [
+      'the HTML search element',
+      'HTML 里可以用 <search> 包住搜索表单：<search><form></form></search>。',
+    ],
+    [
+      'a snake_case word followed by 「>」 in prose',
+      '比较 page_size> 0 的情况时要小心，例如 page_size>0。',
+    ],
+    ['a tool tag named in inline code', '模型有时会输出 `</web_search>` 这样的标签，需要过滤。'],
+  ])('%s stays', (_label, text) => {
+    expect(stripToolCallMarkup(text)).toBe(text);
+  });
+});

@@ -40,6 +40,18 @@ const TOOL_WORD_NAMES = MODEL_TOOL_NAMES.filter((name) => !name.includes('_'));
 /** 61.80 retest run 11 (`{"type": "browser_navigate", …}`): any browser_ / computer_ / tool_ name. */
 const CALL_NAMES = `(?:(?:browser|computer|tool)_[a-z]+(?:_[a-z]+)*|${TOOL_ONLY_NAMES.join('|')})`;
 const INLINE_CALL = String.raw`(?<![\w.])(?:[A-Za-z][A-Za-z_]{2,}[ \t]*[:：][ \t]*(?:${CALL_NAMES}|${TOOL_WORD_NAMES.join('|')})|${CALL_NAMES})[ \t]*\(?[ \t]*\{\s*"`;
+/**
+ * LEAK-2 (online check after DEPLOY-R5, s04 on production): the scrape → generate fallback wrote
+ * 「web_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>」 — a tag named after a tool, its
+ * opening 「<」 missing. A tag pair named after a tool the model is offered (any name with an
+ * underscore, or browser_ / computer_ / tool_ …) is tool syntax, with or without that 「<」; a lone
+ * such tag goes too. Plain names (`<search>` is an HTML element) are not touched.
+ */
+const NAMED_PAIRED_RE = new RegExp(
+  String.raw`(?:<|(?<=^|\s))(${CALL_NAMES})\b[^<>\n]*>[\s\S]*?</\1\s*>`,
+  'gi',
+);
+const NAMED_TAG_RE = new RegExp(String.raw`</?(?:${CALL_NAMES})\b[^<>]*/?>`, 'gi');
 const TOOL_JSON_START_RE = new RegExp(
   String.raw`${INLINE_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|${CALL_NAMES})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
   'g',
@@ -123,10 +135,13 @@ function hasStructure(text: string): boolean {
 
 function stripPlain(text: string, structured = hasStructure(text)): string {
   if (!structured) return text;
-  return stripToolJson(stripBrackets(text).replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
-    TOOL_NAME_LINE_RE,
-    '',
-  );
+  return stripToolJson(
+    stripBrackets(text)
+      .replace(NAMED_PAIRED_RE, '')
+      .replace(PAIRED_RE, '')
+      .replace(TAG_RE, '')
+      .replace(NAMED_TAG_RE, ''),
+  ).replace(TOOL_NAME_LINE_RE, '');
 }
 
 /**
