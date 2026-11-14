@@ -1,16 +1,17 @@
-import {
-  type CoreModelRuntimeEnvironment,
-  type CoreModelRuntimeInput,
-  type CoreModelRuntimeUnavailableReason,
-  resolveCoreModelRuntime,
+import type {
+  CoreModelRuntimeEnvironment,
+  CoreModelRuntimeInput,
+  CoreModelRuntimeUnavailableReason,
 } from '../llm/core-model-runtime.js';
+import { modelGateway } from '../llm/gateway/model-gateway.js';
+import type { ModelGatewayEnvironment } from '../llm/gateway/settings.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 
 type QwenMessagesAdapter = Omit<MessagesAdapter, 'metadata'> & {
   readonly metadata: Extract<MessagesAdapter['metadata'], { provider: 'alibaba-model-studio' }>;
 };
 
-export type SuggestionsProviderEnvironment = CoreModelRuntimeEnvironment;
+export type SuggestionsProviderEnvironment = CoreModelRuntimeEnvironment & ModelGatewayEnvironment;
 
 export type SuggestionsProviderRoute =
   | {
@@ -29,22 +30,21 @@ export function resolveSuggestionsProviderRoute(input: {
   userModelDataRegion: unknown;
   createMessages?: CoreModelRuntimeInput['createMessages'];
 }): SuggestionsProviderRoute {
-  const runtime = resolveCoreModelRuntime({
-    environment: input.environment,
+  const runtime = modelGateway({
+    core: { environment: input.environment, createMessages: input.createMessages },
+  }).resolve('suggestions', {
     actorExternalId: input.userExternalId,
-    lane: 'suggestions',
     ownership: {
       scope: 'personal',
       userRegion: input.userModelDataRegion,
     },
-    createMessages: input.createMessages,
   });
 
   if (runtime.kind === 'unavailable') {
     return { provider: 'unavailable', reason: runtime.reason };
   }
 
-  const messagesAdapter = runtime.messages('fast');
+  const messagesAdapter = runtime.messages();
   if (messagesAdapter.metadata.provider !== 'alibaba-model-studio') {
     throw new Error('Qwen suggestions runtime returned a non-Qwen adapter');
   }

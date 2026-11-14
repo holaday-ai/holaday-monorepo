@@ -341,6 +341,17 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  /**
+   * REBUILD-2 unified model gateway (llm/gateway). Off: every model call takes its legacy
+   * lane/purpose path unchanged. On: role → model per region from the role-model table, DashScope
+   * differences normalised, llm_calls purpose `role:<role>`.
+   */
+  LLM_GATEWAY_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** JSON role-model overrides, e.g. {"cn":{"judge":"qwen3.8-flash"}}; invalid entries ignored. */
+  LLM_GATEWAY_ROLE_MODELS: z.string().default(''),
   /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])

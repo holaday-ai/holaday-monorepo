@@ -272,6 +272,7 @@ import {
   resolveBrowserBrainSelection,
   withBrowserBrain,
 } from '../../llm/browser-brain.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import {
   catalogSettingsService,
@@ -616,28 +617,35 @@ const modelRuntimeWiring = createProductionModelRuntimeWiring(
   },
 );
 
-function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
+/** REBUILD-2: every model call in this router asks the gateway by role. */
+const tasksModelGateway = modelGateway({ wiring: modelRuntimeWiring });
+
+function personalModelContext(actorExternalId: string, modelDataRegion: unknown) {
+  return {
     actorExternalId,
-    lane: 'generate',
-    ownership: { scope: 'personal', userRegion: modelDataRegion },
-  });
+    ownership: { scope: 'personal' as const, userRegion: modelDataRegion },
+  };
+}
+
+function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
+  return tasksModelGateway.resolve(
+    'generate',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
-    actorExternalId,
-    lane: 'scrape',
-    ownership: { scope: 'personal', userRegion: modelDataRegion },
-  });
+  return tasksModelGateway.resolve(
+    'scrape',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function resolveVerifierRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
-    actorExternalId,
-    lane: 'verifier',
-    ownership: { scope: 'personal', userRegion: modelDataRegion },
-  });
+  return tasksModelGateway.resolve(
+    'verifier',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function generateRuntimeUnavailableReason(reason: ModelTaskUnavailableReason): string {
@@ -663,8 +671,8 @@ function firecrawlUsage(usage: { calls: number; credits: number } | undefined): 
   return { calls, credits, costUsd: Math.round(credits * appEnv.FIRECRAWL_COST_USD * 1e6) / 1e6 };
 }
 
-function coreLaneForExecutionMode(executionMode: string): 'generate' | 'scrape' | 'browser' | null {
-  if (executionMode === 'browser') return 'browser';
+function coreRoleForExecutionMode(executionMode: string): 'generate' | 'scrape' | 'brain' | null {
+  if (executionMode === 'browser') return 'brain';
   if (executionMode === 'generate' || executionMode === 'template_fill') return 'generate';
   if (executionMode === 'scrape') return 'scrape';
   return null;
@@ -2155,14 +2163,13 @@ export const tasksRouter = router({
             // Resolve region, credentials and rollout eligibility before quota
             // consumption. An unavailable core lane is a deployment/rollout state,
             // not a billable task attempt.
-            const coreLane = coreLaneForExecutionMode(executionMode);
+            const coreRole = coreRoleForExecutionMode(executionMode);
             let browserMessagesAdapter: MessagesAdapter | undefined;
-            if (coreLane) {
-              const preflight = modelRuntimeWiring.resolveCore({
-                actorExternalId: ctx.userId,
-                lane: coreLane,
-                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-              });
+            if (coreRole) {
+              const preflight = tasksModelGateway.resolve(
+                coreRole,
+                personalModelContext(ctx.userId, userRow.modelDataRegion),
+              );
               if (preflight.kind === 'unavailable') {
                 const reason = modelTaskFailureReason(preflight.reasonCode);
                 const taskId = newExternalId('task');
@@ -2208,8 +2215,8 @@ export const tasksRouter = router({
                   executionMode,
                 };
               }
-              if (coreLane === 'browser') {
-                browserMessagesAdapter = preflight.messages('vision');
+              if (coreRole === 'brain') {
+                browserMessagesAdapter = preflight.messages();
                 if (input.localChrome)
                   await assertLocalChromeSelection(ctx.userId, input.localChrome);
                 if (
@@ -3712,7 +3719,7 @@ export const tasksRouter = router({
                 userRow.modelDataRegion,
               );
               const templateResponsesAdapter =
-                templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
+                templateRuntime.kind === 'ready' ? templateRuntime.responses() : null;
 
               await repo.insertTask(
                 {
@@ -4044,13 +4051,13 @@ export const tasksRouter = router({
                 userRow.modelDataRegion,
               );
               const generateResponsesAdapter =
-                generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
+                generateRuntime.kind === 'ready' ? generateRuntime.responses() : null;
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
               );
               const semanticVerifierAdapter =
-                verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+                verifierRuntime.kind === 'ready' ? verifierRuntime.messages() : null;
               const generateUnavailableReasonCode =
                 generateRuntime.kind === 'unavailable' ? generateRuntime.reasonCode : null;
 
@@ -4564,33 +4571,32 @@ export const tasksRouter = router({
                 userRow.modelDataRegion,
               );
               const scrapeResponsesAdapter =
-                scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
+                scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses() : null;
               const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
               );
               const fallbackGenerateResponsesAdapter =
                 fallbackGenerateRuntime.kind === 'ready'
-                  ? fallbackGenerateRuntime.responses('standard')
+                  ? fallbackGenerateRuntime.responses()
                   : null;
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
               );
               const semanticVerifierAdapter =
-                verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
+                verifierRuntime.kind === 'ready' ? verifierRuntime.messages() : null;
               // FIX-60 复审 #1 #1: a small model reads, when the scraped answer is in doubt, whether
               // it gives each asked field's value. The catalog sets every purpose of a lane to that
               // lane's model (the verifier lane is qwen3.8-max), so the call runs on the plan lane,
               // whose model is the small one (qwen3.8-flash).
-              const fieldJudgeRuntime = modelRuntimeWiring.resolveCore({
-                actorExternalId: ctx.userId,
-                lane: 'plan',
-                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-              });
+              const fieldJudgeRuntime = tasksModelGateway.resolve(
+                'judge',
+                personalModelContext(ctx.userId, userRow.modelDataRegion),
+              );
               const scrapeFieldJudge =
                 fieldJudgeRuntime.kind === 'ready'
-                  ? createAskedFieldJudge(fieldJudgeRuntime.messages('fast'), {
+                  ? createAskedFieldJudge(fieldJudgeRuntime.messages(), {
                       logger: ctx.logger,
                     })
                   : undefined;
@@ -6151,14 +6157,13 @@ export const tasksRouter = router({
                 });
                 // Batch 09: unified executor search (Qwen built-in first, Firecrawl
                 // fallback when FIRECRAWL_API_KEY is set) and read-only page reads.
-                const unifiedBrowserRuntime = modelRuntimeWiring.resolveCore({
-                  actorExternalId: ctx.userId,
-                  lane: 'browser',
-                  ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-                });
+                const unifiedBrowserRuntime = tasksModelGateway.resolve(
+                  'search',
+                  personalModelContext(ctx.userId, userRow.modelDataRegion),
+                );
                 const unifiedPrimarySearch =
                   unifiedBrowserRuntime.kind === 'ready'
-                    ? createResponsesWebSearch(unifiedBrowserRuntime.responses('fast'))
+                    ? createResponsesWebSearch(unifiedBrowserRuntime.responses())
                     : null;
                 // FIRECRAWL-1: Firecrawl is the browser's search fallback only before any
                 // wall in the task, and never on a retry of a page Firecrawl could not read.
@@ -7114,13 +7119,12 @@ export const tasksRouter = router({
                     deps: {
                       ...(() => {
                         // Batch 04: the OTA readonly lane uses the model-catalog brain.
-                        const otaRuntime = modelRuntimeWiring.resolveCore({
-                          actorExternalId: ctx.userId,
-                          lane: 'browser',
-                          ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-                        });
+                        const otaRuntime = tasksModelGateway.resolve(
+                          'brain.text',
+                          personalModelContext(ctx.userId, userRow.modelDataRegion),
+                        );
                         return otaRuntime.kind === 'ready'
-                          ? { messagesAdapter: otaRuntime.messages('standard') }
+                          ? { messagesAdapter: otaRuntime.messages() }
                           : { client: legacyMediaModelClient };
                       })(),
                       dispatchNavigate: async (url: string) => {
@@ -7344,7 +7348,7 @@ export const tasksRouter = router({
                         );
                         const handoffGenerateResponsesAdapter =
                           handoffGenerateRuntime.kind === 'ready'
-                            ? handoffGenerateRuntime.responses('standard')
+                            ? handoffGenerateRuntime.responses()
                             : null;
                         let generateOutcome: GenerateOutcome;
                         try {
@@ -8625,18 +8629,17 @@ export const tasksRouter = router({
               const taskDbId = taskDbRow?.id;
               // Batch 04: the browser lane's brain (model catalog) drives the unified
               // tool set when a Playwright page is available.
-              const visionRuntime = modelRuntimeWiring.resolveCore({
-                actorExternalId: ctx.userId,
-                lane: 'browser',
-                ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
-              });
+              const visionRuntime = tasksModelGateway.resolve(
+                'brain',
+                personalModelContext(ctx.userId, userRow.modelDataRegion),
+              );
               const unifiedBrowser =
                 visionRuntime.kind === 'ready'
                   ? {
-                      messagesAdapter: visionRuntime.messages('vision'),
+                      messagesAdapter: visionRuntime.messages(),
                       recorder: new DrizzleLlmCallRecorder(ctx.db),
                       webSearch: createFallbackWebSearch({
-                        primary: createResponsesWebSearch(visionRuntime.responses('fast')),
+                        primary: createResponsesWebSearch(visionRuntime.responses('search')),
                         firecrawl: ctx.firecrawl ?? null,
                       }),
                     }
@@ -11218,17 +11221,13 @@ export const tasksRouter = router({
           userRow.modelDataRegion,
         );
         const resumeGenerateResponsesAdapter =
-          resumeGenerateRuntime.kind === 'ready'
-            ? resumeGenerateRuntime.responses('standard')
-            : null;
+          resumeGenerateRuntime.kind === 'ready' ? resumeGenerateRuntime.responses() : null;
         const resumeVerifierRuntime = resolveVerifierRuntimeForUser(
           ctx.userId,
           userRow.modelDataRegion,
         );
         const resumeSemanticVerifierAdapter =
-          resumeVerifierRuntime.kind === 'ready'
-            ? resumeVerifierRuntime.messages('verify_strict')
-            : null;
+          resumeVerifierRuntime.kind === 'ready' ? resumeVerifierRuntime.messages() : null;
         const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
         const newWorkflowPreamble = newWorkflow?.promptPreamble ?? '';
         const effectiveCombined =

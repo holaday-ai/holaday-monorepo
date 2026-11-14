@@ -1,16 +1,17 @@
-import {
-  type CoreModelRuntimeEnvironment,
-  type CoreModelRuntimeInput,
-  type CoreModelRuntimeUnavailableReason,
-  resolveCoreModelRuntime,
+import type {
+  CoreModelRuntimeEnvironment,
+  CoreModelRuntimeInput,
+  CoreModelRuntimeUnavailableReason,
 } from '../../llm/core-model-runtime.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
+import type { ModelGatewayEnvironment } from '../../llm/gateway/settings.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 
 type QwenMessagesAdapter = Omit<MessagesAdapter, 'metadata'> & {
   readonly metadata: Extract<MessagesAdapter['metadata'], { provider: 'alibaba-model-studio' }>;
 };
 
-export type PlanProviderEnvironment = CoreModelRuntimeEnvironment;
+export type PlanProviderEnvironment = CoreModelRuntimeEnvironment & ModelGatewayEnvironment;
 
 export type PlanProviderRoute =
   | {
@@ -28,23 +29,25 @@ export function resolvePlanProviderRoute(input: {
   userExternalId: string;
   userModelDataRegion: unknown;
   createMessages?: CoreModelRuntimeInput['createMessages'];
+  /** `environment` already names an explicitly selected planning model (browser brain). */
+  modelPinned?: boolean;
 }): PlanProviderRoute {
-  const runtime = resolveCoreModelRuntime({
-    environment: input.environment,
+  const runtime = modelGateway({
+    core: { environment: input.environment, createMessages: input.createMessages },
+  }).resolve('plan', {
     actorExternalId: input.userExternalId,
-    lane: 'plan',
     ownership: {
       scope: 'personal',
       userRegion: input.userModelDataRegion,
     },
-    createMessages: input.createMessages,
+    ...(input.modelPinned ? { modelPinned: true } : {}),
   });
 
   if (runtime.kind === 'unavailable') {
     return { provider: 'unavailable', reason: runtime.reason };
   }
 
-  const messagesAdapter = runtime.messages('standard');
+  const messagesAdapter = runtime.messages();
   if (messagesAdapter.metadata.provider !== 'alibaba-model-studio') {
     throw new Error('Qwen plan runtime returned a non-Qwen adapter');
   }
