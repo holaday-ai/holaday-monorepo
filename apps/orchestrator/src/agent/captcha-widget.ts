@@ -1,4 +1,5 @@
 import type { CDPSession, Page } from 'playwright';
+import { testFixtureOrigins } from './test-fixture-origins.js';
 
 /**
  * CAPTCHA-UX-1: one detector for the captcha box on the page — used to zoom the screen onto it
@@ -18,12 +19,9 @@ const CAPTCHA_FRAME_URL =
  * (the same exact origins the network policy lets through; never in production).
  */
 function fixtureFrameSource(): string {
-  if (process.env.NODE_ENV === 'production') return '';
-  const origins = (process.env.BROWSER_TEST_FIXTURE_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(origin));
-  return origins.map((origin) => `|^${origin.replace(/[.]/g, '\\.')}\\/(?:anchor|bframe)`).join('');
+  return testFixtureOrigins()
+    .map((origin) => `|^${origin.replace(/[.]/g, '\\.')}\\/(?:anchor|bframe)`)
+    .join('');
 }
 export const CAPTCHA_FRAME_URL_SOURCE = CAPTCHA_FRAME_URL.source + fixtureFrameSource();
 const CAPTCHA_FRAME_RE = new RegExp(CAPTCHA_FRAME_URL_SOURCE, 'i');

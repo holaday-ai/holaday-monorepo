@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { testFixtureOrigins } from './test-fixture-origins.js';
 
 export interface ResolvedAddress {
   address: string;
@@ -37,18 +38,9 @@ interface CachedResolution {
   value: Promise<readonly ResolvedAddress[]>;
 }
 
-/**
- * CAPTCHA-UX-1 local acceptance only: the exact origins of a local test-fixture server
- * (`BROWSER_TEST_FIXTURE_ORIGINS=http://127.0.0.1:8765,...`). Never in production
- * (NODE_ENV=production), and only http://127.0.0.1:<port> origins — nothing else is opened.
- */
+/** CAPTCHA-UX-1 local acceptance only (see test-fixture-origins.ts). */
 export function isTestFixtureOrigin(url: URL): boolean {
-  if (process.env.NODE_ENV === 'production') return false;
-  if (!/^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(url.origin)) return false;
-  return (process.env.BROWSER_TEST_FIXTURE_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .includes(url.origin);
+  return testFixtureOrigins().includes(url.origin);
 }
 
 const PRIVATE_NETWORK_MESSAGE = '为保护账户与服务器安全，不能访问本机、内网或云服务元数据地址。';

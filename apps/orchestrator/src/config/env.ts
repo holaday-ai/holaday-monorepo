@@ -58,6 +58,10 @@ export function parseHoladayPublicBaseUrl(value: string, nodeEnv: NodeEnvironmen
 }
 const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /** CAPTCHA-UX-1: an explicit local-test environment (enables test-fixture origins). */
+  HOLADAY_ENV: z.string().optional(),
+  /** CAPTCHA-UX-1 local acceptance only — refused in production (below). */
+  BROWSER_TEST_FIXTURE_ORIGINS: z.string().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   HTTP_PORT: z.coerce.number().int().positive().default(3001),
   WS_PORT: z.coerce.number().int().positive().default(3002),
@@ -752,6 +756,19 @@ export const envSchema = baseEnvSchema
         });
       }
     }
+
+    // 协调方 2026-11-14: the local test-fixture switch opens a path to local addresses — a production
+    // configuration that carries it is refused at start.
+    if (
+      environment.NODE_ENV === 'production' &&
+      (environment.BROWSER_TEST_FIXTURE_ORIGINS?.trim() || environment.HOLADAY_ENV === 'local-test')
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['BROWSER_TEST_FIXTURE_ORIGINS'],
+        message:
+          'BROWSER_TEST_FIXTURE_ORIGINS and HOLADAY_ENV=local-test are for local acceptance only and must not be set in production',
+      });
 
     try {
       parseHoladayPublicBaseUrl(environment.HOLADAY_PUBLIC_BASE_URL, environment.NODE_ENV);
