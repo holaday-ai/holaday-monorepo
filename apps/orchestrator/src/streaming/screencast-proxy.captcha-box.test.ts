@@ -4,6 +4,7 @@ import { pino } from 'pino';
 import { chromium } from 'playwright';
 import { expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
+import { cloudflareChallengePage } from '../agent/fixtures/cloudflare-challenge.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
 import type { BrowserPool } from '../browser-pool/index.js';
@@ -81,6 +82,82 @@ it('CAPTCHA-UX-1 第 2 条: while a verification is waited for, the screen is to
     wall = false;
     await waited;
     await vi.waitFor(() => expect(boxes.at(-1)).toBeNull(), { timeout: 3000 });
+  } finally {
+    stop.abort();
+    ws.close();
+    await once(ws, 'close');
+    binding.finish();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await browser.close();
+    vi.unstubAllEnvs();
+  }
+}, 20000);
+
+it('G2e: a Cloudflare check whose Turnstile frame is in a closed shadow root is zoomed onto too', async () => {
+  vi.stubEnv('BROWSER_VIEWPORT_V2', 'true');
+  // Site isolation on, as with a real Chrome: the provider frame is out of the page's process.
+  const browser = await chromium.launch({ headless: true, args: ['--site-per-process'] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await cloudflareChallengePage(page);
+  const instance = {
+    taskId: 'tsk_cf_box',
+    userId: 'usr_cf_box',
+    status: 'ready',
+    executor: { getPage: async () => page },
+  } as unknown as BrowserInstance;
+  const binding = browserControlSessions.start(instance);
+  const server = createServer();
+  const proxy = createScreencastProxy({
+    pool: { peek: () => instance, touch: () => {} } as unknown as BrowserPool,
+    logger: pino({ level: 'silent' }),
+    authenticateToken: async () => instance.userId,
+  });
+  server.on('upgrade', proxy.handleUpgrade);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const addr = server.address() as { port: number };
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${addr.port}/screencast-ws/tsk_cf_box?token=fixture&viewportV2=1`,
+  );
+  const boxes: unknown[] = [];
+  ws.on('message', (raw) => {
+    const m = JSON.parse(String(raw));
+    if (m.type === 'captcha-box') boxes.push(m.rect);
+  });
+  const stop = new AbortController();
+  let wall = true;
+  try {
+    await once(ws, 'open');
+    const waited = captchaHandoffs.wait({
+      taskId: instance.taskId,
+      userId: instance.userId,
+      control: binding.control,
+      hasWall: async () => wall,
+      onWaiting: async () => {},
+      onResumed: async () => true,
+      signal: stop.signal,
+      pollMs: 100,
+    });
+    await vi.waitFor(
+      () => expect(boxes.at(-1)).toEqual({ x: 120, y: 240, width: 300, height: 65 }),
+      { timeout: 3000 },
+    );
+    // The widget moves (the page re-lays out): the zoom follows it.
+    await page.evaluate(() => {
+      document.getElementById('challenge-stage')!.style.top = '300px';
+    });
+    await vi.waitFor(
+      () => expect(boxes.at(-1)).toEqual({ x: 120, y: 300, width: 300, height: 65 }),
+      { timeout: 3000 },
+    );
+    // Passed: Turnstile fills the box's own field — the whole page comes back.
+    await page.evaluate(() => {
+      (document.getElementById('cf-chl-widget-a1b2c_response') as HTMLInputElement).value =
+        '0.'.padEnd(300, 'x');
+    });
+    await vi.waitFor(() => expect(boxes.at(-1)).toBeNull(), { timeout: 3000 });
+    wall = false;
+    await waited;
   } finally {
     stop.abort();
     ws.close();
