@@ -118,9 +118,12 @@ it.each([false, true])(
       await new Promise((r) => setTimeout(r, 120));
       expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(0);
       const previousCalls = calls;
+      // HOTFIX-R4A（协调方改）: the picture a press names is no longer judged for age — it reaches
+      // the policy, which still decides (here: a sensitive action without confirmation → no hit).
       send('mouseDown', { ...currentFrame(), frameId: 'forged' });
       await new Promise((r) => setTimeout(r, 100));
-      expect(calls).toBe(previousCalls);
+      expect(calls).toBe(previousCalls + 1);
+      expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(0);
       policy = async (_, envelope) => ({
         request: {
           taskId: instance.taskId,

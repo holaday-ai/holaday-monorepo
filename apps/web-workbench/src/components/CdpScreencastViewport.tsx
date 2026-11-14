@@ -62,40 +62,10 @@ export type CdpScreencastStatus = 'idle' | 'connecting' | 'connected' | 'disconn
 /** What kind of input the server refused (the page changed under it). */
 export type CdpRefusedInput = 'key' | 'pointer' | 'closed';
 
-/**
- * An input made while the newest frame is too old to name (a still page sends no frames by
- * itself). It waits briefly — in memory only, never logged — for the fresh frame asked for,
- * and is mapped when sent, against that frame.
- */
-interface WaitingInput {
-  at: number;
-  build: () => InputPayload | null;
-  /** Where the input lands depends on the layout (a press), not only on focus (a key). */
-  pointer: boolean;
-  /** The layout (CSS size + scroll) of the frame the person acted on. */
-  layout?: string;
-  /**
-   * 复审 #1 #1: the tab and revision of that frame. A fresh frame of another page (the assistant
-   * navigated meanwhile) may have the same layout; the input is sent only on the same tab and
-   * revision (a still page re-captured keeps its revision).
-   */
-  tabId?: string;
-  revision?: number;
-}
-/** What decides where a point on the screen lands on the page. */
-function layoutKey(g: BrowserFrameGeometry | null | undefined): string | undefined {
-  if (!g?.cssWidth) return undefined;
-  return `${g.cssWidth}x${g.cssHeight}@${g.scrollOffset?.x ?? 0},${g.scrollOffset?.y ?? 0}`;
-}
-const GEOMETRY_FRESH_MS = 5000;
-/** Ask for a fresh frame before the newest one is too old for the server to accept. */
+/** Ask for a fresh frame while the person is about to act on a still page (display only). */
 const GEOMETRY_REFRESH_MS = 3000;
 const OBSERVE_GAP_MS = 1000;
-const WAITING_INPUT_MS = 3000;
-const WAITING_INPUT_LIMIT = 64;
 const REFUSED_NOTICE_GAP_MS = 2000;
-/** 复审 #1 #1: how often a held input says 「busy」 to the server (the assistant yields 2 s). */
-const BUSY_SIGNAL_GAP_MS = 500;
 
 interface Props {
   /** Stable WS URL to /screencast-ws/:taskId, without credentials. */
@@ -198,14 +168,20 @@ export function CdpScreencastViewport({
   // frame's own capturedAt is the server's clock; a user clock a few seconds
   // off made every click look stale and silently dropped.
   const geometryReceivedAtRef = React.useRef(0);
-  const waitingInputsRef = React.useRef<WaitingInput[]>([]);
   const lastObserveAtRef = React.useRef(0);
   const refusedNoticeAtRef = React.useRef(0);
-  const busySentAtRef = React.useRef(0);
   const invalidateGeometry = React.useCallback(() => {
     geometryRef.current = null;
     observationEpochRef.current++;
     if (canvasRef.current) delete canvasRef.current.dataset.frameId;
+  }, []);
+  /**
+   * HOTFIX-R4A（协调方改）: the page changed (a navigation): frames decoded for the old one are not
+   * painted, but the last picture's geometry still maps the person's input — like a remote
+   * desktop, what is on screen is what they act on.
+   */
+  const retireFrames = React.useCallback(() => {
+    observationEpochRef.current++;
   }, []);
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
   const inputBridgeStateRef = React.useRef<CdpInputBridgeState>(INITIAL_CDP_INPUT_BRIDGE_STATE);
@@ -253,9 +229,7 @@ export function CdpScreencastViewport({
   // the latest value without re-attaching listeners on every flip.
   const viewOnlyRef = React.useRef(viewOnly);
   viewOnlyRef.current = viewOnly;
-  React.useEffect(() => {
-    if (viewOnly) waitingInputsRef.current = [];
-  }, [viewOnly]);
+  React.useEffect(() => {}, [viewOnly]);
   React.useEffect(() => {
     readableAutoScrollKeyRef.current = null;
     hostRef.current?.scrollTo({ left: 0, top: 0 });
@@ -284,14 +258,13 @@ export function CdpScreencastViewport({
       /* socket closing in this tick */
     }
   }, [viewportV2]);
-  /** The newest frame can name an input now (v2: the server checks it is still current). */
+  /**
+   * There is a picture to map an input onto (v2). HOTFIX-R4A（协调方改）: its age no longer
+   * matters — the input goes where the person sees it.
+   */
   const frameUsable = React.useCallback((): boolean => {
     if (!viewportV2) return true;
-    return (
-      writeReadyRef.current &&
-      geometryRef.current !== null &&
-      Date.now() - geometryReceivedAtRef.current <= GEOMETRY_FRESH_MS
-    );
+    return writeReadyRef.current && geometryRef.current !== null;
   }, [viewportV2]);
   /** Keep the newest frame fresh while the person is about to act (hovering, touching). */
   const keepFrameFresh = React.useCallback((): void => {
@@ -321,7 +294,7 @@ export function CdpScreencastViewport({
         return false;
       const geometry = geometryRef.current;
       if (viewportV2 && (!frameUsable() || !geometry)) {
-        // No fresh frame to name this input by: ask for one and drop it.
+        // No picture yet (the stream is starting): nothing to map this input onto.
         requestObservation();
         return false;
       }
@@ -350,83 +323,21 @@ export function CdpScreencastViewport({
     [frameUsable, requestObservation, viewportV2],
   );
 
-  /** Deliver what waited for a fresh frame, on the layout the person acted on — or say so. */
-  const flushWaiting = React.useCallback((): void => {
-    if (waitingInputsRef.current.length === 0) return;
-    const now = Date.now();
-    const waiting = waitingInputsRef.current.filter((item) => now - item.at <= WAITING_INPUT_MS);
-    if (waiting.length === 0) {
-      waitingInputsRef.current = [];
-      return;
-    }
-    if (!socketOpen() || viewOnlyRef.current || !frameUsable()) {
-      waitingInputsRef.current = waiting;
-      return;
-    }
-    waitingInputsRef.current = [];
-    // The page moved (a scroll, a navigation) since the press: that point now shows something
-    // else. Deliver none of it and ask the person to press again. 复审 #1 #1: another page of the
-    // same size and scroll is still another page — the tab and revision must be the pressed frame's.
-    const geometry = geometryRef.current;
-    const current = layoutKey(geometry);
-    const samePage = (item: WaitingInput): boolean =>
-      item.tabId !== undefined &&
-      item.tabId === geometry?.tabId &&
-      item.revision === geometry?.viewportRevision;
-    if (
-      viewportV2 &&
-      waiting.some(
-        (item) => !samePage(item) || (item.pointer && (!item.layout || item.layout !== current)),
-      )
-    ) {
-      notifyRefused(waiting.some((item) => item.pointer) ? 'pointer' : 'key');
-      return;
-    }
-    for (const item of waiting) {
-      const payload = item.build();
-      if (payload) sendInput(payload);
-    }
-  }, [frameUsable, notifyRefused, sendInput, viewportV2]);
-  const flushWaitingRef = React.useRef(flushWaiting);
-  flushWaitingRef.current = flushWaiting;
-
   /**
-   * A press, a key or text from the person. Sent at once when the newest frame can name it;
-   * otherwise it waits (briefly, in order) for the fresh frame asked for here.
+   * A press, a key or text from the person. HOTFIX-R4A（协调方改）: sent at once, like a remote
+   * desktop — no waiting for a fresher frame, no replay, no 「再点一次」.
    */
   const deliverInput = React.useCallback(
-    (build: () => InputPayload | null, pointer: boolean): boolean => {
+    (build: () => InputPayload | null, _pointer: boolean): boolean => {
       if (viewOnlyRef.current || !socketOpen()) return false;
       onUserInputRef.current?.();
-      if (waitingInputsRef.current.length === 0 && frameUsable()) {
-        const payload = build();
-        return payload ? sendInput(payload) : false;
+      // No picture yet (the stream is starting): nothing to map it onto — ask for one.
+      if (!frameUsable()) {
+        requestObservation();
+        return false;
       }
-      const now = Date.now();
-      const pressed = geometryRef.current;
-      waitingInputsRef.current = [
-        ...waitingInputsRef.current.filter((item) => now - item.at <= WAITING_INPUT_MS),
-        {
-          at: now,
-          build,
-          pointer,
-          layout: layoutKey(pressed),
-          tabId: pressed?.tabId,
-          revision: pressed?.viewportRevision,
-        },
-      ].slice(-WAITING_INPUT_LIMIT);
-      // 复审 #1 #1: say 「busy」 now (no coordinates, no contents) so the assistant yields before
-      // this input can be sent; then ask for the fresh frame that names it.
-      if (viewportV2 && now - busySentAtRef.current >= BUSY_SIGNAL_GAP_MS) {
-        busySentAtRef.current = now;
-        try {
-          wsRef.current?.send('{"type":"busy"}');
-        } catch {
-          /* socket closing in this tick */
-        }
-      }
-      requestObservation();
-      return true;
+      const payload = build();
+      return payload ? sendInput(payload) : false;
     },
     [frameUsable, requestObservation, sendInput],
   );
@@ -559,7 +470,6 @@ export function CdpScreencastViewport({
         return;
       }
       writeReadyRef.current = false;
-      waitingInputsRef.current = [];
       invalidateGeometry();
       const connectionSeq = ++connectionSeqRef.current;
       setStatus('connecting');
@@ -603,15 +513,11 @@ export function CdpScreencastViewport({
         if (viewportV2 && msg.type === 'viewport-v2-ready') {
           // The stream runs: input can go out as soon as a frame names it.
           writeReadyRef.current = true;
-          flushWaitingRef.current();
           return;
         }
         if (viewportV2 && msg.type === 'input-expired') {
-          // The page changed under the input (the assistant acted, a navigation): say so, once
-          // per burst, instead of nothing happening. Moves and scrolls need no notice.
-          const kind = msg.input ?? '';
-          if (/^(mouse)?move$|^scroll$|^wheel$/i.test(kind)) return;
-          notifyRefused(kind === 'key' ? 'key' : 'pointer');
+          // HOTFIX-R4A: the one refusal left — an Enter / Space right after the page navigated.
+          if (msg.input === 'key') notifyRefused('key');
           return;
         }
         // 复审 #1 (建议修 #3): the task is stopping (or a run is starting) — the input was not sent.
@@ -620,7 +526,7 @@ export function CdpScreencastViewport({
           return;
         }
         if (viewportV2 && msg.type === 'observation-invalidated') {
-          invalidateGeometry();
+          retireFrames();
           return;
         }
         // Older servers confirm a size this screen no longer sends; nothing to do.
@@ -631,7 +537,7 @@ export function CdpScreencastViewport({
         // remote navigation (user clicked a link, JS pushState,
         // page reloaded, etc.).
         if (msg.type === 'url-changed' && typeof msg.url === 'string') {
-          if (viewportV2) invalidateGeometry();
+          if (viewportV2) retireFrames();
           onUrlChangeRef.current?.(msg.url);
           return;
         }
@@ -663,7 +569,6 @@ export function CdpScreencastViewport({
           reason: event.reason || '(none)',
         });
         invalidateGeometry();
-        waitingInputsRef.current = [];
         setStatus('disconnected');
         // Backoff: doubles up to a 5 s ceiling, then stays at 5 s
         // forever. Browser hibernation is the expected steady state;
@@ -681,7 +586,6 @@ export function CdpScreencastViewport({
     return () => {
       disposed = true;
       invalidateGeometry();
-      waitingInputsRef.current = [];
       connectionSeqRef.current += 1;
       frameSeqRef.current += 1;
       if (retryTimer) clearTimeout(retryTimer);
@@ -708,7 +612,15 @@ export function CdpScreencastViewport({
       decodingImgRef.current = null;
       pendingFrameRef.current = null;
     };
-  }, [hasStreamToken, reconnectSignal, wsUrl, viewportV2, invalidateGeometry, notifyRefused]);
+  }, [
+    hasStreamToken,
+    reconnectSignal,
+    wsUrl,
+    viewportV2,
+    invalidateGeometry,
+    retireFrames,
+    notifyRefused,
+  ]);
 
   // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
   // fresh Image so a delayed decode cannot inherit another frame's handlers.
@@ -786,7 +698,6 @@ export function CdpScreencastViewport({
       }
       onPaint();
       setStatus('connected');
-      flushWaitingRef.current();
       onFrameReadyRef.current?.();
       // A new renderer can emit one frame at its startup size. Recompute
       // immediately so that frame is still contained without affecting the

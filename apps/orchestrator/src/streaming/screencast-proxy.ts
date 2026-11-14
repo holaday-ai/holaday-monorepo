@@ -41,12 +41,8 @@ import type { BrowserPool } from '../browser-pool/index.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
-import {
-  BrowserActionConfirmations,
-  BrowserFrameGuard,
-  frameGraceFor,
-} from './browser-viewport-v2.js';
-import { CdpInputHandler } from './cdp-input.js';
+import { BrowserActionConfirmations } from './browser-viewport-v2.js';
+import { CdpInputHandler, PAGE_CHANGED_ERROR } from './cdp-input.js';
 import { CdpStreamer } from './cdp-streamer.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import type { InputEnvelope } from './screencast-input-bridge.js';
@@ -126,22 +122,6 @@ export interface ScreencastProxy {
    */
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
 }
-
-/** FIX-61B P1-5: how long after typing the focus may let an Enter / Space through. */
-const TYPING_FOCUS_MS = 1_500;
-/** 复审 #1: the text box that really has the focus (through shadow roots); null in a frame or elsewhere. */
-const FOCUSED_TEXT_BOX_EXPRESSION = `(() => {
-  let e = document.activeElement;
-  while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
-  if (!e || /^(?:IFRAME|FRAME|BODY|HTML)$/.test(e.tagName)) return null;
-  const type = (e.getAttribute('type') || 'text').toLowerCase();
-  const editable = e.isContentEditable || e.tagName === 'TEXTAREA' ||
-    (e.tagName === 'INPUT' && /^(?:text|search|email|url|tel|number)$/.test(type));
-  return editable ? e : null;
-})()`;
-/** 复审 #1: dialogs open on the page (a new one may confirm on Enter). */
-const OPEN_DIALOGS_EXPRESSION =
-  "document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]').length";
 
 export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastProxy {
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
@@ -284,66 +264,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let streamer: CdpStreamer | null = null;
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
-    const frameGuard = new BrowserFrameGuard();
-    // FIX-62 P0-1: the frame revision each accepted human input was checked against; the handler
-    // re-checks it (and the document itself) right before the input is sent.
-    const validated = new WeakMap<object, { revision: number; loader: string }>();
-    /**
-     * FIX-61B P1-5 (Deploy-61 online: the first Enter after typing 「holaday」 was dropped without a
-     * word — the caret and Google's suggestion list kept superseding the frame within 250ms). The
-     * element the person typed into, and when. An Enter / Space on a frame superseded within the
-     * lenient grace goes through only when the focus is still exactly that element (a page that
-     * moved focus to 「确认支付」 is refused, as before).
-     */
-    let typingFocus: { node: number; dialogs: number; at: number } | null = null;
-    /**
-     * The element keys go to, as a stable node id, and how many dialogs are open — or null when it
-     * cannot be told for sure (复审 #1): focus inside a frame, or on anything but a text box.
-     * Shadow roots are walked down to the element that really has the focus.
-     */
-    const focusedNode = async (): Promise<{ node: number; dialogs: number } | null> => {
-      const session = streamer?.getSession();
-      if (!session) return null;
-      try {
-        const evaluated = (await session.send('Runtime.evaluate', {
-          expression: FOCUSED_TEXT_BOX_EXPRESSION,
-          returnByValue: false,
-        })) as { result?: { objectId?: string } };
-        const objectId = evaluated.result?.objectId;
-        if (!objectId) return null;
-        const described = (await session.send('DOM.describeNode', { objectId })) as {
-          node?: { backendNodeId?: number };
-        };
-        void session.send('Runtime.releaseObject', { objectId }).catch(() => {});
-        const node = described.node?.backendNodeId;
-        if (!node) return null;
-        const counted = (await session.send('Runtime.evaluate', {
-          expression: OPEN_DIALOGS_EXPRESSION,
-          returnByValue: true,
-        })) as { result?: { value?: unknown } };
-        const dialogs = typeof counted.result?.value === 'number' ? counted.result.value : -1;
-        return { node, dialogs };
-      } catch {
-        return null;
-      }
-    };
-    /** Read where the keys go just before they are sent (read after, the page may have moved focus). */
-    const noteTyping = async (): Promise<void> => {
-      const focus = await focusedNode();
-      typingFocus = focus === null ? null : { ...focus, at: Date.now() };
-    };
-    /** The focus is still the element typed into within the lenient grace. */
-    const stillTypingTarget = async (): Promise<boolean> => {
-      const typed = typingFocus;
-      if (!typed || Date.now() - typed.at > TYPING_FOCUS_MS) return false;
-      // 复审 #1: the same text box, and no dialog opened since (「按回车确认」 on a new modal).
-      const now = await focusedNode();
-      return !!now && now.node === typed.node && now.dialogs === typed.dialogs && now.dialogs >= 0;
-    };
     const confirmations = new BrowserActionConfirmations();
     const invalidate = () => {
-      typingFocus = null;
-      frameGuard.invalidate();
       confirmations.invalidate();
       if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
         args.ws.send(JSON.stringify({ type: 'observation-invalidated' }));
@@ -363,55 +285,24 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ? async (envelope, signal) => {
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
-            if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
-              // The assistant has moved to another tab: the input was aimed at a page no longer
-              // shown. Drop it, follow the assistant's page; the person sees it and acts again.
-              invalidate();
+            // HOTFIX-R4A（协调方改，减法）: like a remote desktop, the person's input goes where they
+            // see it — no frame freshness, revision or layout check, no 「再点一次」. The one refusal
+            // left (Enter / Space within 300 ms of a cross-document navigation) is in CdpInputHandler.
+            if (!streamer) throw new Error('browser_input_session_unavailable');
+            // A v2 client names the picture it acted on (the audit and policy bind to it); an old
+            // client that sends none is refused, as before. Its age is no longer checked.
+            if (!envelope.observation) throw new Error('browser_observation_missing');
+            if (!streamer.matchesPage(await args.instance.executor.getPage()))
+              // The assistant moved to another tab: this input lands on the page the person sees;
+              // the screen then follows the assistant's page.
               void streamer
-                ?.followCurrentPage()
+                .followCurrentPage()
                 .catch((err: unknown) =>
                   userLog.debug({ err: errMsg(err) }, 'screencast: follow page failed'),
                 );
-              throw new Error('browser_tab_changed');
-            }
-            // FIX-61 复审 #2 #2 / DEPLOY-61 #1: keys, text and the release of a press are lenient;
-            // Enter and Space activate the focused element and keep 250ms (frameGraceFor).
-            let inputKind = frameGraceFor(message);
-            let relaxedForTyping = false;
-            // FIX-61B P1-5: Enter / Space on a frame superseded only within the lenient grace go
-            // through when the focus is still the element the person was typing into.
-            if (
-              inputKind === 'pointer' &&
-              message.type === 'keyDown' &&
-              !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
-              frameGuard.validate(envelope.observation, Date.now(), 'lenient') &&
-              (await stillTypingTarget())
-            ) {
-              inputKind = 'lenient';
-              relaxedForTyping = true;
-            }
-            if (
-              ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
-            ) {
-              streamer?.requestFrameRefresh();
-              throw new Error('browser_observation_expired');
-            }
-            if (envelope.observation)
-              validated.set(message, {
-                revision: envelope.observation.viewportRevision,
-                loader: streamer?.documentLoader() ?? '',
-              });
+            if ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y)))
+              throw new Error('browser_input_invalid');
             if (message.type === 'scroll' || message.type === 'mouseMove') return;
-            // FIX-61B P1-5: where the person types (text, or a printable key), read before it is sent.
-            if (
-              message.type === 'insertText' ||
-              (message.type === 'keyDown' &&
-                typeof message.key === 'string' &&
-                message.key.length === 1 &&
-                message.key !== ' ')
-            )
-              await noteTyping();
             if (!opts.beforeViewportAction) throw new Error('browser_action_gate_unavailable');
             const result = await opts.beforeViewportAction(
               args.instance,
@@ -419,13 +310,6 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               signal,
               streamer.getSession(),
             );
-            // Recheck after the asynchronous policy: resize/navigation may have happened.
-            if (
-              !streamer.matchesPage(await args.instance.executor.getPage()) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind) ||
-              (relaxedForTyping && !(await stillTypingTarget()))
-            )
-              throw new Error('browser_observation_expired');
             if (
               result.request.taskId !== args.instance.taskId ||
               result.request.actor !== 'human' ||
@@ -491,23 +375,15 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       }
       void inputBridge.receive(raw.toString()).catch((err: unknown) => {
         userLog.debug({ err: errMsg(err) }, 'screencast: input dispatch failed');
-        // DEPLOY-61 重跑 第 0 步 #2: the checks are unchanged; this screen is only told that its
-        // input named a frame no longer current, so a replayed first press can say 「请再点一次」.
+        // HOTFIX-R4A（协调方改）: the only refusal left — an Enter / Space within 300 ms of a
+        // cross-document navigation (CdpInputHandler) — is said once: 「页面刚跳转了，请再按一次」.
         if (
           args.viewportV2 &&
-          errMsg(err) === 'browser_observation_expired' &&
+          errMsg(err) === PAGE_CHANGED_ERROR &&
           args.ws.readyState === WebSocket.OPEN
         ) {
           try {
-            // FIX-61B P1-5: which kind of input, so a refused key is said too.
-            let kind = 'pointer';
-            try {
-              const sent = JSON.parse(raw.toString()) as { payload?: { type?: string } };
-              if (/^(?:keyDown|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
-            } catch {
-              /* unreadable: pointer */
-            }
-            args.ws.send(JSON.stringify({ type: 'input-expired', input: kind }));
+            args.ws.send(JSON.stringify({ type: 'input-expired', input: 'key' }));
           } catch {
             /* socket closed between readyState and send */
           }
@@ -556,7 +432,6 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ws: args.ws,
         logger: userLog,
         viewportV2: args.viewportV2,
-        onFrame: (frame) => frameGuard.observe(frame),
         onObservationInvalidated: invalidate,
       });
       await streamer.start();
@@ -589,15 +464,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
           void teardown('input-outcome-unknown');
         },
       );
-      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document its frame
-      // showed: the revision and loader it was validated against, checked again when it is sent.
+      // HOTFIX-R4A（协调方改）: the one guard left — when the last cross-document navigation was.
       const streamRef = streamer;
-      inputHandler.setDocumentGuard({
-        expected: (message) => validated.get(message),
-        revision: () => streamRef.currentRevision(),
-        loader: () => streamRef.documentLoader(),
-        freshLoader: () => streamRef.freshLoader(),
-        entry: () => streamRef.historyEntryId(),
+      inputHandler.setNavigationGuard({
+        lastNavigationAt: () => streamRef.lastNavigationAt(),
         pending: () => streamRef.historyPending(),
         settled: (ms) => streamRef.historySettled(ms),
       });

@@ -1090,9 +1090,8 @@ function CloudBrowserPanel({
       toast.show(
         input === 'closed'
           ? '任务正在停止，这一下没发出去，稍等再操作'
-          : input === 'key'
-            ? '页面刚变了，这一下没发出去，请再按一次'
-            : '页面刚变了，再点一次',
+          : // HOTFIX-R4A（协调方改）: the one refusal left — an Enter / Space right after a navigation.
+            '页面刚跳转了，请再按一次',
         'info',
       );
     },

@@ -219,48 +219,32 @@ it('REBUILD-4: nothing painted yet → asks for a frame; a press made on no pict
   expect(screen.pointer()).toEqual([]);
   expect(screen.sent.some((m) => m.type === 'observe')).toBe(true);
   screen.frame();
-  // The press was not made on this page's picture: it is not replayed on it.
+  // HOTFIX-R4A: nothing is replayed later, and nothing to say about it.
   expect(screen.pointer()).toEqual([]);
-  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+  expect(screen.onInputRefused).not.toHaveBeenCalled();
 });
 
-it('REBUILD-4: a stale frame is never used to name input; a fresh one is asked for first', () => {
+it('HOTFIX-R4A: an old picture still names input at once — no waiting for a fresher one', () => {
   const now = vi.spyOn(Date, 'now');
   const start = 1_000_000;
   now.mockReturnValue(start);
   const screen = sharedScreen();
   screen.frame();
-  // 6 seconds later, nothing new painted: the frame is too old for the server.
+  // 6 seconds later, nothing new painted (a still page): the press goes out at once.
   now.mockReturnValue(start + 6_000);
   screen.press();
-  expect(screen.pointer()).toEqual([]);
-  expect(screen.sent.filter((m) => m.type === 'observe').length).toBeGreaterThan(0);
-  screen.frame();
-  expect(screen.pointer().every((m) => m.observation?.frameId === 'f2')).toBe(true);
-  expect(screen.pointer()).toHaveLength(2);
+  expect(screen.pointer().map((m) => m.observation?.frameId)).toEqual(['f1', 'f1']);
+  expect(screen.sent.filter((m) => m.type === 'busy')).toEqual([]);
+  expect(screen.onInputRefused).not.toHaveBeenCalled();
 });
 
-it('REBUILD-4: the page scrolled before a waiting press could go out — not delivered, 「再点一次」', () => {
-  const now = vi.spyOn(Date, 'now');
-  const start = 1_000_000;
-  now.mockReturnValue(start);
-  const screen = sharedScreen();
-  screen.frame(0);
-  now.mockReturnValue(start + 6_000);
-  screen.press();
-  screen.frame(120);
-  expect(screen.pointer()).toEqual([]);
-  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
-});
-
-it('REBUILD-4: a navigation invalidates the frame: input waits for the new page', () => {
+it('HOTFIX-R4A: after a navigation the person can act at once on what is on screen', () => {
   const screen = sharedScreen();
   screen.frame();
-  screen.receive({ type: 'url-changed', url: 'https://example.com/next' });
+  screen.invalidate('https://example.com/next');
   screen.press();
-  expect(screen.pointer()).toEqual([]);
-  screen.receive({ type: 'observation-invalidated' });
-  expect(screen.canvas.dataset.frameId).toBeUndefined();
+  expect(screen.pointer().map((m) => m.payload?.type)).toEqual(['mouseDown', 'mouseUp']);
+  expect(screen.onInputRefused).not.toHaveBeenCalled();
 });
 
 it('REBUILD-4: the server refusing input (the page changed) is said once per burst — keys and presses', () => {
@@ -272,13 +256,14 @@ it('REBUILD-4: the server refusing input (the page changed) is said once per bur
   expect(screen.onInputRefused).toHaveBeenCalledWith('key');
 });
 
-it('REBUILD-4: a refused press is said as a press; a refused move or scroll says nothing', () => {
+it('HOTFIX-R4A: only a refused Enter / Space is said; nothing is said for pointer input', () => {
   const screen = sharedScreen();
   screen.receive({ type: 'input-expired', input: 'mouseMove' });
   screen.receive({ type: 'input-expired', input: 'scroll' });
+  screen.receive({ type: 'input-expired', input: 'pointer' });
   expect(screen.onInputRefused).not.toHaveBeenCalled();
-  screen.receive({ type: 'input-expired', input: 'mouseDown' });
-  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
+  screen.receive({ type: 'input-expired', input: 'key' });
+  expect(screen.onInputRefused).toHaveBeenCalledWith('key');
 });
 
 it('REBUILD-4: hovering does not count as the person operating; a press does', () => {
@@ -401,82 +386,6 @@ it('FIX-61 复审 #2 #2: frames arriving faster than one decode never starve the
   expect(images).toHaveLength(2);
   frame('f6');
   expect(images).toHaveLength(3);
-});
-
-it('复审 #1 #1: a waiting press is not sent on another page of the same size and scroll (the assistant navigated)', () => {
-  const now = vi.spyOn(Date, 'now');
-  const start = 1_000_000;
-  now.mockReturnValue(start);
-  const screen = sharedScreen();
-  screen.receive({ type: 'viewport-v2-ready' });
-  screen.frame();
-  // The page has been still over 5 s: the press waits for a fresh frame.
-  now.mockReturnValue(start + 6_000);
-  screen.press();
-  expect(screen.pointer()).toEqual([]);
-  // Meanwhile the assistant goes to another page, also 1280×800 at scroll 0.
-  screen.invalidate();
-  screen.frame();
-  expect(screen.pointer()).toEqual([]);
-  expect(screen.onInputRefused).toHaveBeenCalledWith('pointer');
-});
-
-it('复审 #1 #1: … nor on another tab with the same revision; the same still page re-captured is fine', () => {
-  const now = vi.spyOn(Date, 'now');
-  const start = 1_000_000;
-  now.mockReturnValue(start);
-  const other = sharedScreen();
-  other.frame();
-  now.mockReturnValue(start + 6_000);
-  other.press();
-  other.frame(0, 1280, 800, { tabId: 't2' });
-  expect(other.pointer()).toEqual([]);
-  expect(other.onInputRefused).toHaveBeenCalledWith('pointer');
-  cleanup();
-  now.mockReturnValue(start);
-  const same = sharedScreen();
-  same.frame();
-  now.mockReturnValue(start + 6_000);
-  same.press();
-  same.frame();
-  expect(same.pointer().map((m) => m.observation)).toEqual([
-    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
-    { frameId: 'f2', tabId: 't', viewportRevision: 1 },
-  ]);
-  expect(same.onInputRefused).not.toHaveBeenCalled();
-});
-
-it('复审 #1 #1: waiting keys on a page the assistant replaced are not typed into it', () => {
-  const now = vi.spyOn(Date, 'now');
-  const start = 1_000_000;
-  now.mockReturnValue(start);
-  const screen = sharedScreen();
-  screen.frame();
-  now.mockReturnValue(start + 6_000);
-  fireEvent.keyDown(screen.input, { key: 'a', code: 'KeyA' });
-  screen.invalidate();
-  screen.frame();
-  expect(screen.sent.filter((m) => m.payload?.type === 'keyDown')).toEqual([]);
-  expect(screen.onInputRefused).toHaveBeenCalledWith('key');
-});
-
-it('复审 #1 #1: a press that has to wait says 「busy」 at once — no coordinates — so the assistant yields', () => {
-  const now = vi.spyOn(Date, 'now');
-  const start = 1_000_000;
-  now.mockReturnValue(start);
-  const screen = sharedScreen();
-  screen.frame();
-  // A press sent at once needs no busy signal: the input itself tells the server.
-  screen.press();
-  expect(screen.sent.filter((m) => m.type === 'busy')).toEqual([]);
-  now.mockReturnValue(start + 6_000);
-  screen.press();
-  screen.press();
-  const busy = screen.sent.filter((m) => m.type === 'busy');
-  expect(busy).toEqual([{ type: 'busy' }]);
-  now.mockReturnValue(start + 6_600);
-  screen.press();
-  expect(screen.sent.filter((m) => m.type === 'busy')).toHaveLength(2);
 });
 
 it('复审 #1 (建议修 #3): an input refused while the task stops is said', () => {

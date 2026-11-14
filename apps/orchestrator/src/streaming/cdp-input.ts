@@ -46,29 +46,24 @@ export const MARK_HUMAN_TYPED_FIELD = `(() => {
 })()`;
 
 /**
- * FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): human input reaches only the document the person was
- * looking at. Wired by the screencast proxy from the streamer's records. Everything that waits on
- * the browser is bounded, and the last check before sending is synchronous (复审 #1 #3/#4).
+ * HOTFIX-R4A（协调方改，2026-11-14）: the person's input is delivered like a remote desktop's — what
+ * they see is what they click or type, with no frame freshness check. The one guard left: an Enter
+ * or Space within 300 ms of a cross-document navigation (a new document, a pushState history entry,
+ * another tab) is dropped, because it was meant for the page before.
  */
-export interface InputDocumentGuard {
-  /** The frame revision and document an accepted input was checked against; none on legacy input. */
-  expected(msg: InputMessage): { revision: number; loader: string } | undefined;
-  /** The stream's revision now. */
-  revision(): number;
-  /** The document (CDP loaderId) the stream's events say is shown now; '' when not known yet. */
-  loader(): string;
-  /** The document read from the browser now; null when it cannot be read in time. */
-  freshLoader(): Promise<string | null>;
-  /** The current history entry (pushState makes a new one); null when not known. */
-  entry(): number | null;
-  /** A same-document navigation whose kind (push or replace) is not known yet. */
-  pending(): boolean;
-  /** Waits (bounded, 300ms unless given) until no such navigation is being classified. */
-  settled(timeoutMs?: number): Promise<void>;
+export interface InputNavigationGuard {
+  /** When the page last changed document (ms since epoch; 0 = never). */
+  lastNavigationAt(): number;
+  /** A same-document navigation whose kind (push or replace) is still being read. */
+  pending?(): boolean;
+  /** Waits (bounded) until no such navigation is being read. */
+  settled?(timeoutMs?: number): Promise<void>;
 }
+/** How long after a cross-document navigation an Enter / Space is dropped. */
+export const NAVIGATION_KEY_GUARD_MS = 300;
 
-/** Error for an input refused because the page changed under it (the screen asks again). */
-export const PAGE_CHANGED_ERROR = 'browser_observation_expired';
+/** Error for an Enter / Space dropped right after a navigation (the screen asks once again). */
+export const PAGE_CHANGED_ERROR = 'browser_page_just_navigated';
 
 const NAMED_KEYS = new Set([
   'Enter',
@@ -121,16 +116,6 @@ function activates(msg: InputMessage): boolean {
     return k === 'Enter' || k === 'Space';
   }
   return false;
-}
-
-/**
- * Inputs whose document is read fresh before sending: anything that can change or act on a page.
- * Moves, wheel and the release of an ordinary key are not (复审 #1 #6: one CDP round trip each).
- */
-function needsFreshDocument(msg: InputMessage): boolean {
-  if (msg.type === 'mouseMove' || msg.type === 'scroll' || msg.type === 'viewport') return false;
-  if (msg.type === 'keyUp') return activates(msg);
-  return true;
 }
 
 /**
@@ -297,15 +282,15 @@ export class CdpInputHandler {
     'left' | 'middle' | 'right',
     Extract<InputMessage, { type: 'mouseDown' | 'mouseUp' }>
   >();
-  /** FIX-62 P0-1: the document each held key / button was pressed on. */
-  private readonly pressedOn = new Map<string, string | null>();
-  private documentGuard: InputDocumentGuard | null = null;
+  private navigationGuard: InputNavigationGuard | null = null;
+  /** HOTFIX-R4A: Enter / Space keys dropped after a navigation — their key-ups are dropped too. */
+  private readonly droppedKeys = new Set<string>();
   /** The last activating input's target, for the 「outcome unknown」 log. */
   private lastTarget: { role: string | null; name: string | null; page: string } | null = null;
 
-  /** FIX-62 P0-1: bind every human input to the document its frame showed. */
-  setDocumentGuard(guard: InputDocumentGuard | null): void {
-    this.documentGuard = guard;
+  /** HOTFIX-R4A: the person's input (audit log, the navigation guard); none on legacy input. */
+  setNavigationGuard(guard: InputNavigationGuard | null): void {
+    this.navigationGuard = guard;
   }
 
   /**
@@ -329,7 +314,7 @@ export class CdpInputHandler {
    * propagate and cancellation interrupts the real CDP session. We still await
    * the original send: detach failure must not manufacture a settled action.
    */
-  async handle(msg: InputMessage, signal?: AbortSignal, releaseOf?: string | null): Promise<void> {
+  async handle(msg: InputMessage, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     const session = this.getSession();
     if (!session) {
@@ -342,62 +327,43 @@ export class CdpInputHandler {
       this.activeSession = session;
       this.activeModifiers = 0;
     }
-    // FIX-62 P0-1: the input's page must still be the one in the browser when it is sent. The
-    // waits (fresh document read, target for the log) come first and are bounded; then one
-    // synchronous check: a navigation that committed meanwhile has bumped the revision or
-    // changed the loader by then. Refusal happens before the interruption wiring: it is no
-    // uncertain outcome.
-    const guard = this.documentGuard;
-    let documentAtDispatch: string | null = null;
+    const guard = this.navigationGuard;
     if (guard && msg.type !== 'viewport') {
-      const expected = releaseOf === undefined ? guard.expected(msg) : undefined;
-      // 复审 #3 #1: a same-document navigation being classified is waited for (bounded), not
-      // refused outright — a page that replaceStates every frame would otherwise drop letters.
-      if (expected && needsFreshDocument(msg) && guard.pending()) await guard.settled();
-      // 复审 #4 #2: still being classified after the wait — an activating input (press, release,
-      // Enter, Space) is refused; the screen asks again.
-      const stillPending = !!expected && activates(msg) && guard.pending();
-      const fresh = expected && needsFreshDocument(msg) ? await guard.freshLoader() : undefined;
-      const target = activates(msg)
-        ? await within(
-            session
-              .send('Runtime.evaluate', {
-                expression: describeTargetExpression(msg),
-                returnByValue: true,
-              })
-              .then((r) => (r.result?.value as CdpInputHandler['lastTarget']) ?? null),
-            1000,
-          )
-        : null;
-      const now = guard.loader();
-      const refused =
-        !!expected &&
-        (stillPending ||
-          guard.revision() !== expected.revision ||
-          (!!expected.loader && now !== expected.loader) ||
-          (fresh !== undefined && (fresh === null || (!!now && fresh !== now))));
       const where = {
         type: msg.type,
         ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
         ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
       };
-      if (refused) {
-        const fields = { ...where, target, unreadable: fresh === null };
-        if (activates(msg))
-          this.logger.info(fields, 'cdp-input: human input refused (page changed)');
-        else this.logger.debug(fields, 'cdp-input: human input refused (page changed)');
-        throw new Error(PAGE_CHANGED_ERROR);
+      const keyId =
+        msg.type === 'keyDown' || msg.type === 'keyUp'
+          ? (msg.code ?? msg.key ?? String(msg.keyCode))
+          : '';
+      // The release of a dropped Enter / Space has nothing to release.
+      if (msg.type === 'keyUp' && this.droppedKeys.delete(keyId)) return;
+      // The release of a button this browser does not hold has nothing to release either.
+      if (msg.type === 'mouseUp' && !this.pressedButtons.has(msg.button ?? 'left')) return;
+      if (msg.type === 'keyDown' && activates(msg)) {
+        // A pushState being classified right now is waited for (bounded) before deciding.
+        if (guard.pending?.()) await guard.settled?.(NAVIGATION_KEY_GUARD_MS);
+        if (Date.now() - guard.lastNavigationAt() <= NAVIGATION_KEY_GUARD_MS) {
+          this.droppedKeys.add(keyId);
+          this.logger.info(where, 'cdp-input: human input refused (page just navigated)');
+          throw new Error(PAGE_CHANGED_ERROR);
+        }
       }
-      // A press is bound to its document AND history entry: a pushState swap keeps the loader
-      // but not what the press was aimed at (复审 #2 A). Unknown ('' loader, pending) binds to none.
-      const entry = guard.entry();
-      documentAtDispatch = now && entry !== null ? `${now}#${entry}` : '';
       if (activates(msg)) {
-        this.lastTarget = target;
-        this.logger.info(
-          { ...where, target, ...(releaseOf !== undefined ? { release: true } : {}) },
-          'cdp-input: human activation',
+        // FIX-62 audit log: what the person's press or Enter / Space hit (role, own label, origin).
+        const target = await within(
+          session
+            .send('Runtime.evaluate', {
+              expression: describeTargetExpression(msg),
+              returnByValue: true,
+            })
+            .then((r) => (r.result?.value as CdpInputHandler['lastTarget']) ?? null),
+          1000,
         );
+        this.lastTarget = target;
+        this.logger.info({ ...where, target }, 'cdp-input: human activation');
       }
     }
     let interrupted = false;
@@ -447,7 +413,6 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.set(msg.button ?? 'left', msg);
-          this.pressedOn.set(`button:${msg.button ?? 'left'}`, documentAtDispatch);
           break;
         case 'mouseUp':
           await send('Input.dispatchMouseEvent', {
@@ -458,7 +423,6 @@ export class CdpInputHandler {
             clickCount: msg.clickCount ?? 1,
           });
           this.pressedButtons.delete(msg.button ?? 'left');
-          this.pressedOn.delete(`button:${msg.button ?? 'left'}`);
           break;
         case 'scroll':
           await send('Input.dispatchMouseEvent', {
@@ -485,10 +449,6 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.set(msg.code ?? msg.key ?? String(msg.keyCode), msg);
-          this.pressedOn.set(
-            `key:${msg.code ?? msg.key ?? String(msg.keyCode)}`,
-            documentAtDispatch,
-          );
           break;
         }
         case 'keyUp': {
@@ -504,7 +464,6 @@ export class CdpInputHandler {
           });
           this.activeModifiers = reportedModifiers;
           this.pressedKeys.delete(msg.code ?? msg.key ?? String(msg.keyCode));
-          this.pressedOn.delete(`key:${msg.code ?? msg.key ?? String(msg.keyCode)}`);
           break;
         }
         case 'insertText':
@@ -537,7 +496,6 @@ export class CdpInputHandler {
             ...(msg.type === 'keyDown' || msg.type === 'keyUp' ? { key: keyClass(msg) } : {}),
             ...('x' in msg ? { x: Math.round(msg.x), y: Math.round(msg.y) } : {}),
             target: activates(msg) ? this.lastTarget : null,
-            ...(releaseOf !== undefined ? { release: true } : {}),
           },
           'cdp-input: human input outcome unknown',
         );
