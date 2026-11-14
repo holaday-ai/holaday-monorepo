@@ -143,6 +143,14 @@ const READ_PATH_RE =
   /(?:^|[/._-])(?:suggest(?:ions?)?|sug|autocomplete|autosuggest|typeahead|complete|recommend|search|query|hint|lookup|predict)(?:[/._-]|$)/i;
 
 /**
+ * G2c (DEPLOY-R5 online BestBuy): a path segment that names a log / analytics report. Only a POST
+ * set off by the site's own search box (typing in it, or its search button) may pass on this —
+ * still never with a write path or a write named in the query or body.
+ */
+const SEARCH_LOG_PATH_RE =
+  /(?:^|[/._-])(?:logs?|logger|logging|log-events|track|tracking|tracker|beacon|analytics|metrics|telemetry|rum|pixel|impressions?|exposure|clickstream)(?:[/._-]|$)/i;
+
+/**
  * A write named in the query or the body rather than the path:
  * 「POST /api?action=addCart」, 「{"action":"addCart"}」, 「op=submit」.
  */
@@ -263,6 +271,21 @@ function botSensorPost(request: Request): boolean {
   }
 }
 /**
+ * G2c (DEPLOY-R5 online BestBuy): BestBuy's bot sensor body (`{"body":"…4 KB…"}`) on www.bestbuy.com,
+ * whatever the random path looks like this week — its shape has changed five times (FIX-38/42/52).
+ * Judged only for a POST the search box set off: a search word is a few characters, never a 1 KB
+ * opaque string. The host stays exact and a path that names a word (cart, api, signin…) still pauses.
+ */
+function bestBuySearchSensorPost(url: URL, request: Request): boolean {
+  if (url.hostname !== 'www.bestbuy.com' || url.search) return false;
+  if (url.pathname.split('/').slice(1).some(namesBestBuyWord)) return false;
+  try {
+    return opaqueSensorBody(request.postData() ?? '');
+  } catch {
+    return false;
+  }
+}
+/**
  * FIX-38 #4 (Deploy-38 new-bestbuy / reg-new-bestbuy; evidence FIX-36 #5): BestBuy's bot
  * sensor. The page sends it on load and on its own timers, whatever the user does: a one-field
  * JSON body (`{"body":…}`, about 4.3 KB) to a random many-segment path on www.bestbuy.com
@@ -328,9 +351,15 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
     segments.filter((segment) => /\d/.test(segment)).length < Math.max(2, segments.length * 0.4)
   )
     return false;
-  // DEPLOY-43 复审 #2: exactly one string member as written (a duplicate key is no sensor), and its
-  // value is the sensor's opaque string — never JSON (`{"body":"{\"action\":\"addToCart\"…}"}`)
-  // nor `key=value&key=…` pairs.
+  return opaqueSensorBody(postData);
+}
+
+/**
+ * DEPLOY-43 复审 #2: exactly one string member as written (a duplicate key is no sensor), and its
+ * value is the sensor's opaque string of 1 KB or more — never JSON
+ * (`{"body":"{\"action\":\"addToCart\"…}"}`) nor `key=value&key=…` pairs.
+ */
+export function opaqueSensorBody(postData: string): boolean {
   const member = postData.match(
     /^\s*\{\s*"(?:body|sensor_data)"\s*:\s*("(?:[^"\\]|\\.)*")\s*\}\s*$/,
   );
@@ -1494,7 +1523,7 @@ type ActionWindow = {
   inFlight: Set<Request>;
   lastActivity: number;
   action: string;
-  /** FIX-30: a `type` into the page's search box. */
+  /** FIX-30: a `type` into the page's search box (G2c: or a click on its search button). */
   searchField?: boolean;
 };
 
@@ -1814,7 +1843,10 @@ export class CloudObservation {
     // search box is a read only when it is positively one — a suggestion/search
     // path, or Akamai's sensor body — and its path names no write (recent
     // searches, preferences…). Anything else, an opaque path included, still
-    // pauses; a navigating submit is still a candidate, and no path exempts a click.
+    // pauses; a navigating submit is still a candidate.
+    // G2c (DEPLOY-R5 online BestBuy): also a log / analytics path or BestBuy's sensor
+    // body on a path of any shape, and the same holds for a click on the search box's own button;
+    // any other click is never exempted by its path.
     const searchRead =
       r.method() === 'POST' &&
       !!cause?.searchField &&
@@ -1823,7 +1855,10 @@ export class CloudObservation {
       !navigation &&
       !WRITE_PATH_RE.test(url.pathname) &&
       !writeIntentPayload(url, r) &&
-      (READ_PATH_RE.test(url.pathname) || botSensorPost(r));
+      (READ_PATH_RE.test(url.pathname) ||
+        SEARCH_LOG_PATH_RE.test(url.pathname) ||
+        botSensorPost(r) ||
+        bestBuySearchSensorPost(url, r));
     let rpcRead = false;
     if (r.method() === 'POST' && !transactional) {
       try {
@@ -2591,8 +2626,8 @@ export class CloudObservation {
       inFlight: new Set(),
       lastActivity: Date.now(),
       action: action.tool,
-      ...(action.tool === 'type' && 'ref' in action && action.ref
-        ? { searchField: await searchFieldAt(this.locator(frame, action.ref)) }
+      ...((action.tool === 'type' || action.tool === 'click') && 'ref' in action && action.ref
+        ? { searchField: await searchFieldAt(this.locator(frame, action.ref), action.tool) }
         : {}),
     };
     this.actionWindow = window;
@@ -2752,65 +2787,157 @@ export class CloudObservation {
 /**
  * FIX-30: whether a `type` target is the page's search box (the executor's
  * fieldKind test, plus a search word in its name/placeholder/label).
+ * G2c: or whether a `click` target is that search box's own search button.
  */
-async function searchFieldAt(target: Locator): Promise<boolean> {
+async function searchFieldAt(target: Locator, tool: 'type' | 'click'): Promise<boolean> {
   try {
-    // FIX-30 review blocker 1: only a strong signal makes a search box — a weak one
-    // (placeholder 「Search or ask a question」, a class) is how a chat box looks too.
-    // No named local functions in page code (tsx keepNames adds __name).
-    return await target.evaluate(
-      (el) => {
-        const input = el as HTMLInputElement;
-        const form = input.form ?? el.closest('form');
-        const action = form?.getAttribute('action') || '';
-        const actionPath = action.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
-        // YouTube's search form posts to /results (FIX-31 core-04).
-        // FIX-31 review: a support/chat box worded like search is never a search box.
-        if (
-          /客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
-            [
-              input.getAttribute('name'),
-              input.id,
-              input.getAttribute('placeholder'),
-              input.getAttribute('aria-label'),
-              input.getAttribute('class'),
-              form?.id,
-              form?.getAttribute('class'),
-            ].join(' '),
-          )
-        )
-          return false;
-        return (
-          String(input.getAttribute('type') || '').toLowerCase() === 'search' ||
-          el.getAttribute('role') === 'searchbox' ||
-          (!!form &&
-            (form.getAttribute('role') === 'search' ||
-              /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|results|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
-                actionPath,
-              ) ||
-              /[?&](?:q|query|wd|kw|keyword|k)=/i.test(action) ||
-              // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
-              // Gaode's search panel have no action and no button.
-              (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
-              (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
-                /(?:^|\.)amap\.com$/i.test(location.hostname)))) ||
-          // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
-          (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
-            /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
-          // FIX-32: Best Buy's header search is a bare textarea; Enter opens
-          // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
-          (el.id === 'autocomplete-search-bar' &&
-            /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
-          (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
-            /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
-          // FIX-53 #6: Gaode's bare `#searchipt` on the page it serves the cloud browser.
-          (el.id === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname))
-        );
-      },
-      undefined,
-      { timeout: 1000 },
-    );
+    // G2c (DEPLOY-R5 online BestBuy): a busy page answered slower than 1 s, and a box that
+    // could not be read was judged no search box.
+    return await target.evaluate(searchTargetProbe, tool, { timeout: 3000 });
   } catch {
     return false;
   }
+}
+
+/**
+ * Page code (no named local functions: tsx keepNames adds __name). What a site search looks like:
+ *
+ *  - FIX-30 strong signals: `type=search`, `role=searchbox`, a form with `role=search`, a search
+ *    action path or query key, and the known site rules below;
+ *  - G2c (DEPLOY-R5 online BestBuy 「我在Best Buy在一个输入框里输入了内容。页面像是提交了一个请求」):
+ *    the run typed into a nameless wrapper (`- generic [ref=…]`), which `fill` hands to the label's
+ *    control — the control is judged, not the wrapper. Inside a search landmark (`[role=search]`,
+ *    `<search>`) a text box is a search box; so is a plain text box whose name / id / label /
+ *    placeholder says search (搜索, search, keyword, q, wd…) — but never a box that also names a
+ *    chat, comment, reply, message, account or contact field;
+ *  - G2c: a click on a search button (「搜索」, 「Search」, an icon button) belonging to such a box.
+ *
+ * Whatever this says, only a POST that is positively a read (a suggestion / search / log path, a
+ * sensor body) with no write path or write payload passes; a navigating form POST, a transaction
+ * path, PUT / PATCH / DELETE and any opaque POST still pause.
+ */
+export function searchTargetProbe(el: Element, tool: string): boolean {
+  // The box a click's search button belongs to, or the control `fill` types into.
+  let target: Element | null = el;
+  if (tool === 'click') {
+    const control = el.closest(
+      'button, input[type="submit"], input[type="image"], input[type="button"], [role="button"], a',
+    );
+    if (!control) return false;
+    const buttonName = [
+      control.getAttribute('aria-label'),
+      control.getAttribute('title'),
+      control.tagName === 'INPUT'
+        ? (control as HTMLInputElement).value
+        : (control as HTMLElement).innerText || control.textContent,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // An icon button, or one named only as a search: 「搜索」「Search」「submit search」「Go」.
+    if (
+      buttonName &&
+      !/^(?:(?:搜\s?索|搜一下|查找|search|submit search|search button|go)\s*)+$/i.test(buttonName)
+    )
+      return false;
+    const fieldSelector =
+      'input[type="search"], input[type="text"], input:not([type]), textarea, [role="searchbox"], [role="combobox"]';
+    let scope: Element | null =
+      (control as HTMLButtonElement).form ?? control.closest('form, [role="search"], search');
+    for (let up = control.parentElement, i = 0; !scope && up && i < 2; up = up.parentElement, i++)
+      if (up.querySelector(fieldSelector)) scope = up;
+    const fields = scope ? Array.from(scope.querySelectorAll(fieldSelector)) : [];
+    // One box only: a button between a search box and a comment box belongs to neither.
+    target = fields.length === 1 ? (fields[0] ?? null) : null;
+  } else if (!el.matches('input, textarea, select') && !(el as HTMLElement).isContentEditable) {
+    const label = el.closest('label');
+    if (label?.control) target = label.control;
+  }
+  if (!target) return false;
+  const input = target as HTMLInputElement;
+  const form = input.form ?? target.closest('form');
+  const action = form?.getAttribute('action') || '';
+  const actionPath = action.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
+  const type = String(input.getAttribute('type') || '').toLowerCase();
+  const labelText = Array.from(input.labels ?? [])
+    .map((label) => (label.textContent || '').trim().slice(0, 40))
+    .join(' ');
+  // YouTube's search form posts to /results (FIX-31 core-04).
+  // FIX-31 review: a support/chat box worded like search is never a search box.
+  if (
+    /客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
+      [
+        input.getAttribute('name'),
+        input.id,
+        input.getAttribute('placeholder'),
+        input.getAttribute('aria-label'),
+        input.getAttribute('class'),
+        form?.id,
+        form?.getAttribute('class'),
+      ].join(' '),
+    )
+  )
+    return false;
+  if (
+    type === 'search' ||
+    target.getAttribute('role') === 'searchbox' ||
+    (!!form &&
+      (form.getAttribute('role') === 'search' ||
+        /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|results|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+          actionPath,
+        ) ||
+        /[?&](?:q|query|wd|kw|keyword|k)=/i.test(action) ||
+        // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
+        // Gaode's search panel have no action and no button.
+        (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
+        (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
+          /(?:^|\.)amap\.com$/i.test(location.hostname)))) ||
+    // IKEA's header search and Gaode's route from/to boxes are bare inputs, no form.
+    (/(?:^|\s)s-input(?:\s|$)/.test(target.getAttribute('class') || '') &&
+      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+    // FIX-32: Best Buy's header search is a bare textarea; Enter opens
+    // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
+    (target.id === 'autocomplete-search-bar' && /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
+    (/(?:^|\s)LocationItem_input/.test(target.getAttribute('class') || '') &&
+      /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+    // FIX-53 #6: Gaode's bare `#searchipt` on the page it serves the cloud browser.
+    (target.id === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname))
+  )
+    return true;
+  // G2c: the weaker signals hold only for a plain text box that names nothing a person writes to
+  // someone (a comment, reply, review, message, post) or an account / contact / code field.
+  if (
+    !(
+      target.tagName === 'TEXTAREA' ||
+      (target as HTMLElement).isContentEditable ||
+      (target.tagName === 'INPUT' && ['', 'text', 'search'].includes(type))
+    )
+  )
+    return false;
+  const words = [
+    input.getAttribute('name'),
+    target.id,
+    input.getAttribute('placeholder'),
+    input.getAttribute('aria-label'),
+    input.getAttribute('title'),
+    labelText,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (
+    /评论|评价|回复|发布|发表|私信|反馈|弹幕|写点|说点|备注|地址|收货|手机|电话|邮箱|密码|验证码|优惠码|兑换码|邀请码|用户名|账号|昵称|comment|reply|review|feedback|\bpost\b|send|message|e-?mail|phone|password|passcode|code\b|coupon|promo|address|user ?name|login|sign ?in|nickname/i.test(
+      `${words} ${form?.getAttribute('action') || ''}`,
+    )
+  )
+    return false;
+  return (
+    !!target.closest('[role="search"], search') ||
+    /^(?:q|query|search|search_?query|search_?term|searchterm|keywords?|kw|wd|st)$/i.test(
+      input.getAttribute('name') || '',
+    ) ||
+    /搜索|搜一搜|查找|关键词|关键字|search|keyword/i.test(words) ||
+    // 京东's header box: `#key`, typed and searched by script, no form.
+    (target.id === 'key' && /(?:^|\.)jd\.com$/i.test(location.hostname))
+  );
 }
