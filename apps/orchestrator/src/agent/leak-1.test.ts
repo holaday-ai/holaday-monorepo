@@ -133,3 +133,18 @@ describe('LEAK-1 复审 #3', () => {
     expect(deliverableAnswer(text)).toBe('我需要等待搜索结果。');
   });
 });
+
+describe('LEAK-1 retest run 8 · a reply of nothing but closing reasoning tags', () => {
+  const RUN8 = '</think>\n\n'.repeat(40);
+  it('is cleaned to nothing', () => {
+    expect(sanitizeFinalText(RUN8)).toBe('');
+  });
+  it('an answer after the tags stays; a tag named in a sentence stays', () => {
+    expect(sanitizeFinalText(`</think>\n\n</think>\n\n2024 年得主是韩江。`)).toBe(
+      '2024 年得主是韩江。',
+    );
+    expect(sanitizeFinalText('推理结束时模型会输出 </think> 标签。')).toBe(
+      '推理结束时模型会输出 </think> 标签。',
+    );
+  });
+});
