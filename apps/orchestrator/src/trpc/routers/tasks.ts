@@ -4962,6 +4962,25 @@ export const tasksRouter = router({
                   ) {
                     return;
                   }
+                  // G2b (production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」: the write-up of
+                  // the search results failed, generate — which cannot search — wrote a
+                  // web_search call as the answer): a web lookup the scrape lane could not
+                  // answer goes to the cloud browser; if that cannot start it fails honestly.
+                  // It is never answered by generate. A search with no query is not a lookup.
+                  const searchLookup =
+                    scrapeOutcome.status === 'failed' &&
+                    scrapeOutcome.source === 'search' &&
+                    scrapeOutcome.failureKind !== 'input';
+                  if (
+                    searchLookup &&
+                    !pageUnreadable &&
+                    !liveFactLookup &&
+                    (await handOverToBrowser(
+                      '搜索结果没能整理成回答，已自动改用云端浏览器去页面上查',
+                    ))
+                  ) {
+                    return;
+                  }
 
                   // A1 — scrape failed → fall back to generate. Generate has
                   // zero infra dependencies (no Brave, no Firecrawl) so it's
@@ -4998,10 +5017,11 @@ export const tasksRouter = router({
                     (pageUnreadable &&
                       (scrapeOutcome.source === 'scrape' ||
                         scrapeOutcome.failureKind === 'blocked')) ||
-                    liveFactLookup
+                    liveFactLookup ||
+                    searchLookup
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
-                    // search whose every result was a wall (FIX-32).
+                    // search whose every result was a wall (FIX-32), nor any web lookup (G2b).
                     outcome = {
                       status: 'failed',
                       reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',
