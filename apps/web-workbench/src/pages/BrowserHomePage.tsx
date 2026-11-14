@@ -18,6 +18,7 @@ import {
   browserHomeErrorMessage,
   browserHomeNavFailureMessage,
   browserHomeOpenErrorMessage,
+  isBrowserHomeClosedSendError,
   isWebPageUrl,
 } from '@/lib/browser-home';
 import { createBrowserHomeTask } from '@/lib/browser-home-task';
@@ -37,32 +38,27 @@ type SessionState =
   | { status: 'ready'; sessionId: string }
   | { status: 'error'; message: string };
 
-/**
- * Leaving the page releases the cloud browser. The release waits one tick so an immediate
- * re-mount (React StrictMode in development, or bouncing back to the route) keeps the same
- * browser instead of racing a close against the next open.
- */
-let pendingClose: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleClose(): void {
-  if (pendingClose) clearTimeout(pendingClose);
-  pendingClose = setTimeout(() => {
-    pendingClose = null;
-    void trpc.browserHome.close.mutate().catch(() => undefined);
-  }, 0);
-}
-
-function cancelPendingClose(): void {
-  if (!pendingClose) return;
-  clearTimeout(pendingClose);
-  pendingClose = null;
+/** One id per page mount: the server counts open /browser pages (P2-4, see browserHome.close). */
+function newViewerId(): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `v${random}`.slice(0, 40);
 }
 
 /**
  * BROWSER-HOME-1 —「云浏览器」. The person's own task-less cloud browser (`bhs_<userId>`): a thin
  * address bar, the HOLA DAY home (rendered here, while the browser is allocated in the
  * background) until a site is opened, then the live screen, with the unified composer floating
- * over the bottom. Leaving the route releases the browser.
+ * over the bottom. Leaving the route lets the browser go: the server releases it a few seconds
+ * after the last open /browser page of this user left (another tab keeps it; coming back within
+ * the grace keeps the same browser).
+ *
+ * P1-2: the browser can go away under an open page (15-minute idle while the home view shows, a
+ * crash). An address-bar action answered「no session」, a send refused because no browser is open,
+ * or the screen's stream dropping, reopens it quietly (the server goes back to the last address)
+ * and retries the action once.
  */
 export function BrowserHomePage({
   region,
@@ -89,11 +85,17 @@ export function BrowserHomePage({
   const openErrorRef = React.useRef<string | null>(null);
   // Once the person opened something, a late open() result must not switch the view under them.
   const navigatedRef = React.useRef(false);
+  const viewerIdRef = React.useRef<string | null>(null);
 
-  const openSession = React.useCallback((): Promise<string | null> => {
-    setSession({ status: 'opening' });
+  /**
+   * Open (or reuse) the browser. `quiet`: a reopen behind an action already on screen — the page
+   * keeps showing what it shows instead of flashing「正在打开」.
+   */
+  const openSession = React.useCallback((options?: { quiet?: boolean }): Promise<string | null> => {
+    if (!options?.quiet) setSession({ status: 'opening' });
     openErrorRef.current = null;
-    const promise = trpc.browserHome.open.mutate().then(
+    const viewerId = viewerIdRef.current;
+    const promise = trpc.browserHome.open.mutate(viewerId ? { viewerId } : undefined).then(
       (res) => {
         if (!aliveRef.current) return null;
         setSession({ status: 'ready', sessionId: res.sessionId });
@@ -117,13 +119,23 @@ export function BrowserHomePage({
 
   React.useEffect(() => {
     aliveRef.current = true;
-    cancelPendingClose();
+    const viewerId = newViewerId();
+    viewerIdRef.current = viewerId;
     void openSession();
     return () => {
       aliveRef.current = false;
       openRef.current = null;
-      scheduleClose();
+      if (viewerIdRef.current === viewerId) viewerIdRef.current = null;
+      // The server keeps the browser while another page of this user uses it, and for a short
+      // grace that a quick return (or a StrictMode remount) cancels with its open.
+      void trpc.browserHome.close.mutate({ viewerId }).catch(() => undefined);
     };
+  }, [openSession]);
+
+  /** P1-2: the browser went away under this page — open it again, quietly, at most once per call. */
+  const reopenQuietly = React.useCallback(async (): Promise<string | null> => {
+    if (!aliveRef.current) return null;
+    return openSession({ quiet: true });
   }, [openSession]);
 
   const navigateBrowser = React.useCallback(
@@ -140,10 +152,19 @@ export function BrowserHomePage({
           toast.show(openErrorRef.current ?? '云浏览器打开失败，请稍后重试', 'error');
           return false;
         }
-        const res = await trpc.browserHome.nav.mutate(
-          direction === 'goto' ? { direction, input: target } : { direction },
-        );
+        const request = direction === 'goto' ? { direction, input: target } : { direction };
+        let res = await trpc.browserHome.nav.mutate(request);
         if (!aliveRef.current) return false;
+        // The browser is gone (idle release, crash): reopen at the last address, retry once.
+        if (!res.ok && res.reason === 'no_session') {
+          if (!(await reopenQuietly()) || !aliveRef.current) {
+            if (aliveRef.current)
+              toast.show(openErrorRef.current ?? '云浏览器打开失败，请稍后重试', 'error');
+            return false;
+          }
+          res = await trpc.browserHome.nav.mutate(request);
+          if (!aliveRef.current) return false;
+        }
         if (!res.ok) {
           // Back from the first page returns to the HOLA DAY home.
           if (direction === 'back' && res.reason === 'no_history') {
@@ -168,7 +189,7 @@ export function BrowserHomePage({
         if (aliveRef.current) setPending(false);
       }
     },
-    [openSession, toast],
+    [openSession, reopenQuietly, toast],
   );
 
   const submitTask = React.useCallback(
@@ -203,13 +224,12 @@ export function BrowserHomePage({
         toast.show(openErrorRef.current ?? '云浏览器打开失败，请稍后重试', 'error');
         return keepComposerOnSubmitFailure;
       }
-      const res = await createBrowserHomeTask({
-        intent,
-        fileIds,
-        mode,
-        expertMode,
-        skillSelection,
-      });
+      const task = { intent, fileIds, mode, expertMode, skillSelection };
+      let res = await createBrowserHomeTask(task);
+      // Refused because the browser is gone (idle release, crash): reopen it, send once more.
+      if ('error' in res && isBrowserHomeClosedSendError(res.error) && aliveRef.current) {
+        if (await reopenQuietly()) res = await createBrowserHomeTask(task);
+      }
       if ('error' in res) {
         toast.show(taskActionError('发送失败', res.error), 'error');
         return keepComposerOnSubmitFailure;
@@ -221,7 +241,7 @@ export function BrowserHomePage({
       setView('browser');
       return clearComposerOnSubmitSuccess;
     },
-    [activeTaskId, openSession, toast],
+    [activeTaskId, openSession, reopenQuietly, toast],
   );
 
   const sessionId = session.status === 'ready' ? session.sessionId : null;
@@ -234,6 +254,23 @@ export function BrowserHomePage({
   const handleUrlChange = React.useCallback((next: string) => {
     if (isWebPageUrl(next)) setUrl(next);
   }, []);
+  // P1-2: a dropped stream may mean the browser is gone; one quiet reopen per connection (open
+  // is a no-op for a browser that is still there, and the stream reconnects on its own).
+  const streamReopenArmedRef = React.useRef(true);
+  const handleStreamStatus = React.useCallback(
+    (status: CdpScreencastStatus) => {
+      setStreamStatus(status);
+      if (status === 'connected') {
+        streamReopenArmedRef.current = true;
+        return;
+      }
+      if ((status === 'disconnected' || status === 'error') && streamReopenArmedRef.current) {
+        streamReopenArmedRef.current = false;
+        void reopenQuietly();
+      }
+    },
+    [reopenQuietly],
+  );
 
   return (
     <div
@@ -269,7 +306,7 @@ export function BrowserHomePage({
                   streamToken={streamToken}
                   fitMode="contain"
                   onUrlChange={handleUrlChange}
-                  onStatusChange={setStreamStatus}
+                  onStatusChange={handleStreamStatus}
                 />
               )}
               {session.status === 'error' ? (

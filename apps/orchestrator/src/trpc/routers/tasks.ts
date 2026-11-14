@@ -5894,7 +5894,7 @@ export const tasksRouter = router({
                     // BROWSER-HOME-1: the person's open cloud browser, lent as it is (its page
                     // kept); given back on every terminal path (finishBrowserHomeTask below).
                     const adopted = input.browserHomeSession
-                      ? lendBrowserHomeToTask({
+                      ? await lendBrowserHomeToTask({
                           pool: ctx.browserPool,
                           userId: ctx.userId,
                           taskId,
@@ -7100,12 +7100,11 @@ export const tasksRouter = router({
                   // second call when the slot is already torn down no-ops.
                   if (didAllocatePool && ctx.browserPool) {
                     const releasingPool = ctx.browserPool;
-                    // BROWSER-HOME-1: the person's cloud browser goes back to them instead.
-                    if (
-                      input.browserHomeSession &&
-                      browserHomeSessions.giveBack(releasingPool, taskId, ctx.userId)
-                    )
-                      return;
+                    // BROWSER-HOME-1 (P1-1): the wedged run may still be acting in the person's
+                    // cloud browser, so it is never given back here (nor later by the run's own
+                    // ending): the loan is forfeited and the browser released as before. The
+                    // person's next open starts a fresh one at the last address.
+                    if (input.browserHomeSession) releasingPool.forfeitBrowserHomeLoan(taskId);
                     void runTaskBackground(ctx, async (ctx) =>
                       releasingPool.release(taskId, 'watchdog-force-release').catch((relErr) => {
                         ctx.logger.warn(

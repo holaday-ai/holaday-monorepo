@@ -12,8 +12,10 @@ import { pino } from 'pino';
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
 import type { SupercarOutcome } from '../../agent/supercar/agent-loop.js';
+import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { BROWSER_HOME_IDLE_TIMEOUT_MS } from '../../browser-home/browser-home-session.js';
+import { lendBrowserHomeToTask } from '../../browser-home/browser-home-task.js';
 import { BrowserPool } from '../../browser-pool/browser-pool.js';
 import type {
   BrowserInstance,
@@ -474,5 +476,110 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
     await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 10_000 });
     expect(pool.peek(`bhs_${USER}`)).toBe(home);
     expect(pool.peek(result.taskId)).not.toBe(home);
+  });
+
+  it('watchdog on a wedged run: the browser is released, never handed to the person (P1-1)', async () => {
+    // The watchdog fires SUPERCAR_TIMEOUT_MS + 30 s after the run starts: here ~100 ms.
+    vi.stubEnv('SUPERCAR_TIMEOUT_MS', String(-30_000 + 100));
+    const { pool } = makePool();
+    const home = await openHome(pool);
+    const release = vi.spyOn(pool, 'release');
+    let unstick!: () => void;
+    const stuck = new Promise<void>((resolve) => {
+      unstick = resolve;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    // A run that ignores the abort and keeps going.
+    script.run = async () => {
+      started();
+      await stuck;
+      return outcomes.completed!();
+    };
+    const result = await tasksRouter
+      .createCaller(makeCtx(pool))
+      .create({ intent, browserHomeSession: true });
+    await running;
+    await vi.waitFor(
+      () => expect(release).toHaveBeenCalledWith(result.taskId, 'watchdog-force-release'),
+      { timeout: 5_000 },
+    );
+    expect(pool.peek(`bhs_${USER}`)).toBeNull();
+    expect(pool.browserHomeHolder(USER)).toBeNull();
+    expect(streamFor(pool)).not.toMatchObject({ kind: 'instance' });
+
+    // The wedged run ends later: still nothing goes back to the person.
+    unstick();
+    await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 10_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pool.peek(`bhs_${USER}`)).toBeNull();
+    expect(home.taskId).toBe(result.taskId);
+  });
+
+  it("a task sent while the person's own action is in flight waits for it, then runs (P2-6)", async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool);
+    const review = browserControlSessions.review(home);
+    let finishAction!: () => void;
+    const action = review.control.runHuman(
+      () =>
+        new Promise<void>((resolve) => {
+          finishAction = resolve;
+        }),
+      'navigate',
+    );
+    const starts: Array<string> = [];
+    script.run = async (args) => {
+      const factory = (args as { browserControlFactory?: () => { finish(): void } })
+        .browserControlFactory;
+      try {
+        factory?.().finish();
+        starts.push('started');
+      } catch (error) {
+        starts.push(error instanceof Error ? error.message : String(error));
+      }
+      return outcomes.completed!();
+    };
+    const result = await tasksRouter
+      .createCaller(makeCtx(pool))
+      .create({ intent, browserHomeSession: true });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(starts).toEqual([]);
+    finishAction();
+    await action;
+    await vi.waitFor(() => expect(starts).toEqual(['started']), { timeout: 10_000 });
+    await vi.waitFor(() => expect(pool.peek(`bhs_${USER}`)).toBe(home), { timeout: 10_000 });
+    expect(result.status).toBe('executing');
+  });
+});
+
+describe('lendBrowserHomeToTask — the person still acting (P2-6)', () => {
+  it('fails with a clear Chinese message when the action does not settle in time; nothing lent', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool);
+    const review = browserControlSessions.review(home);
+    let finishAction!: () => void;
+    const action = review.control.runHuman(
+      () =>
+        new Promise<void>((resolve) => {
+          finishAction = resolve;
+        }),
+      'navigate',
+    );
+    const claim = { handOver: vi.fn(), release: vi.fn(), settle: vi.fn() };
+    await expect(
+      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_busy', claim, settleMs: 50 }),
+    ).rejects.toThrow('你在云浏览器里的操作还没有完成，任务没有执行。请稍后再发送。');
+    expect(claim.release).toHaveBeenCalled();
+    expect(pool.peek(`bhs_${USER}`)).toBe(home);
+    expect(pool.browserHomeHolder(USER)).toBeNull();
+    finishAction();
+    await action;
+    // Settled: lent at once.
+    await expect(
+      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_now', claim: null, settleMs: 50 }),
+    ).resolves.toBe(home);
   });
 });

@@ -861,14 +861,10 @@ export class BrowserPool {
     this.moveInstanceKey(inst, homeId, taskId, broker);
     // While the task holds it the browser follows the task's lifecycle (pool idle default).
     delete inst.idleTimeoutMs;
-    if (broker) {
-      try {
-        this.#checkBroker(broker);
-      } catch {
-        this.moveInstanceKey(inst, taskId, homeId, broker);
-        if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
-        return null;
-      }
+    if (!this.loanBrokerValid(inst)) {
+      this.moveInstanceKey(inst, taskId, homeId, broker);
+      if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
+      return null;
     }
     this.browserHomeLoans.set(taskId, loan);
     this.logger.info({ userId, taskId }, 'pool: lent the cloud browser to a task');
@@ -900,9 +896,32 @@ export class BrowserPool {
       return null;
     if (!this.destinationFree(loan.homeId)) return null;
     const broker = this.#brokerBindings.get(inst);
-    const retentionTimer = this.retentionTimers.get(taskId);
-    if (retentionTimer) clearTimeout(retentionTimer);
-    this.retentionTimers.delete(taskId);
+    // Atomic (P2-7): the broker is checked before the key moves (with the task's hold already
+    // lifted, as the return lifts it) and again after; any failure restores the hold and puts the
+    // key back, so the instance is never left half-moved. On null the caller finishes the task
+    // browser the normal way (retain / release under the task id).
+    const retention = {
+      until: inst.retainedUntil,
+      reason: inst.retentionReason,
+      ttlMs: inst.retentionTtlMs,
+      broker: broker
+        ? {
+            retained: broker.retained,
+            until: broker.retainedUntil,
+            ttlMs: broker.retentionTtlMs,
+          }
+        : null,
+    };
+    const restoreRetention = () => {
+      if (retention.until !== undefined) inst.retainedUntil = retention.until;
+      if (retention.reason !== undefined) inst.retentionReason = retention.reason;
+      if (retention.ttlMs !== undefined) inst.retentionTtlMs = retention.ttlMs;
+      if (broker && retention.broker) {
+        broker.retained = retention.broker.retained;
+        broker.retainedUntil = retention.broker.until;
+        broker.retentionTtlMs = retention.broker.ttlMs;
+      }
+    };
     delete inst.retainedUntil;
     delete inst.retentionReason;
     delete inst.retentionTtlMs;
@@ -911,17 +930,47 @@ export class BrowserPool {
       broker.retainedUntil = undefined;
       broker.retentionTtlMs = undefined;
     }
-    this.moveInstanceKey(inst, taskId, loan.homeId, broker);
-    if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
-    if (broker) {
-      try {
-        this.#checkBroker(broker);
-      } catch {
-        return null;
-      }
+    if (!this.loanBrokerValid(inst)) {
+      restoreRetention();
+      return null;
     }
+    this.moveInstanceKey(inst, taskId, loan.homeId, broker);
+    if (!this.loanBrokerValid(inst)) {
+      this.moveInstanceKey(inst, loan.homeId, taskId, broker);
+      restoreRetention();
+      return null;
+    }
+    // Committed: the task's hold (awaiting-reply / review lease) ends with it.
+    const retentionTimer = this.retentionTimers.get(taskId);
+    if (retentionTimer) clearTimeout(retentionTimer);
+    this.retentionTimers.delete(taskId);
+    if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
     this.logger.info({ userId, taskId }, 'pool: cloud browser returned to its session');
     return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: whether the instance's broker record (strict mode) still checks out. True
+   * without a broker (non-strict pools). A separate method so a test can make the check fail.
+   */
+  private loanBrokerValid(inst: BrowserInstance): boolean {
+    const broker = this.#brokerBindings.get(inst);
+    if (!broker) return true;
+    try {
+      this.#checkBroker(broker);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * BROWSER-HOME-1 (P1-1): this task's run may still be acting in the browser (the watchdog fired
+   * on a wedged run), so the browser must never go back to the person: the loan ends here and the
+   * task's browser is released the normal way. True when the task held a loan.
+   */
+  forfeitBrowserHomeLoan(taskId: string): boolean {
+    return this.browserHomeLoans.delete(taskId);
   }
 
   /**

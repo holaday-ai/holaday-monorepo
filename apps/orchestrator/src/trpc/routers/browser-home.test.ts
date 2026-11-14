@@ -22,6 +22,8 @@ const original = {
 function fakePool() {
   const instances = new Map<string, BrowserInstance>();
   const gotos: string[] = [];
+  /** Test hook: how the next goto behaves (sets the landed URL, may throw). */
+  const loads: Array<(target: string) => { url: string; error?: Error }> = [];
   const pool = {
     allocate: vi.fn(async (taskId: string, userId: string) => {
       let url = 'about:blank';
@@ -29,7 +31,10 @@ function fakePool() {
         url: () => url,
         goto: async (target: string) => {
           gotos.push(target);
-          url = target;
+          const load = target === 'about:blank' ? undefined : loads.shift();
+          const outcome = load ? load(target) : { url: target };
+          url = outcome.url;
+          if (outcome.error) throw outcome.error;
         },
         goBack: async () => null,
         goForward: async () => null,
@@ -75,7 +80,7 @@ function fakePool() {
       return inst;
     },
   };
-  return { pool, instances, gotos };
+  return { pool, instances, gotos, loads };
 }
 
 function caller(
@@ -279,5 +284,132 @@ describe('browserHome router — while a task holds the browser (step 4)', () =>
     expect(pool.release).not.toHaveBeenCalled();
     expect(pool.peek('tsk_running')).toBe(inst);
     expect(pool.browserHomeHolder('usr_lent')).toBeNull();
+  });
+});
+
+describe('browserHome router — a page that does not load (P1-3)', () => {
+  it.each([
+    [
+      'a TLS error',
+      'net::ERR_CERT_AUTHORITY_INVALID at https://1.1.1.1/x',
+      '该网站证书有问题，无法安全连接。请确认网址是否正确或换一个站点。',
+    ],
+    [
+      'a refused proxy tunnel',
+      'net::ERR_TUNNEL_CONNECTION_FAILED at https://1.1.1.1/x',
+      '网页没有打开：这个地址不允许访问，或暂时无法连接。',
+    ],
+    [
+      'a 15 s timeout',
+      'page.goto: Timeout 15000ms exceeded.',
+      '页面加载超时，可能网络不稳定或站点响应慢，请稍后重试。',
+    ],
+    ['anything else', 'net::ERR_FAILED', '网页没有打开，请检查网址或稍后重试。'],
+  ])('%s: Chinese message, the browser is kept and still usable', async (_name, raw, message) => {
+    const { pool, gotos, loads } = fakePool();
+    const c = caller('usr_loadfail', pool);
+    await c.open();
+    const inst = pool.peek('bhs_usr_loadfail')!;
+    loads.push(() => ({ url: 'chrome-error://chromewebdata/', error: new Error(raw) }));
+    expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/x' })).toEqual({
+      ok: false,
+      reason: 'load_failed',
+      message,
+    });
+    // Kept: not released, not quarantined — the next address opens in the same browser.
+    expect(pool.release).not.toHaveBeenCalled();
+    expect(pool.peek('bhs_usr_loadfail')).toBe(inst);
+    expect(browserControlSessions.openForViewer(inst)?.control.snapshot().error).toBeNull();
+    expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/y' })).toEqual({
+      ok: true,
+      url: 'https://1.1.1.1/y',
+    });
+    expect(gotos).toEqual(['https://1.1.1.1/x', 'https://1.1.1.1/y']);
+    await c.close();
+  });
+
+  it('a redirect to a refused address never stays on screen: moved to a blank page', async () => {
+    const { pool, gotos, loads } = fakePool();
+    const c = caller('usr_redirect', pool);
+    await c.open();
+    const inst = pool.peek('bhs_usr_redirect')!;
+    // The egress proxy answers the refused hop with its 403 page; the load itself "succeeds".
+    loads.push(() => ({ url: 'http://169.254.169.254/latest/meta-data' }));
+    expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/r' })).toEqual({
+      ok: false,
+      reason: 'blocked_redirect',
+      message: '这个网页跳转到了本机、内网或云服务元数据地址，为保护安全已停止打开。',
+    });
+    expect(gotos).toEqual(['https://1.1.1.1/r', 'about:blank']);
+    expect((await inst.executor.getPage()).url()).toBe('about:blank');
+    expect(browserHomeSessions.lastUrl('usr_redirect')).toBeNull();
+    // Same when the refused hop made the load fail (https CONNECT refused).
+    loads.push(() => ({
+      url: 'https://10.0.0.5/',
+      error: new Error('net::ERR_TUNNEL_CONNECTION_FAILED'),
+    }));
+    expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/r2' })).toMatchObject({
+      ok: false,
+      reason: 'blocked_redirect',
+    });
+    expect((await inst.executor.getPage()).url()).toBe('about:blank');
+    expect(pool.release).not.toHaveBeenCalled();
+    expect(pool.peek('bhs_usr_redirect')).toBe(inst);
+    await c.close();
+  });
+});
+
+describe('browserHome router — pages leaving (P2-4)', () => {
+  it('another open page keeps the browser; the last one leaving releases it after the grace', async () => {
+    vi.useFakeTimers();
+    try {
+      const { pool } = fakePool();
+      const c = caller('usr_tabs', pool);
+      await c.open({ viewerId: 'page-a-0001' });
+      await c.open({ viewerId: 'page-b-0001' });
+      const inst = pool.peek('bhs_usr_tabs');
+      expect(await c.close({ viewerId: 'page-a-0001' })).toEqual({ released: false });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(pool.release).not.toHaveBeenCalled();
+      expect(pool.peek('bhs_usr_tabs')).toBe(inst);
+
+      // Leave and come back within a few seconds: the same browser.
+      await c.close({ viewerId: 'page-b-0001' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await c.open({ viewerId: 'page-b-0002' });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(pool.release).not.toHaveBeenCalled();
+      expect(pool.allocate).toHaveBeenCalledTimes(1);
+      expect(pool.peek('bhs_usr_tabs')).toBe(inst);
+
+      // The last page leaves for good.
+      await c.close({ viewerId: 'page-b-0002' });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(pool.release).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(pool.release).toHaveBeenCalledWith('bhs_usr_tabs', 'browser-home-close');
+      expect(pool.peek('bhs_usr_tabs')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a remount whose open arrives before the old page’s close keeps the browser', async () => {
+    vi.useFakeTimers();
+    try {
+      const { pool } = fakePool();
+      const c = caller('usr_remount', pool);
+      await c.open({ viewerId: 'mount-0000001' });
+      await Promise.all([
+        c.open({ viewerId: 'mount-0000002' }),
+        c.close({ viewerId: 'mount-0000001' }),
+      ]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(pool.release).not.toHaveBeenCalled();
+      expect(pool.peek('bhs_usr_remount')).not.toBeNull();
+      await c.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

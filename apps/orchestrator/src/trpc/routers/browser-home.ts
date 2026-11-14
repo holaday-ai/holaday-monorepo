@@ -2,8 +2,12 @@
  * BROWSER-HOME-1 — the「云浏览器」entry's server side: one task-less cloud browser per user.
  *
  * open()  → create or reuse `bhs_<userId>`; returns { sessionId, url } (url null = blank page).
+ *           With { viewerId } the page is counted as one of the user's open pages.
  * nav()   → back / forward / reload / goto (an address or search words) as the person's input.
- * close() → release it (the last address is remembered for the next open). While one of the
+ *           A page that does not load is an error message; the browser is kept.
+ * close() → with { viewerId }: that page left; the browser is released only when no other page
+ *           of the user uses it, after a short grace that a new open() cancels. Without: release
+ *           it now (the last address is remembered for the next open). While one of the
  *           user's tasks holds it (tasks.create browserHomeSession), the session ends and the
  *           task's normal release applies when it finishes.
  *
@@ -22,13 +26,13 @@ import {
   type BrowserHomeRegion,
   resolveBrowserHomeAddress,
 } from '../../browser-home/browser-home-address.js';
+import { navigateBrowserHome } from '../../browser-home/browser-home-nav.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import { PoolCapacityError } from '../../browser-pool/browser-pool.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
 import { protectedProcedure, router } from '../trpc.js';
-import { navigateOwnedBrowser } from './browser-control.js';
 
 const browserHomeProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (!isBrowserHomeEnabledFor(ctx.userId)) {
@@ -54,11 +58,14 @@ async function regionFor(ctx: Context & { userId: string }): Promise<BrowserHome
   return region === 'cn' || region === 'intl' ? region : appEnv.MODEL_DATA_REGION_DEFAULT;
 }
 
+/** P2-4: the /browser page instance (one id per mount) — see BrowserHomeSessions.leave. */
+const viewerInput = z.object({ viewerId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) }).optional();
+
 export const browserHomeRouter = router({
-  open: browserHomeProcedure.mutation(async ({ ctx }) => {
+  open: browserHomeProcedure.input(viewerInput).mutation(async ({ ctx, input }) => {
     const pool = requirePool(ctx);
     try {
-      return await browserHomeSessions.open(pool, ctx.userId, ctx.logger);
+      return await browserHomeSessions.open(pool, ctx.userId, ctx.logger, input?.viewerId);
     } catch (error) {
       if (error instanceof PoolCapacityError) {
         throw new TRPCError({
@@ -104,9 +111,8 @@ export const browserHomeRouter = router({
         if (!address) return { ok: false as const, reason: 'missing_url' };
         url = address.url;
       }
-      const result = await navigateOwnedBrowser({
+      const result = await navigateBrowserHome({
         pool,
-        logger: ctx.logger,
         instance,
         // In the session: the person's own review control. Held by their task: the task's control
         // (the assistant yields to the person, as for any input on the screen).
@@ -125,8 +131,13 @@ export const browserHomeRouter = router({
       return { ok: true as const, url: current };
     }),
 
-  close: browserHomeProcedure.mutation(async ({ ctx }) => {
+  close: browserHomeProcedure.input(viewerInput).mutation(async ({ ctx, input }) => {
     const pool = requirePool(ctx);
+    // A page leaving: released only when it was the last one, after the close grace.
+    if (input?.viewerId) {
+      browserHomeSessions.leave(pool, ctx.userId, input.viewerId);
+      return { released: false };
+    }
     return { released: await browserHomeSessions.close(pool, ctx.userId) };
   }),
 });

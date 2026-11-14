@@ -239,6 +239,16 @@ export function browserHomeNavFailureMessage(
   return browserNavFailureMessage(result.reason, direction);
 }
 
+/**
+ * The server's refusal of a send when the person has no open cloud browser (BROWSER_HOME_TASK_COPY
+ * .closed in the orchestrator). The page reopens the browser and sends once more (P1-2).
+ */
+export const BROWSER_HOME_CLOSED_SEND_ERROR = '云浏览器还没有打开，请先打开云浏览器再发送任务。';
+
+export function isBrowserHomeClosedSendError(error: string | null | undefined): boolean {
+  return typeof error === 'string' && error.includes('云浏览器还没有打开');
+}
+
 const HAS_CHINESE = /[一-鿿]/;
 
 /** A thrown error: the server's Chinese refusal (暂未开放 / 都在忙 …) is shown as is. */

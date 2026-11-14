@@ -3,7 +3,7 @@ import { BrowserHomeView } from '@/components/browser-home/BrowserHomeView';
 import { ToastProvider } from '@/components/ui/toast';
 import type { BrowserHomeSite } from '@/lib/browser-home';
 import { setStoreNavigate, useTaskStore } from '@/stores/task-store';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,10 +40,21 @@ vi.mock('@/lib/use-stream-token', () => ({
   }),
 }));
 
+const stream = vi.hoisted(() => ({
+  onStatusChange: null as null | ((status: string) => void),
+}));
+
 vi.mock('@/components/CdpScreencastViewport', () => ({
-  CdpScreencastViewport: ({ wsUrl }: { wsUrl: string | null }) => (
-    <div data-testid="screen" data-ws-url={wsUrl ?? ''} />
-  ),
+  CdpScreencastViewport: ({
+    wsUrl,
+    onStatusChange,
+  }: {
+    wsUrl: string | null;
+    onStatusChange?: (status: string) => void;
+  }) => {
+    stream.onStatusChange = onStatusChange ?? null;
+    return <div data-testid="screen" data-ws-url={wsUrl ?? ''} />;
+  },
 }));
 
 function memoryStorage(): Storage {
@@ -168,13 +179,77 @@ describe('BROWSER-HOME-1 BrowserHomePage', () => {
     expect(addressBar().value).toBe('https://news.example/');
   });
 
-  it('leaving the route releases the cloud browser', async () => {
+  it('leaving the route tells the server this page left (it releases after the last one)', async () => {
     const user = mount();
     await waitFor(() => expect(api.open).toHaveBeenCalled());
+    const opened = api.open.mock.calls[0]![0] as { viewerId: string };
+    expect(opened.viewerId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
     expect(api.close).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '离开' }));
     expect(screen.getByText('别的页面')).toBeTruthy();
     await waitFor(() => expect(api.close).toHaveBeenCalledTimes(1));
+    expect(api.close).toHaveBeenCalledWith({ viewerId: opened.viewerId });
+  });
+});
+
+describe('BROWSER-HOME-1 P1-2: the browser went away under the page', () => {
+  it('an address-bar action answered「no session」reopens quietly and retries once', async () => {
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+    api.nav.mockResolvedValueOnce({ ok: false, reason: 'no_session' });
+    await user.click(addressBar());
+    await user.type(addressBar(), 'example.com{Enter}');
+    await waitFor(() => expect(api.nav).toHaveBeenCalledTimes(2));
+    expect(api.open).toHaveBeenCalledTimes(2);
+    expect(api.nav.mock.calls[1]![0]).toEqual({ direction: 'goto', input: 'example.com' });
+    expect(await screen.findByTestId('screen')).toBeTruthy();
+    expect(screen.queryByText('云浏览器还在打开，请稍候再试')).toBeNull();
+  });
+
+  it('only once: a second「no session」is shown, not looped', async () => {
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+    api.nav.mockResolvedValue({ ok: false, reason: 'no_session' });
+    await user.click(addressBar());
+    await user.type(addressBar(), 'example.com{Enter}');
+    expect(await screen.findByText('云浏览器还在打开，请稍候再试')).toBeTruthy();
+    expect(api.nav).toHaveBeenCalledTimes(2);
+    expect(api.open).toHaveBeenCalledTimes(2);
+  });
+
+  it('a send refused because no browser is open reopens it and sends once more', async () => {
+    api.create.mockRejectedValueOnce(
+      Object.assign(new Error('云浏览器还没有打开，请先打开云浏览器再发送任务。'), {
+        data: { code: 'FORBIDDEN' },
+      }),
+    );
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+    const box = document.querySelector('textarea')!;
+    await user.type(box, '整理这个页面');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
+    expect(api.open).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('region', { name: '云浏览器任务' })).toBeTruthy();
+    expect(screen.queryByText(/云浏览器还没有打开/)).toBeNull();
+  });
+
+  it('the screen’s stream dropping reopens quietly (once per connection)', async () => {
+    api.open.mockResolvedValue({ sessionId: 'bhs_usr_1', url: 'https://news.example/' });
+    mount();
+    await screen.findByTestId('screen');
+    expect(api.open).toHaveBeenCalledTimes(1);
+    act(() => stream.onStatusChange?.('connected'));
+    act(() => stream.onStatusChange?.('disconnected'));
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(2));
+    act(() => stream.onStatusChange?.('error'));
+    act(() => stream.onStatusChange?.('disconnected'));
+    expect(api.open).toHaveBeenCalledTimes(2);
+    // Still the same screen (no「正在打开」flash).
+    expect(screen.getByTestId('screen')).toBeTruthy();
+    act(() => stream.onStatusChange?.('connected'));
+    act(() => stream.onStatusChange?.('disconnected'));
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(3));
   });
 });
 

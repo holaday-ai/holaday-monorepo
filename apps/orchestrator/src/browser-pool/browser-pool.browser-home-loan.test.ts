@@ -219,4 +219,54 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
     // Lent, it is that task's browser (the task's own panel routes reach it).
     expect(pool.peekActiveForUser('usr_A')).toBe(home);
   });
+
+  it('return is atomic: a failed broker check leaves the browser whole under the task (P2-7)', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool, 'usr_A');
+    const valid = vi.spyOn(
+      pool as unknown as { loanBrokerValid: (inst: BrowserInstance) => boolean },
+      'loanBrokerValid',
+    );
+
+    // Fails before the move: nothing changes, the task's hold stays.
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    expect(pool.retain('tsk_1', 30 * 60_000, AWAITING_REPLY)).toBe(true);
+    const held = home.retainedUntil;
+    valid.mockReturnValueOnce(false);
+    expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
+    expect(pool.peek('tsk_1')).toBe(home);
+    expect(home.taskId).toBe('tsk_1');
+    expect(pool.peek('bhs_usr_A')).toBeNull();
+    expect(home.retainedUntil).toBe(held);
+    expect(home.retentionReason).toBe(AWAITING_REPLY);
+    expect(home.idleTimeoutMs).toBeUndefined();
+    await pool.release('tsk_1', 'task-done');
+
+    // Fails after the move: the key goes back, the hold is restored.
+    const again = await openHome(pool, 'usr_A');
+    pool.lendBrowserHome('usr_A', 'tsk_2', 'anonymous');
+    expect(pool.retain('tsk_2', 30 * 60_000, AWAITING_REPLY)).toBe(true);
+    const held2 = again.retainedUntil;
+    valid.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect(pool.returnBrowserHome('tsk_2', 'usr_A')).toBeNull();
+    expect(pool.peek('tsk_2')).toBe(again);
+    expect(again.taskId).toBe('tsk_2');
+    expect(pool.peek('bhs_usr_A')).toBeNull();
+    expect(again.retainedUntil).toBe(held2);
+    expect(again.retentionReason).toBe(AWAITING_REPLY);
+    // The caller then finishes it the normal way, under the task id.
+    expect(await pool.release('tsk_2', 'task-done')).toBe(true);
+    expect(pool.peek('tsk_2')).toBeNull();
+  });
+
+  it('a forfeited loan (watchdog) is never given back (P1-1)', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool, 'usr_A');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    expect(pool.forfeitBrowserHomeLoan('tsk_1')).toBe(true);
+    expect(pool.browserHomeHolder('usr_A')).toBeNull();
+    expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
+    expect(pool.peek('tsk_1')).toBe(home);
+    expect(pool.peek('bhs_usr_A')).toBeNull();
+  });
 });

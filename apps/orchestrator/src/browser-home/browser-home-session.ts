@@ -19,6 +19,12 @@ import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { BROWSER_HOME_SESSION_PREFIX, type BrowserInstance } from '../browser-pool/types.js';
 
 export const BROWSER_HOME_IDLE_TIMEOUT_MS = 15 * 60_000;
+/**
+ * A page that leaves (unmount) does not release at once: the last viewer leaving starts this
+ * grace, and any open() within it (the same tab coming back, a reload) cancels the release.
+ */
+export const BROWSER_HOME_CLOSE_GRACE_MS = 5_000;
+const MAX_VIEWERS_PER_USER = 32;
 const MAX_REMEMBERED_URLS = 10_000;
 const MAX_URL_LENGTH = 2048;
 
@@ -87,11 +93,27 @@ export interface BrowserHomeOpenResult {
   url: string | null;
 }
 
+/** What leave() did: other pages still use it, its release was scheduled, or none was open. */
+export type BrowserHomeLeaveResult = 'kept' | 'scheduled' | 'none';
+
 export class BrowserHomeSessions {
   private readonly lastUrls = new Map<string, string>();
   private readonly opening = new Map<string, Promise<BrowserHomeOpenResult>>();
   private readonly watched = new WeakSet<object>();
   private readonly taskClaims = new Map<string, { token: object; at: number }>();
+  /**
+   * P2-4: the open /browser pages of each user (one id per page mount). Only the last one leaving
+   * releases the browser, and only after the close grace. A page that vanished without leaving
+   * (a crashed tab) keeps its id until the browser is gone; the 15-minute idle still applies,
+   * since only a page showing the screen keeps the browser active.
+   */
+  private readonly viewers = new Map<string, Set<string>>();
+  private readonly pendingReleases = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly closeGraceMs: number;
+
+  constructor(options: { closeGraceMs?: number } = {}) {
+    this.closeGraceMs = options.closeGraceMs ?? BROWSER_HOME_CLOSE_GRACE_MS;
+  }
 
   /** The user's ready home browser while it is in the session (not lent to a task), or null. */
   instanceFor(pool: Pick<BrowserPool, 'peek'>, userId: string): BrowserInstance | null {
@@ -176,9 +198,21 @@ export class BrowserHomeSessions {
     }
   }
 
-  /** Create the user's home browser, or return the one already open (one per user). */
-  open(pool: BrowserHomePool, userId: string, logger: Logger): Promise<BrowserHomeOpenResult> {
+  /**
+   * Create the user's home browser, or return the one already open (one per user). `viewerId`
+   * names the page opening it (see leave()); any open cancels a release still in its grace.
+   */
+  open(
+    pool: BrowserHomePool,
+    userId: string,
+    logger: Logger,
+    viewerId?: string,
+  ): Promise<BrowserHomeOpenResult> {
+    this.cancelPendingRelease(userId);
     const pending = this.opening.get(userId);
+    // A fresh browser: pages recorded for an earlier one (gone by idle or a crash) do not count.
+    if (!pending && !this.locate(pool, userId)) this.viewers.delete(userId);
+    if (viewerId) this.addViewer(userId, viewerId);
     if (pending) return pending;
     const promise = this.openOnce(pool, userId, logger).finally(() => {
       if (this.opening.get(userId) === promise) this.opening.delete(userId);
@@ -279,18 +313,73 @@ export class BrowserHomeSessions {
   }
 
   /**
+   * P2-4: one page stops using the browser (it unmounted). Other open pages keep it; the last one
+   * leaving schedules the release after the close grace, which a new open() cancels — so leaving
+   * and coming back within a few seconds keeps the same browser.
+   */
+  leave(pool: BrowserHomePool, userId: string, viewerId: string): BrowserHomeLeaveResult {
+    const viewers = this.viewers.get(userId);
+    viewers?.delete(viewerId);
+    if (viewers && viewers.size > 0) return 'kept';
+    this.viewers.delete(userId);
+    if (!this.opening.has(userId) && !this.locate(pool, userId)) return 'none';
+    this.cancelPendingRelease(userId);
+    const timer = setTimeout(() => {
+      if (this.pendingReleases.get(userId) !== timer) return;
+      this.pendingReleases.delete(userId);
+      void this.close(pool, userId, { onlyIfUnused: true }).catch(() => undefined);
+    }, this.closeGraceMs);
+    timer.unref?.();
+    this.pendingReleases.set(userId, timer);
+    return 'scheduled';
+  }
+
+  private addViewer(userId: string, viewerId: string): void {
+    let viewers = this.viewers.get(userId);
+    if (!viewers) {
+      viewers = new Set();
+      this.viewers.set(userId, viewers);
+    }
+    viewers.add(viewerId);
+    // Bounded: the oldest ids (likely pages that vanished without leaving) go first.
+    while (viewers.size > MAX_VIEWERS_PER_USER) {
+      const oldest = viewers.values().next().value as string | undefined;
+      if (oldest === undefined) break;
+      viewers.delete(oldest);
+    }
+  }
+
+  private cancelPendingRelease(userId: string): void {
+    const timer = this.pendingReleases.get(userId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.pendingReleases.delete(userId);
+  }
+
+  /**
    * Release the user's home browser (remembering where it was). False when none was open. While a
    * task holds it, the session ends instead: nothing is given back when that task ends, and the
    * task's normal release applies to the browser.
    */
-  async close(pool: BrowserHomePool, userId: string): Promise<boolean> {
+  async close(
+    pool: BrowserHomePool,
+    userId: string,
+    options: { onlyIfUnused?: boolean } = {},
+  ): Promise<boolean> {
+    // A page opened since the last one left keeps it (the grace path re-checks after each await).
+    const reused = () => options.onlyIfUnused === true && (this.viewers.get(userId)?.size ?? 0) > 0;
+    if (reused()) return false;
+    if (!options.onlyIfUnused) {
+      this.cancelPendingRelease(userId);
+      this.viewers.delete(userId);
+    }
     await this.opening.get(userId)?.catch(() => {});
     const seen = this.locate(pool, userId);
     if (!seen) return false;
     this.rememberUrl(userId, await currentUrl(seen.instance));
     // Located again after the await: the task may have given it back meanwhile.
     const location = this.locate(pool, userId);
-    if (!location) return false;
+    if (!location || reused()) return false;
     if (location.heldBy) return pool.endBrowserHomeLoan(userId) !== null;
     return pool.release(location.instance.taskId, 'browser-home-close');
   }

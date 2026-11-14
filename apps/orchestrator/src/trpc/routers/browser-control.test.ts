@@ -6,6 +6,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
     beta = { messages: { create: createMessage } };
   },
 }));
+import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
@@ -165,6 +166,71 @@ describe('browser control route integration (REBUILD-4 共同操作)', () => {
       expect(f.effects).toEqual([]);
     } finally {
       binding.finish();
+    }
+  });
+});
+
+describe('task browserNav keeps its mainline rules (BROWSER-HOME-1 P2-5)', () => {
+  it('a browser adopted by a follow-up mid-navigation is refused, page untouched', async () => {
+    const f = fixture();
+    const gotos: string[] = [];
+    const page = {
+      goto: async (url: string) => {
+        gotos.push(url);
+      },
+    };
+    f.instance.executor.getPage = async () => page as never;
+    let owner: string = f.instance.taskId;
+    (f.ctx as { browserPool: unknown }).browserPool = {
+      peek: (id: string) => (id === owner ? f.instance : null),
+      release: async () => true,
+    };
+    const binding = browserControlSessions.start(f.instance);
+    // The policy check is where the navigation awaits: the follow-up adopts the browser then.
+    vi.spyOn(defaultBrowserNetworkPolicy, 'check').mockImplementation(async (url) => {
+      owner = 'tsk_followup';
+      f.instance.taskId = 'tsk_followup';
+      return { allowed: true, url, addresses: ['1.1.1.1'] };
+    });
+    try {
+      expect(
+        await f.caller.browserNav({
+          taskId: 'tsk_control',
+          direction: 'goto',
+          url: 'https://1.1.1.1/x',
+        }),
+      ).toEqual({ ok: false, reason: 'browser_session_changed' });
+      expect(gotos).toEqual([]);
+    } finally {
+      binding.finish();
+    }
+  });
+
+  it('a failed load still stops the task browser (unknown outcome), under its current owner', async () => {
+    const f = fixture();
+    f.instance.executor.getPage = async () =>
+      ({
+        reload: async () => {
+          throw new Error('net::ERR_CONNECTION_RESET');
+        },
+      }) as never;
+    const release = vi.fn(async () => true);
+    (f.ctx as { browserPool: unknown }).browserPool = { peek: () => f.instance, release };
+    const binding = browserControlSessions.start(f.instance);
+    try {
+      expect(await f.caller.browserNav({ taskId: f.instance.taskId, direction: 'reload' })).toEqual(
+        { ok: false, reason: 'browser_input_outcome_unknown' },
+      );
+      await vi.waitFor(() =>
+        expect(release).toHaveBeenCalledWith('tsk_control', 'browser-navigation-unknown'),
+      );
+      expect(binding.control.snapshot().error).toBe('input_outcome_unknown');
+    } finally {
+      try {
+        binding.finish();
+      } catch {
+        // The quarantined control may refuse a clean finish; that is the mainline behaviour.
+      }
     }
   });
 });

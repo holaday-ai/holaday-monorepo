@@ -14,6 +14,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
+import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserPool } from '../browser-pool/browser-pool.js';
 import { finishTaskBrowser } from '../browser-pool/finish-task-browser.js';
 import { isBrowserHomeEnabledFor } from './browser-home-access.js';
@@ -30,7 +31,11 @@ export const BROWSER_HOME_TASK_COPY = {
   closed: '云浏览器还没有打开，请先打开云浏览器再发送任务。',
   busy: '云浏览器里已有一个任务在执行，请等它结束后再发送。',
   lendFailed: '云浏览器已关闭或正被另一个任务使用，任务没有执行。请重新打开云浏览器后再发送。',
+  personBusy: '你在云浏览器里的操作还没有完成，任务没有执行。请稍后再发送。',
 } as const;
+
+/** P2-6: how long a task waits for the person's own action in the browser to finish. */
+export const BROWSER_HOME_PERSON_SETTLE_MS = 5_000;
 
 export interface BrowserHomeTaskRequest {
   browserHomeSession?: boolean;
@@ -93,15 +98,28 @@ export function claimBrowserHomeTaskOrThrow(args: {
 /**
  * The task's dispatch: lend the user's browser to the task (keeping its page). Always drops the
  * claim — from here the pool's loan is what keeps a second task out. Throws the Chinese reason
- * when there is nothing to lend (the person closed it meanwhile, or it stopped).
+ * when there is nothing to lend (the person closed it meanwhile, or it stopped), or when the
+ * person's own action in it (a navigation, a click) has not finished within a few seconds: the
+ * run's control cannot start beside an input still in flight.
  */
-export function lendBrowserHomeToTask(args: {
-  pool: Pick<BrowserPool, 'lendBrowserHome'>;
+export async function lendBrowserHomeToTask(args: {
+  pool: Pick<BrowserPool, 'lendBrowserHome' | 'peek'>;
   userId: string;
   taskId: string;
   claim: BrowserHomeTaskClaim | null | undefined;
+  settleMs?: number;
+  sessions?: BrowserHomeSessions;
 }) {
   try {
+    const home = (args.sessions ?? browserHomeSessions).instanceFor(args.pool, args.userId);
+    if (
+      home &&
+      !(await browserControlSessions.inputSettledWithin(
+        home,
+        args.settleMs ?? BROWSER_HOME_PERSON_SETTLE_MS,
+      ))
+    )
+      throw new Error(BROWSER_HOME_TASK_COPY.personBusy);
     const instance = args.pool.lendBrowserHome(args.userId, args.taskId, 'anonymous');
     if (!instance) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
     return instance;
