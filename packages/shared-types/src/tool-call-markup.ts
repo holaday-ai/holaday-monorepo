@@ -30,8 +30,15 @@ const TOOL_NAME_LINE_RE = /^[ \t]*[a-z]+_(?:use|call)[ \t]*$/gim;
  */
 const TOOL_ONLY_NAMES = MODEL_TOOL_NAMES.filter((name) => name.includes('_'));
 const TOOL_WORD_NAMES = MODEL_TOOL_NAMES.filter((name) => !name.includes('_'));
+/**
+ * 61.80 (s04 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」, delivered as completed on prod and
+ * candidate): a call written as `BROWSE:web_search{"query":…}` — a capitalised channel label and
+ * a tool name glued to its JSON arguments — or a bare `web_search{"query":…}` /
+ * `browser_use{…}`. A word-like tool name (`click`, `type`) counts only behind such a label.
+ */
+const INLINE_CALL = String.raw`(?<![\w.])(?:[A-Z][A-Z_]{2,}\s*:\s*[a-z][\w.-]*|(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')}))\s*\{\s*"`;
 const TOOL_JSON_START_RE = new RegExp(
-  String.raw`\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"tool_use"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
+  String.raw`${INLINE_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
   'g',
 );
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;
@@ -58,7 +65,8 @@ function stripToolJson(text: string): string {
   for (const match of text.matchAll(TOOL_JSON_START_RE)) {
     const start = match.index ?? 0;
     if (start < from) continue;
-    const end = jsonBlockEnd(text, start);
+    // An inline call (`BROWSE:web_search{…}`) goes from its label; its JSON starts at the brace.
+    const end = jsonBlockEnd(text, text.indexOf('{', start));
     // An unclosed call (truncated stream) runs to the end of its line.
     const stop = end > 0 ? end : text.indexOf('\n', start) + 1 || text.length;
     out += text.slice(from, start);
@@ -133,7 +141,7 @@ function stripRefs(text: string): string {
  * `{"action":"deploy"}` explained in prose stays.
  */
 const TOOL_CALL_JSON_RE =
-  /"name"\s*:\s*"[\w.-]*(?:_use|_call|browser|computer)[\w.-]*"|"(?:tool|tool_name|tool_use|function|function_call)"\s*:|"action"\s*:\s*"(?:navigate|goto|open|click|left_click|double_click|right_click|type|key|scroll|screenshot|snapshot|read_page|get_page_text|wait|wait_for|mouse_move|finish)"/i;
+  /"(?:name|type)"\s*:\s*"[\w.-]*(?:_use|_call|browser|computer)[\w.-]*"|"(?:tool|tool_name|tool_use|function|function_call)"\s*:|"action"\s*:\s*"(?:navigate|goto|open|click|left_click|double_click|right_click|type|key|scroll|screenshot|snapshot|read_page|get_page_text|wait|wait_for|mouse_move|finish)"/i;
 const FENCED_RE = /```[\w-]*[ \t]*\n?([\s\S]*?)(?:```|$)/g;
 
 /**
