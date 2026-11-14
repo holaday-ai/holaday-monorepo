@@ -599,6 +599,11 @@ export interface SupercarOutcome {
    * it: only a model call can be an "AI 服务认证失败", only a met wall a login.
    */
   failureSource?: 'model' | 'page' | 'tool' | 'user_wall' | 'not_started' | 'task';
+  /**
+   * REBUILD-3: the browser answer was checked and rendered by the price answer contract
+   * (ANSWER_CONTRACT_PRICE); the free-text price clean-ups downstream do not apply to it.
+   */
+  answerContract?: 'price';
 }
 
 export interface SupercarTickEvent {

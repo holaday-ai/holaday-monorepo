@@ -19,6 +19,16 @@ import {
   modelFailureReason,
   withModelRetry,
 } from '../../llm/model-call-retry.js';
+import {
+  type AnswerContractKind,
+  PRICE_CONTRACT_RULE,
+  createPriceContract,
+  hasImages,
+  priceFinishTool,
+  twoStepPriceResult,
+} from '../answer-contract/price-contract.js';
+import { parsePriceResult } from '../answer-contract/price-result.js';
+import type { ReadPage } from '../answer-contract/read-blocks.js';
 import { asksForToolCallExample } from '../generate-answer-guard.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import type { AskedFieldJudge } from '../scrape-field-judge.js';
@@ -380,6 +390,12 @@ export interface UnifiedBrowserLoopInput {
    * lets local test hosts through. Production never sets it (PR #295 review).
    */
   localFixtures?: boolean;
+  /**
+   * REBUILD-3 (`ANSWER_CONTRACT_PRICE`): a price task finishes with a structured
+   * `price_result` that code checks against the text read and renders (agent/answer-contract).
+   * Absent: the finish path is unchanged.
+   */
+  answerContract?: AnswerContractKind;
 }
 
 /** Remediation turn after the pre-delivery review found gaps in the answer. */
@@ -399,6 +415,8 @@ export type UnifiedBrowserOutcome =
       steps: number;
       /** Fewer items than the user asked for: delivered as 部分完成, not completed. */
       partial?: { found: number; wanted: number; missing?: string };
+      /** REBUILD-3: the answer was checked and rendered by the answer contract. */
+      answerContract?: AnswerContractKind;
     }
   | {
       status: 'failed';
@@ -513,16 +531,22 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed': {
+      // REBUILD-3: a contract answer is rendered by code; the free-text price clean-up
+      // (plainAnswer: names, 原样 notes, repeated lines, seller offers) does not apply.
       const summary = strip(
-        plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+        outcome.answerContract
+          ? outcome.summary
+          : plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
         outcome.summary,
       );
       return {
         ...outcome,
         // FIX-62 P0-3 (f62k2): a partial answer explains what is missing — its prices too.
-        summary: outcome.partial
-          ? partialAnswerPrices(summary, readTexts, intentText, { absent: !readsDropped })
-          : summary,
+        // A contract answer's prices come from checked blocks, so it is left as rendered.
+        summary:
+          outcome.partial && !outcome.answerContract
+            ? partialAnswerPrices(summary, readTexts, intentText, { absent: !readsDropped })
+            : summary,
         ...(outcome.partial?.missing
           ? { partial: { ...outcome.partial, missing: explain(outcome.partial.missing) } }
           : {}),
@@ -563,6 +587,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     },
   ];
   const pageEvidence: ObservedEvidence[] = [];
+  /** REBUILD-3: every read of this run, kept longer than pageEvidence, for the price contract. */
+  const contractReads: ReadPage[] = [];
+  const priceContract =
+    input.answerContract === 'price'
+      ? createPriceContract({ wantedCount: requestedCount(input.userIntent ?? input.intent) })
+      : null;
+  let twoStepTried = false;
   // Tabs read successfully and their latest listed titles. Kept apart from
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
@@ -593,6 +624,18 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     )
       return '';
     pageEvidence.push(item);
+    if (priceContract) {
+      contractReads.push({
+        text: decoded.slice(0, 64_000),
+        ...(item.tabId ? { tabId: item.tabId } : {}),
+        ...(item.sourceURL ? { sourceURL: item.sourceURL } : {}),
+      });
+      while (
+        contractReads.length > 48 ||
+        contractReads.reduce((n, p) => n + p.text.length, 0) > 1_000_000
+      )
+        contractReads.shift();
+    }
     if (item.tabId) {
       readTabs.add(item.tabId);
       // FIX-27: a read's first level-1 heading is the document title.
@@ -853,6 +896,16 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     maxRetries: 0,
   };
   const retry = { ...(input.signal ? { signal: input.signal } : {}), ...input.modelRetry };
+  // FIX-60 P0-2: which language the answer is in, said in so many words and last.
+  const systemPrompt = () =>
+    `${unifiedBrowserSystemPrompt()}${
+      input.observationV2
+        ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
+        : ''
+    }${priceContract ? `\n${PRICE_CONTRACT_RULE}` : ''}\n\n${replyLanguageRule(input.userIntent ?? input.intent)}`;
+  /** REBUILD-3: a price task's finish carries the price_result schema. */
+  const contractTool = (tool: NeutralToolDefinition) =>
+    priceContract && tool.name === 'finish' ? priceFinishTool(tool) : tool;
   if (input.signal?.aborted) return { status: 'cancelled', steps: 0 };
   if (input.adapter.browserBrain) {
     try {
@@ -1025,14 +1078,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       const request: Parameters<MessagesAdapter['create']>[0] = {
         // The finish turn writes the whole answer: it gets more room than an action turn.
         maxTokens: finishOnly ? FINISH_MAX_TOKENS : 4_096,
-        // FIX-60 P0-2: which language the answer is in, said in so many words and last.
-        system: `${unifiedBrowserSystemPrompt()}${
-          input.observationV2
-            ? '\n当前启用云端读取：每次交互带上 read_page 返回的 observationRevision/tabId/frameId；动作后重新读取，只有实际页面证据才能完成。cursor/ref 过期须重读。'
-            : ''
-        }\n\n${replyLanguageRule(input.userIntent ?? input.intent)}`,
+        system: systemPrompt(),
         messages: trimImages(compactToolResults(messages, input.fullPageResults)),
-        tools: finishOnly
+        tools: (finishOnly
           ? CONTROL_TOOLS.filter((t) => t.name === 'finish')
           : [
               ...(input.observationV2
@@ -1051,7 +1099,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 return true;
               }),
               ...(input.readPage ? [READ_URL_TOOL] : []),
-            ],
+            ]
+        ).map(contractTool),
         toolChoice: { type: 'any' },
       };
       response = await withModelRetry(
@@ -1226,7 +1275,14 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           /^\s*(?:部分完成|partially completed)/i.test(summary) &&
           pageEvidence.length > 0 &&
           trace.some((entry) => entry.ok && (entry.form?.filled || entry.download || entry.scroll));
-        if (args.status === 'completed' || declaredPartial) {
+        // REBUILD-3: a price task that gives up with some items read is checked like a
+        // completed one — what it did get is delivered as 部分完成.
+        const contractItems = (() => {
+          if (!priceContract || args.status !== 'failed') return false;
+          const parsed = parsePriceResult(args.price_result);
+          return parsed.ok && parsed.value.items.length > 0;
+        })();
+        if (args.status === 'completed' || declaredPartial || contractItems) {
           // Safety: a wall in front of the target pauses for the user.
           const blocker = await checkBlocker();
           if (blocker) {
@@ -1478,6 +1534,54 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               );
               continue;
             }
+          }
+          // REBUILD-3 (ANSWER_CONTRACT_PRICE): the price contract replaces every check and
+          // rewrite below for a price answer — checked quotes and blocks, code-rendered text.
+          // Without a valid price_result (after its retry and the two-step degrade) the
+          // finish goes on through the legacy path.
+          if (priceContract) {
+            let decision = priceContract.decide(args, contractReads, { final: concludeNow });
+            if (decision.kind === 'invalid' && !twoStepTried && hasImages(messages)) {
+              twoStepTried = true;
+              const restructured = await twoStepPriceResult({
+                adapter: input.adapter,
+                system: systemPrompt(),
+                messages: trimImages(compactToolResults(messages, input.fullPageResults)),
+                finishTool: contractTool(CONTROL_TOOLS.find((tool) => tool.name === 'finish')!),
+                options: roleOptions,
+              }).catch(() => null);
+              if (restructured)
+                decision = priceContract.decide(
+                  { ...args, price_result: restructured.price_result },
+                  contractReads,
+                  { final: true },
+                );
+            }
+            if (decision.kind === 'retry') {
+              await rejected(summary, '', decision.reason);
+              results.push(toolResult(call.id, decision.message, true));
+              continue;
+            }
+            if (decision.kind === 'fail')
+              return {
+                status: 'failed',
+                reason: decision.reason,
+                failureSource: 'task',
+                steps: step + 1,
+              };
+            if (decision.kind === 'deliver')
+              return {
+                status: 'completed',
+                summary: withLimitations(decision.summary),
+                evidence: decision.evidence,
+                steps: step + 1,
+                answerContract: 'price',
+                ...(decision.partial ? { partial: decision.partial } : {}),
+              };
+            logger.warn(
+              { errors: decision.errors.slice(0, 6) },
+              'price contract: no valid price_result, legacy finish',
+            );
           }
           const given =
             typeof args.evidence === 'string' ? unescapeLiteralBreaks(args.evidence).trim() : '';
