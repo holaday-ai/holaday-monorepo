@@ -5,6 +5,8 @@
  * falls back to the domestic endpoint.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { modelGateway } from './gateway/model-gateway.js';
+import { DEFAULT_ROLE_MODELS } from './gateway/role-models.js';
 import type { MessagesAdapter, QwenMessagesEnvironment } from './messages-adapter.js';
 import { BUILTIN_MODEL_CATALOG, type BrainEntry } from './model-catalog.js';
 import {
@@ -49,7 +51,9 @@ const ENVIRONMENT = {
 };
 
 /** Factories that resolve the real Qwen route (as the production adapters do) and record it. */
-function recordingWiring(environment = ENVIRONMENT) {
+function recordingWiring(
+  environment: typeof ENVIRONMENT & { LLM_GATEWAY_V2?: boolean } = ENVIRONMENT,
+) {
   const routes: QwenRoute[] = [];
   const createMessages = vi.fn(
     (input: {
@@ -229,5 +233,60 @@ describe('BROWSER-HOME-1 Qwen endpoint override', () => {
     expect(
       wiring.resolveCore({ actorExternalId: 'usr_cn', lane: 'browser', ownership: cn }),
     ).toMatchObject({ kind: 'ready', qwenEndpoint: 'cn' });
+  });
+});
+
+describe('G2a: BROWSER-HOME-1 endpoint override through the REBUILD-2 model gateway', () => {
+  it('gateway off: by role, the override wiring resolves exactly as the legacy override call', () => {
+    const viaGateway = recordingWiring();
+    const legacy = recordingWiring();
+    for (const [role, lane, purpose] of [
+      ['brain', 'browser', 'vision'],
+      ['generate', 'generate', 'standard'],
+      ['judge', 'plan', 'fast'],
+    ] as const) {
+      const runtime = modelGateway({ wiring: withQwenEndpoint(viaGateway.wiring, 'intl') }).resolve(
+        role,
+        { actorExternalId: 'usr_cn', ownership: cn },
+      );
+      if (runtime.kind !== 'ready') throw new Error('expected ready');
+      expect(runtime).toMatchObject({ region: 'cn', qwenEndpoint: 'intl' });
+      runtime.messages();
+      ready(
+        withQwenEndpoint(legacy.wiring, 'intl').resolveCore({
+          actorExternalId: 'usr_cn',
+          lane,
+          ownership: cn,
+        }),
+      ).messages(purpose);
+    }
+    expect(viaGateway.routes).toEqual(legacy.routes);
+    for (const route of viaGateway.routes) expect(route.region).toBe('intl');
+  });
+
+  it('gateway on: the override keeps the gateway (cn role models, international endpoint)', () => {
+    const { wiring, routes } = recordingWiring({ ...ENVIRONMENT, LLM_GATEWAY_V2: true });
+    const overridden = withQwenEndpoint(wiring, 'intl');
+    expect(overridden.gateway?.enabled).toBe(true);
+    const runtime = modelGateway({ wiring: overridden }).resolve('judge', {
+      actorExternalId: 'usr_cn',
+      ownership: cn,
+    });
+    if (runtime.kind !== 'ready') throw new Error('expected ready');
+    runtime.messages();
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toMatchObject({ region: 'intl', model: DEFAULT_ROLE_MODELS.cn.judge });
+    expect(routes[0]?.apiKey).toBe('synthetic-intl-key');
+  });
+
+  it('direct core gateway (plan / suggestions): the override is passed through', () => {
+    const runtime = modelGateway({ core: { environment: ENVIRONMENT } }).resolve('plan', {
+      actorExternalId: 'usr_cn',
+      ownership: cn,
+      qwenEndpoint: 'intl',
+    });
+    if (runtime.kind !== 'ready') throw new Error('expected ready');
+    expect(runtime.region).toBe('cn');
+    expect(runtime.messages().metadata).toMatchObject({ region: 'intl' });
   });
 });

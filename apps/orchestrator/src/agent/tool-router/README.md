@@ -3,6 +3,21 @@
 Interfaces that passed REBUILD-1 G become tools the model may choose next to the browser.
 Behind `TOOL_ROUTER_V2` (default `false`); with the flag off nothing here runs.
 
+## Regions (G2a, DEPLOY-R1)
+
+`TOOL_ROUTER_V2_REGIONS` (comma list of `cn` / `intl`, default empty) names the model data regions
+the router runs for; `ToolRouterSettings.enabledFor(userRow.modelDataRegion)` gates the routing
+turn, the wall fallback and the post-wall check in `tasks.create`. Empty = the router runs for
+nobody even with `TOOL_ROUTER_V2=true`; DEPLOY-R1 sets `TOOL_ROUTER_V2=true` +
+`TOOL_ROUTER_V2_REGIONS=cn` (the cn entry writes `cn` on an account's first task, FIX-60). A user
+outside the list (or without a region) gets exactly the flag-off behaviour below. Bench runs that
+want the router on both entries set `TOOL_ROUTER_V2_REGIONS=cn,intl`.
+
+Mainline's LEAK-1 root fix (「搜一下 / 百度一下 / 上网查」 → search lane, `matchSearchVerb`,
+source `kw:search-verb`) is part of the legacy decision: router off for the user → it applies
+unchanged; router on → the router decides, and its prompt tells the model such a request is a
+lookup (never `answer_directly`). The two never both apply.
+
 ## Flag off (default)
 
 `tasks.create` calls `decideExecutionRoute({ enabled: false, legacy, route })`, which only calls

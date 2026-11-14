@@ -13,6 +13,17 @@
  *   4. An interface choice runs in the scrape lane through `interfaceSearchLane`; hard rule (1):
  *      any interface failure or empty result hands the task to the browser (tasks.ts).
  * A router model failure goes to the browser (never answered from memory).
+ *
+ * G2a — who decides, so mainline keyword fixes and the router never both apply:
+ *   - The router runs only for a user whose model data region is in TOOL_ROUTER_V2_REGIONS
+ *     (`ToolRouterSettings.enabledFor`; DEPLOY-R1 opens `cn` only). For everyone else the legacy
+ *     classifier's decision is used unchanged — including LEAK-1's root fix, the colloquial
+ *     「搜一下 / 百度一下 / 上网查」 → search lane (`intent-classifier.ts` matchSearchVerb,
+ *     source `kw:search-verb`).
+ *   - Router on: the legacy decision is computed but only kept for the dedicated lanes; the router
+ *     decides everything else, 「搜一下」 included. Its prompt says such a request asks to look it up
+ *     online (never `answer_directly`), so the LEAK-1 case cannot land in generate through the
+ *     router either; the tool-call markup filter on delivered answers stays as the backstop.
  */
 import type { Logger } from 'pino';
 import { z } from 'zod';
@@ -116,6 +127,7 @@ ${toolLines ? `${toolLines}\n` : ''}- ${BROWSER}：用云端浏览器打开网�
 
 规则：
 - 价格、库存这类会变的数字，答案必须来自实时页面，不能凭记忆，也不能只凭搜索摘要。
+- 用户说「搜一下 / 搜搜 / 百度一下 / 上网查 / 网上查 / 联网查」或 search / look up / google 这类话，就是要联网查：不要选 ${ANSWER_DIRECTLY}（写作、翻译等用户自己给了材料的任务除外）。
 - 选接口工具时，query 写一条适合搜索的短查询（保留用户的关键词和语言）；其他方式 query 留空。
 - reason 用一句话说明理由。${argLines ? `\n${argLines}` : ''}${namedLine}
 - The request may be in English or Chinese; apply the same rules.`;

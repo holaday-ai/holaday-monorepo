@@ -687,7 +687,10 @@ function resolveScrapeRuntimeForUser(
   modelDataRegion: unknown,
   wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
 ) {
-  return gatewayFor(wiring).resolve('scrape', personalModelContext(actorExternalId, modelDataRegion));
+  return gatewayFor(wiring).resolve(
+    'scrape',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function resolveVerifierRuntimeForUser(
@@ -1947,7 +1950,10 @@ export const tasksRouter = router({
             const routedExecution = retryCore
               ? null
               : await decideExecutionRoute({
-                  enabled: taskToolRouter.enabled && !ctx.scrapeBrowserRetry && !input.localChrome,
+                  enabled:
+                    taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                    !ctx.scrapeBrowserRetry &&
+                    !input.localChrome,
                   legacy: () =>
                     explainExecutionMode({
                       intent: input.intent,
@@ -1958,7 +1964,7 @@ export const tasksRouter = router({
                       logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
                     }),
                   route: async () => {
-                    const judge = tasksModelGateway.resolve(
+                    const judge = gatewayFor(taskModelWiring).resolve(
                       'judge',
                       personalModelContext(ctx.userId, userRow.modelDataRegion),
                     );
@@ -6430,7 +6436,7 @@ export const tasksRouter = router({
                 // REBUILD-2 协调方决定: a read task whose wall the public sources can answer (the
                 // router on, a search interface for the user's region, a ready answer runtime).
                 const wallFallbackRun =
-                  taskToolRouter.enabled &&
+                  taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                   wallFallbackAllowed(input.intent) &&
                   toolsForRegion(
                     taskToolRouter.tools,
@@ -6438,7 +6444,8 @@ export const tasksRouter = router({
                       ? userRow.modelDataRegion
                       : null,
                   ).some((tool) => tool.kind === 'search') &&
-                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion).kind === 'ready';
+                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion, taskModelWiring)
+                    .kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
@@ -7557,7 +7564,8 @@ export const tasksRouter = router({
                       // the browser is not used again. TOOL_ROUTER_V2 only.
                       // 复审 #2: nothing runs for a task the user cancelled.
                       const wall =
-                        taskToolRouter.enabled && !(await repo.isTaskCancelled(taskId))
+                        taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                        !(await repo.isTaskCancelled(taskId))
                           ? wallEnd(outcome, input.intent)
                           : null;
                       const wallSearchTool = wall
@@ -7569,7 +7577,11 @@ export const tasksRouter = router({
                           ).find((tool) => tool.kind === 'search') ?? null)
                         : null;
                       const wallRuntime = wallSearchTool
-                        ? resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion)
+                        ? resolveScrapeRuntimeForUser(
+                            ctx.userId,
+                            userRow.modelDataRegion,
+                            taskModelWiring,
+                          )
                         : null;
                       if (wall && wallSearchTool && wallRuntime?.kind === 'ready') {
                         const language = replyLanguage(input.intent, userRow.modelDataRegion);
@@ -7616,7 +7628,7 @@ export const tasksRouter = router({
                         // completed, no wall_fallback; the wall outcome stands.
                         let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
                         if (fallback?.status === 'completed' && fallback.summary.trim()) {
-                          const judgeRuntime = tasksModelGateway.resolve(
+                          const judgeRuntime = gatewayFor(taskModelWiring).resolve(
                             'judge',
                             personalModelContext(ctx.userId, userRow.modelDataRegion),
                           );
