@@ -51,9 +51,17 @@ const BRACKET_CALL_RE =
   /\[(SEARCH|WEB_SEARCH|SEARCH_QUERY|BROWSE|BROWSER|BROWSER_USE|TOOL_CALLS?|TOOL_USE|FUNCTION_CALLS?)\]([\s\S]*?)\[\/\1\]/gi;
 /** 复审 #2: only a block carrying arguments (`query: "…"`, `url=…`) — a tagged word in prose stays. */
 const BRACKET_ARGS_RE = /(?:^|\n)\s*[a-z_]+\s*[:=]/i;
+/**
+ * 复审 #3: also a block whose content is a JSON (`[SEARCH]{"query":"x"}[/SEARCH]`), or one that
+ * starts a line (`[SEARCH]2025年诺贝尔文学奖得主[/SEARCH] 我需要等待…`) — mid-sentence it is prose.
+ */
 function stripBrackets(text: string): string {
-  return text.replace(BRACKET_CALL_RE, (block, _name: string, inner: string) =>
-    BRACKET_ARGS_RE.test(inner) ? '' : block,
+  return text.replace(
+    BRACKET_CALL_RE,
+    (block, _name: string, inner: string, offset: number, whole: string) => {
+      const startsLine = offset === 0 || /\n[ \t]*$/.test(whole.slice(0, offset));
+      return BRACKET_ARGS_RE.test(inner) || /^\s*\{/.test(inner) || startsLine ? '' : block;
+    },
   );
 }
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;

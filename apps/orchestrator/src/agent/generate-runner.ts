@@ -473,6 +473,7 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let truncatedAtCap = false;
+  let toolTextQuestion = false;
   const observedSources: NeutralResponseSource[] = [];
   const credibleSources = () => {
     const sources = dedupeSources(observedSources);
@@ -683,15 +684,11 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
         AWAITING_USER_MARKER_RE.test(combined) &&
         hasToolCallMarkup(combined)
       ) {
-        // 复审 #2: returned as it stands — no source list or footer is added to it.
-        return {
-          status: 'completed',
-          generation: { completeness: 'complete', stopReason: 'end_turn' },
-          summary: stripAwaitingUserMarker(combined),
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          durationMs: Date.now() - start,
-        };
+        // 复审 #3: the loop ends as for any answer (the fresh-research gate still applies);
+        // only the source list and footer are left off — they would read as content.
+        toolTextQuestion = true;
+        accumulatedSummary = stripAwaitingUserMarker(combined);
+        break;
       }
       if (!opts.planOnly && status === 'completed' && AWAITING_USER_MARKER_RE.test(combined)) {
         return {
@@ -752,11 +749,11 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
       });
     }
     const visible = accumulatedSummary + (truncatedAtCap ? TRUNCATION_NOTICE : '');
-    const withSources = appendSources(visible, sources);
+    const withSources = toolTextQuestion ? visible : appendSources(visible, sources);
     // Core follow-up controls belong to the router's separate suggestion channel. Do not
     // mix legacy UI links (including encoded numbers) into the verified body.
     const summary =
-      workflow && !opts.verificationContext
+      workflow && !opts.verificationContext && !toolTextQuestion
         ? withSources + buildFollowUpFooter(workflow)
         : withSources;
     return {

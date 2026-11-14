@@ -1027,14 +1027,13 @@ function matchSearchVerb(intent: string): string | null {
   }
   // 61.80 (s04 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」 went to generate, which cannot search and
   // wrote a tool call as its answer): the colloquial search verbs are searches too — unless the
-  // task is writing / translating, or the words sit in quoted material after a colon (复审 #2:
-  // 「帮我写个广告语：百度一下，你就知道」).
+  // task is writing / translating (复审 #2: 「帮我写个广告语：百度一下，你就知道」). The real fix
+  // is the tool router (第 62 项 TOOL_ROUTER_V2, next batch); no more keywords here.
   const colloquial =
     /(?:^|[\s，。；、,;]|帮我|给我|替我|为我|请|去|你|上|忙|麻烦)(搜一下|搜一搜|搜搜|搜下|百度一下|谷歌一下|google一下|上网查|网上查|联网查)/i.exec(
       intent,
     );
   if (!colloquial || WRITING_RE.test(intent) || TRANSFORMS_TEXT_RE.test(intent)) return null;
-  if (/[：:]/.test(intent.slice(0, colloquial.index))) return null;
   return colloquial[1] ?? null;
 }
 

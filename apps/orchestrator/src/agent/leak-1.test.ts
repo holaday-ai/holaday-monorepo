@@ -157,3 +157,19 @@ describe('LEAK-1 复审 #2', () => {
     expect(stripToolCallMarkup(text)).toBe(text);
   });
 });
+
+describe('LEAK-1 复审 #3', () => {
+  it.each([
+    ['正在为你查询，结果是：韩江。', '正在为你查询，结果是：韩江。'],
+    ['请稍等，查询结果为韩江。', '请稍等，查询结果为韩江。'],
+  ])('a short real answer after a call is still an answer: %s', (rest, shown) => {
+    expect(deliverableAnswer(`BROWSE:web_search{"query": "x"}\n${rest}`)).toBe(shown);
+  });
+  it.each([
+    '[SEARCH]{"query":"x"}[/SEARCH]',
+    '[SEARCH]2025年诺贝尔文学奖得主[/SEARCH] 我需要等待搜索结果。',
+  ])('bracket forms that start a line or carry JSON are tool syntax: %s', (text) => {
+    expect(hasToolCallMarkup(text)).toBe(true);
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+});

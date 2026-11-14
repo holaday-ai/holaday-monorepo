@@ -94,7 +94,8 @@ function openerOnly(text: string): boolean {
 const WAITING_RE =
   /(?:等待|稍等|稍候|请等).{0,16}(?:搜索|查询|检索|结果)|(?:搜索|查询|检索)结果(?:返回|出来)(?:后|之后)|\bwait(?:ing)? for (?:the )?(?:search )?results?\b/i;
 function onlyOpenersOrWaiting(text: string): boolean {
-  if (text.length > 160) return false;
+  // 复审 #3: a clause that gives something (「结果是：韩江」「查询结果为…」) is content.
+  if (text.length > 160 || /[：:]|是|显示|结果为|得主为/.test(text)) return false;
   const sentences = text
     .split(/[。！!？?\n]+/)
     .map((sentence) => sentence.trim())
