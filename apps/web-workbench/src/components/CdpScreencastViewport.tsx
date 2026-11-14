@@ -665,13 +665,13 @@ export function CdpScreencastViewport({
         // Every frame is accepted and scaled to fit, whatever its size: the page keeps its own
         // fixed layout. Its geometry maps input when it matches the image painted (and the
         // connection it came on is still this one); otherwise the last picture's geometry stays.
-        if (
-          observationEpoch === observationEpochRef.current &&
-          geometry &&
-          geometry.imageWidth === img.width &&
-          geometry.imageHeight === img.height
-        )
-          geometryRef.current = geometry;
+        // 复审 #2 P2-b: a geometry that does not fit its own picture maps nothing (better an input
+        // not sent than one sent to the wrong place).
+        if (observationEpoch === observationEpochRef.current)
+          geometryRef.current =
+            geometry && geometry.imageWidth === img.width && geometry.imageHeight === img.height
+              ? geometry
+              : null;
         if (geometryRef.current) writeReadyRef.current = true;
       }
       if (geometryRef.current) geometryReceivedAtRef.current = Date.now();

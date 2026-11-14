@@ -335,6 +335,8 @@ export class CdpInputHandler {
       this.droppedKeys.clear();
     }
     const guard = this.navigationGuard;
+    /** When an Enter / Space reached the server (the navigation guard is checked again at send). */
+    let arrived: number | undefined;
     if (guard && msg.type !== 'viewport') {
       const where = {
         type: msg.type,
@@ -352,7 +354,7 @@ export class CdpInputHandler {
       if (msg.type === 'keyDown' && activates(msg)) {
         // A pushState being classified right now is waited for (bounded) before deciding.
         if (guard.pending?.()) await guard.settled?.(NAVIGATION_KEY_GUARD_MS);
-        const arrived = guard.receivedAt?.(msg) ?? performance.now();
+        arrived = guard.receivedAt?.(msg) ?? performance.now();
         if (guard.lastNavigationAt() >= arrived - NAVIGATION_KEY_GUARD_MS) {
           // 复审 P2-3: an auto-repeat of a key already sent keeps that key's release.
           if (!this.pressedKeys.has(keyId)) this.droppedKeys.add(keyId);
@@ -445,6 +447,21 @@ export class CdpInputHandler {
         case 'keyDown': {
           const reportedModifiers = modifiersBitmask(msg) | modifierBit(msg);
           await this.releaseStaleModifiers(send, reportedModifiers);
+          // 复审 #2 P2-a: the audit lookup and modifier releases above can take up to a second;
+          // a navigation meanwhile still keeps this Enter / Space off the new page.
+          if (
+            guard &&
+            arrived !== undefined &&
+            guard.lastNavigationAt() >= arrived - NAVIGATION_KEY_GUARD_MS
+          ) {
+            if (!this.pressedKeys.has(msg.code ?? msg.key ?? String(msg.keyCode)))
+              this.droppedKeys.add(msg.code ?? msg.key ?? String(msg.keyCode));
+            this.logger.info(
+              { type: msg.type, key: keyClass(msg) },
+              'cdp-input: human input refused (page just navigated)',
+            );
+            throw new Error(PAGE_CHANGED_ERROR);
+          }
           const text = dispatchKeyText(msg);
           const commands = editingCommands(msg);
           await send('Input.dispatchKeyEvent', {
@@ -493,6 +510,8 @@ export class CdpInputHandler {
       }
       this.onInputDispatched?.(msg);
     } catch (err) {
+      // The send-time navigation check refused before anything was sent: no uncertain outcome.
+      if (err instanceof Error && err.message === PAGE_CHANGED_ERROR) throw err;
       this.logger.debug(
         { err: err instanceof Error ? err.message : String(err), type: msg.type },
         'cdp-input: dispatch failed',

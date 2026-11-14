@@ -579,6 +579,27 @@ describe('CdpInputHandler navigation guard', () => {
     expect(effects).toEqual(['keyDown:Enter', 'keyUp:Enter']);
   });
 
+  it('复审 #2 P2-a: a navigation while the Enter waits on its audit lookup still drops it — not an uncertain outcome', async () => {
+    let navigatedAt = 0;
+    const { effects, session } = recording(async () => {
+      navigatedAt = performance.now(); // the page leaves during the lookup
+      return { result: { value: null } };
+    });
+    const uncertain = vi.fn();
+    const handler = new CdpInputHandler(
+      () => session,
+      pino({ level: 'silent' }),
+      undefined,
+      uncertain,
+    );
+    handler.setNavigationGuard({ lastNavigationAt: () => navigatedAt });
+    await expect(handler.handle({ ...ENTER }, new AbortController().signal)).rejects.toThrow(
+      'browser_page_just_navigated',
+    );
+    expect(effects).toEqual([]);
+    expect(uncertain).not.toHaveBeenCalled();
+  });
+
   it('a release of a button the browser does not hold is dropped (no lone mouse-up)', async () => {
     const { effects, session } = recording();
     const handler = new CdpInputHandler(() => session, pino({ level: 'silent' }));
