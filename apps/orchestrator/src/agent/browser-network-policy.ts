@@ -37,6 +37,20 @@ interface CachedResolution {
   value: Promise<readonly ResolvedAddress[]>;
 }
 
+/**
+ * CAPTCHA-UX-1 local acceptance only: the exact origins of a local test-fixture server
+ * (`BROWSER_TEST_FIXTURE_ORIGINS=http://127.0.0.1:8765,...`). Never in production
+ * (NODE_ENV=production), and only http://127.0.0.1:<port> origins — nothing else is opened.
+ */
+export function isTestFixtureOrigin(url: URL): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  if (!/^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(url.origin)) return false;
+  return (process.env.BROWSER_TEST_FIXTURE_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .includes(url.origin);
+}
+
 const PRIVATE_NETWORK_MESSAGE = '为保护账户与服务器安全，不能访问本机、内网或云服务元数据地址。';
 const DNS_UNVERIFIED_MESSAGE = '目标网址暂时无法安全解析，请稍后重试。';
 
@@ -66,6 +80,7 @@ export class BrowserNetworkPolicy {
     if (!staticDecision.allowed) return staticDecision;
 
     const { url, host } = staticDecision;
+    if (isTestFixtureOrigin(url)) return { allowed: true, url: url.href, addresses: [host] };
 
     const literalFamily = isIP(host);
     if (literalFamily !== 0) {
@@ -202,6 +217,7 @@ function checkStaticBrowserUrl(
   }
 
   const host = normalizeHostname(url.hostname);
+  if (isTestFixtureOrigin(url)) return { allowed: true, url, host };
   if (isBlockedHostname(host) || (isIP(host) !== 0 && !isPublicInternetAddress(host))) {
     return {
       allowed: false,

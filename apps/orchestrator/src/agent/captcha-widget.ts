@@ -13,9 +13,22 @@ import type { CDPSession, Page } from 'playwright';
 /** Frames served by a captcha provider (the box or its challenge). */
 const CAPTCHA_FRAME_URL =
   /^https:\/\/(?:[\w-]+\.)*(?:(?:google|recaptcha)\.(?:com|net)\/recaptcha\/|hcaptcha\.com\/|challenges\.cloudflare\.com\/|(?:static|api)\.geetest\.com\/|(?:client-api\.)?arkoselabs\.com\/)/i;
-export const CAPTCHA_FRAME_URL_SOURCE = CAPTCHA_FRAME_URL.source;
+/**
+ * Local acceptance only: a test-fixture server's /anchor and /bframe frames count as a provider's
+ * (the same exact origins the network policy lets through; never in production).
+ */
+function fixtureFrameSource(): string {
+  if (process.env.NODE_ENV === 'production') return '';
+  const origins = (process.env.BROWSER_TEST_FIXTURE_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(origin));
+  return origins.map((origin) => `|^${origin.replace(/[.]/g, '\\.')}\\/(?:anchor|bframe)`).join('');
+}
+export const CAPTCHA_FRAME_URL_SOURCE = CAPTCHA_FRAME_URL.source + fixtureFrameSource();
+const CAPTCHA_FRAME_RE = new RegExp(CAPTCHA_FRAME_URL_SOURCE, 'i');
 export function isCaptchaFrameUrl(url: string | undefined | null): boolean {
-  return typeof url === 'string' && CAPTCHA_FRAME_URL.test(url);
+  return typeof url === 'string' && CAPTCHA_FRAME_RE.test(url);
 }
 
 export interface CaptchaBoxRect {
