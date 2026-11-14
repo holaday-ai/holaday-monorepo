@@ -292,6 +292,7 @@ import {
   type ModelTaskUnavailableReason,
   createProductionModelRuntimeWiring,
 } from '../../llm/model-runtime-wiring.js';
+import { notify } from '../../notifications/notification-service.js';
 import {
   createTaskCaptureRecorder,
   extractTaskMemoryAfterSuccess,
@@ -6791,6 +6792,20 @@ export const tasksRouter = router({
                     } catch (err) {
                       ctx.logger.warn({ err, taskId }, 'supercar: broadcast awaiting_user failed');
                     }
+                    // CAPTCHA-UX-1 第 2 条: a verification the person has to do, said in the inbox
+                    // too (someone not looking at the panel). Inbox only; never blocks the wait.
+                    if (ev.captchaHandoff)
+                      void notify(
+                        { db: ctx.db, logger: ctx.logger },
+                        {
+                          userInternalId: userRow.id,
+                          type: 'task_reminder',
+                          title: '需要你完成人机验证',
+                          message:
+                            '任务遇到网站的人机验证：请回到任务的浏览器画面里完成（画面会自动放大到验证框），过了我会自动继续，最多等 10 分钟。',
+                          delivery: 'in_app_only',
+                        },
+                      ).catch(() => {});
                     // Phase 1 follow-up — stamp `executionMode='browser'`,
                     // `finalUrl`, AND `finalScreenshot` into result on park.
                     //

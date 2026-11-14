@@ -162,25 +162,30 @@ async function viaSearchApi(
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
     await recordApiResults(results, provider, args);
+    // The provider that answered this search (a chain names the one that answered last).
+    const label = provider.label;
     const served = await serveSearchResults(page.context(), {
       query: plan.query,
-      label: provider.label,
+      label,
       results,
     });
-    const unguard = await guardEngineSearches(page.context(), provider, args, served);
+    /** DEPLOY-R4 D16: every provider whose results page this run served, in order. */
+    const labels = new Set([label]);
+    const unguard = await guardEngineSearches(page.context(), provider, args, served, labels);
+    const alternate = withAlternate(
+      {
+        from: plan.from as Engine,
+        query: plan.query,
+        requiresWeather: plan.requiresWeather,
+        specific: /必须|只能|仅用|一定要|天气卡片|weather card|\bmust\b|\bonly\b/i.test(original),
+        original,
+      },
+      label,
+      served.url,
+      preferred,
+    );
     return {
-      plan: withAlternate(
-        {
-          from: plan.from as Engine,
-          query: plan.query,
-          requiresWeather: plan.requiresWeather,
-          specific: /必须|只能|仅用|一定要|天气卡片|weather card|\bmust\b|\bonly\b/i.test(original),
-          original,
-        },
-        provider.label,
-        served.url,
-        preferred,
-      ),
+      plan: withServedLabels(alternate, label, labels),
       dispose: async () => {
         await unguard().catch(() => {});
         await served.dispose();
@@ -235,6 +240,7 @@ async function guardEngineSearches(
   provider: SearchProvider,
   args: RunSupercarOptions,
   served: Awaited<ReturnType<typeof serveSearchResults>>,
+  labels?: Set<string>,
 ): Promise<() => Promise<void>> {
   const matcher = (url: URL) => engineResultsQuery(url.href) !== null;
   const handler = async (route: Route) => {
@@ -253,9 +259,11 @@ async function guardEngineSearches(
       .catch(() => [] as WebSearchResult[]);
     if (!results.length) return route.fallback();
     await recordApiResults(results, provider, args);
+    const label = provider.label;
+    labels?.add(label);
     const to = served.add({
       query,
-      label: provider.label,
+      label,
       results,
       note: `已改用搜索接口结果页：本次不打开 ${new URL(request.url()).hostname} 的搜索结果页。`,
     });
@@ -268,6 +276,70 @@ async function guardEngineSearches(
   };
   await context.route(matcher, handler);
   return () => context.unroute(matcher, handler);
+}
+
+/**
+ * DEPLOY-R4 D16: the notice names the provider of the first search, but the agent's own engine
+ * search later in the run is redirected to a new search that another provider may answer (Brave
+ * had nothing, 通义千问 answered) — the answer said 「本次搜索使用 Brave」 over 千问 results. The
+ * notice now names every provider whose results page the run served.
+ */
+function withServedLabels(
+  plan: SearchFallbackPlan,
+  first: string,
+  labels: ReadonlySet<string>,
+): SearchFallbackPlan {
+  const TOKEN = '\u0000label\u0000';
+  let template = plan.notice.split(first).join(TOKEN);
+  const joined = () => [...labels].join('、');
+  const render = () => template.split(TOKEN).join(joined());
+  Object.defineProperty(plan, 'notice', {
+    enumerable: true,
+    configurable: true,
+    get: render,
+    // `notice += …` appends to the rendered text.
+    set: (value: string) => {
+      const current = render();
+      template = value.startsWith(current)
+        ? template + value.slice(current.length)
+        : value.split(joined()).join(TOKEN);
+    },
+  });
+  return plan;
+}
+
+/** CAPTCHA-UX-1 第 1 条: the task itself names a search engine (its own path decides). */
+const ENGINE_NAMED =
+  /google|谷歌|bing|必应|duckduckgo|百度|baidu|yahoo|雅虎|yandex|sogou|搜狗|360搜索|so\.com/i;
+
+/**
+ * CAPTCHA-UX-1 第 1 条: SEARCH-GUARD-1's redirect for a whole run, before any search happened. The
+ * results page origin starts with an empty page; each redirected search adds its own.
+ */
+async function guardRunSearches(
+  provider: SearchProvider,
+  args: RunSupercarOptions,
+): Promise<(() => Promise<void>) | null> {
+  let served: Awaited<ReturnType<typeof serveSearchResults>> | undefined;
+  try {
+    const page = await args.executor?.getPage();
+    if (!page) return null;
+    served = await serveSearchResults(page.context(), {
+      query: '',
+      label: provider.label,
+      results: [],
+    });
+    const pages = served;
+    const unguard = await guardEngineSearches(page.context(), provider, args, pages);
+    return async () => {
+      await unguard().catch(() => {});
+      await pages.dispose();
+    };
+  } catch {
+    // 复审 P2: a guard that could not be installed leaves no results-page route behind.
+    await served?.dispose().catch(() => {});
+    return null;
+  }
 }
 
 /** Partial weather information is useful; missing temperature alone is not failure. */
@@ -526,7 +598,17 @@ async function searchWithFallback(
       };
     }
   }
-  const first = await deps.run(tracked(args.intent));
+  // CAPTCHA-UX-1 第 1 条: a task that names no search engine never opens one's results page —
+  // the agent's own Google / Bing / DuckDuckGo search goes to the search API (SEARCH-GUARD-1's
+  // redirect, now for the whole first run). A task that names an engine keeps its path above.
+  const unguardRun =
+    deps.searchProvider && deps.searchApiFirst && !ENGINE_NAMED.test(original)
+      ? await guardRunSearches(deps.searchProvider, args)
+      : null;
+  const first = await deps.run(tracked(args.intent)).finally(async () => {
+    // Before any fallback below installs its own results page on the same origin.
+    await unguardRun?.().catch(() => {});
+  });
   // The unified runner returns detected walls directly; legacy/human gates may
   // instead invoke onAwaitingUser. Both require the same host-observed signal.
   if (

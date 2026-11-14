@@ -30,7 +30,9 @@ import type { Duplex } from 'node:stream';
 import type { BrowserActionDecision, BrowserActionRequest } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
+import { captchaWidgetStateCdp } from '../agent/captcha-widget.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
+import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
 import {
   type AuthenticatedSession,
   authenticateStreamOrAccessSession,
@@ -60,6 +62,9 @@ import type { InputEnvelope } from './screencast-input-bridge.js';
  *
  * Pure function — testable without an http.Server.
  */
+/** CAPTCHA-UX-1 第 2 条: how often the captcha box is looked up while a verification is waited for. */
+const CAPTCHA_BOX_POLL_MS = 700;
+
 export type RoutePickResult =
   | { kind: 'instance'; instance: BrowserInstance }
   | { kind: 'forbidden'; reason: string }
@@ -265,6 +270,49 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     let inputHandler: CdpInputHandler | null = null;
     let stopped = false;
     const confirmations = new BrowserActionConfirmations();
+    /**
+     * CAPTCHA-UX-1 第 2 条: while the task waits for the person to pass a verification, tell this
+     * screen where the captcha box is (null when there is none) so it can zoom in on it. Sent only
+     * on change; the screen only scales its own picture — the page's size never changes.
+     */
+    let captchaBoxTimer: NodeJS.Timeout | null = null;
+    let lastCaptchaBox = 'null';
+    let captchaBoxReading = false;
+    const watchCaptchaBox = (): void => {
+      // 复审 P2: a stream torn down while it was starting never gets a timer.
+      if (stopped) return;
+      captchaBoxTimer = setInterval(() => {
+        // 复审 P2: one reading at a time (a busy page or a JS dialog must not pile them up).
+        if (captchaBoxReading) return;
+        captchaBoxReading = true;
+        void (async () => {
+          if (stopped || args.ws.readyState !== WebSocket.OPEN) return;
+          const binding = browserControlSessions.get(
+            args.instance,
+            args.instance.userId,
+            args.instance.taskId,
+          );
+          const waiting =
+            !!binding &&
+            captchaHandoffs.active(args.instance.taskId, args.instance.userId, binding.control);
+          const session = streamer?.getSession();
+          const state = waiting && session ? await captchaWidgetStateCdp(session) : null;
+          // 复审 #2 P2: a reading that failed (a busy page) keeps what the screen shows.
+          if (waiting && !state) return;
+          // Only a box still to be done is zoomed onto; passed or gone → the whole page again.
+          const box = state?.unpassed ? state.box : null;
+          const key = JSON.stringify(box);
+          if (key === lastCaptchaBox || stopped || args.ws.readyState !== WebSocket.OPEN) return;
+          lastCaptchaBox = key;
+          args.ws.send(JSON.stringify({ type: 'captcha-box', rect: box }));
+        })()
+          .catch(() => {})
+          .finally(() => {
+            captchaBoxReading = false;
+          });
+      }, CAPTCHA_BOX_POLL_MS);
+      captchaBoxTimer.unref?.();
+    };
     const invalidate = () => {
       confirmations.invalidate();
       if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
@@ -341,6 +389,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     async function teardown(reason: string): Promise<void> {
       if (stopped) return;
       stopped = true;
+      if (captchaBoxTimer) clearInterval(captchaBoxTimer);
       invalidate();
       inputBridge.detach();
       userLog.info({ reason }, 'screencast: tearing down');
@@ -448,6 +497,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         return;
       }
       userLog.info('screencast: streamer running; input handler attached');
+      if (args.viewportV2) watchCaptchaBox();
       // Pass a getter (not the session itself) so input keeps
       // working across the streamer's hard-restart (phase 19e
       // watchdog) — the streamer swaps in a fresh session, the

@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import type { Frame, Page } from 'playwright';
+import { captchaWidgetState } from '../captcha-widget.js';
 import { detectBrowserBlocker } from './browser-completion.js';
 import { canReadOutsideWall } from './browser-public-targets.js';
 import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
@@ -256,10 +257,34 @@ async function frameVisibility(frame: Frame) {
  * look at: read it again once it has loaded, and only then call it unreadable.
  */
 export async function probeBrowserBlocker(page: Page, intent?: string) {
-  const first = await probeOnce(page, intent);
-  if (first?.reason !== 'page_unreadable') return first;
-  await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {});
-  return probeOnce(page, intent);
+  let hit = await probeOnce(page, intent);
+  if (hit?.reason === 'page_unreadable') {
+    await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {});
+    hit = await probeOnce(page, intent);
+  }
+  return captchaByBox(page, hit);
+}
+
+/**
+ * CAPTCHA-UX-1（协调方追加）: a captcha matched only by the page's address (the reCAPTCHA demo page's
+ * own address contains /recaptcha) is judged by its box on the page: once the provider's response
+ * is filled and no challenge is open, it is no wall — after it was passed the assistant used to
+ * wait out its 10 minutes. 复审 P0: only then — every other captcha (a Cloudflare check, text, a
+ * frame, a slider) keeps its rules, and not seeing a box is never taken as passed.
+ */
+async function captchaByBox<
+  T extends { reason: string; evidence?: { rule?: string; scope?: string } } | null | undefined,
+>(page: Page, hit: T): Promise<T | null> {
+  // 复审 #2 P2: only the page's own address — a subframe matched at /captcha is not judged by a
+  // box in the main document.
+  if (
+    hit?.reason !== 'captcha' ||
+    !hit.evidence?.rule?.includes(':url-path:') ||
+    hit.evidence.scope !== 'document'
+  )
+    return hit;
+  const state = await captchaWidgetState(page);
+  return state?.known && state.passed ? null : hit;
 }
 
 /**
