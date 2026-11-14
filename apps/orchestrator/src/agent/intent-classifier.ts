@@ -1088,6 +1088,18 @@ function siteDomain(intent: string): string | undefined {
   return undefined;
 }
 
+/**
+ * G2b 复审: the task asks for writing or reworking text (「帮我写一篇…报告」「翻译…」), even when it
+ * searches first — such a task is not a lookup and keeps the generate fallback.
+ */
+export function asksForWriting(intent: string): boolean {
+  return (
+    WRITING_RE.test(intent) ||
+    WRITING_FOR_PLATFORM_RE.test(intent) ||
+    TRANSFORMS_TEXT_RE.test(intent)
+  );
+}
+
 export function matchLiveInfoIntent(
   intent: string,
 ): { mode: 'scrape' | 'browser'; match: string } | null {
