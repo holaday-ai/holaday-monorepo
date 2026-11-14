@@ -414,6 +414,18 @@ const baseEnvSchema = z.object({
   /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
 
+  /**
+   * BROWSER-HOME-1 — the「云浏览器」entry: one task-less cloud browser per user
+   * (`bhs_<userId>`, tRPC `browserHome`). Default OFF: every browserHome endpoint
+   * refuses and auth.me reports `browserHomeEnabled: false`.
+   */
+  BROWSER_HOME_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
+  BROWSER_HOME_ALLOWLIST: z.string().default(''),
+
   /** Team project workspace gradual-rollout gate. Default OFF until vetted. */
   TEAM_PROJECTS_ENABLED: z
     .enum(['true', 'false'])
