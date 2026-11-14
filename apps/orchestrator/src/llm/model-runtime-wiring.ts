@@ -9,6 +9,7 @@ import {
   type CoreModelRuntimeEnvironment,
   type CoreModelRuntimeInput,
   type CoreModelRuntimeResolution,
+  type QwenEndpointOverride,
   resolveCoreModelRuntime,
 } from './core-model-runtime.js';
 import { createAnthropicMessagesAdapter } from './dormant/anthropic-messages-adapter.js';
@@ -34,7 +35,8 @@ export type ModelTaskUnavailableReason =
   | 'REGION_SERVICE_NOT_CONFIGURED'
   | 'MODEL_MIGRATION_IN_PROGRESS'
   | 'MODEL_ROLLOUT_NOT_ALLOWED'
-  | 'MODEL_PROVIDER_NOT_CONFIGURED';
+  | 'MODEL_PROVIDER_NOT_CONFIGURED'
+  | 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED';
 
 export const MODEL_TASK_FAILURE_COPY: Readonly<Record<ModelTaskUnavailableReason, string>> = {
   MODEL_DATA_REGION_UNASSIGNED: '请先选择模型数据区域，再开始任务。',
@@ -42,6 +44,8 @@ export const MODEL_TASK_FAILURE_COPY: Readonly<Record<ModelTaskUnavailableReason
   MODEL_MIGRATION_IN_PROGRESS: '这项能力正在迁移到千问，暂时不可用。',
   MODEL_ROLLOUT_NOT_ALLOWED: '这项能力正在小范围验证，暂未对当前账号开放。',
   MODEL_PROVIDER_NOT_CONFIGURED: '所选模型的服务尚未配置，请切换到千问后重试。',
+  QWEN_INTL_ENDPOINT_NOT_CONFIGURED:
+    '云浏览器使用的国际站千问服务尚未配置，任务没有执行，未扣除额度。请联系管理员。',
 };
 
 /** Keys and base URLs only — never on/off switches. */
@@ -61,6 +65,8 @@ export interface ReadyModelRuntime {
   provider: BrainProvider;
   /** Alibaba data region; null for brains outside the Qwen region rules. */
   region: 'cn' | 'intl' | null;
+  /** The DashScope endpoint the Qwen adapters call; null for brains outside Qwen. */
+  qwenEndpoint: 'cn' | 'intl' | null;
   messages(purpose: QwenPurpose): MessagesAdapter;
   responses(purpose: QwenPurpose): ResponsesAdapter;
 }
@@ -94,10 +100,31 @@ export interface ProductionModelRuntimeWiring {
     ownership: CoreModelRuntimeInput['ownership'];
     /** Explicit brain; otherwise the task's bound brain, otherwise the catalog default. */
     brain?: BrainEntry;
+    /**
+     * BROWSER-HOME-1 only (see QwenEndpointOverride): set through withQwenEndpoint by tasks.create
+     * for an admitted cloud-browser task. Changes the Qwen endpoint of a `cn` account, nothing else.
+     */
+    qwenEndpoint?: QwenEndpointOverride;
   }): ProductionModelRuntimeResolution;
   resolveUnmigrated(lane: UnmigratedModelLane): {
     kind: 'unavailable';
     reasonCode: 'MODEL_MIGRATION_IN_PROGRESS';
+  };
+}
+
+/**
+ * BROWSER-HOME-1: the same wiring with every core resolution sent to `endpoint` (see
+ * QwenEndpointOverride). Built per request by tasks.create for an admitted cloud-browser task
+ * only; the shared module-level wiring is never changed.
+ */
+export function withQwenEndpoint(
+  wiring: ProductionModelRuntimeWiring,
+  endpoint: QwenEndpointOverride,
+): ProductionModelRuntimeWiring {
+  return {
+    policy: wiring.policy,
+    resolveCore: (input) => wiring.resolveCore({ ...input, qwenEndpoint: endpoint }),
+    resolveUnmigrated: (lane) => wiring.resolveUnmigrated(lane),
   };
 }
 
@@ -188,6 +215,7 @@ export function createProductionModelRuntimeWiring(
       actorExternalId: input.actorExternalId,
       lane: input.lane,
       ownership: input.ownership,
+      ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
       ...qwenFactories,
     });
     if (resolution.kind === 'ready') {
@@ -197,6 +225,7 @@ export function createProductionModelRuntimeWiring(
         brainId: brain.id,
         provider: 'alibaba-model-studio',
         region: resolution.region,
+        qwenEndpoint: resolution.qwenEndpoint,
         messages: resolution.messages,
         responses: withMcp
           ? (purpose) => withMcpTools(resolution.responses(purpose), options.mcpTools)
@@ -286,6 +315,7 @@ function resolveExternalRuntime(input: {
     brainId: input.brain.id,
     provider: input.provider,
     region: null,
+    qwenEndpoint: null,
     messages,
     responses(purpose) {
       return input.createResponses({

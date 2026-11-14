@@ -4,7 +4,7 @@ import {
   currentBrowserBrain,
   resolveBrowserBrainSelection,
 } from '../../llm/browser-brain.js';
-import type { CoreModelRuntimeInput } from '../../llm/core-model-runtime.js';
+import type { CoreModelRuntimeInput, QwenEndpointOverride } from '../../llm/core-model-runtime.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { MessagesAdapterError, createQwenMessagesAdapter } from '../../llm/messages-adapter.js';
 import type { LlmCallRecorder } from '../llm-call-recorder.js';
@@ -28,6 +28,8 @@ export async function generatePlanForUser(
     taskId?: string;
     browserPlanning?: boolean;
     planningAdapter?: MessagesAdapter;
+    /** BROWSER-HOME-1: set by tasks.create for an admitted cloud-browser task only. */
+    qwenEndpoint?: QwenEndpointOverride;
     recorder?: LlmCallRecorder;
   },
   factories: PlanAdapterFactories = { createQwenAdapter: createQwenMessagesAdapter },
@@ -52,6 +54,7 @@ export async function generatePlanForUser(
           environment,
           userExternalId: input.userExternalId,
           userModelDataRegion: input.userModelDataRegion,
+          ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
           createMessages: factories.createQwenAdapter,
         });
   } catch (error) {

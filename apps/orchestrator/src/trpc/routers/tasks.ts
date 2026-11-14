@@ -301,7 +301,9 @@ import { entryRequestFrom } from '../../llm/model-data-region-entry.js';
 import { settleFirstTaskModelDataRegion } from '../../llm/model-data-region-first-task.js';
 import {
   type ModelTaskUnavailableReason,
+  type ProductionModelRuntimeWiring,
   createProductionModelRuntimeWiring,
+  withQwenEndpoint,
 } from '../../llm/model-runtime-wiring.js';
 import { notify } from '../../notifications/notification-service.js';
 import {
@@ -628,24 +630,36 @@ const modelRuntimeWiring = createProductionModelRuntimeWiring(
   },
 );
 
-function resolveGenerateRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
+function resolveGenerateRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return wiring.resolveCore({
     actorExternalId,
     lane: 'generate',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
   });
 }
 
-function resolveScrapeRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
+function resolveScrapeRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return wiring.resolveCore({
     actorExternalId,
     lane: 'scrape',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
   });
 }
 
-function resolveVerifierRuntimeForUser(actorExternalId: string, modelDataRegion: unknown) {
-  return modelRuntimeWiring.resolveCore({
+function resolveVerifierRuntimeForUser(
+  actorExternalId: string,
+  modelDataRegion: unknown,
+  wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
+) {
+  return wiring.resolveCore({
     actorExternalId,
     lane: 'verifier',
     ownership: { scope: 'personal', userRegion: modelDataRegion },
@@ -1239,6 +1253,14 @@ export const tasksRouter = router({
       }
       // BROWSER-HOME-1 step 4: before anything is created or charged.
       assertBrowserHomeTaskAllowed({ userId: ctx.userId, input, pool: ctx.browserPool });
+      // BROWSER-HOME-1 (BOSS 2026-11-14「我们不是还有国际千问嘛」): an admitted cloud-browser task
+      // (flag + allowlist + open session, asserted just above) calls Qwen on the INTERNATIONAL
+      // endpoint — a `cn` account's only; same models, no domestic fallback. Every model runtime
+      // this request resolves goes through taskModelWiring; any other task keeps the shared wiring.
+      const qwenEndpoint = input.browserHomeSession ? ('intl' as const) : undefined;
+      const taskModelWiring = qwenEndpoint
+        ? withQwenEndpoint(modelRuntimeWiring, qwenEndpoint)
+        : modelRuntimeWiring;
       // O15 — code-task refusal lands BEFORE user lookup so even an
       // unauthenticated-token-in-fail-path doesn't get scaffolding.
       //
@@ -2197,8 +2219,11 @@ export const tasksRouter = router({
             // not a billable task attempt.
             const coreLane = coreLaneForExecutionMode(executionMode);
             let browserMessagesAdapter: MessagesAdapter | undefined;
+            // BROWSER-HOME-1: the Qwen endpoint the browser lane runs on, kept on a cloud-browser
+            // task's row (sourceContext.qwenEndpoint) so acceptance can check it. No key, no URL.
+            let browserQwenEndpoint: 'cn' | 'intl' | null = null;
             if (coreLane) {
-              const preflight = modelRuntimeWiring.resolveCore({
+              const preflight = taskModelWiring.resolveCore({
                 actorExternalId: ctx.userId,
                 lane: coreLane,
                 ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -2231,6 +2256,7 @@ export const tasksRouter = router({
                     executionMode,
                     finalExecutionMode: executionMode,
                     reasonCode: preflight.reasonCode,
+                    ...(qwenEndpoint ? { qwenEndpoint } : {}),
                   },
                 });
                 if (terminal.persisted) {
@@ -2250,6 +2276,7 @@ export const tasksRouter = router({
               }
               if (coreLane === 'browser') {
                 browserMessagesAdapter = preflight.messages('vision');
+                browserQwenEndpoint = preflight.qwenEndpoint;
                 if (input.localChrome)
                   await assertLocalChromeSelection(ctx.userId, input.localChrome);
                 if (
@@ -2271,8 +2298,16 @@ export const tasksRouter = router({
               input.roleId === 'video-creator' ||
               input.videoOptions?.tab !== undefined;
             const mediaServices = resolveMediaModelServices({
-              generate: resolveGenerateRuntimeForUser(ctx.userId, userRow.modelDataRegion),
-              verifier: resolveVerifierRuntimeForUser(ctx.userId, userRow.modelDataRegion),
+              generate: resolveGenerateRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+                taskModelWiring,
+              ),
+              verifier: resolveVerifierRuntimeForUser(
+                ctx.userId,
+                userRow.modelDataRegion,
+                taskModelWiring,
+              ),
             });
             const providerReadiness = {
               hasDashscope: Boolean(appEnv.DASHSCOPE_API_KEY),
@@ -3242,6 +3277,7 @@ export const tasksRouter = router({
               const stockRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const { ashareMessagesAdapter, createAshareModelCallers } = await import(
                 '../../agent/a-share/ashare-model-callers.js'
@@ -3620,7 +3656,7 @@ export const tasksRouter = router({
                         const shownAnswer = deliverableAnswer(answer) ?? answer;
                         void runTaskBackground(ctx, async (ctx) =>
                           publishCoreTaskSuggestions({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                             rawIntent: input.intent,
@@ -3754,6 +3790,7 @@ export const tasksRouter = router({
               const templateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const templateResponsesAdapter =
                 templateRuntime.kind === 'ready' ? templateRuntime.responses('standard') : null;
@@ -4038,7 +4075,7 @@ export const tasksRouter = router({
                 ctx,
                 userId: userRow.id,
                 modelDataRegion: userRow.modelDataRegion,
-                wiring: modelRuntimeWiring,
+                wiring: taskModelWiring,
                 taskRepo: repo,
                 requirements: coreCreateRequirements,
                 blocks: attachmentBlocks,
@@ -4086,12 +4123,14 @@ export const tasksRouter = router({
               const generateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const generateResponsesAdapter =
                 generateRuntime.kind === 'ready' ? generateRuntime.responses('standard') : null;
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const semanticVerifierAdapter =
                 verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
@@ -4153,7 +4192,7 @@ export const tasksRouter = router({
                   try {
                     const executionPlan = generateResponsesAdapter
                       ? await prepareCoreTaskPlan({
-                          wiring: modelRuntimeWiring,
+                          wiring: taskModelWiring,
                           actorExternalId: ctx.userId,
                           modelDataRegion: userRow.modelDataRegion,
                           intent: input.intent,
@@ -4536,7 +4575,7 @@ export const tasksRouter = router({
                     const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
-                        wiring: modelRuntimeWiring,
+                        wiring: taskModelWiring,
                         actorExternalId: ctx.userId,
                         modelDataRegion: userRow.modelDataRegion,
                         rawIntent: input.intent,
@@ -4606,12 +4645,14 @@ export const tasksRouter = router({
               const scrapeRuntime = resolveScrapeRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const scrapeResponsesAdapter =
                 scrapeRuntime.kind === 'ready' ? scrapeRuntime.responses('standard') : null;
               const fallbackGenerateRuntime = resolveGenerateRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const fallbackGenerateResponsesAdapter =
                 fallbackGenerateRuntime.kind === 'ready'
@@ -4620,6 +4661,7 @@ export const tasksRouter = router({
               const verifierRuntime = resolveVerifierRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
+                taskModelWiring,
               );
               const semanticVerifierAdapter =
                 verifierRuntime.kind === 'ready' ? verifierRuntime.messages('verify_strict') : null;
@@ -4627,7 +4669,7 @@ export const tasksRouter = router({
               // it gives each asked field's value. The catalog sets every purpose of a lane to that
               // lane's model (the verifier lane is qwen3.8-max), so the call runs on the plan lane,
               // whose model is the small one (qwen3.8-flash).
-              const fieldJudgeRuntime = modelRuntimeWiring.resolveCore({
+              const fieldJudgeRuntime = taskModelWiring.resolveCore({
                 actorExternalId: ctx.userId,
                 lane: 'plan',
                 ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -4733,7 +4775,7 @@ export const tasksRouter = router({
                   try {
                     const executionPlan = scrapeResponsesAdapter
                       ? await prepareCoreTaskPlan({
-                          wiring: modelRuntimeWiring,
+                          wiring: taskModelWiring,
                           actorExternalId: ctx.userId,
                           modelDataRegion: userRow.modelDataRegion,
                           intent: input.intent,
@@ -5380,7 +5422,7 @@ export const tasksRouter = router({
                     const summary = deliverableAnswer(outcome.summary) ?? outcome.summary;
                     void runTaskBackground(ctx, async (ctx) =>
                       publishCoreTaskSuggestions({
-                        wiring: modelRuntimeWiring,
+                        wiring: taskModelWiring,
                         actorExternalId: ctx.userId,
                         modelDataRegion: userRow.modelDataRegion,
                         rawIntent: input.intent,
@@ -5691,6 +5733,7 @@ export const tasksRouter = router({
                   : generatePlanForUser({
                       browserPlanning: true,
                       planningAdapter: browserMessagesAdapter.browserBrain?.planning,
+                      ...(qwenEndpoint ? { qwenEndpoint } : {}),
                       recorder: {
                         record: async (call) => {
                           pendingPlanCalls.push(call);
@@ -5742,6 +5785,9 @@ export const tasksRouter = router({
               const browserSourceContext = {
                 ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                 browserSessionPolicy: taskSessionPolicy,
+                ...(input.browserHomeSession && browserQwenEndpoint
+                  ? { qwenEndpoint: browserQwenEndpoint }
+                  : {}),
               };
               if (scrapeBrowserRetry) {
                 // Same task, same charge: take over the scrape task's row.
@@ -6214,7 +6260,7 @@ export const tasksRouter = router({
                 });
                 // Batch 09: unified executor search (Qwen built-in first, Firecrawl
                 // fallback when FIRECRAWL_API_KEY is set) and read-only page reads.
-                const unifiedBrowserRuntime = modelRuntimeWiring.resolveCore({
+                const unifiedBrowserRuntime = taskModelWiring.resolveCore({
                   actorExternalId: ctx.userId,
                   lane: 'browser',
                   ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -6240,7 +6286,7 @@ export const tasksRouter = router({
                   : createFirecrawlReadPage(ctx.firecrawl);
                 // FIX-61 复审 #1 #3: FIX-60's small-model field reading (plan lane = the small
                 // model), asked only when a named count looks left out of a browser answer.
-                const browserFieldJudgeRuntime = modelRuntimeWiring.resolveCore({
+                const browserFieldJudgeRuntime = taskModelWiring.resolveCore({
                   actorExternalId: ctx.userId,
                   lane: 'plan',
                   ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -7202,7 +7248,7 @@ export const tasksRouter = router({
                     deps: {
                       ...(() => {
                         // Batch 04: the OTA readonly lane uses the model-catalog brain.
-                        const otaRuntime = modelRuntimeWiring.resolveCore({
+                        const otaRuntime = taskModelWiring.resolveCore({
                           actorExternalId: ctx.userId,
                           lane: 'browser',
                           ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -7392,7 +7438,7 @@ export const tasksRouter = router({
                           db: ctx.db,
                           logger: ctx.logger,
                           adapter: resolveUserGenerateAdapter({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                           }),
@@ -7429,6 +7475,7 @@ export const tasksRouter = router({
                         const handoffGenerateRuntime = resolveGenerateRuntimeForUser(
                           ctx.userId,
                           userRow.modelDataRegion,
+                          taskModelWiring,
                         );
                         const handoffGenerateResponsesAdapter =
                           handoffGenerateRuntime.kind === 'ready'
@@ -8266,6 +8313,7 @@ export const tasksRouter = router({
                             environment: appEnv,
                             userExternalId: ctx.userId,
                             userModelDataRegion: userRow.modelDataRegion,
+                            ...(qwenEndpoint ? { qwenEndpoint } : {}),
                           });
                           if (suggestionsRoute.provider === 'unavailable') {
                             ctx.logger.warn(
@@ -8741,7 +8789,7 @@ export const tasksRouter = router({
               const taskDbId = taskDbRow?.id;
               // Batch 04: the browser lane's brain (model catalog) drives the unified
               // tool set when a Playwright page is available.
-              const visionRuntime = modelRuntimeWiring.resolveCore({
+              const visionRuntime = taskModelWiring.resolveCore({
                 actorExternalId: ctx.userId,
                 lane: 'browser',
                 ownership: { scope: 'personal', userRegion: userRow.modelDataRegion },
@@ -8766,7 +8814,7 @@ export const tasksRouter = router({
                           db: ctx.db,
                           taskDbId,
                           generateAdapter: resolveUserGenerateAdapter({
-                            wiring: modelRuntimeWiring,
+                            wiring: taskModelWiring,
                             actorExternalId: ctx.userId,
                             modelDataRegion: userRow.modelDataRegion,
                           }),
@@ -8994,7 +9042,7 @@ export const tasksRouter = router({
                             db: ctx.db,
                             logger: ctx.logger,
                             adapter: resolveUserGenerateAdapter({
-                              wiring: modelRuntimeWiring,
+                              wiring: taskModelWiring,
                               actorExternalId: ctx.userId,
                               modelDataRegion: userRow.modelDataRegion,
                             }),

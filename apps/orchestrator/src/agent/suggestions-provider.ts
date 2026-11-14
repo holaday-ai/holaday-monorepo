@@ -2,6 +2,7 @@ import {
   type CoreModelRuntimeEnvironment,
   type CoreModelRuntimeInput,
   type CoreModelRuntimeUnavailableReason,
+  type QwenEndpointOverride,
   resolveCoreModelRuntime,
 } from '../llm/core-model-runtime.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
@@ -27,6 +28,8 @@ export function resolveSuggestionsProviderRoute(input: {
   environment: SuggestionsProviderEnvironment;
   userExternalId: string;
   userModelDataRegion: unknown;
+  /** BROWSER-HOME-1: set by tasks.create for an admitted cloud-browser task only. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: CoreModelRuntimeInput['createMessages'];
 }): SuggestionsProviderRoute {
   const runtime = resolveCoreModelRuntime({
@@ -37,6 +40,7 @@ export function resolveSuggestionsProviderRoute(input: {
       scope: 'personal',
       userRegion: input.userModelDataRegion,
     },
+    ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
     createMessages: input.createMessages,
   });
 

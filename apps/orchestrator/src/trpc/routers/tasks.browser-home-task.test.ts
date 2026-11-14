@@ -185,6 +185,7 @@ beforeEach(() => {
     QWEN_CORE_ENABLED_LANES: 'browser',
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
     DASHSCOPE_CN_API_KEY: 'synthetic-cn',
+    DASHSCOPE_INTL_API_KEY: 'synthetic-intl',
     DASHSCOPE_API_KEY: '',
     BROWSER_HOME_ENABLED: true,
     BROWSER_HOME_ALLOWLIST: '',
@@ -203,33 +204,47 @@ beforeEach(() => {
     .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
     .mockResolvedValue({ persisted: true });
   vi.spyOn(extensionWs, 'broadcastToUser').mockImplementation(() => 0);
-  const metadata = {
-    provider: 'alibaba-model-studio',
-    model: 'qwen-fixture',
-    region: 'cn',
-    deploymentScope: 'china_mainland',
-    endpointKind: 'public',
-    protocol: 'messages',
-  } as const;
-  vi.spyOn(messages, 'createQwenMessagesAdapter').mockImplementation(() => ({
-    metadata,
-    async create() {
-      return {
-        id: 'skip',
-        metadata,
-        stopReason: 'end_turn',
-        content: [{ type: 'text', text: '{"skip":true}' }],
-        usage: {
-          inputTokens: 1,
-          outputTokens: 1,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
-          complete: true,
-        },
-      };
-    },
-  }));
+  vi.spyOn(messages, 'createQwenMessagesAdapter').mockImplementation(({ region }) => {
+    const metadata = {
+      provider: 'alibaba-model-studio',
+      model: 'qwen-fixture',
+      region,
+      deploymentScope: region === 'cn' ? 'china_mainland' : 'international',
+      endpointKind: 'public',
+      protocol: 'messages',
+    } as const;
+    return {
+      metadata,
+      async create() {
+        return {
+          id: 'skip',
+          metadata,
+          stopReason: 'end_turn',
+          content: [{ type: 'text', text: '{"skip":true}' }],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            complete: true,
+          },
+        };
+      },
+    };
+  });
 });
+
+/** The regions every Qwen messages adapter of the request was built for (the endpoint called). */
+function qwenEndpointsCalled() {
+  return vi.mocked(messages.createQwenMessagesAdapter).mock.calls.map(([input]) => ({
+    region: input.region,
+    key:
+      input.region === 'cn'
+        ? input.environment.DASHSCOPE_CN_API_KEY
+        : input.environment.DASHSCOPE_INTL_API_KEY,
+    legacyKey: input.environment.DASHSCOPE_API_KEY,
+  }));
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -476,6 +491,56 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
     await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 10_000 });
     expect(pool.peek(`bhs_${USER}`)).toBe(home);
     expect(pool.peek(result.taskId)).not.toBe(home);
+    // The same cn account's ordinary task keeps the domestic Qwen endpoint.
+    expect(qwenEndpointsCalled().length).toBeGreaterThan(0);
+    for (const call of qwenEndpointsCalled()) expect(call.region).toBe('cn');
+    const [, row] = vi.mocked(TaskRepository.prototype.insertTask).mock.calls[0]!;
+    expect(row.sourceContext).not.toHaveProperty('qwenEndpoint');
+  });
+
+  it("international Qwen (BOSS 2026-11-14): a cn account's cloud-browser task calls the international endpoint and records it", async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool);
+    script.run = async () => outcomes.completed!();
+    const result = await tasksRouter
+      .createCaller(makeCtx(pool))
+      .create({ intent, browserHomeSession: true });
+    expect(result.status).toBe('executing');
+    await vi.waitFor(() => expect(pool.peek(`bhs_${USER}`)).toBe(home), { timeout: 10_000 });
+    const calls = qwenEndpointsCalled();
+    expect(calls.length).toBeGreaterThan(0);
+    // Only the international key; the legacy alias is cleared, the domestic route never used.
+    for (const call of calls)
+      expect(call).toEqual({ region: 'intl', key: 'synthetic-intl', legacyKey: '' });
+    const [, row] = vi.mocked(TaskRepository.prototype.insertTask).mock.calls[0]!;
+    expect(row.sourceContext).toMatchObject({ qwenEndpoint: 'intl' });
+  });
+
+  it('international Qwen not configured: the cloud-browser task fails clearly, no domestic fallback, not charged', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool);
+    Object.assign(env, { DASHSCOPE_INTL_API_KEY: '', DASHSCOPE_API_KEY: 'synthetic-legacy' });
+    script.run = async () => {
+      throw new Error('must not run');
+    };
+    const result = await tasksRouter
+      .createCaller(makeCtx(pool))
+      .create({ intent, browserHomeSession: true });
+    expect(result.status).toBe('failed');
+    expect(terminal).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        status: 'failed',
+        errorCode: 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED',
+        reason: expect.stringMatching(/云浏览器.*国际站千问.*尚未配置/),
+        metadata: expect.objectContaining({ qwenEndpoint: 'intl' }),
+      }),
+    );
+    expect(qwenEndpointsCalled()).toEqual([]);
+    expect(consume).not.toHaveBeenCalled();
+    // The browser stays the person's.
+    expect(pool.peek(`bhs_${USER}`)).toBe(home);
+    expect(pool.browserHomeHolder(USER)).toBeNull();
   });
 
   it('watchdog on a wedged run: the browser is released, never handed to the person (P1-1)', async () => {
