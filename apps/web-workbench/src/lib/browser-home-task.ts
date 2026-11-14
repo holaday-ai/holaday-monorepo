@@ -12,9 +12,9 @@ export interface BrowserHomeTaskInput {
 /**
  * BROWSER-HOME-1 — the one place the「云浏览器」floating composer creates a task.
  *
- * For now this is an ordinary task (its own browser). Plan step 4 runs it in the person's cloud
- * browser instead: that change belongs here only (pass `browserHomeSession: true` through to
- * `tasks.create`).
+ * Step 4: the task runs IN the person's open cloud browser, from the page it shows
+ * (`browserHomeSession: true`); the server lends the browser to the task and gives it back when
+ * the task ends, so the page's screen (`bhs_<userId>`) keeps showing it throughout.
  */
 export function createBrowserHomeTask(
   input: BrowserHomeTaskInput,
@@ -30,5 +30,10 @@ export function createBrowserHomeTask(
       undefined,
       undefined,
       input.skillSelection,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { browserHomeSession: true },
     );
 }

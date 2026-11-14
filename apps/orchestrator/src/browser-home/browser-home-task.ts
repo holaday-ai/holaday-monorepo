@@ -6,7 +6,8 @@
  *   1. assertBrowserHomeTaskAllowed — refuses (FORBIDDEN) when the entry is off for the user, when
  *      combined with a follow-up / retry / local Chrome / public-cloud continuation / media or stock
  *      input, or when the user has no open cloud browser.
- *   2. claimBrowserHomeTaskOrThrow — one task at a time (CONFLICT while one runs or is being sent).
+ *   2. claimBrowserHomeTaskOrThrow — one task at a time (PRECONDITION_FAILED while one runs or is
+ *      being sent: a definite refusal, so the web composer keeps the draft and may resend).
  *   3. The task always runs in the browser lane (the agent loop); its dispatch lends the browser
  *      (BrowserPool.lendBrowserHome) and, on every terminal path, finishBrowserHomeTask gives it
  *      back (BrowserPool.returnBrowserHome) with the session's idle and review control.
@@ -73,7 +74,7 @@ export function assertBrowserHomeTaskAllowed(args: {
     throw new TRPCError({ code: 'FORBIDDEN', message: BROWSER_HOME_TASK_COPY.closed });
 }
 
-/** Reserve the browser for this one task, or throw (CONFLICT busy / FORBIDDEN closed). */
+/** Reserve the browser for this one task, or throw (PRECONDITION_FAILED busy / FORBIDDEN closed). */
 export function claimBrowserHomeTaskOrThrow(args: {
   userId: string;
   pool: Pick<BrowserPool, 'peek' | 'browserHomeHolder'> | null | undefined;
@@ -83,7 +84,7 @@ export function claimBrowserHomeTaskOrThrow(args: {
     throw new TRPCError({ code: 'FORBIDDEN', message: BROWSER_HOME_TASK_COPY.closed });
   const result = (args.sessions ?? browserHomeSessions).claimTask(args.pool, args.userId);
   if (result.kind === 'busy')
-    throw new TRPCError({ code: 'CONFLICT', message: BROWSER_HOME_TASK_COPY.busy });
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: BROWSER_HOME_TASK_COPY.busy });
   if (result.kind === 'closed')
     throw new TRPCError({ code: 'FORBIDDEN', message: BROWSER_HOME_TASK_COPY.closed });
   return result.claim;

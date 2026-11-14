@@ -2,7 +2,7 @@
 import { BrowserHomeView } from '@/components/browser-home/BrowserHomeView';
 import { ToastProvider } from '@/components/ui/toast';
 import type { BrowserHomeSite } from '@/lib/browser-home';
-import { useTaskStore } from '@/stores/task-store';
+import { setStoreNavigate, useTaskStore } from '@/stores/task-store';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
@@ -13,6 +13,8 @@ const api = vi.hoisted(() => ({
   open: vi.fn(),
   nav: vi.fn(),
   close: vi.fn(),
+  create: vi.fn(),
+  reply: vi.fn(),
 }));
 
 vi.mock('@/lib/trpc', () => ({
@@ -21,6 +23,10 @@ vi.mock('@/lib/trpc', () => ({
       open: { mutate: api.open },
       nav: { mutate: api.nav },
       close: { mutate: api.close },
+    },
+    tasks: {
+      create: { mutate: api.create },
+      reply: { mutate: api.reply },
     },
     skills: { list: { query: async () => [] } },
     models: { list: { query: async () => ({ items: [] }) } },
@@ -63,13 +69,22 @@ beforeEach(() => {
   api.open.mockResolvedValue({ sessionId: 'bhs_usr_1', url: null });
   api.nav.mockResolvedValue({ ok: true, url: 'https://example.com/' });
   api.close.mockResolvedValue({ released: true });
+  api.create.mockResolvedValue({ taskId: 'tsk_home_1', status: 'executing', steps: [] });
+  api.reply.mockResolvedValue({ ok: true, state: 'stillAwaiting' });
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
-  useTaskStore.setState({ tasks: [], selectedTaskId: null });
+  useTaskStore.setState({
+    tasks: [],
+    selectedTaskId: null,
+    localChromeSelection: null,
+    browserPreference: null,
+    awaitingUserByTask: {},
+    subStatusByTask: {},
+  });
 });
 
 function LeaveButton(): JSX.Element {
@@ -244,5 +259,105 @@ describe('BROWSER-HOME-1 home view', () => {
     expect(window.localStorage.getItem('holaday.browserHome.shortcuts')).toContain('mine.example');
     await user.click(within(mine).getByRole('button', { name: '移除我的站' }));
     expect(within(mine).queryByRole('button', { name: '我的站' })).toBeNull();
+  });
+});
+
+describe('BROWSER-HOME-1 step 4: a task from the floating input runs in this browser', () => {
+  const composer = () => {
+    const box = document.querySelector('textarea');
+    if (!box) throw new Error('no composer');
+    return box;
+  };
+  const card = () => screen.getByRole('region', { name: '云浏览器任务' });
+  const patchTask = (patch: Record<string, unknown>) =>
+    useTaskStore.setState((prev) => ({
+      tasks: prev.tasks.map((t) => (t.taskId === 'tsk_home_1' ? { ...t, ...patch } : t)),
+    }));
+
+  it('sends browserHomeSession, keeps the same screen, shows progress then the result in place', async () => {
+    // A Chrome selection or a public-cloud preference elsewhere never rides along.
+    useTaskStore.setState({ browserPreference: 'cloud-public' } as never);
+    // The shell's "pin the URL to the new task" is not used: the page stays /browser.
+    const pinUrl = vi.fn();
+    setStoreNavigate(pinUrl);
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalled());
+    await user.type(composer(), '把这个页面的标题和价格整理一下');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    const sent = api.create.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sent).toMatchObject({
+      intent: '把这个页面的标题和价格整理一下',
+      browserHomeSession: true,
+    });
+    expect(sent).not.toHaveProperty('localChrome');
+    expect(sent).not.toHaveProperty('browserPreference');
+    expect(sent).not.toHaveProperty('replyToTaskId');
+
+    // The screen of this page's browser — the stream route stays bhs_<userId> throughout.
+    const screenEl = await screen.findByTestId('screen');
+    expect(screenEl.getAttribute('data-ws-url')).toMatch(/\/screencast-ws\/bhs_usr_1$/);
+    expect(within(card()).getByText('执行中')).toBeTruthy();
+    expect(screen.queryByText('别的页面')).toBeNull();
+    expect(pinUrl).not.toHaveBeenCalled();
+    setStoreNavigate(null);
+
+    patchTask({ status: 'completed', resultText: '标题：Item 1\n价格：¥99' });
+    await waitFor(() => expect(within(card()).getByText('已完成')).toBeTruthy());
+    expect(within(card()).getByTestId('browser-home-task-body').textContent).toContain('¥99');
+    expect(screen.getByTestId('screen').getAttribute('data-ws-url')).toMatch(
+      /\/screencast-ws\/bhs_usr_1$/,
+    );
+
+    // Collapsible, and dismissible once ended.
+    await user.click(within(card()).getByRole('button', { name: '收起任务卡片' }));
+    expect(within(card()).queryByTestId('browser-home-task-body')).toBeNull();
+    await user.click(within(card()).getByRole('button', { name: '关闭任务卡片' }));
+    expect(screen.queryByRole('region', { name: '云浏览器任务' })).toBeNull();
+    expect(screen.queryByText('别的页面')).toBeNull();
+  });
+
+  it('a failure shows its reason in the card; a server refusal is a toast and keeps the draft', async () => {
+    api.create.mockRejectedValueOnce(
+      Object.assign(new Error('云浏览器里已有一个任务在执行，请等它结束后再发送。'), {
+        data: { code: 'PRECONDITION_FAILED' },
+      }),
+    );
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalled());
+    await user.type(composer(), '再整理一次');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText(/已有一个任务在执行/)).toBeTruthy();
+    expect((composer() as HTMLTextAreaElement).value).toBe('再整理一次');
+    expect(screen.queryByRole('region', { name: '云浏览器任务' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(card()).toBeTruthy());
+    patchTask({ status: 'failed', resultText: '页面打不开' });
+    await waitFor(() => expect(within(card()).getByText('失败')).toBeTruthy());
+    expect(within(card()).getByTestId('browser-home-task-body').textContent).toBeTruthy();
+  });
+
+  it('when the assistant asks, the floating input answers that task instead of starting another', async () => {
+    const user = mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalled());
+    await user.type(composer(), '帮我登录后看订单');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(card()).toBeTruthy());
+    useTaskStore.setState((prev) => ({
+      tasks: prev.tasks.map((t) =>
+        t.taskId === 'tsk_home_1' ? { ...t, status: 'awaiting_user' as const } : t,
+      ),
+      awaitingUserByTask: { tsk_home_1: { question: '请先在画面里登录', at: Date.now() } },
+    }));
+    expect(await within(card()).findByText('请先在画面里登录')).toBeTruthy();
+    await user.type(composer(), '登录好了');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() =>
+      expect(api.reply).toHaveBeenCalledWith({ taskId: 'tsk_home_1', message: '登录好了' }),
+    );
+    expect(api.create).toHaveBeenCalledTimes(1);
   });
 });

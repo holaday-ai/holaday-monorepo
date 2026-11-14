@@ -350,7 +350,7 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
     await running;
 
     await expect(caller.create({ intent, browserHomeSession: true })).rejects.toMatchObject({
-      code: 'CONFLICT',
+      code: 'PRECONDITION_FAILED',
       message: '云浏览器里已有一个任务在执行，请等它结束后再发送。',
     });
     expect(pool.browserHomeHolder(USER)).toBe(first.taskId);

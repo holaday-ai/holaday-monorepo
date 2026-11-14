@@ -4,6 +4,7 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { InputArea } from '@/components/InputArea';
 import { BrowserHomeAddressBar } from '@/components/browser-home/BrowserHomeAddressBar';
+import { BrowserHomeTaskCard } from '@/components/browser-home/BrowserHomeTaskCard';
 import { BrowserHomeView, recentBrowserHomeTasks } from '@/components/browser-home/BrowserHomeView';
 import {
   type ComposerSubmitResult,
@@ -81,6 +82,8 @@ export function BrowserHomePage({
   const [url, setUrl] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const [streamStatus, setStreamStatus] = React.useState<CdpScreencastStatus>('idle');
+  // Step 4: the task sent from the floating input, shown in the card above it.
+  const [activeTaskId, setActiveTaskId] = React.useState<string | null>(null);
   const aliveRef = React.useRef(true);
   const openRef = React.useRef<Promise<string | null> | null>(null);
   const openErrorRef = React.useRef<string | null>(null);
@@ -176,6 +179,30 @@ export function BrowserHomePage({
       expertMode?: 'normal' | 'expert' | 'auto',
       skillSelection?: UiSkillSelection,
     ): Promise<ComposerSubmitResult> => {
+      // The assistant asked something: the floating input answers it (the task still holds the
+      // browser, so a new task could not run there anyway).
+      const current = activeTaskId
+        ? useTaskStore.getState().tasks.find((t) => t.taskId === activeTaskId)
+        : null;
+      if (current?.status === 'awaiting_user') {
+        const replied = await useTaskStore.getState().replyToTask(current.taskId, intent, fileIds);
+        if ('error' in replied || !replied.ok) {
+          toast.show(
+            taskActionError('回复失败', 'error' in replied ? replied.error : null),
+            'error',
+          );
+          return keepComposerOnSubmitFailure;
+        }
+        return clearComposerOnSubmitSuccess;
+      }
+      // The task runs in this page's browser: make sure it is open first.
+      let sessionId = openRef.current ? await openRef.current : null;
+      if (!sessionId && aliveRef.current) sessionId = await openSession();
+      if (!aliveRef.current) return keepComposerOnSubmitFailure;
+      if (!sessionId) {
+        toast.show(openErrorRef.current ?? '云浏览器打开失败，请稍后重试', 'error');
+        return keepComposerOnSubmitFailure;
+      }
       const res = await createBrowserHomeTask({
         intent,
         fileIds,
@@ -187,10 +214,14 @@ export function BrowserHomePage({
         toast.show(taskActionError('发送失败', res.error), 'error');
         return keepComposerOnSubmitFailure;
       }
-      toast.show('任务已创建，可在左侧任务列表查看进度', 'info');
+      if (!aliveRef.current) return clearComposerOnSubmitSuccess;
+      // Stay on this page: the assistant works on the screen, the card shows its progress.
+      setActiveTaskId(res.taskId);
+      navigatedRef.current = true;
+      setView('browser');
       return clearComposerOnSubmitSuccess;
     },
-    [toast],
+    [activeTaskId, openSession, toast],
   );
 
   const sessionId = session.status === 'ready' ? session.sessionId : null;
@@ -264,6 +295,13 @@ export function BrowserHomePage({
           style={{ bottom: keyboardInset }}
         >
           <div className="w-full max-w-[640px]">
+            {activeTaskId && (
+              <BrowserHomeTaskCard
+                taskId={activeTaskId}
+                onDismiss={() => setActiveTaskId(null)}
+                onOpenTask={(taskId) => navigate(`/?task=${encodeURIComponent(taskId)}`)}
+              />
+            )}
             <InputArea
               floating
               onSubmit={submitTask}
