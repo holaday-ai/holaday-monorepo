@@ -65,8 +65,7 @@ export interface CdpStreamerOptions {
   /** JPEG quality 0..100. V2 defaults to 90, legacy to 60. */
   quality?: number;
   viewportV2?: boolean;
-  /** HOTFIX-R4A: `url` is the page URL the frame was captured under ('' when it changed meanwhile). */
-  onFrame?: (frame: BrowserFrameGeometry, meta?: { url: string }) => void;
+  onFrame?: (frame: BrowserFrameGeometry) => void;
   onObservationInvalidated?: () => void;
   /** Cap frame width. Default 1440 — matches the largest workbench viewport. */
   maxWidth?: number;
@@ -166,16 +165,6 @@ export class CdpStreamer {
   private historyEntry: number | null = null;
   documentLoader(): string {
     return this.loader;
-  }
-  /**
-   * HOTFIX-R4A: the main frame's URL as the navigation events last reported it (a replaceState
-   * changes it without a new history entry). Empty until known.
-   */
-  private url = '';
-  /** Bumped on every URL change: a frame captured before one gets no URL (复审 P2-d). */
-  private urlGeneration = 0;
-  currentUrl(): string {
-    return this.url;
   }
   /**
    * The main frame's loader read from the browser NOW — newer than documentLoader() when a
@@ -279,8 +268,6 @@ export class CdpStreamer {
     this.historyGeneration++;
     for (const wake of [...this.historyWaiters]) wake();
     this.boundPage = page;
-    this.url = page.url();
-    this.urlGeneration++;
     let id = this.pageIds.get(page);
     if (!id) {
       id = randomUUID();
@@ -393,7 +380,7 @@ export class CdpStreamer {
       // surface capture. Never upscale a 1x JPEG and call it Retina.
       if (this.opts.viewportV2 && this.captureScale > 1 && !this.pointerHeld)
         this.requestHighResolutionFrame();
-      else this.publishFrame(params.data, params.metadata ?? {}, this.urlGeneration);
+      else this.publishFrame(params.data, params.metadata ?? {});
       // Acking is mandatory — without it the streamer waits forever
       // for the previous frame to be consumed and frame flow halts.
       cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch((err: Error) => {
@@ -408,8 +395,6 @@ export class CdpStreamer {
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
       this.loader = params.frame.loaderId;
-      this.url = params.frame.url;
-      this.urlGeneration++;
       this.historyEntry = null;
       void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
@@ -451,9 +436,6 @@ export class CdpStreamer {
       // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
       // history entry retires the old frames; replaceState (a search box mirroring each letter
       // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
-      // Unknown main frame: the URL is unknown too (no same-document grace on it).
-      this.url = this.mainFrameId ? params.url : '';
-      this.urlGeneration++;
       void this.noteHistoryEntry(cdp, true);
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
@@ -540,11 +522,7 @@ export class CdpStreamer {
     this.watchdogTimer = null;
   }
 
-  private publishFrame(
-    data: string,
-    metadata: ScreencastFrameMessage['metadata'],
-    urlGeneration: number,
-  ): void {
+  private publishFrame(data: string, metadata: ScreencastFrameMessage['metadata']): void {
     this.invalidateCaptureRequests();
     this.hasReceivedFrame = true;
     this.lastFrameAt = Date.now();
@@ -552,7 +530,7 @@ export class CdpStreamer {
     this.clearInitialFrameTimer();
     const frame: ScreencastFrameMessage = { type: 'frame', data, metadata };
     if (this.opts.viewportV2) {
-      void this.publishGeometryFrame(frame, ++this.observationSequence, urlGeneration);
+      void this.publishGeometryFrame(frame, ++this.observationSequence);
       return;
     }
     try {
@@ -565,7 +543,6 @@ export class CdpStreamer {
   private async publishGeometryFrame(
     frame: ScreencastFrameMessage,
     sequence: number,
-    urlGeneration: number,
   ): Promise<void> {
     const session = this.cdpSession;
     const revision = this.viewportRevision;
@@ -603,9 +580,7 @@ export class CdpStreamer {
         },
         capturedAt,
       };
-      this.opts.onFrame?.(geometry, {
-        url: urlGeneration === this.urlGeneration ? this.url : '',
-      });
+      this.opts.onFrame?.(geometry);
       this.opts.ws.send(JSON.stringify({ ...frame, geometry }));
     } catch {
       this.opts.logger.debug('cdp-streamer: V2 frame dimensions unavailable');
@@ -673,7 +648,6 @@ export class CdpStreamer {
           this.publishFrame(
             data,
             (response as { metadata?: ScreencastFrameMessage['metadata'] }).metadata ?? {},
-            (response as { urlGeneration?: number }).urlGeneration ?? -1,
           );
           const log =
             request.reason === 'initial-frame-fallback'
@@ -702,9 +676,6 @@ export class CdpStreamer {
       // A high-DPR screenshot resets Chromium's native drag latch. During a
       // held pointer, keep forwarding compositor frames without emulation.
       if (this.opts.viewportV2 && this.pointerHeld) return {};
-      // HOTFIX-R4A (复审 P2-c/d): what the picture shows is no older than this moment and this URL.
-      const requestedAt = Date.now();
-      const urlGeneration = this.urlGeneration;
       // Read CSS metrics BEFORE screenshot temporarily changes the emulation.
       const metrics = this.opts.viewportV2 ? await cdp.send('Page.getLayoutMetrics') : null;
       let timeout: NodeJS.Timeout | null = null;
@@ -728,7 +699,6 @@ export class CdpStreamer {
         ]);
         return {
           ...response,
-          urlGeneration,
           metadata: metrics?.cssLayoutViewport
             ? {
                 cssWidth: metrics.cssLayoutViewport.clientWidth,
@@ -736,11 +706,8 @@ export class CdpStreamer {
                 pageScaleFactor: metrics.cssVisualViewport?.scale ?? 1,
                 scrollOffsetX: metrics.cssLayoutViewport.pageX,
                 scrollOffsetY: metrics.cssLayoutViewport.pageY,
-                timestamp: requestedAt / 1000,
               }
-            : this.opts.viewportV2
-              ? { timestamp: requestedAt / 1000 }
-              : {},
+            : {},
         };
       } finally {
         if (timeout) clearTimeout(timeout);

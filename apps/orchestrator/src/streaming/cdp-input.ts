@@ -348,16 +348,6 @@ export class CdpInputHandler {
     // changed the loader by then. Refusal happens before the interruption wiring: it is no
     // uncertain outcome.
     const guard = this.documentGuard;
-    // HOTFIX-R4A (复审 P2-g/h): a person's release of a button this browser does not hold — its
-    // press was refused (stale frame, the document check, a busy capture) — has nothing to release.
-    // Dropped quietly, per button, so a lone mouse-up never reaches the page.
-    if (
-      guard &&
-      releaseOf === undefined &&
-      msg.type === 'mouseUp' &&
-      !this.pressedButtons.has(msg.button ?? 'left')
-    )
-      return;
     let documentAtDispatch: string | null = null;
     if (guard && msg.type !== 'viewport') {
       const expected = releaseOf === undefined ? guard.expected(msg) : undefined;
