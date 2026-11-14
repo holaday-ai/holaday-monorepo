@@ -59,6 +59,7 @@ import {
 import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
 import { browserProxyUpstreams } from '../agent/browser-tools/domain-egress.js';
+import { routingUnreliable } from '../agent/search-fallback/search-results-page.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { ExecutionDrain } from '../execution/execution-drain.js';
@@ -698,6 +699,10 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
       return false;
     }
+    // G2d: a browser whose route table went wrong (a route removal that did not finish) is not
+    // kept for a follow-up task; the caller releases it. A task still waiting for a reply keeps
+    // its own browser (no other task can adopt that hold).
+    if (reason !== AWAITING_REPLY && this.routingBroken(inst)) return false;
 
     const durationMs = Math.max(1, Math.floor(ttlMs));
     const retainedUntil = Date.now() + durationMs;
@@ -788,6 +793,8 @@ export class BrowserPool {
     }
     // A browser without a recorded policy counts as anonymous (fail closed).
     if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
+    // G2d: routes the follow-up installs (search guard, results page) may silently not apply.
+    if (this.routingBroken(inst)) return null;
 
     const retentionTimer = this.retentionTimers.get(sourceTaskId);
     if (retentionTimer) clearTimeout(retentionTimer);
@@ -891,7 +898,9 @@ export class BrowserPool {
       inst.userId !== userId ||
       inst.status !== 'ready' ||
       !this.processesRunning(inst) ||
-      this.releasePromises.has(taskId)
+      this.releasePromises.has(taskId) ||
+      // G2d: the next task lent this browser would install its routes into a broken table.
+      this.routingBroken(inst)
     )
       return null;
     if (!this.destinationFree(loan.homeId)) return null;
@@ -947,6 +956,16 @@ export class BrowserPool {
     if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
     this.logger.info({ userId, taskId }, 'pool: cloud browser returned to its session');
     return inst;
+  }
+
+  /** G2d: the task's search guard marked this browser's routing unreliable (route removal stalled). */
+  private routingBroken(inst: BrowserInstance): boolean {
+    if (!routingUnreliable(inst.executor)) return false;
+    this.logger.warn(
+      { taskId: inst.taskId, userId: inst.userId },
+      'pool: browser routing unreliable; not kept for another task',
+    );
+    return true;
   }
 
   /**
