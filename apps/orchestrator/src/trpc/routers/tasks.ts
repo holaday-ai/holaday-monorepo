@@ -6435,7 +6435,11 @@ export const tasksRouter = router({
                 let resumeCaptchaWatchdog = () => {};
                 // REBUILD-2 协调方决定: a read task whose wall the public sources can answer (the
                 // router on, a search interface for the user's region, a ready answer runtime).
+                // G2a 复审: never in the person's own browser (their local Chrome or their cloud
+                // browser) — they are at the screen and can pass the check themselves.
                 const wallFallbackRun =
+                  !input.localChrome &&
+                  !input.browserHomeSession &&
                   taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                   wallFallbackAllowed(input.intent) &&
                   toolsForRegion(
