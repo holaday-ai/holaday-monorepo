@@ -50,11 +50,7 @@ vi.mock('@/components/CdpScreencastViewport', () => ({
         <button type="button" data-testid="screen" onClick={() => props.onUserInput?.()}>
           screen
         </button>
-        <button
-          type="button"
-          data-testid="refused"
-          onClick={() => props.onInputRefused?.('pointer')}
-        >
+        <button type="button" data-testid="refused" onClick={() => props.onInputRefused?.('key')}>
           refused
         </button>
       </div>
@@ -218,11 +214,11 @@ it('REBUILD-4: a login wall asks the person to act right on the screen, and neve
   expect(screen.queryByText(NO_TAKEOVER)).toBeNull();
 });
 
-it('REBUILD-4: an input the server refused because the page changed is said plainly', async () => {
+it('HOTFIX-R4A: an Enter / Space dropped right after a navigation is said plainly', async () => {
   render(<BrowserPanel {...base} />);
   await screen.findByTestId('viewport');
   fireEvent.click(screen.getByTestId('refused'));
-  expect(api.toast).toHaveBeenCalledWith('页面刚变了，再点一次', 'info');
+  expect(api.toast).toHaveBeenCalledWith('页面刚跳转了，请再按一次', 'info');
 });
 
 it('local Chrome shows the stop control and no takeover controls, without a cloud viewport', async () => {
