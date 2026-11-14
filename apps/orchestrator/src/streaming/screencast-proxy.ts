@@ -39,8 +39,9 @@ import {
   revalidateAuthenticatedSession,
 } from '../auth/middleware.js';
 import { startWebSocketSessionRevalidation } from '../auth/websocket-session-revalidation.js';
+import { isBrowserHomeEnabledFor } from '../browser-home/browser-home-access.js';
 import type { BrowserPool } from '../browser-pool/index.js';
-import type { BrowserInstance } from '../browser-pool/types.js';
+import { BROWSER_HOME_SESSION_PREFIX, type BrowserInstance } from '../browser-pool/types.js';
 import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import { BrowserActionConfirmations } from './browser-viewport-v2.js';
@@ -77,12 +78,26 @@ export function pickInstanceForRoute(args: {
   callerUserId: string;
   peek: (taskId: string) => BrowserInstance | null;
   peekActiveForUser: (userId: string) => BrowserInstance | null;
+  /** BROWSER-HOME-1 gate (BROWSER_HOME_ENABLED + allowlist); injectable for tests. */
+  browserHomeAllowed?: (userId: string) => boolean;
 }): RoutePickResult {
   if (args.urlArg.startsWith(TASK_ID_PREFIX)) {
     const inst = args.peek(args.urlArg);
     if (!inst) return { kind: 'no-active', reason: 'task not active' };
     if (inst.userId !== args.callerUserId) {
       return { kind: 'forbidden', reason: 'caller does not own task' };
+    }
+    return { kind: 'instance', instance: inst };
+  }
+  // BROWSER-HOME-1: a user's task-less cloud browser (`bhs_<userId>`). Only its owner may watch
+  // or drive it; the id alone grants nothing.
+  if (args.urlArg.startsWith(BROWSER_HOME_SESSION_PREFIX)) {
+    if (!(args.browserHomeAllowed ?? isBrowserHomeEnabledFor)(args.callerUserId))
+      return { kind: 'forbidden', reason: 'browser home disabled' };
+    const inst = args.peek(args.urlArg);
+    if (!inst) return { kind: 'no-active', reason: 'browser home session not active' };
+    if (inst.userId !== args.callerUserId || inst.taskId !== args.urlArg) {
+      return { kind: 'forbidden', reason: 'caller does not own browser home session' };
     }
     return { kind: 'instance', instance: inst };
   }
@@ -156,7 +171,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     log.info(
       {
         urlArg,
-        argKind: urlArg.startsWith('tsk_') ? 'taskId' : 'userId',
+        argKind: urlArg.startsWith('tsk_')
+          ? 'taskId'
+          : urlArg.startsWith(BROWSER_HOME_SESSION_PREFIX)
+            ? 'browserHome'
+            : 'userId',
         hasToken: Boolean(extractBearerFromSubprotocol(req)) || Boolean(extractTokenFromQuery(url)),
         ip: req.socket.remoteAddress,
       },

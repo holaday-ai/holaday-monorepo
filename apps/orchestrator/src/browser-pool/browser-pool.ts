@@ -85,6 +85,7 @@ import {
   waitForCdpReady,
 } from './spawn.js';
 import {
+  BROWSER_HOME_SESSION_PREFIX,
   type BrowserInstance,
   type BrowserSessionPolicy,
   type BrowserSessionTarget,
@@ -662,6 +663,18 @@ export class BrowserPool {
   }
 
   /**
+   * BROWSER-HOME-1: give one instance its own idle timeout (the cloud-browser home session keeps
+   * 15 minutes) without changing the pool-wide BROWSER_IDLE_TIMEOUT_MS. Lives on the instance, so
+   * a later allocation under the same id starts from the pool default again.
+   */
+  setIdleTimeout(taskId: string, idleTimeoutMs: number): boolean {
+    const inst = this.instances.get(taskId);
+    if (!inst || !Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) return false;
+    inst.idleTimeoutMs = Math.floor(idleTimeoutMs);
+    return true;
+  }
+
+  /**
    * Keep a completed task's browser alive on a renewable idle lease.
    * A retained instance never reserves capacity ahead of new work: allocate()
    * reclaims the oldest retained browser before returning PoolCapacityError.
@@ -1028,6 +1041,8 @@ export class BrowserPool {
       if (this.#strict && !this.processesRunning(inst)) continue;
       if (inst.userId !== userId) continue;
       if (inst.status !== 'ready') continue;
+      // BROWSER-HOME-1: the task-less home browser is reached only by its own id.
+      if (inst.taskId.startsWith(BROWSER_HOME_SESSION_PREFIX)) continue;
       if (!best || inst.lastActiveAt > best.lastActiveAt) {
         best = inst;
       }
@@ -1180,10 +1195,10 @@ export class BrowserPool {
 
   private async runGcSweep(): Promise<void> {
     const now = Date.now();
-    const cutoff = now - this.config.idleTimeoutMs;
     const stale: string[] = [];
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready') continue;
+      const cutoff = now - (inst.idleTimeoutMs ?? this.config.idleTimeoutMs);
       if (this.#strict) {
         const bound = this.#brokerBindings.get(inst);
         if (!bound) continue;
