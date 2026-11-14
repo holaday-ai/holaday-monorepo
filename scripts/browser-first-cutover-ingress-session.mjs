@@ -11,7 +11,6 @@ import {
 import {
   assertFirstCutoverReconciliationRead,
   createFirstCutoverIngressLifecycle,
-  readFirstCutoverApproval,
   readFirstCutoverReconciliationApproval,
 } from './browser-first-cutover-host.mjs';
 import {

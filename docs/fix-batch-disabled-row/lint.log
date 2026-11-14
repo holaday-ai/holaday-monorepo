@@ -1,0 +1,21 @@
+apps/web-workbench/src/components/TaskListItem.tsx:117:5 lint/a11y/useKeyWithClickEvents ━━━━━━━━━━━
+
+  ! Enforce to have the onClick mouse event with the onKeyUp, the onKeyDown, or the onKeyPress keyboard event.
+  
+    115 │       : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
+    116 │   return (
+  > 117 │     <div
+        │     ^^^^
+  > 118 │       data-task-status={task.status}
+         ...
+  > 139 │       )}
+  > 140 │     >
+        │     ^
+    141 │       {selected && !batchMode && (
+    142 │         <span aria-hidden className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#FF0061]" />
+  
+  i Actions triggered using mouse events should have corresponding keyboard events to account for keyboard-only navigation.
+  
+
+Checked 2 files in 17ms. No fixes applied.
+Found 1 warning.

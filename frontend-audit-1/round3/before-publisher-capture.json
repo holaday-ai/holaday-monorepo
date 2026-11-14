@@ -1,0 +1,20 @@
+[
+  {
+    "item": 11,
+    "width": 1440,
+    "ok": true,
+    "localPublisherFixture": true
+  },
+  {
+    "item": 11,
+    "width": 1280,
+    "ok": true,
+    "localPublisherFixture": true
+  },
+  {
+    "item": 11,
+    "width": 1024,
+    "ok": true,
+    "localPublisherFixture": true
+  }
+]

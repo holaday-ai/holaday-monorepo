@@ -1,3 +1,7 @@
+import {
+  browserCapabilities,
+  instanceBrowserCapabilities,
+} from '../config/browser-capabilities.js';
 /**
  * BrowserPool — per-task Xvfb + Brave + x11vnc + websockify quartets.
  *
@@ -54,9 +58,10 @@ import {
 } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { browserProxyUpstreams } from '../agent/browser-tools/domain-egress.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
-import { ExecutionDrain } from '../execution/execution-drain.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
 import {
   type OperationLifetime,
   captureOperationScopeVeto,
@@ -67,6 +72,7 @@ import { BrokerBootSession } from './broker-boot-session.js';
 import { BrokerPoolRuntime, type OriginalBrokerGroup } from './broker-pool-runtime.js';
 import { BrokerVncIngress, type BrokerVncIngressRequest } from './broker-vnc-ingress.js';
 import type { BrokerVncSessionAccess, BrokerVncSessionRequest } from './broker-vnc-session.js';
+import { egressLearning } from './egress-learning.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import { SlotAllocator } from './port-allocator.js';
 import {
@@ -78,7 +84,15 @@ import {
   spawnXvfb,
   waitForCdpReady,
 } from './spawn.js';
-import type { BrowserInstance, BrowserSlot, PoolConfig, PoolStats } from './types.js';
+import {
+  type BrowserInstance,
+  type BrowserSessionPolicy,
+  type BrowserSessionTarget,
+  type BrowserSlot,
+  type PoolConfig,
+  type PoolStats,
+  sessionPolicyOf,
+} from './types.js';
 
 /** Thrown by allocate() when capacity is reached. Callers should
  *  map this to a 503-equivalent user-facing error, not a 500. */
@@ -123,6 +137,13 @@ interface PoolProcessRecord {
   failure?: Error;
 }
 
+/**
+ * FIX-54 #8: the retention reason of a task waiting for the person's reply (parkForReply, at most
+ * 30 minutes). Unlike a terminal-review retention it holds its slot: capacity reclaim and
+ * follow-up adoption skip it, so while it lasts the pool has one slot fewer for new tasks.
+ */
+export const AWAITING_REPLY = 'awaiting-reply';
+
 export class BrowserPool {
   readonly #strict: boolean;
   #brokerRuntime?: BrokerPoolRuntime;
@@ -163,7 +184,16 @@ export class BrowserPool {
     if (mode !== undefined && mode !== STRICT_POOL) throw brokerInvalid();
     this.#strict = mode === STRICT_POOL;
     this.allocator = new SlotAllocator(config);
-    this.egressProxy = new BrowserEgressProxy({ logger });
+    // PROXY-BROWSER-1: with BROWSER_DOMAIN_PROXY_* in browser mode, each user's
+    // Chrome reaches Google through that user's fixed ISP endpoint.
+    // OPEN-ANY-SITE-1: sites seen refusing the datacenter egress join the list
+    // from the next launch (each launch fixes its list when it starts).
+    const upstreams = browserProxyUpstreams();
+    this.egressProxy = new BrowserEgressProxy({
+      logger,
+      upstreams,
+      ...(upstreams ? { learned: () => egressLearning().sites() } : {}),
+    });
     if (!this.#strict) mkdirSync(config.baseDir, { recursive: true });
   }
 
@@ -285,6 +315,7 @@ export class BrowserPool {
     userId: string,
     viewportProfile?: BrowserViewportProfile,
     pendingVeto?: () => void,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const allocation = currentOperationLifetime();
     this.#checkBroker();
@@ -333,6 +364,10 @@ export class BrowserPool {
       const connected = await record.executor.connect(cdp.endpoint, { cdpHeaders: cdp.headers });
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (sessionPolicyOf(session) === 'vault_allowed')
+        await this.config.prepareSession?.(userId, record.executor, session);
+      this.#checkBroker(record);
       const now = Date.now();
       const instance: BrowserInstance = {
         transport: 'broker',
@@ -340,6 +375,8 @@ export class BrowserPool {
         taskId,
         userId,
         executor: record.executor,
+        capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
         status: 'ready',
         createdAt: now,
         lastActiveAt: now,
@@ -374,12 +411,19 @@ export class BrowserPool {
     if (record.instance) record.instance.status = 'draining';
     // Cleanup may not depend on dispatch permission or erase physical slots.
     record.stopping = Promise.resolve().then(async () => {
-      const outcomes = await Promise.allSettled([
+      const background = await Promise.allSettled([
         record.instance && this.backgroundWork.get(record.instance)?.stop(),
+      ]);
+      const session = await Promise.allSettled([
+        record.executor && this.config.finishSession?.(record.executor),
+      ]);
+      const outcomes = await Promise.allSettled([
         Promise.resolve().then(() => record.executor?.disconnect()),
         Promise.resolve().then(() => record.group?.close()),
       ]);
-      if (outcomes.some((outcome) => outcome.status === 'rejected')) {
+      if (
+        [...background, ...session, ...outcomes].some((outcome) => outcome.status === 'rejected')
+      ) {
         const lifetime = this.#brokerLifetime;
         if (lifetime) lifetime.drain.markUnknown(lifetime.owner);
         throw brokerInvalid();
@@ -441,6 +485,7 @@ export class BrowserPool {
     let lastActivity = Date.now();
     return record.group.vncSession({
       ...request,
+      viewportV2: instanceBrowserCapabilities(instance).viewportV2,
       veto: () => {
         originalVeto();
         this.#vetoBroker(record);
@@ -484,6 +529,8 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    /** The task's target site: only a matching site grant applies (default: none). */
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const caller = this.#strict ? currentOperationLifetime() : undefined;
     let originalScopeVeto: (() => void) | undefined;
@@ -528,6 +575,18 @@ export class BrowserPool {
       throw new Error('POOL_PROCESS_CLEANUP_PENDING');
     }
 
+    session = {
+      ...session,
+      capabilities: Object.freeze({ ...(session?.capabilities ?? browserCapabilities(userId)) }),
+    };
+    // REBUILD-4 第 4 条: the assistant's page is always at least 1280×800 — a phone viewer sees a
+    // scaled frame; the page is never sized to the viewer.
+    if (
+      dimensionsForProfile(viewportProfile).width < 1280 ||
+      dimensionsForProfile(viewportProfile).height < 800
+    )
+      viewportProfile = 'desktop';
+
     let resolve!: (instance: BrowserInstance) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<BrowserInstance>((yes, no) => {
@@ -556,12 +615,12 @@ export class BrowserPool {
         caller.drain.assertDispatch(caller.owner);
         this.#checkBroker();
         pendingVeto();
-        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto);
+        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto, session);
       }
       if (!this.#strict && this.allocator.isFull()) {
         await this.releaseOldestRetained('capacity-reclaim');
       }
-      return this.spawnInstance(taskId, userId, viewportProfile);
+      return this.spawnInstance(taskId, userId, viewportProfile, session);
     })().then(resolve, reject);
     try {
       return await promise;
@@ -635,6 +694,31 @@ export class BrowserPool {
   }
 
   /**
+   * FIX-54 #8: end a retention while the task still runs — an awaiting-reply hold whose reply
+   * came (or whose wait ended). The browser goes back on the idle clock from now.
+   */
+  unretain(taskId: string): boolean {
+    const inst = this.instances.get(taskId);
+    if (!inst || inst.retainedUntil == null) return false;
+    const timer = this.retentionTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.retentionTimers.delete(taskId);
+    const now = Date.now();
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    inst.lastActiveAt = now;
+    const bound = this.#brokerBindings.get(inst);
+    if (bound) {
+      bound.retained = false;
+      bound.retainedUntil = undefined;
+      bound.retentionTtlMs = undefined;
+      bound.lastActiveAt = now;
+    }
+    return true;
+  }
+
+  /**
    * Move a retained terminal browser to a follow-up task. The browser process,
    * profile, cookies and current page stay intact; only the pool ownership key
    * changes. This is deliberately limited to retained instances so a follow-up
@@ -644,10 +728,14 @@ export class BrowserPool {
     sourceTaskId: string,
     destinationTaskId: string,
     userId: string,
+    /** The follow-up's own policy: an anonymous task never adopts an identity context (and vice versa). */
+    sessionPolicy: BrowserSessionPolicy,
   ): BrowserInstance | null {
     if (this.shuttingDown) return null;
     const source = this.instances.get(sourceTaskId);
     if (source && !this.processesRunning(source)) return null;
+    // FIX-54 #8: an awaiting-reply hold belongs to a task that is still running.
+    if (source?.retentionReason === AWAITING_REPLY) return null;
     const broker = source && this.#brokerBindings.get(source);
     if (
       this.#strict &&
@@ -673,6 +761,8 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || inst.userId !== userId || inst.retainedUntil == null) {
       return null;
     }
+    // A browser without a recorded policy counts as anonymous (fail closed).
+    if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
 
     const retentionTimer = this.retentionTimers.get(sourceTaskId);
     if (retentionTimer) clearTimeout(retentionTimer);
@@ -836,6 +926,8 @@ export class BrowserPool {
           'pool: teardown error (continuing)',
         );
       });
+    // Keyed by the spawning task, which a follow-up's adoption does not change.
+    await this.closeEgressRoute(this.instanceProcesses.get(inst)?.taskId ?? taskId);
     this.allocator.release({
       index: inst.index,
       display: inst.display,
@@ -862,7 +954,10 @@ export class BrowserPool {
   private scheduleRetentionExpiry(taskId: string): void {
     const existingTimer = this.retentionTimers.get(taskId);
     if (existingTimer) clearTimeout(existingTimer);
-    if (this.maintenancePaused) { this.retentionTimers.delete(taskId); return; }
+    if (this.maintenancePaused) {
+      this.retentionTimers.delete(taskId);
+      return;
+    }
 
     const inst = this.instances.get(taskId);
     const bound = inst && this.#brokerBindings.get(inst);
@@ -952,7 +1047,10 @@ export class BrowserPool {
     return (
       this.allocator.availableCount() > 0 ||
       Array.from(this.instances.values()).some(
-        (inst) => inst.status === 'ready' && inst.retainedUntil != null,
+        (inst) =>
+          inst.status === 'ready' &&
+          inst.retainedUntil != null &&
+          inst.retentionReason !== AWAITING_REPLY,
       )
     );
   }
@@ -968,13 +1066,22 @@ export class BrowserPool {
     this.gcTimer = setInterval(() => {
       let original: Promise<void>;
       try {
-        original = admission ? admission.runRoot(async () => this.runGcSweep()).result : this.runGcSweep();
-      } catch { return; /* Admission rejected before GC dispatched. */ }
+        original = admission
+          ? admission.runRoot(async () => this.runGcSweep()).result
+          : this.runGcSweep();
+      } catch {
+        return; /* Admission rejected before GC dispatched. */
+      }
       this.gcRuns.add(original);
-      void original.then(() => { this.gcRuns.delete(original); }, () => {
-        this.gcFailed = true;
-        this.gcRuns.delete(original);
-      });
+      void original.then(
+        () => {
+          this.gcRuns.delete(original);
+        },
+        () => {
+          this.gcFailed = true;
+          this.gcRuns.delete(original);
+        },
+      );
     }, GC_INTERVAL_MS);
     this.gcTimer.unref?.();
   }
@@ -998,9 +1105,19 @@ export class BrowserPool {
     return this.maintenancePause;
   }
   assertMaintenanceIdle(): void {
-    if (this.#strict || !this.maintenancePaused || this.gcTimer || this.gcRuns.size || this.gcFailed ||
-      this.instances.size || this.allocationPromises.size || this.releasePromises.size ||
-      this.processRecords.size || this.retentionTimers.size || this.allocator.usedCount())
+    if (
+      this.#strict ||
+      !this.maintenancePaused ||
+      this.gcTimer ||
+      this.gcRuns.size ||
+      this.gcFailed ||
+      this.instances.size ||
+      this.allocationPromises.size ||
+      this.releasePromises.size ||
+      this.processRecords.size ||
+      this.retentionTimers.size ||
+      this.allocator.usedCount()
+    )
       throw new Error('MAINTENANCE_POOL_UNPROVEN');
   }
 
@@ -1096,7 +1213,9 @@ export class BrowserPool {
     let oldest: BrowserInstance | null = null;
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready' || inst.retainedUntil == null) continue;
-      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Infinity)) {
+      // FIX-54 #8: capacity never takes the browser a person is coming back to.
+      if (inst.retentionReason === AWAITING_REPLY) continue;
+      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Number.POSITIVE_INFINITY)) {
         oldest = inst;
       }
     }
@@ -1114,6 +1233,7 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const lifetime = currentOperationLifetime();
     if (this.allocator.isFull()) {
@@ -1181,7 +1301,8 @@ export class BrowserPool {
         /* mkdirSync race / perm — will fail below with a clearer error */
       }
 
-      const proxyServer = await this.egressProxy.start();
+      // One listener per launch, keyed by the spawning task (kept across adoption).
+      const proxyServer = await this.egressProxy.startFor(userId, taskId);
       assertActive();
       let xvfb: SpawnedProcess | null = null;
       let x11vnc: SpawnedProcess | null = null;
@@ -1253,6 +1374,10 @@ export class BrowserPool {
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (sessionPolicyOf(session) === 'vault_allowed')
+        await this.config.prepareSession?.(userId, executor, session);
+      assertActive();
       const now = Date.now();
       instance = {
         ...slot,
@@ -1260,6 +1385,8 @@ export class BrowserPool {
         userId,
         userDataDir,
         executor,
+        capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
         xvfbPid: xvfb?.pid ?? 0,
         bravePid: browserProcess.pid,
         x11vncPid: x11vnc?.pid ?? 0,
@@ -1331,15 +1458,24 @@ export class BrowserPool {
             /* legacy best effort */
           }
         }
+      await this.closeEgressRoute(taskId);
       this.allocator.release(slot);
       this.processRecords.delete(record);
       throw err;
     }
   }
 
+  /** The launch's ISP/mobile listener goes with its browser; its traffic is logged. */
+  private async closeEgressRoute(routeKey: string): Promise<void> {
+    const metrics = await this.egressProxy.closeRoute(routeKey).catch(() => null);
+    if (metrics?.tunnels || metrics?.failures)
+      this.logger.info({ routeKey, ...metrics }, 'pool: ISP egress traffic for this browser');
+  }
+
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {
     if (this.#strict || inst.transport === 'broker') throw brokerInvalid();
     const background = await Promise.allSettled([this.backgroundWork.get(inst)?.stop()]);
+    background.push(...(await Promise.allSettled([this.config.finishSession?.(inst.executor)])));
     const record = this.instanceProcesses.get(inst);
     if (record?.strict) {
       const disconnected = await Promise.allSettled([

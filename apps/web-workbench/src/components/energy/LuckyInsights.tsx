@@ -36,9 +36,7 @@ export function LuckyInsights({ reading }: LuckyInsightsProps): JSX.Element {
                 </header>
                 <div>
                   {group.values.map((value) => (
-                    <span key={value}>
-                      {value}
-                    </span>
+                    <span key={value}>{value}</span>
                   ))}
                 </div>
               </article>

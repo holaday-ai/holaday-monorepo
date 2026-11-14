@@ -1,0 +1,170 @@
+{
+  "candidate": "937bad5686abde39ada1fca6744b51b5edf43215",
+  "sourceHash": "8688387293788bf2dcf7eacf7c7a0de7445f2a7770ebabdfcf00cf184ec1ca20",
+  "suiteSourceHash": "b5ee1dea80cefbdccc3a5f2b613ea985588d8353d428e8689851dc30a1a1e3bd",
+  "buildHash": "a694f7008e4ebab1424d2aa8fbdf70ddf685fe554dcedd57d5e5c662c717ce8a",
+  "browserVersion": "147.0.7727.15",
+  "platform": "darwin",
+  "seed": "2026-10-09-v2",
+  "startedAt": "2026-10-12T08:35:45.025Z",
+  "finishedAt": "2026-10-12T09:05:38.846Z",
+  "selectedCases": [
+    "task:browser:executing",
+    "task:browser:completed",
+    "task:browser:failed",
+    "task:browser:awaiting_user",
+    "task:browser:cancelled"
+  ],
+  "selectedWidths": [
+    1280,
+    1024
+  ],
+  "coverageGaps": [
+    "Filtered run: not full release acceptance",
+    "Case-filtered run: not full release acceptance"
+  ],
+  "acceptance": "layer-1-targeted-pass",
+  "rawAuditStatus": "failed",
+  "rawExitCode": 1,
+  "pages": 10,
+  "expectedPages": 10,
+  "findingsBySeverity": {
+    "P2": 2
+  },
+  "controlStatuses": {
+    "passed": 796,
+    "disabled": 88,
+    "idempotent": 40,
+    "shared-reference": 362
+  },
+  "pageResults": [
+    {
+      "route": "task:browser:executing",
+      "width": 1280,
+      "controls": 256,
+      "findings": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||UI generate awaiting_us…||0",
+          "box": {
+            "x": 81,
+            "y": 843,
+            "width": 153,
+            "height": 32
+          },
+          "observedUrl": "http://127.0.0.1:62454/?task=tsk_ui_browser_executing",
+          "screenshot": "artifacts/1280-task_browser_executing-control-161.png"
+        }
+      ],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:completed",
+      "width": 1280,
+      "controls": 124,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:failed",
+      "width": 1280,
+      "controls": 93,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:awaiting_user",
+      "width": 1280,
+      "controls": 83,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:cancelled",
+      "width": 1280,
+      "controls": 92,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:executing",
+      "width": 1024,
+      "controls": 254,
+      "findings": [
+        {
+          "rule": "unexplained-truncation",
+          "severity": "P2",
+          "control": "BUTTON||UI generate awaiting_us…||0",
+          "box": {
+            "x": 81,
+            "y": 843,
+            "width": 153,
+            "height": 32
+          },
+          "observedUrl": "http://127.0.0.1:62454/?task=tsk_ui_browser_executing",
+          "screenshot": "artifacts/1024-task_browser_executing-control-159.png"
+        }
+      ],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:completed",
+      "width": 1024,
+      "controls": 122,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:failed",
+      "width": 1024,
+      "controls": 91,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:awaiting_user",
+      "width": 1024,
+      "controls": 81,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    },
+    {
+      "route": "task:browser:cancelled",
+      "width": 1024,
+      "controls": 90,
+      "findings": [],
+      "visual": {
+        "different": false,
+        "ratio": 0
+      }
+    }
+  ]
+}

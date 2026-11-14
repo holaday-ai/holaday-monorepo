@@ -1,0 +1,827 @@
+[
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-batch.png",
+    "pagerAtSelection": {
+      "y": 752,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": false,
+      "hit": true
+    },
+    "lastRow": {
+      "y": 620,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 666,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 943,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "afterLoadCount": 16,
+    "listRequests": 2,
+    "afterLoad": {
+      "controls": 75,
+      "issues": []
+    },
+    "focusedLastRow": {
+      "y": 628,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "countBefore": 8,
+    "countAfter": 16
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "disabled",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|进行中的任务不能批量操作||0",
+        "status": "disabled"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-disabled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "cancelled",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate cancelled||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 41,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-cancelled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "menu",
+    "actions": [
+      {
+        "id": "BUTTON||任务菜单||5",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-menu.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "completed",
+    "actions": [
+      {
+        "id": "BUTTON||UI browser completed||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 46,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-completed.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1440,
+    "height": 960,
+    "scenario": "awaiting",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate awaiting_us…||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1440x960-awaiting.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-batch.png",
+    "pagerAtSelection": {
+      "y": 603,
+      "height": 32,
+      "top": 466,
+      "bottom": 590,
+      "fullyVisible": false,
+      "hit": false
+    },
+    "lastRow": {
+      "y": 479,
+      "height": 38,
+      "top": 466,
+      "bottom": 590,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 474,
+      "height": 32,
+      "top": 466,
+      "bottom": 590,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 751,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "afterLoadCount": 16,
+    "listRequests": 2,
+    "afterLoad": {
+      "controls": 75,
+      "issues": []
+    },
+    "focusedLastRow": {
+      "y": 479,
+      "height": 38,
+      "top": 466,
+      "bottom": 590,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "countBefore": 8,
+    "countAfter": 16
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "disabled",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|进行中的任务不能批量操作||0",
+        "status": "disabled"
+      }
+    ],
+    "exact": {
+      "controls": 51,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-disabled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "cancelled",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate cancelled||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 41,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-cancelled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "menu",
+    "actions": [
+      {
+        "id": "BUTTON||任务菜单||5",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-menu.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "completed",
+    "actions": [
+      {
+        "id": "BUTTON||UI browser completed||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 46,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-completed.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "scenario": "awaiting",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate awaiting_us…||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1366x768-awaiting.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-batch.png",
+    "pagerAtSelection": {
+      "y": 772,
+      "height": 32,
+      "top": 573,
+      "bottom": 822,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "lastRow": {
+      "y": 660,
+      "height": 38,
+      "top": 573,
+      "bottom": 822,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 706,
+      "height": 32,
+      "top": 573,
+      "bottom": 822,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 983,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "afterLoadCount": 16,
+    "listRequests": 2,
+    "afterLoad": {
+      "controls": 74,
+      "issues": []
+    },
+    "focusedLastRow": {
+      "y": 660,
+      "height": 38,
+      "top": 573,
+      "bottom": 822,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "countBefore": 8,
+    "countAfter": 16
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "disabled",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|进行中的任务不能批量操作||0",
+        "status": "disabled"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-disabled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "cancelled",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate cancelled||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-cancelled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "menu",
+    "actions": [
+      {
+        "id": "BUTTON||任务菜单||5",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-menu.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "completed",
+    "actions": [
+      {
+        "id": "BUTTON||UI browser completed||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 45,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-completed.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "scenario": "awaiting",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate awaiting_us…||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1200x1000-awaiting.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-batch.png",
+    "pagerAtSelection": {
+      "y": 752,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": false,
+      "hit": true
+    },
+    "lastRow": {
+      "y": 620,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 666,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 943,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "afterLoadCount": 16,
+    "listRequests": 2,
+    "afterLoad": {
+      "controls": 74,
+      "issues": []
+    },
+    "focusedLastRow": {
+      "y": 628,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "countBefore": 8,
+    "countAfter": 16
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "disabled",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|进行中的任务不能批量操作||0",
+        "status": "disabled"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-disabled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "cancelled",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate cancelled||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-cancelled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "menu",
+    "actions": [
+      {
+        "id": "BUTTON||任务菜单||5",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-menu.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "completed",
+    "actions": [
+      {
+        "id": "BUTTON||UI browser completed||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 45,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-completed.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "scenario": "awaiting",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate awaiting_us…||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1280x960-awaiting.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "batch",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|UI generate cancelled 已取消||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-batch.png",
+    "pagerAtSelection": {
+      "y": 752,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": false,
+      "hit": true
+    },
+    "lastRow": {
+      "y": 620,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "pagerAtBottom": {
+      "y": 666,
+      "height": 32,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "footer": {
+      "bottom": 943,
+      "inViewport": true
+    },
+    "beforeLoadCount": 8,
+    "afterLoadCount": 16,
+    "listRequests": 2,
+    "afterLoad": {
+      "controls": 74,
+      "issues": []
+    },
+    "focusedLastRow": {
+      "y": 628,
+      "height": 38,
+      "top": 573,
+      "bottom": 782,
+      "fullyVisible": true,
+      "hit": true
+    },
+    "countBefore": 8,
+    "countAfter": 16
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "disabled",
+    "actions": [
+      {
+        "id": "BUTTON||批量管理任务||0",
+        "status": "passed"
+      },
+      {
+        "id": "DIV|button|进行中的任务不能批量操作||0",
+        "status": "disabled"
+      }
+    ],
+    "exact": {
+      "controls": 50,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-disabled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "cancelled",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate cancelled||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 40,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-cancelled.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "menu",
+    "actions": [
+      {
+        "id": "BUTTON||任务菜单||5",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-menu.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "completed",
+    "actions": [
+      {
+        "id": "BUTTON||UI browser completed||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 45,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-completed.png",
+    "countBefore": 8,
+    "countAfter": 8
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "scenario": "awaiting",
+    "actions": [
+      {
+        "id": "BUTTON||UI generate awaiting_us…||0",
+        "status": "passed"
+      }
+    ],
+    "exact": {
+      "controls": 39,
+      "issues": []
+    },
+    "errors": [],
+    "screenshot": "after-1024x960-awaiting.png",
+    "countBefore": 8,
+    "countAfter": 8
+  }
+]

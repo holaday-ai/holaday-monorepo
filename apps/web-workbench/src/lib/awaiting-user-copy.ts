@@ -23,16 +23,16 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
     streamBody: '请打开浏览器完成登录或扫码，完成后任务会继续，不用重新提交。',
     streamHint: '打开浏览器完成登录',
     panelTitle: '需要登录',
-    panelBody: '交互模式已开启。完成登录或扫码后，HOLA DAY 会继续执行，不用重新提交任务。',
+    panelBody: '这一步需要你来：直接在画面上操作，过了我会自动继续。',
     toolbarLabel: '需要登录',
     composerPlaceholder: '登录完成后可在这里补充说明...',
   },
   captcha: {
     title: '需要验证',
-    streamBody: '请打开浏览器完成验证码或滑块，完成后任务会继续，不用重新提交。',
+    streamBody: '网站要求人机验证，请在下方浏览器中完成验证。',
     streamHint: '打开浏览器通过验证',
     panelTitle: '需要验证',
-    panelBody: '交互模式已开启。完成验证码或滑块后，HOLA DAY 会继续执行，不用重新提交任务。',
+    panelBody: '这一步需要你来：直接在画面上操作，过了我会自动继续。',
     toolbarLabel: '需要验证',
     composerPlaceholder: '验证完成后可在这里补充说明...',
   },
@@ -56,10 +56,12 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
   browser_action: {
     title: '等待你确认',
-    streamBody: '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
+    streamBody:
+      '请打开浏览器检查当前页面。确认无误后在下方回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，HOLA DAY 不会替你点最终确认。',
     streamHint: '打开浏览器确认下一步',
     panelTitle: '等待你确认',
-    panelBody: '交互模式已开启。请检查当前页面并回复继续；涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
+    panelBody:
+      '请检查当前页面并在对话里回复继续；要自己操作，直接点画面就行。涉及提交、支付、发送、分享、改权限、删除或退订时，最终确认由你手动完成。',
     toolbarLabel: '需要确认',
     composerPlaceholder: '确认无误后回复继续，或说明要调整的地方...',
   },
@@ -76,25 +78,73 @@ const COPY_BY_KIND: Record<AwaitingKind, AwaitingUserCopy> = {
   },
 };
 
+export type BrowserConnectionWait = NonNullable<UiAwaitingUser['browserConnection']>;
+
+/** One message for every surface while a task waits for the Chrome extension. */
+const BROWSER_CONNECTION_COPY: AwaitingUserCopy = {
+  title: '需要连接 HOLA DAY Chrome 插件',
+  streamBody:
+    '需要连接 HOLA DAY Chrome 插件：请安装或连接插件，并在 Chrome 中选择目标页面后重新提交原任务。',
+  streamHint: '连接插件后重新提交',
+  panelTitle: '需要连接 HOLA DAY Chrome 插件',
+  panelBody:
+    '这个任务需要在你自己的 Chrome 中执行。请安装或连接 HOLA DAY Chrome 插件，选择目标页面后重新提交原任务。',
+  toolbarLabel: '需要连接插件',
+  composerPlaceholder: '连接插件并选择页面后，可重新提交原任务...',
+};
+
 export function normalizeAwaitingKind(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
 ): AwaitingKind {
   return kind ?? 'clarification';
 }
 
+/** FIX-59 P1-8: an English task's reply box speaks English. */
+const ENGLISH_COMPOSER_PLACEHOLDER: Record<AwaitingKind, string> = {
+  login: 'Once you have signed in, add any note here...',
+  captcha: 'Once the check is done, add any note here...',
+  clarification: "Answer HOLA DAY's question...",
+  permission: 'Say you have access, or give another source...',
+  browser_action: 'Reply "continue" if it looks right, or say what to change...',
+  video_quote: 'Reply "confirm" to start, or "image version" / "cancel"...',
+};
+
+export function awaitingComposerPlaceholder(
+  kind: UiAwaitingUser['awaitingKind'] | undefined,
+  english: boolean,
+): string {
+  return english
+    ? ENGLISH_COMPOSER_PLACEHOLDER[normalizeAwaitingKind(kind)]
+    : awaitingUserCopy(kind).composerPlaceholder;
+}
+
 export function awaitingUserCopy(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
+  browserConnection?: BrowserConnectionWait | null,
 ): AwaitingUserCopy {
-  return COPY_BY_KIND[normalizeAwaitingKind(kind)];
+  const normalized = normalizeAwaitingKind(kind);
+  if (normalized === 'permission' && browserConnection) return BROWSER_CONNECTION_COPY;
+  return COPY_BY_KIND[normalized];
 }
 
 export function awaitingUserStreamMessage(
   kind: UiAwaitingUser['awaitingKind'] | undefined,
   question: string | null | undefined,
+  browserConnection?: BrowserConnectionWait | null,
 ): AwaitingUserStreamMessage {
   const normalized = normalizeAwaitingKind(kind);
-  const copy = awaitingUserCopy(normalized);
+  const copy = awaitingUserCopy(normalized, browserConnection);
   const trimmedQuestion = question?.trim();
+  if (normalized === 'permission' && browserConnection) {
+    return {
+      body: trimmedQuestion || copy.streamBody,
+      followUp: !browserConnection.publicCloudAllowed
+        ? '这个任务需要你的登录状态，不会改用无登录态的云端浏览器。'
+        : browserConnection.identityRequired
+          ? `这个任务${browserConnection.identityReason ?? '需要读取你本人的数据'}。可以连接插件后重新提交；也可以点“用公开云端继续（看不到你的个人信息）”，需要个人数据的部分将无法完成。`
+          : '只需要公开信息时，可以点“用公开云端继续（看不到你的个人信息）”。',
+    };
+  }
   if (normalized === 'clarification' && trimmedQuestion) {
     return {
       body: trimmedQuestion,
@@ -104,7 +154,8 @@ export function awaitingUserStreamMessage(
   if (normalized === 'browser_action' && trimmedQuestion) {
     return {
       body: trimmedQuestion,
-      followUp: '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
+      followUp:
+        '确认无误后在下方回复继续；最终提交、支付、发送、分享、改权限、删除或退订由你手动完成。',
     };
   }
   if (normalized === 'video_quote' && trimmedQuestion) {

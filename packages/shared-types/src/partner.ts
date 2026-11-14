@@ -22,7 +22,24 @@ export const PARTNER_RECHARGE_TIERS = [
 ] as const;
 
 export type PartnerMembershipStatus = 'active' | 'expired' | 'cancelled';
-export type PartnerKycStatus = 'not_started' | 'pending' | 'passed' | 'review_required' | 'rejected';
-export type PartnerLotStatus = 'accumulating' | 'release_pending' | 'releasing' | 'completed' | 'frozen' | 'closed';
+export type PartnerKycStatus =
+  | 'not_started'
+  | 'pending'
+  | 'passed'
+  | 'review_required'
+  | 'rejected';
+export type PartnerLotStatus =
+  | 'accumulating'
+  | 'release_pending'
+  | 'releasing'
+  | 'completed'
+  | 'frozen'
+  | 'closed';
 export type PartnerLedgerEntryStatus = 'pending' | 'posted' | 'voided';
-export type PartnerWithdrawalStatus = 'requested' | 'reviewing' | 'approved' | 'paid' | 'rejected' | 'returned';
+export type PartnerWithdrawalStatus =
+  | 'requested'
+  | 'reviewing'
+  | 'approved'
+  | 'paid'
+  | 'rejected'
+  | 'returned';

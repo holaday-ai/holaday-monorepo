@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  batchTaskDraftHasReusableDetail,
-  batchTaskDraftHasContent,
   batchTaskDialogHasDraftContent,
   batchTaskDraftFromPrompt,
+  batchTaskDraftHasContent,
+  batchTaskDraftHasReusableDetail,
   batchTaskDraftIsEmpty,
   batchTaskDraftMissingGoal,
   batchTaskDraftProgress,
@@ -94,9 +94,7 @@ describe('batch task draft helpers', () => {
   });
 
   it('detects cards with reusable steps or output details', () => {
-    expect(
-      batchTaskDraftHasReusableDetail({ goal: '查价格', steps: '', output: '' }),
-    ).toBe(false);
+    expect(batchTaskDraftHasReusableDetail({ goal: '查价格', steps: '', output: '' })).toBe(false);
     expect(
       batchTaskDraftHasReusableDetail({
         goal: '查价格',

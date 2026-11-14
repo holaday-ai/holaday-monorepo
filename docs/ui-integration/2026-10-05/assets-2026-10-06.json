@@ -1,0 +1,51 @@
+[
+  {
+    "file": "avatars/casual-coffee.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1566222,
+    "bytes": 3088
+  },
+  {
+    "file": "avatars/casual-matcha.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1570698,
+    "bytes": 4376
+  },
+  {
+    "file": "avatars/cute-cloud.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1409418,
+    "bytes": 3508
+  },
+  {
+    "file": "avatars/cute-peach.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1494400,
+    "bytes": 4800
+  },
+  {
+    "file": "avatars/mature-indigo.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1392226,
+    "bytes": 2620
+  },
+  {
+    "file": "avatars/mature-ivory.webp",
+    "width": 120,
+    "height": 120,
+    "before": 1463195,
+    "bytes": 3244
+  },
+  {
+    "file": "coast-dusk.webp",
+    "width": 1536,
+    "height": 1024,
+    "before": 2444870,
+    "bytes": 180306
+  }
+]

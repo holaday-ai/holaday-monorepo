@@ -1,4 +1,3 @@
-import { readFirstCutoverCloudNativePreflight } from '../browser-first-cutover-native-preflight.mjs';
 // Diagnostic for the approved cloud-browser recovery boundary, NOT a release gate.
 // Historical silent/app/global-policy modes retain their failed hypotheses.
 // Run only in a disposable network-none Linux container, never with a real profile.
@@ -34,6 +33,7 @@ import {
   cutoverRegistrationConfigDigest,
 } from '../browser-cutover-evidence.mjs';
 import { validateFirstCutoverOwnedDisplayObservation } from '../browser-first-cutover-inventory.mjs';
+import { readFirstCutoverCloudNativePreflight } from '../browser-first-cutover-native-preflight.mjs';
 import {
   firstCutoverCloudBrowserRecoveryLaunch,
   firstCutoverCloudVncRecoveryMaterial,

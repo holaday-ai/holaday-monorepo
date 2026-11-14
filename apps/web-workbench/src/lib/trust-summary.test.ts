@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildRecoveryActions,
-  buildTrustSummary,
-  shouldShowTrustSummary,
-} from './trust-summary';
+import { buildRecoveryActions, buildTrustSummary, shouldShowTrustSummary } from './trust-summary';
 
 describe('trust summary', () => {
   it('uses a compact warning for completed research results without clickable sources', () => {
@@ -120,9 +116,7 @@ describe('trust summary', () => {
     expect(summary.title).toBe('任务状态');
     expect(summary.boundary).toContain('不会把空指标包装成证据');
     expect(summary.rows).toEqual([]);
-    expect(summary.ledger.find((item) => item.label === '页面状态')?.value).toBe(
-      '未形成终态证据',
-    );
+    expect(summary.ledger.find((item) => item.label === '页面状态')?.value).toBe('未形成终态证据');
   });
 
   it('only puts collected evidence in the top evidence rows', () => {
@@ -139,9 +133,7 @@ describe('trust summary', () => {
     expect(summary.rows.map((row) => row.label)).toEqual(['页面截图']);
     expect(summary.rows.map((row) => row.value)).not.toContain('0 个链接');
     expect(summary.rows.map((row) => row.value)).not.toContain('未记录');
-    expect(summary.ledger.find((item) => item.label === '来源链接')?.value).toBe(
-      '0 个',
-    );
+    expect(summary.ledger.find((item) => item.label === '来源链接')?.value).toBe('0 个');
   });
 
   it('does not count a server-confirmed unavailable file as downloadable evidence', () => {
@@ -163,9 +155,7 @@ describe('trust summary', () => {
     });
 
     expect(summary.rows.find((row) => row.label === '产物文件')).toBeUndefined();
-    expect(
-      summary.ledger.find((item) => item.label === '产物文件'),
-    ).toBeUndefined();
+    expect(summary.ledger.find((item) => item.label === '产物文件')).toBeUndefined();
   });
 
   it('does not frame awaiting-user states as result review', () => {
@@ -182,9 +172,7 @@ describe('trust summary', () => {
     expect(summary.verdict).toContain('任务正在等待你的操作');
     expect(summary.boundary).toContain('还没有进入结果复核');
     expect(summary.rows).toEqual([]);
-    expect(summary.ledger.find((item) => item.label === '当前状态')?.value).toBe(
-      '等待用户',
-    );
+    expect(summary.ledger.find((item) => item.label === '当前状态')?.value).toBe('等待用户');
   });
 });
 
@@ -310,5 +298,18 @@ describe('recovery actions', () => {
 
     expect(actions.some((a) => a.kind === 'retry')).toBe(false);
     expect(actions.find((a) => a.label === '拆成小步骤')?.prompt).toContain('请先只完成第一步');
+  });
+
+  it('offers a per-item source retry when list items lack their own links', () => {
+    const actions = buildRecoveryActions({
+      status: 'failed',
+      intent: '打开36kr首页，总结今天前三条新闻',
+      failedChecks: [
+        { type: 'list_item_sources', detail: '第 1 条缺少独立来源链接（不能用首页或搜索页）' },
+      ],
+    });
+    expect(actions.find((action) => action.label === '逐条补齐来源')?.prompt).toContain(
+      '每条附该条自己的详情页链接',
+    );
   });
 });

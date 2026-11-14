@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
@@ -20,6 +20,11 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 const original = { ...env };
+// The scripted Qwen fixture speaks the legacy coordinate protocol; the default
+// executor is unified since batch 08, so pin the rollback mode here.
+beforeEach(() => {
+  Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   reloadFeatureFlagsForTest();
@@ -28,28 +33,60 @@ afterEach(() => {
 });
 
 it.each([
+  'v2-offline',
+  'v2-grant',
+  // FIX-PR250: ordinary login / private-data wording, with and without an
+  // explicit public-cloud choice, is held before model preflight and quota.
+  'v2-private-repo',
+  'v2-inbox-public-cloud',
+  // FIX-PR252: routing flag OFF — the retired cookie sync must not send a
+  // login-required task to a logged-out cloud browser.
+  'v2-flag-off-identity',
   'ready',
   'timeout',
   'disabled',
   'region',
+  // FIX-60 BOSS 决定: choice off, no region yet — the first task's entry decides and is written.
+  'entry-cn',
+  'entry-intl',
   'credentials',
   'executor',
   'local',
   'local-file',
   'ordinary',
 ] as const)('formal Qwen browser task admission and execution: %s', async (scenario) => {
+  const isV2 = scenario.startsWith('v2-');
+  if (isV2) {
+    if (scenario !== 'v2-flag-off-identity') vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+    vi.spyOn(extensionWs, 'hasConnectedExtension').mockReturnValue(
+      scenario === 'v2-grant' || scenario === 'v2-inbox-public-cloud',
+    );
+  }
+  const awaiting = vi
+    .spyOn(TaskRepository.prototype, 'persistAwaitingUser')
+    .mockResolvedValue({ persisted: true });
   const isLocal = scenario === 'local' || scenario === 'local-file';
   Object.assign(env, {
     ANTHROPIC_API_KEY: '',
     AGENT_MODE: 'legacy',
-    QWEN_CORE_ROLLOUT_MODE: 'synthetic',
     QWEN_CORE_ALLOWLIST: 'usr_browser_qwen',
-    QWEN_CORE_ENABLED_LANES: scenario === 'disabled' ? '' : 'browser',
+    // Qwen is on by default; the env can only switch it off (kill switch).
+    QWEN_CORE_ROLLOUT_MODE: scenario === 'disabled' ? 'off' : 'synthetic',
+    QWEN_CORE_ENABLED_LANES: 'browser',
     QWEN_MESSAGES_ADAPTER_ENABLED: true,
-    DASHSCOPE_CN_API_KEY: scenario === 'credentials' ? '' : 'synthetic-cn',
-    DASHSCOPE_API_KEY: '',
+    // entry-cn has only the intl key and entry-intl only the cn key: each fails at the
+    // credential check of exactly the region its entry wrote, never the default one.
+    DASHSCOPE_CN_API_KEY:
+      scenario === 'credentials' || scenario === 'entry-cn' ? '' : 'synthetic-cn',
+    DASHSCOPE_API_KEY: scenario === 'entry-cn' ? 'synthetic-intl' : '',
+    // FIX-60: the 'region' case checks the region selection step itself (on, as before); off,
+    // an unassigned account runs in the default region (fix60.test.ts).
+    MODEL_DATA_REGION_SELECTION_ENABLED: scenario === 'region',
   });
-  vi.spyOn(classifier, 'classifyExecutionMode').mockResolvedValue(isLocal ? 'generate' : 'browser');
+  vi.spyOn(classifier, 'explainExecutionMode').mockResolvedValue({
+    mode: isLocal ? 'generate' : 'browser',
+    source: 'test',
+  });
   const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
   vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
   vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
@@ -101,7 +138,7 @@ it.each([
       if (call.extensionClientId !== '48a8a099-0987-40e3-aa14-fb4545f9a003')
         throw new Error('wrong connection');
       const command = call.args?.session;
-      if (command?.op === 'act') effects.push('local-click');
+      if (command?.op === 'act') effects.push('local-act');
       const observation = {
         tabId: 42,
         origin: 'https://work.example',
@@ -178,8 +215,11 @@ it.each([
                                 '[{"name":"Alpha","score":2},{"name":"Beta, Inc","score":3}]',
                             }
                           : {
+                              // Clicks in the user's Chrome go to a human handoff
+                              // until targets are host-verified; typing still runs.
                               action: {
-                                kind: 'click',
+                                kind: 'type',
+                                payload: { text: '已修改' },
                                 selector: {
                                   description: 'Save',
                                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -249,6 +289,7 @@ it.each([
     } as unknown as ReturnType<typeof storageProvider.getSharedStorageProvider>);
   }
   const broadcast = vi.spyOn(extensionWs, 'broadcastToUser');
+  const regionWrites: unknown[] = [];
   const db = {
     select(projection: Record<string, unknown> = {}) {
       const rows =
@@ -259,16 +300,36 @@ it.each([
                 plan: 'pro',
                 selectedRoles: [],
                 selectedSkills: [],
-                modelDataRegion: scenario === 'region' ? null : 'cn',
+                modelDataRegion:
+                  scenario === 'region' || scenario.startsWith('entry-') ? null : 'cn',
               },
             ]
-          : 'count' in projection
-            ? [{ count: 0 }]
-            : scenario === 'local-file' && 'id' in projection && 'userId' in projection
-              ? [{ id: 41, userId: 41 }]
-              : Object.keys(projection).length === 1 && 'id' in projection
-                ? [{ id: 41 }]
-                : [];
+          : isV2 && 'status' in projection
+            ? [
+                {
+                  id: 77,
+                  status: 'awaiting_user',
+                  intent: '查看我的京东订单',
+                  result: {
+                    metadata: {
+                      browserSource: 'local-chrome',
+                      ...(scenario === 'v2-flag-off-identity'
+                        ? { browserRoutingAwaiting: 'extension_offline' }
+                        : {}),
+                    },
+                  },
+                  awaitingQuestion: '请连接插件并重新选择页面',
+                },
+              ]
+            : isV2 && 'modelDataRegion' in projection
+              ? [{ id: 41, modelDataRegion: 'cn' }]
+              : 'count' in projection
+                ? [{ count: 0 }]
+                : scenario === 'local-file' && 'id' in projection && 'userId' in projection
+                  ? [{ id: 41, userId: 41 }]
+                  : Object.keys(projection).length === 1 && 'id' in projection
+                    ? [{ id: 41 }]
+                    : [];
       const query = {
         where: () => query,
         orderBy: () => query,
@@ -293,9 +354,16 @@ it.each([
         return [];
       },
     }),
+    async transaction<T>(operation: (tx: unknown) => Promise<T>): Promise<T> {
+      return await operation(db);
+    },
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: async () => {
+          if ('modelDataRegion' in values) {
+            regionWrites.push(values.modelDataRegion);
+            return [{ affectedRows: 1 }];
+          }
           if ((scenario === 'local' || scenario === 'ordinary') && 'evidenceJson' in values) {
             markPersistenceStarted();
             await persistenceGate;
@@ -309,10 +377,27 @@ it.each([
     db,
     logger,
     userId: 'usr_browser_qwen',
-    req: {},
+    req:
+      scenario === 'entry-cn'
+        ? {
+            socket: { remoteAddress: '127.0.0.1' },
+            headers: { 'x-real-ip': '47.99.169.186', host: 'hd-app.orangebench.tech' },
+          }
+        : scenario === 'entry-intl'
+          ? {
+              socket: { remoteAddress: '127.0.0.1' },
+              // A client-set X-Forwarded-For / CF-IPCountry naming the mainland changes nothing.
+              headers: {
+                'x-real-ip': '172.70.214.33',
+                host: 'holaday.ai',
+                'x-forwarded-for': '47.99.169.186',
+                'cf-ipcountry': 'CN',
+              },
+            }
+          : {},
     res: {},
     planner: {},
-    playwrightExecutor: scenario === 'executor' || isLocal ? null : executor,
+    playwrightExecutor: scenario === 'executor' || isLocal || isV2 ? null : executor,
     executionRouter: null,
     browserPool: null,
     taskQueue: null,
@@ -332,10 +417,18 @@ it.each([
       : {}),
   } as unknown as Context;
   const pending = tasksRouter.createCaller(ctx).create({
-    intent:
-      scenario === 'local-file' ? '从当前 Chrome 页面生成可下载 CSV' : '查看网页内容并点击详情',
+    intent: isV2
+      ? scenario === 'v2-private-repo'
+        ? '登录 GitHub 后读取私有仓库列表'
+        : scenario === 'v2-inbox-public-cloud'
+          ? '查看 Gmail 收件箱'
+          : '查看我的京东订单'
+      : scenario === 'local-file'
+        ? '从当前 Chrome 页面生成可下载 CSV'
+        : '查看网页内容并点击详情',
     mode: 'auto',
     expertMode: 'normal',
+    ...(scenario === 'v2-inbox-public-cloud' ? { browserPreference: 'cloud-public' as const } : {}),
     ...(isLocal
       ? {
           localChrome: {
@@ -347,14 +440,74 @@ it.each([
         }
       : {}),
   });
-  if (scenario === 'executor') {
+  if (scenario === 'executor' || scenario === 'v2-inbox-public-cloud') {
+    // v2-inbox-public-cloud (FIX-ROUTING-IDENTITY-2): the explicit public-cloud choice
+    // now runs the identity task logged out instead of waiting; with no cloud
+    // executor in this fixture it reaches the executor precondition, never a wait.
     await expect(pending).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(awaiting).not.toHaveBeenCalled();
     expect(consume).not.toHaveBeenCalled();
     expect(requests).toEqual([]);
     return;
   }
   const result = await pending;
+  if (isV2) {
+    expect(result.status).toBe('awaiting_user');
+    expect(consume).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    // Every identity wait carries the connection marker with the readable reason;
+    // the public cloud stays available by explicit choice (FIX-ROUTING-IDENTITY-2).
+    if (scenario !== 'v2-grant') {
+      const connection = {
+        reason: 'extension_offline',
+        publicCloudAllowed: true,
+        identityRequired: true,
+        identityReason: expect.stringMatching(/「.+」/),
+      };
+      expect((result as { browserConnection?: unknown }).browserConnection).toEqual(connection);
+      expect(broadcast).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'server.supercar.awaiting_user',
+          browserConnection: connection,
+        }),
+      );
+      expect(awaiting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            metadata: expect.objectContaining({
+              browserConnection: connection,
+              identityDecision: { required: true, reason: expect.stringMatching(/「.+」/) },
+            }),
+          }),
+        }),
+      );
+      expect((result as { question: string }).question).toContain('需要连接 HOLA DAY Chrome 插件');
+    }
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(terminal).not.toHaveBeenCalled();
+    expect(awaiting).toHaveBeenCalledWith(expect.objectContaining({ awaitingKind: 'permission' }));
+    const replied = await tasksRouter
+      .createCaller(ctx)
+      .reply({ taskId: result.taskId, message: '继续' });
+    expect(replied).toEqual({ ok: true, state: 'stillAwaiting' });
+    expect(consume).not.toHaveBeenCalled();
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    return;
+  }
+  if (scenario === 'entry-cn' || scenario === 'entry-intl') {
+    expect(regionWrites).toEqual([scenario === 'entry-cn' ? 'cn' : 'intl']);
+    expect(result.status).toBe('failed');
+    expect(consume).not.toHaveBeenCalled();
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(terminal.mock.calls.at(-1)?.[1]).toMatchObject({
+      errorCode: 'REGION_SERVICE_NOT_CONFIGURED',
+    });
+    return;
+  }
   if (scenario === 'disabled' || scenario === 'region' || scenario === 'credentials') {
+    expect(regionWrites).toEqual([]);
     expect(result.status).toBe('failed');
     expect(consume).not.toHaveBeenCalled();
     expect(createAdapter).not.toHaveBeenCalled();
@@ -437,7 +590,11 @@ it.each([
     expect(consume).toHaveBeenCalledTimes(charged);
     expect(TaskRepository.prototype.insertTask).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ sourceContext: { browserSource: 'local-chrome' } }),
+      expect.objectContaining({
+        executionMode: 'browser',
+        // FIX-INTENT-ROUTE-BROWSER: a public task (no identity needed) is anonymous.
+        sourceContext: { browserSource: 'local-chrome', browserSessionPolicy: 'anonymous' },
+      }),
     );
     releaseModel();
   }
@@ -450,7 +607,7 @@ it.each([
         terminal: terminal.mock.calls,
       }),
       // Qwen emits 0..1000 coordinates: floor(120*1280/1000), floor(80*720/1000).
-    ).toEqual(scenario === 'local' ? ['local-click'] : ['153,57']),
+    ).toEqual(scenario === 'local' ? ['local-act'] : ['153,57']),
   );
   await vi.waitFor(() => expect(terminal).toHaveBeenCalled());
   if (scenario === 'ordinary') {

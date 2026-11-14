@@ -1,0 +1,104 @@
+[
+  {
+    "route": "task:generate:executing",
+    "width": 1440,
+    "screenshot": "artifacts/1440-task_generate_executing-control-85.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video-control-80.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_video-control-106.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_image-control-41.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "screenshot": "artifacts/1440-_image-control-70.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "task:generate:executing",
+    "width": 1280,
+    "screenshot": "artifacts/1280-task_generate_executing-control-84.png",
+    "review": "Opened final-run screenshot; media titles legible; task-name parent title and dedicated media hover DOM evidence documented separately."
+  },
+  {
+    "route": "/video",
+    "width": 1280,
+    "screenshot": "artifacts/1280-_video.png",
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1280-_video-control-80.png",
+    "route": "/video",
+    "width": 1280,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1280-_video-control-106.png",
+    "route": "/video",
+    "width": 1280,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1280-_image-control-41.png",
+    "route": "/image",
+    "width": 1280,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1280-_image-control-70.png",
+    "route": "/image",
+    "width": 1280,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1024-task_generate_executing-control-84.png",
+    "route": "task:generate:executing",
+    "width": 1024,
+    "review": "Opened final-run screenshot; sidebar task-name ellipsis has full parent title in component."
+  },
+  {
+    "route": "/video",
+    "width": 1024,
+    "screenshot": "artifacts/1024-_video.png",
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1024-_video-control-106.png",
+    "route": "/video",
+    "width": 1024,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1024-_video-control-90.png",
+    "route": "/video",
+    "width": 1024,
+    "review": "Opened final-run screenshot; media title fully legible."
+  },
+  {
+    "screenshot": "artifacts/1024-_image-control-70.png",
+    "route": "/image",
+    "width": 1024,
+    "review": "Opened final-run screenshot; media title fully legible."
+  }
+]

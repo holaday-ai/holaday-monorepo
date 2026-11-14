@@ -56,7 +56,8 @@ export function sourceCoverProxyUrl(value: unknown): string | undefined {
         proxy.hash ||
         parameters.length !== 1 ||
         parameters[0] !== 'url'
-      ) return undefined;
+      )
+        return undefined;
       const source = trustedSourceCoverUrl(proxy.searchParams.get('url'));
       return source
         ? `/api/stock-news/source-cover?url=${encodeURIComponent(source.toString())}`

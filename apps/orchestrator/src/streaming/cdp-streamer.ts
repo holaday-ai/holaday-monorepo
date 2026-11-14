@@ -38,9 +38,13 @@
  * path for the cases where events DO fire.
  */
 
-import type { CDPSession, Page } from 'playwright';
+import { randomUUID } from 'node:crypto';
+import type { BrowserFrameGeometry } from '@holaday/shared-types';
 import type { Logger } from 'pino';
+import type { CDPSession, Page } from 'playwright';
+import sharp from 'sharp';
 import type { WebSocket } from 'ws';
+import { browserUrlForLog } from '../browser-pool/log-url.js';
 
 export interface CdpStreamerOptions {
   /**
@@ -58,24 +62,24 @@ export interface CdpStreamerOptions {
   ws: WebSocket;
   /** Per-instance logger (already child-tagged with userId). */
   logger: Logger;
-  /** JPEG quality 0..100. Default 60. */
+  /** JPEG quality 0..100. V2 defaults to 90, legacy to 60. */
   quality?: number;
+  viewportV2?: boolean;
+  onFrame?: (frame: BrowserFrameGeometry) => void;
+  onObservationInvalidated?: () => void;
   /** Cap frame width. Default 1440 — matches the largest workbench viewport. */
   maxWidth?: number;
   /** Cap frame height. Default 1200 — matches the largest workbench viewport. */
   maxHeight?: number;
-  /**
-   * Re-applies the latest client viewport after a renderer-changing event.
-   * Chromium can discard device metrics during cross-origin navigation even
-   * while the CDP socket itself remains connected.
-   */
-  onViewportMayReset?: () => Promise<void> | void;
 }
 
 export interface ScreencastFrameMessage {
   type: 'frame';
   data: string;
+  geometry?: BrowserFrameGeometry;
   metadata: {
+    cssWidth?: number;
+    cssHeight?: number;
     offsetTop?: number;
     pageScaleFactor?: number;
     deviceWidth?: number;
@@ -93,6 +97,206 @@ export interface ScreencastUrlMessage {
 
 export class CdpStreamer {
   private cdpSession: CDPSession | null = null;
+  private captureScale = 1;
+  private pointerHeld = false;
+  notePointerInput(type: string): void {
+    if (type === 'mouseDown') this.pointerHeld = true;
+    if (type === 'mouseUp' || type === 'release') {
+      this.pointerHeld = false;
+      this.requestFrameRefresh();
+    }
+  }
+  private displayTail: Promise<void> = Promise.resolve();
+  private uncertainCaptureSession: CDPSession | null = null;
+  /** CDP screenshots temporarily alter emulation: never dispatch input during capture. */
+  runWithStableViewport<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.displayTail.then(() => {
+      if (this.cdpSession && this.uncertainCaptureSession === this.cdpSession)
+        throw new Error('browser_capture_unsettled');
+      return action();
+    });
+    this.displayTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+  private compositorDirty = false;
+  private compositorTimer: NodeJS.Timeout | null = null;
+  setCaptureScale(scale: number): void {
+    this.captureScale = scale;
+  }
+  private requestHighResolutionFrame(): void {
+    this.compositorDirty = true;
+    if (this.compositorTimer || this.captureInFlight) return;
+    this.compositorTimer = setTimeout(() => {
+      this.compositorTimer = null;
+      if (!this.streaming || !this.compositorDirty) return;
+      this.compositorDirty = false;
+      this.queueCurrentFrameCapture('retina-compositor', this.frameSequence);
+    }, 16);
+  }
+  private viewportRevision = 0;
+  private observationSequence = 0;
+  private tabId = '';
+  private mainFrameId: string | undefined;
+  private boundPage: Page | null = null;
+  matchesPage(page: Page): boolean {
+    return this.boundPage === page && !page.isClosed();
+  }
+  private readonly pageIds = new WeakMap<Page, string>();
+
+  invalidateObservation(): void {
+    this.invalidateCaptureRequests();
+    this.viewportRevision++;
+    this.observationSequence++;
+    this.opts.onObservationInvalidated?.();
+  }
+  /** The revision the frames now being published carry (FIX-62 P0-1: checked at dispatch). */
+  currentRevision(): number {
+    return this.viewportRevision;
+  }
+  /**
+   * FIX-62 P0-1: the main frame's document (CDP loaderId) the frames now show, as the navigation
+   * events last reported it. Empty until the first read or navigation of the bound page.
+   */
+  private loader = '';
+  /**
+   * HOTFIX-R4A（协调方改）: when the page last changed document — a main-frame navigation, a
+   * pushState new history entry (timed at its event, not when it was classified), a tab rebind.
+   * Monotonic (performance.now()): a clock set back never makes it look recent.
+   */
+  private lastNavigation = 0;
+  lastNavigationAt(): number {
+    return this.lastNavigation;
+  }
+  /** The current history entry (pushState makes a new one; replaceState keeps it). */
+  private historyEntry: number | null = null;
+  documentLoader(): string {
+    return this.loader;
+  }
+  /**
+   * The main frame's loader read from the browser NOW — newer than documentLoader() when a
+   * navigation committed whose event has not been handled yet. Null when it cannot be read in
+   * time (a JS dialog blocks the page): the caller then cannot confirm the document.
+   */
+  async freshLoader(timeoutMs = 1500): Promise<string | null> {
+    const session = this.cdpSession;
+    if (!session) return null;
+    let timer: NodeJS.Timeout | undefined;
+    const read = session
+      .send('Page.getFrameTree')
+      .then((r) => r.frameTree.frame.loaderId)
+      .catch(() => null);
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+      timer.unref?.();
+    });
+    const loader = await Promise.race([read, late]);
+    if (timer) clearTimeout(timer);
+    if (loader && !this.loader && session === this.cdpSession) this.loader = loader;
+    return loader;
+  }
+  /** Same-document navigations whose history entry is still being read (复审 #2 B). */
+  private historyReads = 0;
+  /** Bumped when the page is (re)bound: an older read's result and count no longer apply. */
+  private historyGeneration = 0;
+  /** Waiters for the reads in flight to settle (复审 #3 #1). */
+  private historyWaiters: Array<() => void> = [];
+  /** The current history entry id; null until read, -1 when it could not be read. */
+  historyEntryId(): number | null {
+    return this.historyEntry;
+  }
+  /** A same-document navigation happened and whether it was a new entry is not known yet. */
+  historyPending(): boolean {
+    return this.historyReads > 0;
+  }
+  /** Sentinels for entries that could not be read: each new, never equal to a real id. */
+  private unknownEntrySeq = 0;
+  private unknownEntry(): number {
+    this.unknownEntrySeq -= 1;
+    return this.unknownEntrySeq;
+  }
+  /** Resolves when no history read is in flight, or after `timeoutMs` at most. */
+  historySettled(timeoutMs = 300): Promise<void> {
+    if (!this.historyReads) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(done, timeoutMs);
+      timer.unref?.();
+      const waiters = this.historyWaiters;
+      function done(): void {
+        clearTimeout(timer);
+        const at = waiters.indexOf(done);
+        if (at >= 0) waiters.splice(at, 1);
+        resolve();
+      }
+      waiters.push(done);
+    });
+  }
+  /**
+   * Learn the current history entry; a different one (or none known before) means a pushState
+   * swapped the page and, when `retire`, the old frames go. A read that fails or takes longer
+   * than 1.5s retires too (复审 #3 #2: the pending flag can never stay up).
+   */
+  private async noteHistoryEntry(
+    session: CDPSession,
+    retire: boolean,
+    at = performance.now(),
+  ): Promise<void> {
+    const generation = this.historyGeneration;
+    if (retire) this.historyReads++;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const h = await Promise.race([
+        session.send('Page.getNavigationHistory'),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('history read timed out')), 1500);
+          timer.unref?.();
+        }),
+      ]);
+      const id = h.entries[h.currentIndex]?.id ?? null;
+      if (session !== this.cdpSession || generation !== this.historyGeneration) return;
+      const changed = id === null || this.historyEntry === null || id !== this.historyEntry;
+      this.historyEntry = id ?? this.unknownEntry();
+      if (retire && changed) {
+        this.lastNavigation = Math.max(this.lastNavigation, at);
+        this.invalidateObservation();
+      }
+    } catch {
+      if (session === this.cdpSession && generation === this.historyGeneration) {
+        // 复审 #4 #1: a new entry no press can be bound to — an earlier press is never released on
+        // whatever the page now shows; later presses bind to this one and release normally.
+        this.historyEntry = this.unknownEntry();
+        if (retire) {
+          this.lastNavigation = Math.max(this.lastNavigation, at);
+          this.invalidateObservation();
+        }
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (retire && generation === this.historyGeneration) {
+        this.historyReads = Math.max(0, this.historyReads - 1);
+        if (!this.historyReads) for (const wake of [...this.historyWaiters]) wake();
+      }
+    }
+  }
+  private bindPage(page: Page): void {
+    this.loader = '';
+    this.historyEntry = null;
+    this.historyReads = 0;
+    this.historyGeneration++;
+    for (const wake of [...this.historyWaiters]) wake();
+    // Another tab replacing the one shown is a page change; the first page of a stream is not.
+    if (this.boundPage && this.boundPage !== page) this.lastNavigation = performance.now();
+    this.boundPage = page;
+    let id = this.pageIds.get(page);
+    if (!id) {
+      id = randomUUID();
+      this.pageIds.set(page, id);
+    }
+    this.tabId = id;
+    this.invalidateObservation();
+  }
   private streaming = false;
   private hasReceivedFrame = false;
   private lastFrameAt = 0;
@@ -117,18 +321,20 @@ export class CdpStreamer {
   /** How often the watchdog inspects the frame gap. */
   private readonly watchdogIntervalMs = 1000;
   private readonly initialFrameFallbackMs = 1200;
-  private readonly inputRefreshDelayMs = 160;
+  private readonly inputRefreshDelayMs = 16;
   private readonly captureScreenshotTimeoutMs = 2500;
   private readonly opts: Required<
-    Omit<CdpStreamerOptions, 'logger' | 'onViewportMayReset'>
+    Omit<CdpStreamerOptions, 'logger' | 'onFrame' | 'onObservationInvalidated'>
   > & {
     logger: Logger;
-    onViewportMayReset?: () => Promise<void> | void;
+    onFrame?: CdpStreamerOptions['onFrame'];
+    onObservationInvalidated?: CdpStreamerOptions['onObservationInvalidated'];
   };
 
   constructor(opts: CdpStreamerOptions) {
     this.opts = {
-      quality: 60,
+      quality: opts.viewportV2 ? 90 : 60,
+      viewportV2: false,
       maxWidth: 1440,
       maxHeight: 1200,
       ...opts,
@@ -149,9 +355,16 @@ export class CdpStreamer {
     this.streaming = true;
     try {
       const page = await this.opts.getPage();
+      this.bindPage(page);
       this.cdpSession = await page.context().newCDPSession(page);
       this.wireListeners(this.cdpSession);
+      // FIX-62 P0-1: the document and history entry the first frames show.
+      void this.noteHistoryEntry(this.cdpSession, false);
+      void this.freshLoader();
       await this.cdpSession.send('Page.enable');
+      const tree = await this.cdpSession.send('Page.getFrameTree');
+      this.mainFrameId = tree?.frameTree?.frame?.id;
+      this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
       await this.armScreencast('initial-start', null);
       // Start the no-frame counter at "now" so an arm that takes a
       // few hundred ms to produce its first frame doesn't trigger
@@ -177,22 +390,23 @@ export class CdpStreamer {
   private wireListeners(cdp: CDPSession): void {
     cdp.on('Page.screencastFrame', (params) => {
       if (!this.streaming || this.cdpSession !== cdp) {
-        cdp
-          .send('Page.screencastFrameAck', { sessionId: params.sessionId })
-          .catch(() => undefined);
+        cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => undefined);
         return;
       }
       // The CDP wire format wraps the JPEG as a base64 string
       // already — pass through unchanged so the frontend can
       // render via `data:image/jpeg;base64,${data}`.
-      this.publishFrame(params.data, params.metadata ?? {});
+      // Chromium's screencast often emits CSS-resolution JPEGs even with DPR=2.
+      // Use compositor damage as the trigger for a coalesced, full-resolution
+      // surface capture. Never upscale a 1x JPEG and call it Retina.
+      if (this.opts.viewportV2 && this.captureScale > 1 && !this.pointerHeld)
+        this.requestHighResolutionFrame();
+      else this.publishFrame(params.data, params.metadata ?? {});
       // Acking is mandatory — without it the streamer waits forever
       // for the previous frame to be consumed and frame flow halts.
-      cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(
-        (err: Error) => {
-          this.opts.logger.debug({ err: err.message }, 'cdp-streamer: ack failed');
-        },
-      );
+      cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch((err: Error) => {
+        this.opts.logger.debug({ err: err.message }, 'cdp-streamer: ack failed');
+      });
     });
 
     cdp.on('Page.frameNavigated', (params) => {
@@ -200,9 +414,15 @@ export class CdpStreamer {
       // Only notify on top-level navigation. Subframes fire too
       // but the SPA only cares about the address-bar URL.
       if (params.frame.parentId) return;
+      this.mainFrameId = params.frame.id;
+      this.loader = params.frame.loaderId;
+      this.lastNavigation = performance.now();
+      this.historyEntry = null;
+      void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
       // frame of the new page, even when Chromium keeps the same CDP session.
       this.invalidateCaptureRequests();
+      this.invalidateObservation();
       const msg: ScreencastUrlMessage = {
         type: 'url-changed',
         url: params.frame.url,
@@ -232,8 +452,13 @@ export class CdpStreamer {
     // stream stays valid.
     cdp.on('Page.navigatedWithinDocument', (params) => {
       if (!this.streaming || this.cdpSession !== cdp) return;
-      if (params.frameId == null) return;
-      this.invalidateCaptureRequests();
+      if (params.frameId == null || (this.mainFrameId && params.frameId !== this.mainFrameId))
+        return;
+      // FIX-62 P0-1 (DEPLOY-61 第三次 单列 4): a pushState swap can replace everything the person
+      // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
+      // history entry retires the old frames; replaceState (a search box mirroring each letter
+      // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
+      void this.noteHistoryEntry(cdp, true, performance.now());
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent
       // check above, but this event doesn't carry parent info.
@@ -257,19 +482,8 @@ export class CdpStreamer {
     });
   }
 
-  private async rearmAfterNavigation(
-    reason: string,
-    url: string | null,
-  ): Promise<void> {
+  private async rearmAfterNavigation(reason: string, url: string | null): Promise<void> {
     await this.armScreencast(reason, url);
-    try {
-      await this.opts.onViewportMayReset?.();
-    } catch (err) {
-      this.opts.logger.debug(
-        { reason, err: errMsg(err) },
-        'cdp-streamer: viewport reapply failed',
-      );
-    }
   }
 
   /**
@@ -288,28 +502,25 @@ export class CdpStreamer {
       await cdp.send('Page.startScreencast', {
         format: 'jpeg',
         quality: this.opts.quality,
-        maxWidth: this.opts.maxWidth,
-        maxHeight: this.opts.maxHeight,
+        ...(this.opts.viewportV2
+          ? {}
+          : { maxWidth: this.opts.maxWidth, maxHeight: this.opts.maxHeight }),
         everyNthFrame: 1,
       });
-      if (
-        !this.streaming ||
-        this.cdpSession !== cdp ||
-        this.armSequence !== armSequence
-      ) {
+      if (!this.streaming || this.cdpSession !== cdp || this.armSequence !== armSequence) {
         return;
       }
-      const frameArrivedWhileArming =
-        this.frameSequence !== frameSequenceBeforeArm;
+      const frameArrivedWhileArming = this.frameSequence !== frameSequenceBeforeArm;
       if (!frameArrivedWhileArming) {
         this.hasReceivedFrame = false;
         this.lastFrameAt = Date.now();
         this.scheduleInitialFrameFallback();
       }
-      this.opts.logger.info({ reason, url }, 'cdp-streamer: armed screencast');
+      // Origin only: a page URL's path and query can carry tokens (FOLLOWUPS-282).
+      this.opts.logger.info({ reason, origin: logOrigin(url) }, 'cdp-streamer: armed screencast');
     } catch (err) {
       this.opts.logger.warn(
-        { reason, url, err: errMsg(err) },
+        { reason, origin: logOrigin(url), err: errMsg(err) },
         'cdp-streamer: arm screencast failed',
       );
     }
@@ -318,33 +529,83 @@ export class CdpStreamer {
   private startWatchdog(): void {
     if (this.watchdogTimer) return;
     this.watchdogTimer = setInterval(() => {
+      if (this.opts.viewportV2 && this.hasReceivedFrame && Date.now() - this.lastFrameAt >= 2000)
+        this.requestFrameRefresh();
       void this.watchdogTick();
     }, this.watchdogIntervalMs);
   }
 
   private stopWatchdog(): void {
+    if (this.compositorTimer) clearTimeout(this.compositorTimer);
+    this.compositorTimer = null;
+    this.compositorDirty = false;
     if (!this.watchdogTimer) return;
     clearInterval(this.watchdogTimer);
     this.watchdogTimer = null;
   }
 
-  private publishFrame(
-    data: string,
-    metadata: ScreencastFrameMessage['metadata'],
-  ): void {
+  private publishFrame(data: string, metadata: ScreencastFrameMessage['metadata']): void {
     this.invalidateCaptureRequests();
     this.hasReceivedFrame = true;
     this.lastFrameAt = Date.now();
     this.frameSequence += 1;
     this.clearInitialFrameTimer();
     const frame: ScreencastFrameMessage = { type: 'frame', data, metadata };
+    if (this.opts.viewportV2) {
+      void this.publishGeometryFrame(frame, ++this.observationSequence);
+      return;
+    }
     try {
       this.opts.ws.send(JSON.stringify(frame));
     } catch (err) {
-      this.opts.logger.debug(
-        { err: errMsg(err) },
-        'cdp-streamer: frame send failed (ws closed?)',
-      );
+      this.opts.logger.debug({ err: errMsg(err) }, 'cdp-streamer: frame send failed (ws closed?)');
+    }
+  }
+
+  private async publishGeometryFrame(
+    frame: ScreencastFrameMessage,
+    sequence: number,
+  ): Promise<void> {
+    const session = this.cdpSession;
+    const revision = this.viewportRevision;
+    const tabId = this.tabId;
+    const capturedAt = frame.metadata.timestamp ? frame.metadata.timestamp * 1000 : Date.now();
+    try {
+      const dimensions = await sharp(Buffer.from(frame.data, 'base64')).metadata();
+      const m = frame.metadata;
+      // Screencast deviceWidth/deviceHeight can be physical pixels under DPR
+      // emulation. Only cssLayoutViewport has an unambiguous input coordinate unit.
+      const metrics = !m.cssWidth && session ? await session.send('Page.getLayoutMetrics') : null;
+      const cssWidth = m.cssWidth ?? metrics?.cssLayoutViewport?.clientWidth;
+      const cssHeight = m.cssHeight ?? metrics?.cssLayoutViewport?.clientHeight;
+      if (
+        !this.streaming ||
+        this.cdpSession !== session ||
+        sequence !== this.observationSequence ||
+        revision !== this.viewportRevision
+      )
+        return;
+      if (!cssWidth || !cssHeight || !dimensions.width || !dimensions.height) return;
+      const geometry: BrowserFrameGeometry = {
+        frameId: `${tabId}:${revision}:${sequence}`,
+        tabId,
+        viewportRevision: revision,
+        cssWidth,
+        cssHeight,
+        imageWidth: dimensions.width,
+        imageHeight: dimensions.height,
+        pageScaleFactor: m.pageScaleFactor ?? metrics?.cssVisualViewport?.scale ?? 1,
+        offsetTop: m.offsetTop ?? 0,
+        scrollOffset: {
+          x: m.scrollOffsetX ?? metrics?.cssLayoutViewport?.pageX ?? 0,
+          y: m.scrollOffsetY ?? metrics?.cssLayoutViewport?.pageY ?? 0,
+        },
+        capturedAt,
+      };
+      this.opts.onFrame?.(geometry);
+      this.opts.ws.send(JSON.stringify({ ...frame, geometry }));
+    } catch {
+      this.opts.logger.debug('cdp-streamer: V2 frame dimensions unavailable');
     }
   }
 
@@ -369,10 +630,7 @@ export class CdpStreamer {
     this.pendingCapture = null;
   }
 
-  private queueCurrentFrameCapture(
-    reason: string,
-    expectedFrameSequence: number,
-  ): void {
+  private queueCurrentFrameCapture(reason: string, expectedFrameSequence: number): void {
     const cdp = this.cdpSession;
     if (!cdp || !this.streaming) return;
     this.pendingCapture = {
@@ -409,15 +667,15 @@ export class CdpStreamer {
           }
           const data = (response as { data?: unknown }).data;
           if (typeof data !== 'string' || data.length === 0) continue;
-          this.publishFrame(data, {});
+          this.publishFrame(
+            data,
+            (response as { metadata?: ScreencastFrameMessage['metadata'] }).metadata ?? {},
+          );
           const log =
             request.reason === 'initial-frame-fallback'
               ? this.opts.logger.info.bind(this.opts.logger)
               : this.opts.logger.debug.bind(this.opts.logger);
-          log(
-            { reason: request.reason },
-            'cdp-streamer: published current-page capture',
-          );
+          log({ reason: request.reason }, 'cdp-streamer: published current-page capture');
         } catch (err) {
           this.opts.logger.debug(
             { reason: request.reason, err: errMsg(err) },
@@ -427,31 +685,57 @@ export class CdpStreamer {
       }
     } finally {
       this.captureInFlight = false;
+      if (this.compositorDirty) this.requestHighResolutionFrame();
       if (this.streaming && this.pendingCapture) {
         void this.drainCaptureQueue();
       }
     }
   }
 
-  private async captureCurrentPage(cdp: CDPSession): Promise<unknown> {
-    let timeout: NodeJS.Timeout | null = null;
-    try {
-      return await Promise.race([
-        cdp.send('Page.captureScreenshot', {
-          format: 'jpeg',
-          quality: this.opts.quality,
-          fromSurface: true,
-          captureBeyondViewport: false,
-        }),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => {
-            reject(new Error('current-page capture timed out'));
-          }, this.captureScreenshotTimeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
+  private captureCurrentPage(cdp: CDPSession): Promise<unknown> {
+    const capture = async () => {
+      if (this.cdpSession !== cdp) throw new Error('browser_capture_session_changed');
+      // A high-DPR screenshot resets Chromium's native drag latch. During a
+      // held pointer, keep forwarding compositor frames without emulation.
+      if (this.opts.viewportV2 && this.pointerHeld) return {};
+      // Read CSS metrics BEFORE screenshot temporarily changes the emulation.
+      const metrics = this.opts.viewportV2 ? await cdp.send('Page.getLayoutMetrics') : null;
+      let timeout: NodeJS.Timeout | null = null;
+      try {
+        const response = await Promise.race([
+          cdp.send('Page.captureScreenshot', {
+            format: 'jpeg',
+            quality: this.opts.quality,
+            fromSurface: true,
+            captureBeyondViewport: false,
+          }),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              if (this.opts.viewportV2) {
+                this.uncertainCaptureSession = cdp;
+                void this.restartAfterStall();
+              }
+              reject(new Error('current-page capture timed out'));
+            }, this.captureScreenshotTimeoutMs);
+          }),
+        ]);
+        return {
+          ...response,
+          metadata: metrics?.cssLayoutViewport
+            ? {
+                cssWidth: metrics.cssLayoutViewport.clientWidth,
+                cssHeight: metrics.cssLayoutViewport.clientHeight,
+                pageScaleFactor: metrics.cssVisualViewport?.scale ?? 1,
+                scrollOffsetX: metrics.cssLayoutViewport.pageX,
+                scrollOffsetY: metrics.cssLayoutViewport.pageY,
+              }
+            : {},
+        };
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    };
+    return this.opts.viewportV2 ? this.runWithStableViewport(capture) : capture();
   }
 
   /**
@@ -466,6 +750,10 @@ export class CdpStreamer {
     this.inputRefreshTimer = setTimeout(() => {
       this.inputRefreshTimer = null;
       if (!this.streaming || this.frameSequence !== expectedSequence) return;
+      if (this.opts.viewportV2 && this.pointerHeld) {
+        void this.armScreencast('held-pointer-refresh', null);
+        return;
+      }
       this.queueCurrentFrameCapture('post-input-fallback', expectedSequence);
     }, this.inputRefreshDelayMs);
   }
@@ -477,11 +765,7 @@ export class CdpStreamer {
    * fails or points at a different renderer.
    */
   private async watchdogTick(): Promise<void> {
-    if (
-      !this.streaming ||
-      this.watchdogCheckInFlight ||
-      this.restartInFlight
-    ) {
+    if (!this.streaming || this.watchdogCheckInFlight || this.restartInFlight) {
       return;
     }
     const gapMs = Date.now() - this.lastFrameAt;
@@ -517,43 +801,59 @@ export class CdpStreamer {
     }
   }
 
+  /**
+   * FIX-61B P0-3: the agent moved to another page (a new tab) under this stream. Bind to the page
+   * it is on now — at once, not when the watchdog finds a stall — and re-apply the screen's size.
+   */
+  async followCurrentPage(): Promise<void> {
+    if (!this.streaming) return;
+    // 复审 #1: a restart already under way may have bound the old page — follow once more after it.
+    if (this.restartInFlight) {
+      this.followPending = true;
+      return;
+    }
+    await this.restartAfterStall();
+  }
+  private followPending = false;
+
   private async restartAfterStall(): Promise<void> {
     if (this.restartInFlight) return;
     this.restartInFlight = true;
     try {
       await this.hardRestart();
     } catch (err) {
-      this.opts.logger.warn(
-        { err: errMsg(err) },
-        'cdp-streamer: hard restart failed',
-      );
+      this.opts.logger.warn({ err: errMsg(err) }, 'cdp-streamer: hard restart failed');
     } finally {
       this.restartInFlight = false;
       // Reset the frame counter so we don't loop into another
       // restart 1s later if the new arm is still warming up.
       this.lastFrameAt = Date.now();
+      if (this.followPending) {
+        this.followPending = false;
+        // 复审 #2: only when the restart bound another page than the agent's (no needless restart).
+        void this.opts
+          .getPage()
+          .then((page) => (this.matchesPage(page) ? undefined : this.followCurrentPage()))
+          .catch(() => {});
+      }
     }
   }
 
-  private async sessionMatchesCurrentPage(
-    cdp: CDPSession | null,
-  ): Promise<boolean> {
+  private async sessionMatchesCurrentPage(cdp: CDPSession | null): Promise<boolean> {
     if (!cdp) return false;
     try {
       const page = await this.opts.getPage();
+      // Matching URLs do not prove target identity: a replacement tab may open
+      // the same URL. Only start/restart may bind an observation to its session.
+      if (this.opts.viewportV2 && !this.matchesPage(page)) return false;
       const response = await cdp.send('Runtime.evaluate', {
         expression: 'window.location.href',
         returnByValue: true,
       });
-      const currentUrl = (
-        response as { result?: { value?: unknown } }
-      ).result?.value;
+      const currentUrl = (response as { result?: { value?: unknown } }).result?.value;
       return typeof currentUrl === 'string' && currentUrl === page.url();
     } catch (err) {
-      this.opts.logger.debug(
-        { err: errMsg(err) },
-        'cdp-streamer: session health check failed',
-      );
+      this.opts.logger.debug({ err: errMsg(err) }, 'cdp-streamer: session health check failed');
       return false;
     }
   }
@@ -568,6 +868,7 @@ export class CdpStreamer {
    * even if the old one was bound to a dead RFH.
    */
   private async hardRestart(): Promise<void> {
+    this.invalidateObservation();
     this.armSequence += 1;
     this.invalidateCaptureRequests();
     this.clearInitialFrameTimer();
@@ -596,11 +897,17 @@ export class CdpStreamer {
     // (a fresh ctx.newPage() in the reset case), which is the
     // page the agent is now operating on.
     const page = await this.opts.getPage();
+    this.bindPage(page);
     this.cdpSession = await page.context().newCDPSession(page);
     this.wireListeners(this.cdpSession);
+    // FIX-62 P0-1: the document and history entry the first frames show.
+    void this.noteHistoryEntry(this.cdpSession, false);
+    void this.freshLoader();
     await this.cdpSession.send('Page.enable');
+    const tree = await this.cdpSession.send('Page.getFrameTree');
+    this.mainFrameId = tree?.frameTree?.frame?.id;
+    this.opts.ws.send(JSON.stringify({ type: 'url-changed', url: page.url() }));
     await this.armScreencast('hard-restart', page.url());
-    await this.opts.onViewportMayReset?.();
   }
 
   /**
@@ -611,6 +918,8 @@ export class CdpStreamer {
    */
   async stop(): Promise<void> {
     this.streaming = false;
+    this.boundPage = null;
+    this.invalidateObservation();
     this.armSequence += 1;
     this.invalidateCaptureRequests();
     this.stopWatchdog();
@@ -644,9 +953,12 @@ export class CdpStreamer {
   getSession(): CDPSession | null {
     return this.cdpSession;
   }
-
 }
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function logOrigin(url: string | null): string | null {
+  return url === null ? null : browserUrlForLog(url);
 }

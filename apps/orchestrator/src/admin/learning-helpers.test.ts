@@ -15,9 +15,7 @@ describe('extractDomain', () => {
   });
 
   it('extracts hostname from an embedded https URL', () => {
-    expect(extractDomain('去 https://item.taobao.com/abc 看看价格')).toBe(
-      'item.taobao.com',
-    );
+    expect(extractDomain('去 https://item.taobao.com/abc 看看价格')).toBe('item.taobao.com');
   });
 
   it('extracts hostname from http (insecure)', () => {
@@ -88,9 +86,7 @@ describe('classifyTaskError', () => {
   });
 
   it('identifies page-structure / element-not-found', () => {
-    expect(classifyTaskError('element not found: .submit-btn', null)).toBe(
-      'page_structure',
-    );
+    expect(classifyTaskError('element not found: .submit-btn', null)).toBe('page_structure');
     expect(classifyTaskError('找不到元素 .checkout', null)).toBe('page_structure');
     expect(classifyTaskError('页面结构变化', null)).toBe('page_structure');
   });

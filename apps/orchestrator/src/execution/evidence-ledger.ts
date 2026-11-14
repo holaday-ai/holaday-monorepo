@@ -17,6 +17,7 @@
  * verifiable facts (numbers, URLs, boolean states).
  */
 import { randomUUID } from 'node:crypto';
+import { TEXT_URL_RE as URL_RE } from './text-urls.js';
 
 export type EvidenceSourceType =
   | 'user_input'
@@ -51,10 +52,18 @@ export const MAX_FACT_CHARS = 500;
  */
 export const MAX_ENTRIES_PER_TASK = 1_000;
 
+/**
+ * FIX-58 复审 #1: the user's own words and attachments, kept whole (never serialised). A fact is
+ * cut at 500 chars, but a price on line 40 of the user's own price list is still theirs.
+ */
+export const MAX_USER_WORDS_CHARS = 2_000_000;
+
 export class EvidenceLedger {
   readonly taskId: string;
   private readonly _entries: EvidenceEntry[] = [];
   private _truncated = false;
+  private readonly _userWords: string[] = [];
+  private _userWordsChars = 0;
 
   constructor(taskId: string) {
     this.taskId = taskId;
@@ -66,14 +75,20 @@ export class EvidenceLedger {
    * timestamp. Returns the assigned id (or empty string on overflow).
    */
   add(entry: Omit<EvidenceEntry, 'id' | 'timestamp' | 'taskId'>): string {
+    if (
+      (entry.sourceType === 'user_input' || entry.sourceType === 'file_parse') &&
+      this._userWordsChars < MAX_USER_WORDS_CHARS
+    ) {
+      const whole = entry.fact.slice(0, MAX_USER_WORDS_CHARS - this._userWordsChars);
+      this._userWords.push(whole);
+      this._userWordsChars += whole.length;
+    }
     if (this._entries.length >= MAX_ENTRIES_PER_TASK) {
       this._truncated = true;
       return '';
     }
     const fact =
-      entry.fact.length > MAX_FACT_CHARS
-        ? entry.fact.slice(0, MAX_FACT_CHARS)
-        : entry.fact;
+      entry.fact.length > MAX_FACT_CHARS ? entry.fact.slice(0, MAX_FACT_CHARS) : entry.fact;
     const id = randomUUID();
     this._entries.push({
       id,
@@ -85,6 +100,11 @@ export class EvidenceLedger {
       confidence: entry.confidence,
     });
     return id;
+  }
+
+  /** The user's own input and attachments, uncut (FIX-58 复审 #1). */
+  get userWords(): string {
+    return this._userWords.join('\n');
   }
 
   /** Read-only view of all entries in insertion order. */
@@ -124,7 +144,7 @@ export class EvidenceLedger {
         continue;
       }
       // Match http(s) URLs liberally; the verifier normalises before compare.
-      const matches = e.fact.match(/https?:\/\/[^\s,;'")\]]+/g);
+      const matches = e.fact.match(URL_RE);
       if (matches) {
         for (const m of matches) urls.add(m);
       }

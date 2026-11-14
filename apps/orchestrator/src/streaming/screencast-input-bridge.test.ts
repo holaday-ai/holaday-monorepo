@@ -10,112 +10,78 @@ function viewport(width: number, height: number): string {
   });
 }
 
-describe('DeferredScreencastInputBridge', () => {
-  it('requires the current owner lease before forwarding manual input', async () => {
+describe('DeferredScreencastInputBridge (REBUILD-4 共同操作)', () => {
+  it('forwards the person’s input through runOwnedInput with no lease', async () => {
     const control = new BrowserControl();
     const applied: InputMessage[] = [];
+    const kinds: string[] = [];
     const bridge = new DeferredScreencastInputBridge({
-      runOwnedInput: (lease, action) => control.runHuman(lease ?? '', action),
+      runOwnedInput: (action, kind) => {
+        kinds.push(kind);
+        return control.runHuman(action, kind === 'viewport' ? undefined : kind);
+      },
     });
     await bridge.attach({
       handle: async (input) => {
         applied.push(input);
       },
     });
-    const send = (controlLease?: string) =>
-      bridge.receive(
-        JSON.stringify({
-          type: 'input',
-          controlLease,
-          payload: { type: 'insertText', text: '你好' },
-        }),
-      );
-    await expect(send()).rejects.toThrow('browser_control_not_owned');
-    control.requestHuman();
-    await expect(send('unconfirmed')).rejects.toThrow('browser_control_not_owned');
-    const parked = control.checkpoint(async () => undefined);
-    const token = control.snapshot().lease ?? '';
-    try {
-      await send(token);
-      control.returnToAgent(token);
-      await expect(send(token)).rejects.toThrow('browser_control_not_owned');
-      await parked;
-      control.requestHuman();
-      const next = control.checkpoint(async () => undefined);
-      try {
-        await expect(send(token)).rejects.toThrow('browser_control_not_owned');
-      } finally {
-        control.close();
-        await next;
-      }
-      expect(applied).toEqual([{ type: 'insertText', text: '你好' }]);
-    } finally {
-      control.close();
-      await parked;
-    }
+    await bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'insertText', text: '你好' } }),
+    );
+    // An old client may still send a lease: it is ignored, never required.
+    await bridge.receive(
+      JSON.stringify({
+        type: 'input',
+        controlLease: 'stale',
+        payload: { type: 'mouseDown', x: 5, y: 6, button: 'left' },
+      }),
+    );
+    expect(applied).toEqual([
+      { type: 'insertText', text: '你好' },
+      { type: 'mouseDown', x: 5, y: 6, button: 'left' },
+    ]);
+    expect(kinds).toEqual(['insertText', 'mouseDown']);
+    expect(control.humanInputLog().count).toBe(2);
+    expect(control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
   });
 
-  it('defers viewport changes to a settled runner boundary without granting clicks', async () => {
+  it('ignores a viewport message: it never reaches the sink, runOwnedInput or the receipt hook', async () => {
+    const handle = vi.fn<(message: InputMessage) => Promise<void>>().mockResolvedValue(undefined);
+    const runOwnedInput = vi.fn(async (action: (signal: AbortSignal) => Promise<void>) =>
+      action(new AbortController().signal),
+    );
+    const onInputReceived = vi.fn(() => undefined);
+    const bridge = new DeferredScreencastInputBridge({ runOwnedInput, onInputReceived });
+    await bridge.receive(viewport(612, 844));
+    await bridge.attach({ handle });
+    await bridge.receive(viewport(430, 760));
+    await bridge.receive(viewport(1024, 2300));
+    expect(handle).not.toHaveBeenCalled();
+    expect(runOwnedInput).not.toHaveBeenCalled();
+    expect(onInputReceived).not.toHaveBeenCalled();
+    await bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'mouseMove', x: 1, y: 2 } }),
+    );
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle).toHaveBeenCalledWith({ type: 'mouseMove', x: 1, y: 2 }, expect.any(AbortSignal));
+  });
+
+  it('a closed control refuses the input', async () => {
     const control = new BrowserControl();
-    const applied: InputMessage[] = [];
+    const handle = vi.fn(async () => {});
     const bridge = new DeferredScreencastInputBridge({
-      runOwnedInput: (lease, action) => control.runHuman(lease ?? '', action),
-      queueViewport: (action) => control.queueViewport(action),
+      runOwnedInput: (action) => control.runHuman(action, 'mouseDown'),
     });
-    await bridge.receive(viewport(800, 600));
-    await bridge.attach({
-      handle: async (input) => {
-        applied.push(input);
-      },
-    });
+    await bridge.attach({ handle });
+    control.close();
     await expect(
-      bridge.receive(
-        JSON.stringify({
-          type: 'input',
-          payload: { type: 'mouseDown', x: 5, y: 6 },
-        }),
-      ),
-    ).rejects.toThrow('browser_control_not_owned');
-    expect(control.snapshot().phase).toBe('agent');
-    expect(applied).toEqual([]);
-    await control.checkpoint(async () => undefined);
-    expect(applied).toEqual([{ type: 'viewport', width: 800, height: 600 }]);
+      bridge.receive(JSON.stringify({ type: 'input', payload: { type: 'mouseDown', x: 5, y: 6 } })),
+    ).rejects.toThrow('browser_control_closed');
+    expect(handle).not.toHaveBeenCalled();
   });
 
-  it('does not acknowledge a deferred viewport from a disconnected client', async () => {
-    const control = new BrowserControl();
-    const effects: string[] = [];
-    const bridge = new DeferredScreencastInputBridge({
-      queueViewport: (action) => control.queueViewport(action),
-      onViewportApplied: () => effects.push('ack'),
-    });
-    await bridge.attach({
-      handle: async () => {
-        effects.push('resize');
-      },
-    });
-    await bridge.receive(viewport(800, 600));
-    bridge.detach();
-    await control.checkpoint(async () => undefined);
-    expect(effects).toEqual([]);
-  });
-
-  it('does not publish or remember invalid viewport dimensions', async () => {
-    const effects: string[] = [];
-    const bridge = new DeferredScreencastInputBridge({
-      onViewportApplied: () => effects.push('ack'),
-    });
-    await bridge.receive(viewport(0, 600));
-    await bridge.attach({
-      handle: async () => {
-        effects.push('resize');
-      },
-    });
-    await bridge.reapplyViewport();
-    expect(effects).toEqual([]);
-  });
-
-  it('drops queued old-connection input after detach and waits for active input before return', async () => {
+  it('drops queued old-connection input after detach and lets the active input finish', async () => {
     const control = new BrowserControl();
     let finish!: () => void;
     let started!: () => void;
@@ -127,7 +93,8 @@ describe('DeferredScreencastInputBridge', () => {
     });
     const applied: string[] = [];
     const bridge = new DeferredScreencastInputBridge({
-      runOwnedInput: (lease, action) => control.runHuman(lease ?? '', action),
+      runOwnedInput: (action, kind) =>
+        control.runHuman(action, kind === 'viewport' ? undefined : kind),
     });
     await bridge.attach({
       handle: async () => {
@@ -137,49 +104,52 @@ describe('DeferredScreencastInputBridge', () => {
         applied.push('input-ended');
       },
     });
-    control.requestHuman();
-    const parked = control.checkpoint(async () => {
-      applied.push('observe');
-    });
-    const controlLease = control.snapshot().lease ?? '';
-    const input = JSON.stringify({
-      type: 'input',
-      controlLease,
-      payload: { type: 'insertText', text: 'x' },
-    });
+    const input = JSON.stringify({ type: 'input', payload: { type: 'insertText', text: 'x' } });
     const one = bridge.receive(input);
     const two = bridge.receive(input);
     await start;
     bridge.detach();
-    control.returnToAgent(controlLease);
     try {
       expect(applied).toEqual(['input-started']);
     } finally {
       finish();
-      await Promise.all([one, two, parked]);
+      await Promise.all([one, two]);
     }
-    expect(applied).toEqual(['input-started', 'input-ended', 'observe']);
+    expect(applied).toEqual(['input-started', 'input-ended']);
+    await control.settled();
   });
 
-  it('replays the latest viewport received while the CDP streamer is starting', async () => {
-    const handle = vi.fn<(message: InputMessage) => Promise<void>>().mockResolvedValue(undefined);
-    const onViewportApplied = vi.fn();
-    const bridge = new DeferredScreencastInputBridge({ onViewportApplied });
-
-    await bridge.receive(viewport(430, 760));
-    await bridge.receive(viewport(612, 844));
-    await bridge.attach({ handle });
-
-    expect(handle).toHaveBeenCalledTimes(1);
-    expect(handle).toHaveBeenCalledWith(
-      {
-        type: 'viewport',
-        width: 612,
-        height: 844,
+  it('runs inputs in the order received', async () => {
+    const control = new BrowserControl();
+    const applied: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = new DeferredScreencastInputBridge({
+      runOwnedInput: (action, kind) =>
+        control.runHuman(action, kind === 'viewport' ? undefined : kind),
+    });
+    await bridge.attach({
+      handle: async (input) => {
+        if (input.type === 'mouseDown') await gate;
+        applied.push(input.type);
       },
-      undefined,
+    });
+    const down = bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'mouseDown', x: 1, y: 1 } }),
     );
-    expect(onViewportApplied).toHaveBeenCalledWith({ width: 612, height: 844 });
+    const up = bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'mouseUp', x: 1, y: 1 } }),
+    );
+    const text = bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'insertText', text: 'a' } }),
+    );
+    await Promise.resolve();
+    expect(applied).toEqual([]);
+    release();
+    await Promise.all([down, up, text]);
+    expect(applied).toEqual(['mouseDown', 'mouseUp', 'insertText']);
   });
 
   it('drops stale pointer input before attach and forwards live input afterward', async () => {
@@ -211,40 +181,66 @@ describe('DeferredScreencastInputBridge', () => {
 
     await bridge.receive('{broken');
     await bridge.receive(JSON.stringify({ type: 'not-input' }));
-    await bridge.receive(viewport(700, 900));
+    await bridge.receive(JSON.stringify({ type: 'input' }));
+    await bridge.receive(JSON.stringify({ type: 'input', payload: { type: 'keyDown', key: 'a' } }));
 
     expect(handle).toHaveBeenCalledTimes(1);
-    expect(handle).toHaveBeenCalledWith(
-      {
-        type: 'viewport',
-        width: 700,
-        height: 900,
-      },
-      undefined,
-    );
+    expect(handle).toHaveBeenCalledWith({ type: 'keyDown', key: 'a' }, undefined);
   });
 
-  it('reapplies the latest viewport after a renderer-changing navigation', async () => {
-    const handle = vi.fn<(message: InputMessage) => Promise<void>>().mockResolvedValue(undefined);
-    const onViewportApplied = vi.fn();
-    const bridge = new DeferredScreencastInputBridge({ onViewportApplied });
-    await bridge.attach({ handle });
-
-    await bridge.receive(viewport(383, 1020));
-    handle.mockClear();
-    onViewportApplied.mockClear();
-
-    await bridge.reapplyViewport();
-
-    expect(handle).toHaveBeenCalledOnce();
-    expect(handle).toHaveBeenCalledWith(
-      {
-        type: 'viewport',
-        width: 383,
-        height: 1020,
+  it('calls the FIX-62 receipt hook around each input, even when the sink is missing', async () => {
+    const events: string[] = [];
+    const bridge = new DeferredScreencastInputBridge({
+      onInputReceived: (envelope) => {
+        events.push(`received:${envelope.payload?.type}`);
+        return () => events.push('settled');
       },
-      undefined,
+    });
+    await bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'mouseDown', x: 1, y: 1 } }),
     );
-    expect(onViewportApplied).toHaveBeenCalledWith({ width: 383, height: 1020 });
+    await bridge.attach({
+      handle: async (input) => {
+        events.push(`handled:${input.type}`);
+      },
+    });
+    await bridge.receive(
+      JSON.stringify({ type: 'input', payload: { type: 'insertText', text: 'a' } }),
+    );
+    expect(events).toEqual([
+      'received:mouseDown',
+      'settled',
+      'received:insertText',
+      'handled:insertText',
+      'settled',
+    ]);
   });
+});
+
+it('checks current observation within the owned dispatch checkpoint, after queue delay', async () => {
+  let live = true;
+  let queued: (() => Promise<void>) | null = null;
+  let effects = 0;
+  const bridge = new DeferredScreencastInputBridge({
+    beforeDispatch: async () => {
+      if (!live) throw new Error('expired');
+    },
+    runOwnedInput: async (action) => {
+      queued = () => action(new AbortController().signal);
+    },
+  });
+  await bridge.attach({
+    handle: async () => {
+      effects++;
+    },
+  });
+  await bridge.receive(
+    JSON.stringify({
+      type: 'input',
+      payload: { type: 'mouseDown', x: 100, y: 100 },
+    }),
+  );
+  live = false;
+  await expect(queued!()).rejects.toThrow('expired');
+  expect(effects).toBe(0);
 });

@@ -7,7 +7,7 @@ import {
   startOwnedOperation,
   withOperationDispatchScope,
 } from '../execution/owned-operation.js';
-import { _resetMasterKeyCacheForTests } from './cookie-crypto.js';
+import { _resetMasterKeyCacheForTests, encryptCookieJson } from './cookie-crypto.js';
 import { injectCookies, injectPendingCookies } from './sync-service.js';
 
 vi.mock('../config/logger.js', () => ({
@@ -112,6 +112,10 @@ function fixture(
   if (opts.row === 'invalid-json') row.cookiesJson = '{';
   if (opts.row === 'not-array') row.cookiesJson = '{}';
   if (opts.row === 'empty-array') row.cookiesJson = '[]';
+  vi.stubEnv('COOKIE_MASTER_KEY', Buffer.alloc(32, 1).toString('base64'));
+  _resetMasterKeyCacheForTests();
+  if (row.cookiesJson) Object.assign(row, encryptCookieJson(row.cookiesJson));
+  row.cookiesJson = '';
   if (opts.row === 'bad-encryption') {
     vi.stubEnv('COOKIE_MASTER_KEY', Buffer.alloc(32, 1).toString('base64'));
     _resetMasterKeyCacheForTests();

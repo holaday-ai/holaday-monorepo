@@ -34,11 +34,6 @@ describe('task status sets', () => {
   });
 
   it('counts queued in global queue depth without counting parked user waits', () => {
-    expect(TASK_QUEUE_DEPTH_STATUSES).toEqual([
-      'pending',
-      'planning',
-      'queued',
-      'executing',
-    ]);
+    expect(TASK_QUEUE_DEPTH_STATUSES).toEqual(['pending', 'planning', 'queued', 'executing']);
   });
 });

@@ -23,15 +23,7 @@ test('every independent proof is mandatory, exact and not truthy', () => {
     const absent = { ...ready };
     delete absent[key];
     assert.equal(evaluateMaintenanceCutover(absent).allowed, false, key);
-    for (const bad of [
-      null,
-      0,
-      1,
-      '',
-      'true',
-      'false',
-      key === 'needsReconciliation' ? true : false,
-    ])
+    for (const bad of [null, 0, 1, '', 'true', 'false', key === 'needsReconciliation'])
       assert.equal(
         evaluateMaintenanceCutover({ ...ready, [key]: bad }).allowed,
         false,

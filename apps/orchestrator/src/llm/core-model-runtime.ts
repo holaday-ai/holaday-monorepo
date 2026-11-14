@@ -1,4 +1,6 @@
+import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
+import { MessagesAdapterError } from './messages-adapter.js';
 import {
   type MessagesAdapter,
   type QwenMessagesEnvironment,
@@ -13,9 +15,9 @@ import {
   type CoreModelLane,
   type CoreRolloutMode,
   type ModelRuntimePolicy,
-  assertProductionModelRuntimePolicy,
   resolveCoreModelLaneAccess,
 } from './model-runtime-policy.js';
+import { safeProviderDiagnostics } from './provider-error-diagnostics.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
 
@@ -26,6 +28,26 @@ export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   QWEN_CORE_ENABLED_LANES: string;
   QWEN_CORE_ALLOWLIST: string;
   QWEN_RESPONSES_ADAPTER_ENABLED: boolean;
+  /**
+   * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 step is off unless this is true. Off, an
+   * account's first task writes the region of its entry (llm/model-data-region-first-task.ts);
+   * until then — and for anything run before a first task — an account (or organization) without
+   * a region runs in MODEL_DATA_REGION_DEFAULT. One that chose keeps its choice.
+   */
+  MODEL_DATA_REGION_SELECTION_ENABLED?: boolean;
+  /** The region an unassigned account runs in while the selection step is off (default cn). */
+  MODEL_DATA_REGION_DEFAULT?: 'cn' | 'intl';
+}
+
+/** The region an account that never chose one runs in, or null when it must choose first. */
+export function unassignedModelDataRegion(
+  environment: Pick<
+    CoreModelRuntimeEnvironment,
+    'MODEL_DATA_REGION_SELECTION_ENABLED' | 'MODEL_DATA_REGION_DEFAULT'
+  >,
+): 'cn' | 'intl' | null {
+  if (environment.MODEL_DATA_REGION_SELECTION_ENABLED === true) return null;
+  return environment.MODEL_DATA_REGION_DEFAULT ?? 'cn';
 }
 
 export interface CoreModelObservation {
@@ -81,11 +103,6 @@ export interface CoreModelRuntimeInput {
 const RESPONSES_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
 
 export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModelRuntimeResolution {
-  assertProductionModelRuntimePolicy(
-    input.environment.NODE_ENV,
-    input.environment.MODEL_RUNTIME_POLICY,
-  );
-
   const access = resolveCoreModelLaneAccess({
     mode: input.environment.QWEN_CORE_ROLLOUT_MODE,
     enabledLanes: input.environment.QWEN_CORE_ENABLED_LANES,
@@ -106,10 +123,13 @@ export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModel
   try {
     region = resolveModelDataRegionOwnership(input.ownership).region;
   } catch (error) {
-    if (error instanceof ModelDataRegionError) {
-      return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
-    }
-    throw error;
+    if (!(error instanceof ModelDataRegionError)) throw error;
+    const fallback =
+      error.code === 'INVALID_MODEL_DATA_REGION'
+        ? null
+        : unassignedModelDataRegion(input.environment);
+    if (!fallback) return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
+    region = fallback;
   }
 
   try {
@@ -168,6 +188,24 @@ function observeMessagesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.create(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            ...result.usage,
+            cacheMode:
+              Array.isArray(request.system) &&
+              request.system.some((block) => block.cacheControl === 'ephemeral')
+                ? 'explicit'
+                : 'implicit',
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'messages' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -175,10 +213,37 @@ function observeMessagesAdapter(
           outcome: 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+            providerRequestId:
+              error instanceof MessagesAdapterError
+                ? (error.diagnostics.requestId ?? undefined)
+                : undefined,
+            requestMeta: {
+              lane,
+              ...(error instanceof MessagesAdapterError
+                ? {
+                    providerError: safeProviderDiagnostics(error.diagnostics),
+                    // FIX-47: which check failed and what came back (masked, ≤ 4 KB).
+                    ...(error.forensics ? { invalidResponse: error.forensics } : {}),
+                  }
+                : {}),
+            },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -186,7 +251,7 @@ function observeMessagesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }
@@ -207,6 +272,24 @@ function observeResponsesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.stream(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        const cached = result.usage.cachedInputTokens ?? null;
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens:
+              cached === null ? result.usage.inputTokens : result.usage.inputTokens - cached,
+            outputTokens: result.usage.outputTokens,
+            cacheReadInputTokens: cached,
+            cacheCreationInputTokens: 0,
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'responses' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -214,10 +297,23 @@ function observeResponsesAdapter(
           outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: 'supercar.turn',
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            requestMeta: { lane },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -225,7 +321,7 @@ function observeResponsesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }

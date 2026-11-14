@@ -1,0 +1,30 @@
+{
+  "note": "Offline route audit corpus. bench1Core: BROWSER-BENCH-1 core 12 (submitted with the bench1Prefix). scrapeControls: pure information tasks that must stay on the scrape lane.",
+  "bench1Prefix": "请使用云端浏览器，",
+  "bench1Core": [
+    "Google 搜索「HOLA DAY AI」返回前5条标题和链接",
+    "Google 搜索「新加坡 天气」读出天气卡片",
+    "YouTube 公开视频页读标题/频道/播放量/发布日期（不播放）",
+    "YouTube 搜索「Playwright tutorial」返回前5个视频标题",
+    "京东或淘宝公开商品搜索页读前5个商品名和价格",
+    "维基百科长页面，分段读取并总结第3节",
+    "从一个页面打开3个链接到新标签，分别读标题后回到第一个",
+    "httpbin.org/forms/post 或 the-internet.herokuapp.com 填表单与日期控件，只填不提交并截图",
+    "the-internet.herokuapp.com/download 下载小文件，报告文件名与大小",
+    "the-internet.herokuapp.com 的 iframe 与 JavaScript alerts",
+    "the-internet.herokuapp.com/infinite_scroll 滚动5次后读内容",
+    "打开会出现登录墙/验证码的页面，确认正确暂停交给用户"
+  ],
+  "scrapeControls": [
+    "总结这篇文章 https://www.36kr.com/p/2963410101321345",
+    "查一下今天的人民币兑美元汇率",
+    "搜索一下最近关于新能源汽车补贴的新闻",
+    "搜索杭州明天的天气预报",
+    "https://en.wikipedia.org/wiki/Hangzhou 这一页讲了什么",
+    "查询一下苹果公司最新的季度营收",
+    "搜索 Playwright 和 Selenium 的主要区别",
+    "查找几篇关于大语言模型安全的最新报道",
+    "查询 2026 年国庆假期高速公路免费通行时间",
+    "总结 https://nodejs.org/en/blog 上最近的版本发布说明"
+  ]
+}

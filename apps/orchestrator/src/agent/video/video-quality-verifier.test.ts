@@ -190,9 +190,7 @@ describe('verifyFinalVideoQuality', () => {
     expect(analysisInput.prompt).toMatch(/静态抽样帧.*连续运动|不能验证.*口型同步/);
     expect(analysisInput.prompt).toMatch(/进入.*拿起.*放回|分阶段动作/);
     expect(analysisInput.prompt).toMatch(/required_action_missing/);
-    expect(analysisInput.prompt).toMatch(
-      /关键主体.*触碰或越过.*画面边缘.*subject_out_of_frame/,
-    );
+    expect(analysisInput.prompt).toMatch(/关键主体.*触碰或越过.*画面边缘.*subject_out_of_frame/);
     expect(result.status).toBe('fail');
   });
 

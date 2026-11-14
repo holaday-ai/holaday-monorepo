@@ -1,24 +1,17 @@
-import { CircleSlash, Download, ExternalLink, FileText, Loader2, X } from 'lucide-react';
-import * as React from 'react';
+import { useToast } from '@/components/ui/toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
   fetchFileBlobAuthed,
   isUnavailableFileStatus,
 } from '@/lib/download-file';
-import { formatFileSize } from '@/lib/file-size';
 import { filePreviewKind } from '@/lib/file-preview-kind';
-import {
-  markFileUnavailableFromStatus,
-  useFileUnavailable,
-} from '@/lib/unavailable-file-registry';
-import { useToast } from '@/components/ui/toast';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { formatFileSize } from '@/lib/file-size';
+import { markFileUnavailableFromStatus, useFileUnavailable } from '@/lib/unavailable-file-registry';
+import * as Dialog from '@radix-ui/react-dialog';
+import { CircleSlash, Download, ExternalLink, FileText, Loader2, X } from 'lucide-react';
+import * as React from 'react';
 
 export interface FilePreviewPayload {
   fileId: string;
@@ -35,6 +28,10 @@ interface Props {
   payload: FilePreviewPayload | null;
   onClose(): void;
   onUnavailable?(fileId: string): void;
+  /** Only the approved file-library page opts into its reference composition. */
+  approved?: boolean;
+  createdAt?: string | number | Date;
+  onUse?(): void;
 }
 
 /**
@@ -54,6 +51,9 @@ export function FilePreviewModal({
   payload,
   onClose,
   onUnavailable,
+  approved = false,
+  createdAt,
+  onUse,
 }: Props): JSX.Element | null {
   const toast = useToast();
   const mountedRef = React.useRef(false);
@@ -177,13 +177,13 @@ export function FilePreviewModal({
   }, [objectUrl]);
 
   React.useEffect(() => {
-    if (!payload) return;
+    if (!payload || approved) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [payload, onClose]);
+  }, [payload, onClose, approved]);
 
   if (!payload) return null;
 
@@ -202,7 +202,8 @@ export function FilePreviewModal({
           setErrorMessage(downloadFailureMessage(res.status));
           onUnavailableRef.current?.(payload.fileId);
         }
-        toast.show(downloadFailureMessage(res.status), 'error');
+        if (!isUnavailableFileStatus(res.status))
+          toast.show(downloadFailureMessage(res.status), 'error');
       }
     } finally {
       if (mountedRef.current) {
@@ -216,137 +217,169 @@ export function FilePreviewModal({
 
   return (
     <TooltipProvider delayDuration={120}>
-      <div
-        className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm"
-        role="dialog"
-        aria-modal
-        onClick={onClose}
-      >
+      <PreviewFocusSurface approved={approved} onClose={onClose} name={payload.filename}>
         <div
-          className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
-          onClick={(e) => e.stopPropagation()}
+          className={`${approved ? 'hd-approved-file-preview ' : ''}fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm`}
+          role="dialog"
+          aria-modal
+          onClick={onClose}
         >
-          <header className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-4 py-2.5 dark:border-white/10">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-foreground" title={payload.filename}>
-                {payload.filename}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
-              </div>
-            </div>
-            <IconTooltip
-              label={unavailable ? '文件已失效' : downloading ? '下载中' : '下载'}
-            >
-              <button
-                type="button"
-                onClick={() => void handleDownload()}
-                disabled={downloading || unavailable}
-                aria-label={unavailable ? '文件已失效' : '下载到本地'}
-                title={
-                  unavailable ? '文件已失效' : downloading ? '下载中' : '下载'
-                }
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
-              >
-                {downloading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </IconTooltip>
-            <IconTooltip label="关闭">
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="关闭预览"
-                title="关闭"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </IconTooltip>
-          </header>
-          <div className="relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
-            {loading && (
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            )}
-            {!loading && errorMessage && (
-              <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                {unavailable ? (
-                  <CircleSlash className="h-8 w-8 text-[#8B93A6]" />
-                ) : (
-                  <ExternalLink className="h-8 w-8 text-[#EA1F59]" />
-                )}
-                <div className="font-medium text-foreground/85">
-                  {unavailable ? '文件已失效' : '无法加载预览'}
+          <div
+            className="flex h-[min(90vh,820px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-lg border border-[#DCDDDD] bg-white shadow-[0_16px_48px_rgba(17,24,39,0.16)] dark:border-white/10 dark:bg-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-4 py-2.5 dark:border-white/10">
+              <div className="min-w-0 flex-1">
+                <div
+                  className="truncate text-sm font-medium text-foreground"
+                  title={payload.filename}
+                >
+                  {payload.filename}
                 </div>
-                <div className="max-w-sm text-xs">
-                  {unavailable
-                    ? '文件记录仍保留，但内容已无法预览、下载或用于新任务。'
-                    : errorMessage}
+                <div className="text-[11px] text-muted-foreground">
+                  {formatFileSize(payload.sizeBytes)} · {mime || '未知类型'}
                 </div>
               </div>
-            )}
-            {!loading && !errorMessage && objectUrl && kind === 'image' && (
-              <img
-                src={objectUrl}
-                alt={payload.filename}
-                className="max-h-full max-w-full object-contain"
-              />
-            )}
-            {!loading && !errorMessage && objectUrl && kind === 'video' && (
-              <video
-                src={objectUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="max-h-full max-w-full"
-              />
-            )}
-            {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
-              <iframe
-                src={objectUrl}
-                title={payload.filename}
-                className="h-full w-full border-0"
-              />
-            )}
-            {!loading && !errorMessage && textBody !== null && (
-              <pre className="m-0 max-h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
-                {textBody}
-              </pre>
-            )}
-            {!loading &&
-              !errorMessage &&
-              !objectUrl &&
-              textBody === null &&
-              kind === 'download' && (
-                <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                  <FileText className="h-8 w-8 text-[#595757]" />
-                  <div className="font-medium text-foreground/85">
-                    无法预览此文件类型
-                  </div>
-                  <IconTooltip label={downloading ? '下载中' : '下载'}>
-                    <button
-                      type="button"
-                      onClick={() => void handleDownload()}
-                      disabled={downloading}
-                      aria-label="下载到本地"
-                      title={downloading ? '下载中' : '下载'}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
-                    >
-                      {downloading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </IconTooltip>
-                </div>
+              {!unavailable && (
+                <IconTooltip label={downloading ? '下载中' : '下载'}>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownload()}
+                    disabled={downloading}
+                    aria-label="下载到本地"
+                    title={downloading ? '下载中' : '下载'}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-muted-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                  >
+                    {downloading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </IconTooltip>
               )}
+              <IconTooltip label="关闭">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="关闭预览"
+                  title="关闭"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[#EFEFEF]/70 hover:text-foreground dark:hover:bg-white/10"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </IconTooltip>
+            </header>
+            <div className={approved ? 'hd-file-preview-body' : 'contents'}>
+              <div className="hd-file-preview-canvas relative flex flex-1 items-center justify-center overflow-auto bg-[#EFEFEF]/45 dark:bg-background/40">
+                {loading && (
+                  <span role="status" aria-label="正在加载预览">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground motion-reduce:animate-none" />
+                  </span>
+                )}
+                {!loading && errorMessage && (
+                  <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                    {unavailable ? (
+                      <CircleSlash className="h-8 w-8 text-[#8B93A6]" />
+                    ) : (
+                      <ExternalLink className="h-8 w-8 text-[#FF0061]" />
+                    )}
+                    <div className="font-medium text-foreground/85">
+                      {unavailable ? '文件已不可用' : '无法加载预览'}
+                    </div>
+                    <div className="max-w-sm text-xs">
+                      {unavailable
+                        ? '文件记录仍保留，但内容已无法预览、下载或用于新任务。'
+                        : errorMessage}
+                    </div>
+                  </div>
+                )}
+                {!loading && !errorMessage && objectUrl && kind === 'image' && (
+                  <img
+                    src={objectUrl}
+                    alt={payload.filename}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                )}
+                {!loading && !errorMessage && objectUrl && kind === 'video' && (
+                  <video
+                    src={objectUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-full max-w-full"
+                  />
+                )}
+                {!loading && !errorMessage && objectUrl && kind === 'pdf' && (
+                  <iframe
+                    src={objectUrl}
+                    title={payload.filename}
+                    className="h-full w-full border-0"
+                  />
+                )}
+                {!loading && !errorMessage && textBody !== null && (
+                  <pre className="m-0 h-full w-full overflow-auto whitespace-pre-wrap break-words bg-white px-6 py-4 font-mono text-[12px] text-[#2F2F2F] dark:bg-card dark:text-foreground">
+                    {textBody}
+                  </pre>
+                )}
+                {!loading &&
+                  !errorMessage &&
+                  !objectUrl &&
+                  textBody === null &&
+                  kind === 'download' && (
+                    <div className="flex flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                      <FileText className="h-8 w-8 text-[#595757]" />
+                      <div className="font-medium text-foreground/85">无法预览此文件类型</div>
+                      <IconTooltip label={downloading ? '下载中' : '下载'}>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownload()}
+                          disabled={downloading}
+                          aria-label="下载到本地"
+                          title={downloading ? '下载中' : '下载'}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-foreground transition-colors hover:border-[#ADADAD] hover:bg-[#EFEFEF]/55 dark:border-white/10 dark:bg-card dark:hover:bg-white/10"
+                        >
+                          {downloading ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </IconTooltip>
+                    </div>
+                  )}
+              </div>
+              {approved && (
+                <aside className="hd-file-preview-info">
+                  <h2>文件信息</h2>
+                  <dl>
+                    <dt>格式</dt>
+                    <dd>{mime || '未知类型'}</dd>
+                    <dt>大小</dt>
+                    <dd>{formatFileSize(payload.sizeBytes)}</dd>
+                    {createdAt && Number.isFinite(new Date(createdAt).getTime()) ? (
+                      <>
+                        <dt>添加</dt>
+                        <dd>{new Date(createdAt).toLocaleString('zh-CN')}</dd>
+                      </>
+                    ) : null}
+                  </dl>
+                  {onUse && (
+                    <>
+                      <button type="button" disabled={unavailable} onClick={onUse}>
+                        用于新任务
+                      </button>
+                      <small>
+                        {unavailable ? '文件已不可用，无法作为参考资料' : '把这份文件作为参考资料'}
+                      </small>
+                    </>
+                  )}
+                </aside>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </PreviewFocusSurface>
     </TooltipProvider>
   );
 }
@@ -363,5 +396,39 @@ function IconTooltip({
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function PreviewFocusSurface({
+  approved,
+  onClose,
+  name,
+  children,
+}: { approved: boolean; onClose(): void; name: string; children: React.ReactElement }) {
+  const trigger = React.useRef(document.activeElement as HTMLElement | null);
+  const surface = React.useRef<HTMLDivElement>(null);
+  if (!approved) return children;
+  return (
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Content
+          ref={surface}
+          asChild
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            surface.current?.focus();
+          }}
+          aria-label={name}
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (trigger.current?.isConnected) trigger.current.focus();
+          }}
+        >
+          {children}
+        </Dialog.Content>
+        <Dialog.Title className="sr-only">{name}</Dialog.Title>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

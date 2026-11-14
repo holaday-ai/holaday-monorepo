@@ -1,4 +1,8 @@
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
+import {
+  type BrowserCapabilities,
+  browserCapabilities,
+} from '../../config/browser-capabilities.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
@@ -17,6 +21,7 @@ type Session = {
   userId: string;
   taskId: string;
   selection: LocalChromeSelection;
+  capabilities: BrowserCapabilities;
   control: BrowserControl;
   client: SelectedChromeClient;
   cancellation: AbortController;
@@ -50,6 +55,7 @@ export class LocalChromeTaskSessions {
     selection: LocalChromeSelection,
     send: Send,
     ticket?: LocalChromeReservation,
+    capabilities: BrowserCapabilities = Object.freeze(browserCapabilities(userId)),
   ): Session {
     if (this.get(userId, taskId)) throw new Error('chrome_task_exists');
     const reservation = ticket ?? this.reserve(userId, selection);
@@ -67,6 +73,7 @@ export class LocalChromeTaskSessions {
       taskId,
       extensionClientId: selection.extensionClientId,
       control,
+      routingV2: capabilities.routingV2,
       send,
     });
     const session = {
@@ -74,6 +81,7 @@ export class LocalChromeTaskSessions {
       userId,
       taskId,
       selection,
+      capabilities,
       control,
       client,
       cancellation: new AbortController(),

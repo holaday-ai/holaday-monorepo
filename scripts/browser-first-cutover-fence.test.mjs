@@ -1,8 +1,3 @@
-import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
-import {
-  ingressDiagnosticError,
-  ingressDiagnosticStage,
-} from './browser-first-cutover-ingress-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -13,6 +8,11 @@ import {
   restoreCutoverIngress,
   verifyCutoverFence,
 } from './browser-first-cutover-fence.mjs';
+import {
+  ingressDiagnosticError,
+  ingressDiagnosticStage,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
+import { installPaymentPortFence, verifyPaymentPortFence } from './browser-payment-port-fence.mjs';
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 const original = `server {
  listen 127.0.0.1:8080;
@@ -473,7 +473,7 @@ for (const [name, mutate, stage] of [
   [
     'clock',
     (io) => {
-      io.now = () => NaN;
+      io.now = () => Number.NaN;
     },
     'PORT_CLOCK',
   ],
@@ -613,8 +613,8 @@ for (const stage of ['LOCAL_OWNER', 'STORE_CLOCK', 'APPROVAL_DEADLINE']) {
   });
 }
 test('payment port guard retains original successful read order and command exactly once', async () => {
-  const io = portFixture(),
-    calls = [];
+  const io = portFixture();
+  const calls = [];
   for (const key of ['now', 'assertJournalOwnership', 'readFenceReceipt', 'execNft']) {
     const original = io[key];
     io[key] = (...args) => {
@@ -697,7 +697,7 @@ for (const [fault, expectedStage] of [
       'execFile',
       'ingressDiagnosticError',
       'readFile',
-      block + ';return system;',
+      `${block};return system;`,
     )(execFile, ingressDiagnosticError, () => {});
     const io = portFixture();
     io.execNft = system.execNft;
@@ -720,8 +720,8 @@ for (const [fault, expectedStage] of [
 }
 
 test('payment installation keeps one atomic attempt and rejects uncertain acknowledgement without replay', async () => {
-  const io = portFixture(),
-    calls = [];
+  const io = portFixture();
+  const calls = [];
   io.readFenceReceipt = async () => ({ ...portBinding, stage: 'orders', phase: 'installing' });
   io.readPolicy = async () =>
     readFileSync(

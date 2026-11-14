@@ -1,7 +1,7 @@
-import * as React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
 import { getAccessToken } from '@/lib/auth';
 import { authRedirectTarget } from '@/lib/auth-redirect';
+import type * as React from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 
 /**
  * Mirror of RequireAuth — bounces an ALREADY-authenticated visitor

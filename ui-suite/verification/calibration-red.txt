@@ -1,0 +1,83 @@
+TAP version 13
+# Subtest: hidden native toggles use their visible wrapping or associated label
+not ok 1 - hidden native toggles use their visible wrapping or associated label
+  ---
+  duration_ms: 2072.651833
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/browser.test.mjs:653:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    'failed' !== 'passed'
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'passed'
+  actual: 'failed'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/browser.test.mjs:663:14)
+    runNextTicks (node:internal/process/task_queues:64:5)
+    process.processImmediate (node:internal/timers:452:9)
+    process.callbackTrampoline (node:internal/async_hooks:130:17)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: video style current category is idempotent while another category still changes state
+not ok 2 - video style current category is idempotent while another category still changes state
+  ---
+  duration_ms: 1142.787167
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/browser.test.mjs:669:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+
+    + 'failed'
+    - 'idempotent'
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'idempotent'
+  actual: 'failed'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/browser.test.mjs:679:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+not ok 3 - disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+  ---
+  duration_ms: 1.001083
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/core.test.mjs:212:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    false !== true
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/ui-suite/tests/core.test.mjs:215:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 0
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3522.395167

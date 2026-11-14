@@ -178,7 +178,7 @@ export function StockScreeningWorkbench({
             event.preventDefault();
             void preview();
           }}
-          className="mt-4 flex min-h-[48px] items-center gap-2 rounded-[8px] border border-[#DADDE4] bg-[#FCFCFD] p-1.5 focus-within:border-[#EA1F59]/45 focus-within:ring-2 focus-within:ring-[#EA1F59]/10"
+          className="mt-4 flex min-h-[48px] items-center gap-2 rounded-[8px] border border-[#DADDE4] bg-[#FCFCFD] p-1.5 focus-within:border-[#FF0061]/45 focus-within:ring-2 focus-within:ring-[#FF0061]/10"
         >
           <Search className="ml-2 h-4 w-4 shrink-0 text-[#98A2B3]" aria-hidden />
           <input
@@ -190,7 +190,7 @@ export function StockScreeningWorkbench({
           <button
             type="submit"
             disabled={!prompt.trim() || previewing}
-            className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[7px] bg-[#EA1F59] px-3 text-[12px] font-semibold text-white transition hover:bg-[#D91952] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[7px] bg-[#FF0061] px-3 text-[12px] font-semibold text-white transition hover:bg-[#D91952] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             识别条件
@@ -224,7 +224,7 @@ export function StockScreeningWorkbench({
               onClick={reset}
               aria-label="清空筛选条件"
               title="清空筛选条件"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#D91952]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[7px] border border-[#DDE0E6] bg-white text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#D91952]"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -265,7 +265,7 @@ export function StockScreeningWorkbench({
               type="button"
               onClick={() => void run()}
               disabled={!readyToRun || running}
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] border border-[#EA1F59] bg-white px-4 text-[12px] font-semibold text-[#D91952] transition hover:bg-[#FFF0F4] disabled:cursor-not-allowed disabled:border-[#DADDE4] disabled:text-[#98A2B3]"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] border border-[#FF0061] bg-white px-4 text-[12px] font-semibold text-[#D91952] transition hover:bg-[#FFF0F4] disabled:cursor-not-allowed disabled:border-[#DADDE4] disabled:text-[#98A2B3]"
             >
               {running ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -415,7 +415,7 @@ function CriterionEditor({
                 next[index] = Number(event.target.value);
                 onChange({ ...criterion, value: next });
               }}
-              className="h-8 w-20 rounded-[6px] border border-[#DADDE4] bg-white px-2 text-[11px] tabular-nums text-[#303846] outline-none focus:border-[#EA1F59]/45"
+              className="h-8 w-20 rounded-[6px] border border-[#DADDE4] bg-white px-2 text-[11px] tabular-nums text-[#303846] outline-none focus:border-[#FF0061]/45"
             />
           ))}
           <span className="text-[10px] text-[#7A8290]">{criterion.unit}</span>
@@ -430,7 +430,7 @@ function CriterionEditor({
             }
             placeholder="补充数值"
             aria-label={`设置${criterion.label}阈值`}
-            className="h-8 w-28 rounded-[6px] border border-[#DADDE4] bg-white px-2 text-[11px] tabular-nums text-[#303846] outline-none placeholder:text-[#A7ADBA] focus:border-[#EA1F59]/45"
+            className="h-8 w-28 rounded-[6px] border border-[#DADDE4] bg-white px-2 text-[11px] tabular-nums text-[#303846] outline-none placeholder:text-[#A7ADBA] focus:border-[#FF0061]/45"
           />
           <span className="text-[10px] text-[#7A8290]">{criterion.unit}</span>
         </div>
@@ -555,7 +555,7 @@ function CandidateRow({
           type="button"
           onClick={onAdd}
           disabled={adding}
-          className="inline-flex h-8 w-fit shrink-0 items-center justify-center gap-1 rounded-[7px] border border-[#DADDE4] bg-white px-2.5 text-[11px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#D91952] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-8 w-fit shrink-0 items-center justify-center gap-1 rounded-[7px] border border-[#DADDE4] bg-white px-2.5 text-[11px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#D91952] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {adding ? (
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />

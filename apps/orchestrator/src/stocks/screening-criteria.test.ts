@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type StockScreenCriterion,
   canonicalStockScreenCriterion,
   parseStockScreenPrompt,
   validateStockScreenCriteria,
-  type StockScreenCriterion,
 } from './screening-criteria.js';
 
 describe('parseStockScreenPrompt', () => {
@@ -13,13 +13,15 @@ describe('parseStockScreenPrompt', () => {
     );
 
     expect(result.unparsedClauses).toEqual([]);
-    expect(result.criteria.map(({ field, operator, value, unit, status }) => ({
-      field,
-      operator,
-      value,
-      unit,
-      status,
-    }))).toEqual([
+    expect(
+      result.criteria.map(({ field, operator, value, unit, status }) => ({
+        field,
+        operator,
+        value,
+        unit,
+        status,
+      })),
+    ).toEqual([
       { field: 'exclude_st', operator: 'eq', value: true, unit: null, status: 'ready' },
       { field: 'pe_ttm', operator: 'lt', value: 30, unit: null, status: 'ready' },
       { field: 'pb', operator: 'lte', value: 3, unit: null, status: 'ready' },
@@ -88,7 +90,9 @@ describe('parseStockScreenPrompt', () => {
     const result = parseStockScreenPrompt('ROE高于10%且资产负债率低于50%');
 
     expect(result.unparsedClauses).toEqual([]);
-    expect(result.criteria.map(({ field, operator, value }) => ({ field, operator, value }))).toEqual([
+    expect(
+      result.criteria.map(({ field, operator, value }) => ({ field, operator, value })),
+    ).toEqual([
       { field: 'roe', operator: 'gt', value: 10 },
       { field: 'debt_ratio', operator: 'lt', value: 50 },
     ]);
@@ -124,22 +128,28 @@ describe('validateStockScreenCriteria', () => {
   });
 
   it('accepts ready boolean, scalar, and ordered range criteria', () => {
-    expect(validateStockScreenCriteria([
-      criterion({ id: 'st', field: 'exclude_st', operator: 'eq', value: true }),
-      criterion({ id: 'pe', value: 30 }),
-      criterion({ id: 'roe-range', field: 'roe', operator: 'between', value: [8, 15] }),
-    ])).toEqual({ ok: true, errors: [] });
+    expect(
+      validateStockScreenCriteria([
+        criterion({ id: 'st', field: 'exclude_st', operator: 'eq', value: true }),
+        criterion({ id: 'pe', value: 30 }),
+        criterion({ id: 'roe-range', field: 'roe', operator: 'between', value: [8, 15] }),
+      ]),
+    ).toEqual({ ok: true, errors: [] });
   });
 
   it('rebuilds display metadata from the field, operator, and value', () => {
-    expect(canonicalStockScreenCriterion(criterion({
-      field: 'roe',
-      operator: 'gt',
-      value: 12,
-      unit: null,
-      label: '立即买入',
-      sourceField: '伪造字段',
-    }))).toMatchObject({
+    expect(
+      canonicalStockScreenCriterion(
+        criterion({
+          field: 'roe',
+          operator: 'gt',
+          value: 12,
+          unit: null,
+          label: '立即买入',
+          sourceField: '伪造字段',
+        }),
+      ),
+    ).toMatchObject({
       field: 'roe',
       operator: 'gt',
       value: 12,

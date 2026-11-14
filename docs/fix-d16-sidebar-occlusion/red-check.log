@@ -1,0 +1,20 @@
+{"cases":3,"issues":[{"rule":"control-occluded","severity":"P1","control":"BUTTON||UI generate failed||0","box":{"x":57,"y":634,"width":177,"height":32}},{"rule":"control-occluded","severity":"P1","control":"BUTTON||UI browser completed||0","box":{"x":57,"y":634,"width":177,"height":32}},{"rule":"control-occluded","severity":"P1","control":"BUTTON||UI generate awaiting_us…||0","box":{"x":57,"y":634,"width":177,"height":32}}],"rowsPreserved":true}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: History controls must remain unobstructed after task/menu actions
+
+3 !== 0
+
+    at file:///Users/yaleiqi/.codex/worktrees/fix-batch-disabled-row/holaday-monorepo/docs/fix-d16-sidebar-occlusion/verify.mjs:58:8
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 3,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v25.6.0

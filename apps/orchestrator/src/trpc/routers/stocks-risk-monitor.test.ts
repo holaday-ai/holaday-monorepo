@@ -16,16 +16,19 @@ describe('stock risk monitor route inputs', () => {
       ...snapshot,
       symbol: '603528',
     });
-    expect(() => createStockRiskMonitorInputSchema.parse({
-      ...snapshot,
-      trustMode: 'delayed',
-      symbol: '603528',
-      name: '客户端伪造名称',
-    })).toThrow();
+    expect(() =>
+      createStockRiskMonitorInputSchema.parse({
+        ...snapshot,
+        trustMode: 'delayed',
+        symbol: '603528',
+        name: '客户端伪造名称',
+      }),
+    ).toThrow();
   });
 
   it('allows monitor status lookup for every radar-readable trust mode', () => {
-    expect(stockRiskMonitorsInputSchema.parse({ ...snapshot, trustMode: 'historical' }))
-      .toMatchObject({ trustMode: 'historical' });
+    expect(
+      stockRiskMonitorsInputSchema.parse({ ...snapshot, trustMode: 'historical' }),
+    ).toMatchObject({ trustMode: 'historical' });
   });
 });

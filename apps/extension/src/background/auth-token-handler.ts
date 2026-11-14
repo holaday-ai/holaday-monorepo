@@ -75,8 +75,7 @@ export function decideStoredAuthTokenAction(
   stored: string | null,
   knownBad: string | null,
 ): StoredAuthTokenAction {
-  const normalizedStored =
-    stored !== null && stored.trim().length > 0 ? stored.trim() : null;
+  const normalizedStored = stored !== null && stored.trim().length > 0 ? stored.trim() : null;
   if (normalizedStored === null) return { kind: 'none' };
   if (knownBad !== null && normalizedStored === knownBad) {
     return { kind: 'refuse', reason: 'known_bad_token' };

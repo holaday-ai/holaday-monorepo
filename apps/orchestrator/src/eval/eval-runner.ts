@@ -106,11 +106,7 @@ async function ensureUser(externalId: string): Promise<void> {
   console.log(`[eval] seeded user ${externalId}`);
 }
 
-async function callMutation<T>(
-  procedure: string,
-  input: unknown,
-  token: string,
-): Promise<T> {
+async function callMutation<T>(procedure: string, input: unknown, token: string): Promise<T> {
   const res = await fetch(`${BASE_URL}/trpc/${procedure}`, {
     method: 'POST',
     headers: {
@@ -122,30 +118,20 @@ async function callMutation<T>(
   const json: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
     const errBody = (json as { error?: { message?: string } }).error;
-    throw new Error(
-      `tRPC ${procedure} ${res.status}: ${errBody?.message ?? JSON.stringify(json)}`,
-    );
+    throw new Error(`tRPC ${procedure} ${res.status}: ${errBody?.message ?? JSON.stringify(json)}`);
   }
   return (json as { result: { data: T } }).result.data;
 }
 
-async function callQuery<T>(
-  procedure: string,
-  input: unknown,
-  token: string,
-): Promise<T> {
-  const url = `${BASE_URL}/trpc/${procedure}?input=${encodeURIComponent(
-    JSON.stringify(input),
-  )}`;
+async function callQuery<T>(procedure: string, input: unknown, token: string): Promise<T> {
+  const url = `${BASE_URL}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`;
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
   });
   const json: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
     const errBody = (json as { error?: { message?: string } }).error;
-    throw new Error(
-      `tRPC ${procedure} ${res.status}: ${errBody?.message ?? JSON.stringify(json)}`,
-    );
+    throw new Error(`tRPC ${procedure} ${res.status}: ${errBody?.message ?? JSON.stringify(json)}`);
   }
   return (json as { result: { data: T } }).result.data;
 }
@@ -180,16 +166,10 @@ async function runDetailRehydrate(
 ): Promise<EvalCaseResult> {
   const failures: string[] = [];
   // Pull the most recent rows; pick the newest 'completed' one.
-  const list = await callQuery<ListOut>(
-    'tasks.list',
-    { limit: 20 },
-    token,
-  );
+  const list = await callQuery<ListOut>('tasks.list', { limit: 20 }, token);
   const completed = list.tasks.find((t) => t.status === 'completed');
   if (!completed) {
-    failures.push(
-      'detailRehydrate: no completed task found in tasks.list (run P0_001 first)',
-    );
+    failures.push('detailRehydrate: no completed task found in tasks.list (run P0_001 first)');
     return {
       id: caseDef.id,
       tier: caseDef.tier,
@@ -206,8 +186,7 @@ async function runDetailRehydrate(
   );
   const hasResult = detail.result != null;
   const hasSteps = (detail.steps ?? []).length > 0;
-  const hasPlanText =
-    typeof detail.planText === 'string' && detail.planText.length > 0;
+  const hasPlanText = typeof detail.planText === 'string' && detail.planText.length > 0;
   if (!hasResult && !hasSteps && !hasPlanText) {
     failures.push(
       'detailRehydrate: detail is empty (no result, no steps, no planText) — SPA would white-screen',
@@ -227,9 +206,7 @@ async function runDetailRehydrate(
     taskId: completed.taskId,
     durationMs: Date.now() - startedAt,
     terminalStatus: detail.status,
-    summarySnippet:
-      (readResultField<string>(detail.result, 'summary') ?? '').slice(0, 200) ||
-      null,
+    summarySnippet: (readResultField<string>(detail.result, 'summary') ?? '').slice(0, 200) || null,
   };
 }
 
@@ -312,9 +289,7 @@ async function runStandardCase(
         );
       }
     }
-    failures.push(
-      ...validateEvalExpectations(detail, exp, '', executionMode, acceptanceSnapshot),
-    );
+    failures.push(...validateEvalExpectations(detail, exp, '', executionMode, acceptanceSnapshot));
   } else if (!timedOut) {
     failures.push('runner: no detail captured — task never created');
   }
@@ -370,9 +345,7 @@ async function runStandardCase(
       const shouldPoll = turn.pollAfter !== false;
       if (shouldPoll) {
         const turnMaxMs =
-          turn.expectations?.maxDurationMs ??
-          exp.maxDurationMs ??
-          DEFAULT_MAX_DURATION_MS;
+          turn.expectations?.maxDurationMs ?? exp.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
         try {
           detail = await pollUntilTerminal(taskId, token, turnMaxMs);
         } catch (err) {
@@ -383,16 +356,10 @@ async function runStandardCase(
         }
       } else {
         try {
-          detail = await callQuery<EvalTaskDetail>(
-            'tasks.detail',
-            { taskId },
-            token,
-          );
+          detail = await callQuery<EvalTaskDetail>('tasks.detail', { taskId }, token);
         } catch (err) {
           failures.push(
-            `${turnLabel}refetch failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            `${turnLabel}refetch failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
@@ -440,10 +407,7 @@ async function runStandardCase(
   };
 }
 
-async function runCase(
-  caseDef: EvalCase,
-  token: string,
-): Promise<EvalCaseResult> {
+async function runCase(caseDef: EvalCase, token: string): Promise<EvalCaseResult> {
   const startedAt = Date.now();
   if (caseDef.expectations.customValidator === 'detailRehydrate') {
     return runDetailRehydrate(caseDef, token, startedAt);

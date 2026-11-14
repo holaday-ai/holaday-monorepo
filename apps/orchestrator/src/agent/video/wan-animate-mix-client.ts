@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, observeMediaCall } from '../media-call-recorder.js';
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_MODEL = 'wan2.2-animate-mix';
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
@@ -18,7 +19,11 @@ export class WanAnimateMixError extends Error {
   readonly status?: number;
   readonly code?: string;
 
-  constructor(message: string, kind: WanAnimateMixErrorKind, details: { status?: number; code?: string } = {}) {
+  constructor(
+    message: string,
+    kind: WanAnimateMixErrorKind,
+    details: { status?: number; code?: string } = {},
+  ) {
     super(message);
     this.name = 'WanAnimateMixError';
     this.kind = kind;
@@ -68,7 +73,10 @@ function trimBaseUrl(value: string | undefined): string {
   return (value || DEFAULT_BASE_URL).replace(/\/+$/, '');
 }
 
-function headersFor(params: GenerateWanAnimateMixParams, asyncRequest = false): Record<string, string> {
+function headersFor(
+  params: GenerateWanAnimateMixParams,
+  asyncRequest = false,
+): Record<string, string> {
   return {
     authorization: `Bearer ${params.apiKey}`,
     ...(asyncRequest ? { 'x-dashscope-async': 'enable', 'content-type': 'application/json' } : {}),
@@ -80,9 +88,13 @@ async function readBody(response: Response): Promise<ProviderBody> {
   try {
     return (await response.json()) as ProviderBody;
   } catch {
-    throw new WanAnimateMixError(`Wan Animate returned invalid JSON (HTTP ${response.status})`, 'bad_response', {
-      status: response.status,
-    });
+    throw new WanAnimateMixError(
+      `Wan Animate returned invalid JSON (HTTP ${response.status})`,
+      'bad_response',
+      {
+        status: response.status,
+      },
+    );
   }
 }
 
@@ -103,7 +115,9 @@ async function providerFetch(
   const body = await readBody(response);
   if (!response.ok) {
     throw new WanAnimateMixError(
-      body.message ?? body.output?.message ?? `Wan Animate request failed (HTTP ${response.status})`,
+      body.message ??
+        body.output?.message ??
+        `Wan Animate request failed (HTTP ${response.status})`,
       'http',
       { status: response.status, code: body.code ?? body.output?.code },
     );
@@ -112,9 +126,13 @@ async function providerFetch(
 }
 
 function validate(params: GenerateWanAnimateMixParams): void {
-  if (!params.apiKey) throw new WanAnimateMixError('DASHSCOPE_API_KEY not configured', 'no_api_key');
+  if (!params.apiKey)
+    throw new WanAnimateMixError('DASHSCOPE_API_KEY not configured', 'no_api_key');
   if (!params.imageUrl || !params.referenceVideoUrl) {
-    throw new WanAnimateMixError('Character image and reference video are required', 'invalid_input');
+    throw new WanAnimateMixError(
+      'Character image and reference video are required',
+      'invalid_input',
+    );
   }
 }
 
@@ -123,7 +141,9 @@ function validate(params: GenerateWanAnimateMixParams): void {
  * the reference video's action, expression, environment, and audio while
  * replacing its main subject with the uploaded character image.
  */
-export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams): Promise<WanAnimateMixResult> {
+async function generateWanAnimateMixImpl(
+  params: GenerateWanAnimateMixParams,
+): Promise<WanAnimateMixResult> {
   validate(params);
   const fetchImpl = params.fetchImpl ?? fetch;
   const baseUrl = trimBaseUrl(params.baseUrl);
@@ -161,7 +181,8 @@ export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams)
     const status = body.output?.task_status;
     if (status === 'SUCCEEDED') {
       const videoUrl = body.output?.results?.video_url;
-      if (!videoUrl) throw new WanAnimateMixError('Wan Animate completed without a video URL', 'bad_response');
+      if (!videoUrl)
+        throw new WanAnimateMixError('Wan Animate completed without a video URL', 'bad_response');
       return {
         taskId,
         videoUrl,
@@ -183,4 +204,31 @@ export async function generateWanAnimateMix(params: GenerateWanAnimateMixParams)
     }
     await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
   }
+}
+
+export async function generateWanAnimateMix(
+  params: GenerateWanAnimateMixParams,
+): Promise<WanAnimateMixResult> {
+  return observeMediaCall(
+    {
+      provider: 'alibaba-model-studio',
+      model: params.model ?? DEFAULT_MODEL,
+      region: dashscopeCostRegion(params.baseUrl),
+      purpose: 'media.video',
+    },
+    () => generateWanAnimateMixImpl(params),
+    (result) => ({
+      providerRequestId: result.taskId,
+      ...(result.durationSeconds !== undefined
+        ? {
+            mediaUsage: {
+              unit: 'second',
+              quantity: result.durationSeconds,
+              mode: result.mode,
+              basis: 'provider',
+            },
+          }
+        : {}),
+    }),
+  );
 }

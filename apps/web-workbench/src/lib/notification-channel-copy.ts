@@ -13,8 +13,7 @@ export function maskWebhookUrl(url: string): string {
 
   try {
     const parsed = new URL(trimmed);
-    const secretBearingPart =
-      `${parsed.pathname}${parsed.search}${parsed.hash}` || trimmed;
+    const secretBearingPart = `${parsed.pathname}${parsed.search}${parsed.hash}` || trimmed;
     const tail = secretBearingPart.slice(-6);
     return tail ? `${parsed.host}/...${tail}` : `${parsed.host}/...`;
   } catch {

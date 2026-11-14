@@ -42,9 +42,7 @@ describe('unavailable file registry', () => {
   });
 
   it('shares a definitive unavailable result across remount-compatible references', () => {
-    expect(
-      markFileUnavailableFromStatus('/api/files/file_123/download', 404),
-    ).toBe(true);
+    expect(markFileUnavailableFromStatus('/api/files/file_123/download', 404)).toBe(true);
     expect(isFileUnavailable('file_123')).toBe(true);
     expect(isFileUnavailable('/files/file_123/download?legacy=1')).toBe(true);
   });

@@ -130,7 +130,10 @@ describe('normalizeSyncableCookie', () => {
 
   it('times out a stuck cookie sync post', async () => {
     vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => undefined)),
+    );
     globalThis.chrome = {
       storage: {
         local: {
@@ -208,8 +211,6 @@ describe('normalizeSyncableCookie', () => {
       },
     } as unknown as typeof chrome;
 
-    await expect(syncCookiesToServer([cookie()])).rejects.toThrow(
-      'cookie_sync_response_invalid',
-    );
+    await expect(syncCookiesToServer([cookie()])).rejects.toThrow('cookie_sync_response_invalid');
   });
 });

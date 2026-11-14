@@ -1,3 +1,68 @@
+import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
+import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
+import {
+  type StockResearchDraft,
+  stockResearchIntent,
+} from '@/components/stocks/ApprovedStockComposer';
+import { StockAiCommandComposer } from '@/components/stocks/StockAiCommandComposer';
+import {
+  MarketTemperatureDetails,
+  sectorTrendValues,
+} from '@/components/stocks/StockMarketContextDetails';
+import type { StockScreeningViewState } from '@/components/stocks/StockScreeningWorkbench';
+import {
+  StockMarketContextLayout,
+  StockResearchTable,
+  StockTaskWorkspaceLayout,
+  type StockWorkspaceTask,
+} from '@/components/stocks/StockWorkbenchLayout';
+import { Input } from '@/components/ui/input';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { useToast } from '@/components/ui/toast';
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import {
+  formatStockDateLabel,
+  formatStockDateTimeLabel,
+  formatStockTradeDateLabel,
+  intradayRatioFromLabel,
+  stockChartAxisTicks,
+  stockChartHoverTooltipKind,
+  stockLabelDatePart,
+} from '@/lib/stock-chart-state';
+import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
+import {
+  discoveryPageIndexes,
+  diversifyDiscoveryEditorialArt,
+  diversifyDiscoveryItems,
+  isExplicitWatchlistNews,
+  preferredStockDiscoveryFeed,
+  shouldPrefetchDiscoveryPage,
+} from '@/lib/stock-discovery';
+import {
+  discoveryStoryAliases,
+  discoveryStoryClusterKey,
+  mergeDiscoveryNews,
+} from '@/lib/stock-news';
+import {
+  consumeStockPageInitialRequests,
+  createStockPageInitialRequests,
+} from '@/lib/stock-page-preload';
+import {
+  type StockTemporalCopy,
+  type StockTemporalMode,
+  stockQuickCommands,
+  stockSignalLabel,
+  stockTemporalCopy,
+} from '@/lib/stock-temporal-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { type StockTaskContextInput, useTaskStore } from '@/stores/task-store';
 import {
   ArrowRight,
   Bell,
@@ -15,62 +80,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
-import { NewsDetailModal as StockNewsDetailModal } from '@/components/NewsDetailModal';
-import { StockAiCommandComposer } from '@/components/stocks/StockAiCommandComposer';
-import {
-  MarketTemperatureDetails,
-  sectorTrendValues,
-} from '@/components/stocks/StockMarketContextDetails';
-import type { StockScreeningViewState } from '@/components/stocks/StockScreeningWorkbench';
-import {
-  StockMarketContextLayout,
-  StockResearchTable,
-  StockTaskWorkspaceLayout,
-} from '@/components/stocks/StockWorkbenchLayout';
-import { Input } from '@/components/ui/input';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import { useToast } from '@/components/ui/toast';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import {
-  diversifyDiscoveryEditorialArt,
-  diversifyDiscoveryItems,
-  discoveryPageIndexes,
-  isExplicitWatchlistNews,
-  preferredStockDiscoveryFeed,
-  shouldPrefetchDiscoveryPage,
-} from '@/lib/stock-discovery';
-import {
-  formatStockDateTimeLabel,
-  formatStockDateLabel,
-  formatStockTradeDateLabel,
-  intradayRatioFromLabel,
-  stockChartHoverTooltipKind,
-  stockLabelDatePart,
-  stockChartAxisTicks,
-} from '@/lib/stock-chart-state';
-import { stockDashboardTrustState } from '@/lib/stock-dashboard-trust';
-import {
-  consumeStockPageInitialRequests,
-  createStockPageInitialRequests,
-} from '@/lib/stock-page-preload';
-import { discoveryStoryAliases, discoveryStoryClusterKey, mergeDiscoveryNews } from '@/lib/stock-news';
-import {
-  stockQuickCommands,
-  stockSignalLabel,
-  stockTemporalCopy,
-  type StockTemporalCopy,
-  type StockTemporalMode,
-} from '@/lib/stock-temporal-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
-import { type StockTaskContextInput, useTaskStore } from '@/stores/task-store';
 
 const StockRiskRadar = React.lazy(async () => {
   const component = await import('@/components/stocks/StockRiskRadar');
@@ -210,13 +219,16 @@ export function StockTasksPage(): JSX.Element {
   const [briefingStatus, setBriefingStatus] = React.useState<BriefingStatus | null>(null);
   const [dashboard, setDashboard] = React.useState<DashboardSnapshot | null>(null);
   const [discoveryExtensions, setDiscoveryExtensions] = React.useState<NewsRow[]>([]);
-  const [discoveryMoreAvailable, setDiscoveryMoreAvailable] = React.useState<Record<MarketDiscoveryFeed, boolean>>({
-    'A股要闻': true,
-    '美股要闻': true,
-    '港股要闻': true,
+  const [discoveryMoreAvailable, setDiscoveryMoreAvailable] = React.useState<
+    Record<MarketDiscoveryFeed, boolean>
+  >({
+    A股要闻: true,
+    美股要闻: true,
+    港股要闻: true,
   });
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [prompt, setPrompt] = React.useState('');
+  const [workspaceTask, setWorkspaceTask] = React.useState<StockWorkspaceTask>('watchlist');
   const [loadingDashboard, setLoadingDashboard] = React.useState(true);
   const [refreshingDashboard, setRefreshingDashboard] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -237,14 +249,16 @@ export function StockTasksPage(): JSX.Element {
   const [searchingSymbols, setSearchingSymbols] = React.useState(false);
   const [preferenceRevision, setPreferenceRevision] = React.useState(0);
   const [screeningView, setScreeningView] = React.useState<StockScreeningViewState>('idle');
-  const [activeLeaderboard, setActiveLeaderboard] = React.useState<'涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'>('涨幅榜');
+  const [activeLeaderboard, setActiveLeaderboard] = React.useState<
+    '涨幅榜' | '跌幅榜' | '成交额榜' | '换手率榜'
+  >('涨幅榜');
   const pageAlive = React.useRef(true);
   const dashboardRefreshInFlight = React.useRef(false);
   const dashboardCompletionRetries = React.useRef(0);
   const discoveryNextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
-    'A股要闻': 2,
-    '美股要闻': 2,
-    '港股要闻': 2,
+    A股要闻: 2,
+    美股要闻: 2,
+    港股要闻: 2,
   });
   const discoveryLoadCursor = React.useRef(0);
   const loadingDiscoveryFeeds = React.useRef(new Set<MarketDiscoveryFeed>());
@@ -258,58 +272,63 @@ export function StockTasksPage(): JSX.Element {
     };
   }, []);
 
-  const loadPageData = React.useCallback(async (mode: 'initial' | 'manual' | 'background' = 'background') => {
-    const isRefresh = mode !== 'initial';
-    if (isRefresh && dashboardRefreshInFlight.current) return;
-    if (isRefresh) dashboardRefreshInFlight.current = true;
+  const loadPageData = React.useCallback(
+    async (mode: 'initial' | 'manual' | 'background' = 'background') => {
+      const isRefresh = mode !== 'initial';
+      if (isRefresh && dashboardRefreshInFlight.current) return;
+      if (isRefresh) dashboardRefreshInFlight.current = true;
 
-    let dashboardError: string | null = null;
-    if (mode === 'initial') setLoadingDashboard(true);
-    else if (mode === 'manual') setRefreshingDashboard(true);
-    setLoadError(null);
-    try {
-      const requests = mode === 'initial'
-        ? consumeStockPageInitialRequests()
-        : createStockPageInitialRequests();
-      const watchlistPromise = requests.watchlist.then((rows) => {
-        if (pageAlive.current) setWatchlist(rows);
-        return rows;
-      });
-      const statusPromise = requests.briefingStatus.then((status) => {
-        if (pageAlive.current) setBriefingStatus(status);
-        return status;
-      });
-      const snapshotPromise = requests.dashboardSnapshot.then((snapshot) => {
-        if (pageAlive.current) {
+      let dashboardError: string | null = null;
+      if (mode === 'initial') setLoadingDashboard(true);
+      else if (mode === 'manual') setRefreshingDashboard(true);
+      setLoadError(null);
+      try {
+        const requests =
+          mode === 'initial' ? consumeStockPageInitialRequests() : createStockPageInitialRequests();
+        const watchlistPromise = requests.watchlist.then((rows) => {
+          if (pageAlive.current) setWatchlist(rows);
+          return rows;
+        });
+        const statusPromise = requests.briefingStatus.then((status) => {
+          if (pageAlive.current) setBriefingStatus(status);
+          return status;
+        });
+        const snapshotPromise = requests.dashboardSnapshot
+          .then((snapshot) => {
+            if (pageAlive.current) {
+              setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
+            }
+            return snapshot;
+          })
+          .catch((err) => {
+            if (pageAlive.current) {
+              dashboardError = pageErrorMessage(err);
+              setLoadError(dashboardError);
+            }
+            return null;
+          });
+        const [, , snapshot] = await Promise.all([
+          watchlistPromise,
+          statusPromise,
+          snapshotPromise,
+        ]);
+        if (!pageAlive.current) return;
+        if (snapshot) {
           setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
         }
-        return snapshot;
-      }).catch((err) => {
+        setLoadError(dashboardError);
+      } catch (err) {
+        if (pageAlive.current) setLoadError(pageErrorMessage(err));
+      } finally {
+        if (isRefresh) dashboardRefreshInFlight.current = false;
         if (pageAlive.current) {
-          dashboardError = pageErrorMessage(err);
-          setLoadError(dashboardError);
+          if (mode === 'initial') setLoadingDashboard(false);
+          if (mode === 'manual') setRefreshingDashboard(false);
         }
-        return null;
-      });
-      const [, , snapshot] = await Promise.all([
-        watchlistPromise,
-        statusPromise,
-        snapshotPromise,
-      ]);
-      if (!pageAlive.current) return;
-      if (snapshot) {
-        setDashboard((previous) => preserveDisplayableDashboard(snapshot, previous));
       }
-      setLoadError(dashboardError);
-    } catch (err) {
-      if (pageAlive.current) setLoadError(pageErrorMessage(err));
-    } finally {
-      if (isRefresh) dashboardRefreshInFlight.current = false;
-      if (!pageAlive.current) return;
-      if (mode === 'initial') setLoadingDashboard(false);
-      if (mode === 'manual') setRefreshingDashboard(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   React.useEffect(() => {
     void loadPageData('initial');
@@ -340,14 +359,12 @@ export function StockTasksPage(): JSX.Element {
   }, [dashboard, loadPageData, loadingDashboard, refreshingDashboard]);
 
   const initialDashboardLoading = loadingDashboard && dashboard === null && watchlist === null;
-  const stocks = React.useMemo(
-    () => {
-      const rows = dashboard?.watchlistStocks ?? (initialDashboardLoading ? [] : buildStockRows(watchlist));
-      if (!briefingResult) return rows;
-      return rows.map((stock) => ({ ...stock, report: '已生成' as const }));
-    },
-    [briefingResult, dashboard?.watchlistStocks, initialDashboardLoading, watchlist],
-  );
+  const stocks = React.useMemo(() => {
+    const rows =
+      dashboard?.watchlistStocks ?? (initialDashboardLoading ? [] : buildStockRows(watchlist));
+    if (!briefingResult) return rows;
+    return rows.map((stock) => ({ ...stock, report: '已生成' as const }));
+  }, [briefingResult, dashboard?.watchlistStocks, initialDashboardLoading, watchlist]);
   const marketIndices = dashboard?.marketIndices ?? [];
   const sectors = dashboard?.sectors ?? [];
   const dashboardNews = React.useMemo(() => dashboard?.news ?? [], [dashboard?.news]);
@@ -357,7 +374,8 @@ export function StockTasksPage(): JSX.Element {
   );
   const leaderboards = dashboard?.leaderboards ?? EMPTY_LEADERBOARDS;
   const leaders = pickActiveLeaders(activeLeaderboard, leaderboards);
-  const starStocks = dashboard?.starStocks ?? stocks.filter((stock) => stock.price !== '—').slice(0, 6);
+  const starStocks =
+    dashboard?.starStocks ?? stocks.filter((stock) => stock.price !== '—').slice(0, 6);
   const temperature = dashboard?.temperature ?? null;
   const enabled = briefingStatus?.enabled === true;
   const sampleWatchlist = false;
@@ -366,11 +384,12 @@ export function StockTasksPage(): JSX.Element {
     [dashboard?.trust],
   );
   const temporalCopy = React.useMemo(
-    () => stockTemporalCopy(
-      dashboardTrust.tone,
-      dashboard?.trust?.dataAsOf ?? null,
-      dashboard?.trust?.marketSession ?? null,
-    ),
+    () =>
+      stockTemporalCopy(
+        dashboardTrust.tone,
+        dashboard?.trust?.dataAsOf ?? null,
+        dashboard?.trust?.marketSession ?? null,
+      ),
     [dashboard?.trust?.dataAsOf, dashboard?.trust?.marketSession, dashboardTrust.tone],
   );
   const stockPromptUnavailable =
@@ -398,18 +417,21 @@ export function StockTasksPage(): JSX.Element {
     () => (watchlist ?? []).map((row) => row.symbol),
     [watchlist],
   );
-  const commands = React.useMemo(() => stockQuickCommands(stocks, temporalCopy), [stocks, temporalCopy]);
+  const commands = React.useMemo(
+    () => stockQuickCommands(stocks, temporalCopy),
+    [stocks, temporalCopy],
+  );
   const resetDiscoveryExtensions = React.useCallback(() => {
     setDiscoveryExtensions([]);
     setDiscoveryMoreAvailable({
-      'A股要闻': true,
-      '美股要闻': true,
-      '港股要闻': true,
+      A股要闻: true,
+      美股要闻: true,
+      港股要闻: true,
     });
     discoveryNextPage.current = {
-      'A股要闻': 2,
-      '美股要闻': 2,
-      '港股要闻': 2,
+      A股要闻: 2,
+      美股要闻: 2,
+      港股要闻: 2,
     };
     discoveryLoadCursor.current = 0;
     loadingDiscoveryFeeds.current.clear();
@@ -418,47 +440,64 @@ export function StockTasksPage(): JSX.Element {
     (feed: MarketDiscoveryFeed) => discoveryMoreAvailable[feed],
     [discoveryMoreAvailable],
   );
-  const loadMoreDiscovery = React.useCallback(async (requestedFeed: MarketDiscoveryFeed | '全部'): Promise<boolean> => {
-    const availableFeeds = MARKET_DISCOVERY_FEEDS.filter(
-      (feed) => discoveryMoreAvailable[feed] && !loadingDiscoveryFeeds.current.has(feed),
-    );
-    const feeds = requestedFeed === '全部'
-      ? (() => {
-        for (let offset = 0; offset < MARKET_DISCOVERY_FEEDS.length; offset += 1) {
-          const index = (discoveryLoadCursor.current + offset) % MARKET_DISCOVERY_FEEDS.length;
-          const candidate = MARKET_DISCOVERY_FEEDS[index]!;
-          if (!availableFeeds.includes(candidate)) continue;
-          discoveryLoadCursor.current = (index + 1) % MARKET_DISCOVERY_FEEDS.length;
-          return [candidate];
-        }
-        return [] as MarketDiscoveryFeed[];
-      })()
-      : availableFeeds.includes(requestedFeed) ? [requestedFeed] : [];
-    if (feeds.length === 0) return false;
+  const loadMoreDiscovery = React.useCallback(
+    async (requestedFeed: MarketDiscoveryFeed | '全部'): Promise<boolean> => {
+      const availableFeeds = MARKET_DISCOVERY_FEEDS.filter(
+        (feed) => discoveryMoreAvailable[feed] && !loadingDiscoveryFeeds.current.has(feed),
+      );
+      const feeds =
+        requestedFeed === '全部'
+          ? (() => {
+              for (let offset = 0; offset < MARKET_DISCOVERY_FEEDS.length; offset += 1) {
+                const index =
+                  (discoveryLoadCursor.current + offset) % MARKET_DISCOVERY_FEEDS.length;
+                const candidate = MARKET_DISCOVERY_FEEDS[index]!;
+                if (!availableFeeds.includes(candidate)) continue;
+                discoveryLoadCursor.current = (index + 1) % MARKET_DISCOVERY_FEEDS.length;
+                return [candidate];
+              }
+              return [] as MarketDiscoveryFeed[];
+            })()
+          : availableFeeds.includes(requestedFeed)
+            ? [requestedFeed]
+            : [];
+      if (feeds.length === 0) return false;
 
-    feeds.forEach((feed) => loadingDiscoveryFeeds.current.add(feed));
-    try {
-      const results = await Promise.all(feeds.map(async (feed) => {
-        const page = discoveryNextPage.current[feed];
-        const result = await trpc.stocks.discoveryFeed.query({ feed, page });
-        return { ...result, requestedPage: page };
-      }));
-      if (!pageAlive.current) return false;
-      results.forEach((result) => {
-        discoveryNextPage.current[result.feed] = result.requestedPage + 1;
-      });
-      setDiscoveryMoreAvailable((previous) => ({
-        ...previous,
-        ...Object.fromEntries(results.map((result) => [result.feed, result.hasMore])),
-      }) as Record<MarketDiscoveryFeed, boolean>);
-      setDiscoveryExtensions((previous) => mergeDiscoveryNews(previous, results.flatMap((result) => result.items)));
-      return results.some((result) => result.items.length > 0);
-    } catch {
-      return false;
-    } finally {
-      feeds.forEach((feed) => loadingDiscoveryFeeds.current.delete(feed));
-    }
-  }, [discoveryMoreAvailable]);
+      feeds.forEach((feed) => loadingDiscoveryFeeds.current.add(feed));
+      try {
+        const results = await Promise.all(
+          feeds.map(async (feed) => {
+            const page = discoveryNextPage.current[feed];
+            const result = await trpc.stocks.discoveryFeed.query({ feed, page });
+            return { ...result, requestedPage: page };
+          }),
+        );
+        if (!pageAlive.current) return false;
+        results.forEach((result) => {
+          discoveryNextPage.current[result.feed] = result.requestedPage + 1;
+        });
+        setDiscoveryMoreAvailable(
+          (previous) =>
+            ({
+              ...previous,
+              ...Object.fromEntries(results.map((result) => [result.feed, result.hasMore])),
+            }) as Record<MarketDiscoveryFeed, boolean>,
+        );
+        setDiscoveryExtensions((previous) =>
+          mergeDiscoveryNews(
+            previous,
+            results.flatMap((result) => result.items),
+          ),
+        );
+        return results.some((result) => result.items.length > 0);
+      } catch {
+        return false;
+      } finally {
+        feeds.forEach((feed) => loadingDiscoveryFeeds.current.delete(feed));
+      }
+    },
+    [discoveryMoreAvailable],
+  );
 
   const hasMarketSignals = Boolean(
     temperature ||
@@ -485,7 +524,8 @@ export function StockTasksPage(): JSX.Element {
     let alive = true;
     setSearchingSymbols(true);
     const timer = window.setTimeout(() => {
-      trpc.stocks.searchSymbols.query({ query })
+      trpc.stocks.searchSymbols
+        .query({ query })
         .then((rows) => {
           if (alive) setSymbolSuggestions(rows);
         })
@@ -548,82 +588,98 @@ export function StockTasksPage(): JSX.Element {
     } finally {
       setWatchlistSaving(false);
     }
-  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, stockForm, toast, watchlistSaving]);
+  }, [
+    loadPageData,
+    refreshPreferenceProfile,
+    resetDiscoveryExtensions,
+    stockForm,
+    toast,
+    watchlistSaving,
+  ]);
 
-  const addScreeningCandidate = React.useCallback(async (symbol: string, name: string) => {
-    if (watchlistSaving) {
-      toast.show('关注列表正在更新，请稍后再试', 'error');
-      return;
-    }
-    setWatchlistSaving(true);
-    setLoadError(null);
-    try {
-      const result = await trpc.watchlists.add.mutate({
-        symbol,
-        market: 'A',
-        displayName: name,
-      });
-      toast.show(result.already ? `${name} 已在关注列表` : `已关注 ${name}`);
-      if (!result.already) {
+  const addScreeningCandidate = React.useCallback(
+    async (symbol: string, name: string) => {
+      if (watchlistSaving) {
+        toast.show('关注列表正在更新，请稍后再试', 'error');
+        return;
+      }
+      setWatchlistSaving(true);
+      setLoadError(null);
+      try {
+        const result = await trpc.watchlists.add.mutate({
+          symbol,
+          market: 'A',
+          displayName: name,
+        });
+        toast.show(result.already ? `${name} 已在关注列表` : `已关注 ${name}`);
+        if (!result.already) {
+          refreshPreferenceProfile();
+          setBriefingResult(null);
+          resetDiscoveryExtensions();
+          await loadPageData('background');
+        }
+      } catch (err) {
+        const message = pageErrorMessage(err);
+        setLoadError(message);
+        toast.show(message, 'error');
+      } finally {
+        setWatchlistSaving(false);
+      }
+    },
+    [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving],
+  );
+
+  const removeWatchlistStock = React.useCallback(
+    async (symbol: string) => {
+      if (watchlistSaving) return;
+      setWatchlistSaving(true);
+      setLoadError(null);
+      try {
+        await trpc.watchlists.remove.mutate({ symbol });
+        toast.show(`已移除 ${symbol}`);
         refreshPreferenceProfile();
         setBriefingResult(null);
         resetDiscoveryExtensions();
         await loadPageData('background');
+      } catch (err) {
+        const message = pageErrorMessage(err);
+        setLoadError(message);
+        toast.show(message, 'error');
+      } finally {
+        setWatchlistSaving(false);
       }
-    } catch (err) {
-      const message = pageErrorMessage(err);
-      setLoadError(message);
-      toast.show(message, 'error');
-    } finally {
-      setWatchlistSaving(false);
-    }
-  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving]);
+    },
+    [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving],
+  );
 
-  const removeWatchlistStock = React.useCallback(async (symbol: string) => {
-    if (watchlistSaving) return;
-    setWatchlistSaving(true);
-    setLoadError(null);
-    try {
-      await trpc.watchlists.remove.mutate({ symbol });
-      toast.show(`已移除 ${symbol}`);
-      refreshPreferenceProfile();
-      setBriefingResult(null);
-      resetDiscoveryExtensions();
-      await loadPageData('background');
-    } catch (err) {
-      const message = pageErrorMessage(err);
-      setLoadError(message);
-      toast.show(message, 'error');
-    } finally {
-      setWatchlistSaving(false);
-    }
-  }, [loadPageData, refreshPreferenceProfile, resetDiscoveryExtensions, toast, watchlistSaving]);
-
-  const updateWatchlistStock = React.useCallback(async (symbol: string, displayName: string, note: string) => {
-    if (watchlistSaving) return;
-    setWatchlistSaving(true);
-    setLoadError(null);
-    try {
-      await trpc.watchlists.update.mutate({
-        symbol,
-        displayName: displayName.trim() || null,
-        note: note.trim() || null,
-      });
-      toast.show(`已更新 ${symbol}`);
-      setBriefingResult(null);
-      resetDiscoveryExtensions();
-      await loadPageData('background');
-    } catch (err) {
-      const message = pageErrorMessage(err);
-      setLoadError(message);
-      toast.show(message, 'error');
-    } finally {
-      setWatchlistSaving(false);
-    }
-  }, [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving]);
+  const updateWatchlistStock = React.useCallback(
+    async (symbol: string, displayName: string, note: string) => {
+      if (watchlistSaving) return;
+      setWatchlistSaving(true);
+      setLoadError(null);
+      try {
+        await trpc.watchlists.update.mutate({
+          symbol,
+          displayName: displayName.trim() || null,
+          note: note.trim() || null,
+        });
+        toast.show(`已更新 ${symbol}`);
+        setBriefingResult(null);
+        resetDiscoveryExtensions();
+        await loadPageData('background');
+      } catch (err) {
+        const message = pageErrorMessage(err);
+        setLoadError(message);
+        toast.show(message, 'error');
+      } finally {
+        setWatchlistSaving(false);
+      }
+    },
+    [loadPageData, resetDiscoveryExtensions, toast, watchlistSaving],
+  );
 
   const submitPrompt = React.useCallback(
-    async (value: string) => {
+    async (value: string, draft?: StockResearchDraft) => {
       const trimmed = value.trim();
       if (!trimmed || submitting) return;
       if (stockPromptUnavailable) {
@@ -635,7 +691,13 @@ export function StockTasksPage(): JSX.Element {
         return;
       }
       setSubmitting(true);
-      const result = await createStockTask(trimmed, stockTaskContext);
+      const fileIds = draft?.attachments.map((file) => file.fileId) ?? [];
+      const intent = stockResearchIntent(trimmed, draft);
+      const result = fileIds.length
+        ? await createStockTask(intent, stockTaskContext, fileIds)
+        : draft?.changed
+          ? await createStockTask(intent, stockTaskContext)
+          : await createStockTask(trimmed, stockTaskContext);
       setSubmitting(false);
       if ('taskId' in result) {
         navigate(`/?task=${encodeURIComponent(result.taskId)}`);
@@ -661,18 +723,19 @@ export function StockTasksPage(): JSX.Element {
   }, [briefingBusy, briefingUnavailable, enabled, loadingDashboard]);
 
   return (
-    <div className="min-h-full bg-[#FFFCFA] text-[#25233A]">
+    <div className="hd-stocks-page min-h-full bg-[#FFFCFA] text-[#25233A]">
       <div
         data-stock-mobile-chrome=""
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-[35] h-12 border-b border-[#EFE7F1] bg-[#FFFCFA]/95 shadow-[0_2px_12px_rgba(103,75,121,0.06)] backdrop-blur-xl min-[769px]:hidden"
       />
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
+      <div className="hd-stock-scroll mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 pb-5 pt-14 sm:gap-4 sm:px-5 min-[769px]:pt-4 lg:px-6">
         <header className="flex flex-col gap-3 border-b border-[#EFE7F1] pb-3 min-[769px]:pr-[12rem] md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-[22px] font-semibold tracking-[-0.025em] text-[#3E3154]">
               股市任务
             </h1>
+            <p className="hd-stock-heading-description">关注变化，也看清变化的背景。</p>
             <span
               className={cn(
                 'inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium',
@@ -694,9 +757,15 @@ export function StockTasksPage(): JSX.Element {
               type="button"
               onClick={() => void loadPageData('manual')}
               disabled={refreshingDashboard || loadingDashboard}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <RefreshCw className={cn('h-3.5 w-3.5', refreshingDashboard || loadingDashboard ? 'animate-spin' : '')} aria-hidden />
+              <RefreshCw
+                className={cn(
+                  'h-3.5 w-3.5',
+                  refreshingDashboard || loadingDashboard ? 'animate-spin' : '',
+                )}
+                aria-hidden
+              />
               刷新
             </button>
             <button
@@ -704,7 +773,7 @@ export function StockTasksPage(): JSX.Element {
               onClick={toggleBriefing}
               disabled={briefingBusy || loadingDashboard || briefingUnavailable}
               title={briefingUnavailableTitle}
-              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 min-[769px]:h-8 items-center gap-2 rounded-[8px] border border-[#DCDDDD] bg-white px-3 transition-colors hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {briefingBusy ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -719,7 +788,7 @@ export function StockTasksPage(): JSX.Element {
         </header>
 
         {loadError ? (
-          <div className="rounded-[8px] border border-[#EA1F59]/25 bg-white px-4 py-3 text-[13px] text-[#EA1F59]">
+          <div className="rounded-[8px] border border-[#FF0061]/25 bg-white px-4 py-3 text-[13px] text-[#FF0061]">
             部分股票数据暂时无法加载：{loadError}
           </div>
         ) : null}
@@ -729,52 +798,96 @@ export function StockTasksPage(): JSX.Element {
           </div>
         ) : null}
 
-        <StockAiCommandComposer
-          value={prompt}
-          placeholder={temporalCopy.promptPlaceholder}
-          assistantStatus={temporalCopy.assistantStatus}
-          commands={commands}
-          submitting={submitting}
-          submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
-          onValueChange={setPrompt}
-          onSubmit={() => void submitPrompt(prompt)}
-          onCommand={(command) => {
-            setPrompt(command);
-            if (command === temporalCopy.briefingCommand && dashboardTrust.tone === 'current') {
-              void generateBriefing();
-            }
-            else void submitPrompt(command);
-          }}
-          isCommandDisabled={(command) =>
-            loadingDashboard ||
-            stockPromptUnavailable ||
-            (command === temporalCopy.briefingCommand &&
-              dashboardTrust.tone === 'current' &&
-              briefingUnavailable)}
-          commandTitle={(command) =>
-            command === temporalCopy.briefingCommand ? briefingUnavailableTitle : undefined}
-        />
+        <section className="hd-market-lead" aria-label="市场概览">
+          <div>
+            <span className="hd-page-eyebrow">
+              {dashboardTrust.dataDateLabel} / {dashboardTrust.statusLabel}
+            </span>
+            <h2>
+              {dashboardTrust.tone === 'unverified'
+                ? '等待行情，先看清来源。'
+                : '关注变化，核对每一个信号。'}
+            </h2>
+            <p>
+              {dashboardTrust.refreshLabel}。
+              {sampleWatchlist
+                ? '当前为示例关注列表。'
+                : '以关注列表中的有效报价汇总涨跌，结合新闻、公告与风险证据继续研究。'}
+            </p>
+            <div className="hd-market-lead-actions">
+              <button type="button" onClick={() => setWorkspaceTask('risk')}>
+                查看风险证据
+              </button>
+              <button type="button" onClick={() => setWorkspaceTask('briefing')}>
+                阅读{temporalCopy.briefingTabLabel}
+              </button>
+            </div>
+          </div>
+          {stocks.some((stock) => stock.price !== '—') && (
+            <div className="hd-market-breadth">
+              <div>
+                <strong>
+                  {stocks.some((stock) => stock.price !== '—')
+                    ? stocks.filter((stock) => stock.price !== '—' && stock.changePct > 0).length
+                    : '—'}
+                </strong>
+                <span>关注股上涨</span>
+              </div>
+              <div>
+                <strong>
+                  {stocks.some((stock) => stock.price !== '—')
+                    ? stocks.filter((stock) => stock.price !== '—' && stock.changePct < 0).length
+                    : '—'}
+                </strong>
+                <span>关注股回落</span>
+              </div>
+              <small>{sampleWatchlist ? '示例关注列表' : '仅统计已有报价的关注股'}</small>
+            </div>
+          )}
+        </section>
+        {marketIndices.length > 0 && (
+          <section className="hd-market-index-strip" aria-label="市场指数">
+            {marketIndices.map((index) => (
+              <button
+                key={index.name}
+                type="button"
+                onClick={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}
+              >
+                <span>{index.name}</span>
+                <strong>{index.price}</strong>
+                <small data-up={index.changePct > 0}>
+                  {index.changePct > 0 ? '+' : ''}
+                  {index.changePct.toFixed(2)}%
+                </small>
+              </button>
+            ))}
+          </section>
+        )}
 
         {initialDashboardLoading ? (
           <InitialDashboardSkeleton />
         ) : (
           <div className="min-w-0 space-y-5">
             <StockTaskWorkspaceLayout
+              activeTask={workspaceTask}
+              onTaskChange={setWorkspaceTask}
               briefingLabel={temporalCopy.briefingTabLabel}
-              highlights={<MarketHighlights
-                stocks={stocks}
-                marketIndices={marketIndices}
-                updatedAt={dashboard?.updatedAt}
-                loading={loadingDashboard && dashboard === null}
-                sample={sampleWatchlist}
-                onEdit={() => setWatchlistSheetOpen(true)}
-                onGenerateBriefing={generateBriefing}
-                briefingGenerating={briefingGenerating}
-                canGenerateBriefing={!briefingUnavailable}
-                temporalCopy={temporalCopy}
-                temporalMode={dashboardTrust.tone}
-              />}
-              riskRadar={(
+              highlights={
+                <MarketHighlights
+                  stocks={stocks}
+                  marketIndices={marketIndices}
+                  updatedAt={dashboard?.updatedAt}
+                  loading={loadingDashboard && dashboard === null}
+                  sample={sampleWatchlist}
+                  onEdit={() => setWatchlistSheetOpen(true)}
+                  onGenerateBriefing={generateBriefing}
+                  briefingGenerating={briefingGenerating}
+                  canGenerateBriefing={!briefingUnavailable}
+                  temporalCopy={temporalCopy}
+                  temporalMode={dashboardTrust.tone}
+                />
+              }
+              riskRadar={
                 <React.Suspense fallback={<DeferredStockPanel label="正在加载风险证据…" />}>
                   <StockRiskRadar
                     snapshotId={dashboard?.trust?.snapshotId ?? null}
@@ -782,8 +895,8 @@ export function StockTasksPage(): JSX.Element {
                     trustMode={dashboard?.trust?.mode ?? 'unverified'}
                   />
                 </React.Suspense>
-              )}
-              screening={(
+              }
+              screening={
                 <React.Suspense fallback={<DeferredStockPanel label="正在加载条件选股…" />}>
                   <StockScreeningWorkbench
                     snapshotId={dashboard?.trust?.snapshotId ?? null}
@@ -794,80 +907,148 @@ export function StockTasksPage(): JSX.Element {
                     onViewStateChange={setScreeningView}
                   />
                 </React.Suspense>
-              )}
-              preferenceProfile={(
+              }
+              preferenceProfile={
                 <React.Suspense fallback={<DeferredStockPanel label="正在加载选股偏好…" />}>
-                  <StockPreferenceProfile
-                    presentation="compact"
-                    refreshKey={preferenceRevision}
-                  />
+                  <StockPreferenceProfile presentation="compact" refreshKey={preferenceRevision} />
                 </React.Suspense>
-              )}
-              briefing={<DailyBriefing
-                stocks={stocks}
-                marketIndices={marketIndices}
-                sectors={sectors}
-                news={news}
-                leaderboards={leaderboards}
-                updatedAt={dashboard?.updatedAt}
-                observedTradeDate={dashboard?.observedTradeDate}
-                briefing={briefingResult}
-                generating={briefingGenerating}
-                onGenerate={generateBriefing}
-                sampleWatchlist={sampleWatchlist}
-                hasMarketSignals={hasMarketSignals}
-                canGenerateBriefing={!briefingUnavailable}
-                temporalCopy={temporalCopy}
-                temporalMode={dashboardTrust.tone}
-              />}
+              }
+              briefing={
+                <DailyBriefing
+                  stocks={stocks}
+                  marketIndices={marketIndices}
+                  sectors={sectors}
+                  news={news}
+                  leaderboards={leaderboards}
+                  updatedAt={dashboard?.updatedAt}
+                  observedTradeDate={dashboard?.observedTradeDate}
+                  briefing={briefingResult}
+                  generating={briefingGenerating}
+                  onGenerate={generateBriefing}
+                  sampleWatchlist={sampleWatchlist}
+                  hasMarketSignals={hasMarketSignals}
+                  canGenerateBriefing={!briefingUnavailable}
+                  temporalCopy={temporalCopy}
+                  temporalMode={dashboardTrust.tone}
+                />
+              }
+              composer={
+                <div className="hd-stock-dock">
+                  <StockAiCommandComposer
+                    approved
+                    researchStocks={
+                      sampleWatchlist
+                        ? []
+                        : stocks.map((stock) => ({ symbol: stock.symbol, name: stock.name }))
+                    }
+                    dataDateLabel={dashboardTrust.dataDateLabel}
+                    onManageWatchlist={() => setWatchlistSheetOpen(true)}
+                    value={prompt}
+                    placeholder={temporalCopy.promptPlaceholder}
+                    assistantStatus={temporalCopy.assistantStatus}
+                    commands={commands}
+                    submitting={submitting}
+                    submitDisabled={submitting || !prompt.trim() || stockPromptUnavailable}
+                    onValueChange={setPrompt}
+                    onSubmit={(draft) => void submitPrompt(prompt, draft)}
+                    onCommand={(command) => {
+                      setPrompt(command);
+                      if (
+                        command === temporalCopy.briefingCommand &&
+                        dashboardTrust.tone === 'current'
+                      ) {
+                        void generateBriefing();
+                      } else void submitPrompt(command);
+                    }}
+                    isCommandDisabled={(command) =>
+                      loadingDashboard ||
+                      stockPromptUnavailable ||
+                      (command === temporalCopy.briefingCommand &&
+                        dashboardTrust.tone === 'current' &&
+                        briefingUnavailable)
+                    }
+                    commandTitle={(command) =>
+                      command === temporalCopy.briefingCommand
+                        ? briefingUnavailableTitle
+                        : undefined
+                    }
+                  />
+                </div>
+              }
               screeningView={screeningView}
             />
             <StockMarketContextLayout
-              discovery={<DiscoveryPanel
-                news={news}
-                watchlistSymbols={watchlistSymbols}
-                onOpenNews={(index) => setActiveNewsIndex(index)}
-                onViewAll={(feed) => {
-                  const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
-                  navigate(`/stocks/discovery${query}`);
-                }}
-                onLoadMore={loadMoreDiscovery}
-                canLoadMore={(feed) => feed === '全部'
-                  ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
-                  : MARKET_DISCOVERY_FEEDS.includes(feed as MarketDiscoveryFeed) && canLoadMoreDiscovery(feed as MarketDiscoveryFeed)}
-              />}
-              temperature={<MarketTemperature
-                temperature={temperature}
-                onInspect={() => setInsightSheet(temperatureInsight(temperature))}
-              />}
-              sectors={<SectorTrends
-                sectors={sectors}
-                onInspect={() => setInsightSheet(sectorInsight(sectors, dashboardTrust.tone))}
-              />}
-              leaderboard={<Leaderboard
-                leaders={leaders}
-                active={activeLeaderboard}
-                onActiveChange={setActiveLeaderboard}
-                onInspect={() => setInsightSheet(leaderboardInsight(activeLeaderboard, leaders, dashboardTrust.tone))}
-              />}
-              marketTable={<MarketTable
-                rows={marketIndices}
-                onInspect={() => setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))}
-                temporalCopy={temporalCopy}
-              />}
-              starStocks={<StarStocks
-                stocks={starStocks}
-                onInspect={() => setInsightSheet(starStockInsight(starStocks, temporalCopy, dashboardTrust.tone))}
-                temporalCopy={temporalCopy}
-                temporalMode={dashboardTrust.tone}
-              />}
+              discovery={
+                <DiscoveryPanel
+                  news={news}
+                  watchlistSymbols={watchlistSymbols}
+                  onOpenNews={(index) => setActiveNewsIndex(index)}
+                  onViewAll={(feed) => {
+                    const query = feed === '全部' ? '' : `?feed=${encodeURIComponent(feed)}`;
+                    navigate(`/stocks/discovery${query}`);
+                  }}
+                  onLoadMore={loadMoreDiscovery}
+                  canLoadMore={(feed) =>
+                    feed === '全部'
+                      ? MARKET_DISCOVERY_FEEDS.some(canLoadMoreDiscovery)
+                      : MARKET_DISCOVERY_FEEDS.includes(feed as MarketDiscoveryFeed) &&
+                        canLoadMoreDiscovery(feed as MarketDiscoveryFeed)
+                  }
+                />
+              }
+              temperature={
+                <MarketTemperature
+                  temperature={temperature}
+                  onInspect={() => setInsightSheet(temperatureInsight(temperature))}
+                />
+              }
+              sectors={
+                <SectorTrends
+                  sectors={sectors}
+                  onInspect={() => setInsightSheet(sectorInsight(sectors, dashboardTrust.tone))}
+                />
+              }
+              leaderboard={
+                <Leaderboard
+                  leaders={leaders}
+                  active={activeLeaderboard}
+                  onActiveChange={setActiveLeaderboard}
+                  onInspect={() =>
+                    setInsightSheet(
+                      leaderboardInsight(activeLeaderboard, leaders, dashboardTrust.tone),
+                    )
+                  }
+                />
+              }
+              marketTable={
+                <MarketTable
+                  rows={marketIndices}
+                  onInspect={() =>
+                    setInsightSheet(marketInsight(marketIndices, dashboardTrust.tone))
+                  }
+                  temporalCopy={temporalCopy}
+                />
+              }
+              starStocks={
+                <StarStocks
+                  stocks={starStocks}
+                  onInspect={() =>
+                    setInsightSheet(starStockInsight(starStocks, temporalCopy, dashboardTrust.tone))
+                  }
+                  temporalCopy={temporalCopy}
+                  temporalMode={dashboardTrust.tone}
+                />
+              }
             />
           </div>
         )}
 
         <footer className="flex flex-col gap-2 border-t border-[#E7E7EB] pt-3 text-[11px] text-[#8B92A1] sm:flex-row sm:items-center sm:justify-between">
           <span>仅供信息分析，不构成投资建议</span>
-          <span>数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} · {dashboardTrust.refreshLabel}</span>
+          <span>
+            数据来源：AkShare / Holaday 分析层 · {dashboardTrust.dataDateLabel} ·{' '}
+            {dashboardTrust.refreshLabel}
+          </span>
         </footer>
       </div>
       <WatchlistManagerSheet
@@ -929,18 +1110,16 @@ function DiscoveryPanel({
   const [page, setPage] = React.useState(0);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const userSelectedFeed = React.useRef(false);
-  const indexedNews = React.useMemo(
-    () => news.map((item, index) => ({ item, index })),
-    [news],
-  );
+  const indexedNews = React.useMemo(() => news.map((item, index) => ({ item, index })), [news]);
   const storyAliases = React.useMemo(() => discoveryStoryAliases(news), [news]);
   const filteredNews = React.useMemo(
-    () => diversifyDiscoveryEditorialArt(
-      diversifyDiscoveryItems(
-        indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
-        (item) => discoveryStoryClusterKey(item, storyAliases),
+    () =>
+      diversifyDiscoveryEditorialArt(
+        diversifyDiscoveryItems(
+          indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
+          (item) => discoveryStoryClusterKey(item, storyAliases),
+        ),
       ),
-    ),
     [activeFeed, indexedNews, storyAliases],
   );
   const pageCount = Math.max(1, Math.ceil(filteredNews.length / pageSize));
@@ -951,13 +1130,16 @@ function DiscoveryPanel({
   const pageIndexes = discoveryPageIndexes(pageCount, safePage);
   const announcementCount = news.filter((item) => newsDisplayType(item) === '公告').length;
   const marketNewsCount = news.length - announcementCount;
-  const feedCounts = React.useMemo<Record<DiscoveryFeed, number>>(() => ({
-    '自选股新闻': news.filter((item) => newsFeed(item) === '自选股新闻').length,
-    '重要公告': news.filter((item) => newsFeed(item) === '重要公告').length,
-    'A股要闻': news.filter((item) => newsFeed(item) === 'A股要闻').length,
-    '美股要闻': news.filter((item) => newsFeed(item) === '美股要闻').length,
-    '港股要闻': news.filter((item) => newsFeed(item) === '港股要闻').length,
-  }), [news]);
+  const feedCounts = React.useMemo<Record<DiscoveryFeed, number>>(
+    () => ({
+      自选股新闻: news.filter((item) => newsFeed(item) === '自选股新闻').length,
+      重要公告: news.filter((item) => newsFeed(item) === '重要公告').length,
+      A股要闻: news.filter((item) => newsFeed(item) === 'A股要闻').length,
+      美股要闻: news.filter((item) => newsFeed(item) === '美股要闻').length,
+      港股要闻: news.filter((item) => newsFeed(item) === '港股要闻').length,
+    }),
+    [news],
+  );
   const preferredFeed = preferredStockDiscoveryFeed(feedCounts);
 
   React.useEffect(() => {
@@ -974,11 +1156,12 @@ function DiscoveryPanel({
 
   const requestMore = React.useCallback(async (): Promise<boolean> => {
     if (loadingMore || !hasMore) return false;
-    const loadTarget = activeFeed === '全部'
-      ? activeFeed
-      : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed)
-        ? activeFeed as MarketDiscoveryFeed
-        : null;
+    const loadTarget =
+      activeFeed === '全部'
+        ? activeFeed
+        : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed)
+          ? (activeFeed as MarketDiscoveryFeed)
+          : null;
     if (!loadTarget) return false;
     setLoadingMore(true);
     try {
@@ -989,12 +1172,15 @@ function DiscoveryPanel({
   }, [activeFeed, hasMore, loadingMore, onLoadMore]);
 
   React.useEffect(() => {
-    if (!shouldPrefetchDiscoveryPage({
-      currentPage: safePage,
-      pageCount,
-      hasMore,
-      isLoading: loadingMore,
-    })) return;
+    if (
+      !shouldPrefetchDiscoveryPage({
+        currentPage: safePage,
+        pageCount,
+        hasMore,
+        isLoading: loadingMore,
+      })
+    )
+      return;
     void requestMore();
   }, [hasMore, loadingMore, pageCount, requestMore, safePage]);
 
@@ -1022,7 +1208,11 @@ function DiscoveryPanel({
     <section className="rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]">
       <SectionHeader
         title="市场动态"
-        meta={news.length > 0 ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告` : '等待真实来源'}
+        meta={
+          news.length > 0
+            ? `${marketNewsCount} 条新闻 · ${announcementCount} 条公告`
+            : '等待真实来源'
+        }
         action={news.length > 0 ? '查看更多新闻' : undefined}
         onAction={news.length > 0 ? () => onViewAll(activeFeed) : undefined}
       />
@@ -1040,16 +1230,18 @@ function DiscoveryPanel({
               className={cn(
                 'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition',
                 activeFeed === tab.label
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
                 tab.count === 0 && 'cursor-not-allowed opacity-45',
               )}
             >
               {tab.label}
-              <span className={cn(
-                'tabular-nums',
-                activeFeed === tab.label ? 'text-[#EA1F59]/80' : 'text-[#8B92A1]',
-              )}>
+              <span
+                className={cn(
+                  'tabular-nums',
+                  activeFeed === tab.label ? 'text-[#FF0061]/80' : 'text-[#8B92A1]',
+                )}
+              >
                 {tab.count}
               </span>
             </button>
@@ -1057,9 +1249,15 @@ function DiscoveryPanel({
         </div>
       ) : null}
       {news.length === 0 ? (
-        <EmptyState title="暂无真实股市新闻" body="公开新闻和公司公告暂未返回带发布时间与原文链接的内容。" />
+        <EmptyState
+          title="暂无真实股市新闻"
+          body="公开新闻和公司公告暂未返回带发布时间与原文链接的内容。"
+        />
       ) : filteredNews.length === 0 ? (
-        <EmptyState title={`暂无${activeFeed}`} body="当前栏目没有可展示的真实内容，切换到全部可查看其他来源动态。" />
+        <EmptyState
+          title={`暂无${activeFeed}`}
+          body="当前栏目没有可展示的真实内容，切换到全部可查看其他来源动态。"
+        />
       ) : null}
       {items.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1079,7 +1277,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goPrevious}
             disabled={safePage === 0}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="上一页动态"
             title="上一页"
           >
@@ -1090,7 +1288,7 @@ function DiscoveryPanel({
               type="button"
               onClick={() => void requestMore()}
               disabled={loadingMore}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E7EB] bg-white px-3 text-[12px] font-medium text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
               {loadingMore ? '正在加载' : '加载更多'}
@@ -1100,14 +1298,18 @@ function DiscoveryPanel({
             {pageIndexes.map((index, position) => (
               <React.Fragment key={index}>
                 {position > 0 && index > pageIndexes[position - 1]! + 1 ? (
-                  <span className="px-0.5 text-[11px] leading-none text-[#98A2B3]" aria-hidden>...</span>
+                  <span className="px-0.5 text-[11px] leading-none text-[#98A2B3]" aria-hidden>
+                    ...
+                  </span>
                 ) : null}
                 <button
                   type="button"
                   onClick={() => setPage(index)}
                   className={cn(
                     'h-1.5 rounded-full transition-all',
-                    index === safePage ? 'w-4 bg-[#121826]' : 'w-1.5 bg-[#D2D6DE] hover:bg-[#AEB5C2]',
+                    index === safePage
+                      ? 'w-4 bg-[#121826]'
+                      : 'w-1.5 bg-[#D2D6DE] hover:bg-[#AEB5C2]',
                   )}
                   aria-label={`查看第 ${index + 1} 页动态`}
                   title={`第 ${index + 1} 页`}
@@ -1119,7 +1321,7 @@ function DiscoveryPanel({
             type="button"
             onClick={goNext}
             disabled={(safePage >= pageCount - 1 && !hasMore) || loadingMore}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E7E7EB] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="下一页动态"
             title="下一页"
           >
@@ -1158,21 +1360,19 @@ function MarketHighlights({
 }): JSX.Element {
   const hasRealQuotes = stocks.some((stock) => stock.price !== '—' || stock.spark.length >= 2);
   const researchStocks = stocks.slice(0, 12);
-  const firstResearchStock = researchStocks.find((stock) => stock.price !== '—' || stock.spark.length >= 2)
-    ?? researchStocks[0]
-    ?? null;
+  const firstResearchStock =
+    researchStocks.find((stock) => stock.price !== '—' || stock.spark.length >= 2) ??
+    researchStocks[0] ??
+    null;
   const [selectedSymbol, setSelectedSymbol] = React.useState<string | null>(null);
-  const selectedStock = researchStocks.find((stock) => stock.symbol === selectedSymbol)
-    ?? firstResearchStock;
-  const primaryIndex = marketIndices.find((row) => row.name.includes('上证')) ?? marketIndices[0] ?? null;
+  const selectedStock =
+    researchStocks.find((stock) => stock.symbol === selectedSymbol) ?? firstResearchStock;
+  const primaryIndex =
+    marketIndices.find((row) => row.name.includes('上证')) ?? marketIndices[0] ?? null;
   return (
     <section className="min-w-0">
       {selectedStock ? (
-        <StockStoryHero
-          stock={selectedStock}
-          updatedAt={updatedAt}
-          temporalCopy={temporalCopy}
-        />
+        <StockStoryHero stock={selectedStock} updatedAt={updatedAt} temporalCopy={temporalCopy} />
       ) : null}
       {!hasRealQuotes ? (
         <div className="mt-3 rounded-[16px] border border-dashed border-[#DCD4E2] bg-[#FFFDFB] p-4">
@@ -1180,20 +1380,24 @@ function MarketHighlights({
             <div>
               <div className="text-[14px] font-semibold text-[#332842]">真实行情同步中</div>
               <p className="mt-1 max-w-[560px] text-[12px] leading-relaxed text-[#716A7C]">
-                Holaday 正在等待 AkShare 返回价格和走势；未拿到真实行情前，不放大空图表，也不使用模拟数据。
+                Holaday 正在等待 AkShare
+                返回价格和走势；未拿到真实行情前，不放大空图表，也不使用模拟数据。
               </p>
             </div>
             <button
               type="button"
               onClick={onEdit}
-              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
             >
               管理关注
             </button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {stocks.slice(0, 8).map((stock) => (
-              <span key={stock.symbol} className="inline-flex items-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 py-1.5 text-[12px] text-[#4F5868]">
+              <span
+                key={stock.symbol}
+                className="inline-flex items-center gap-1.5 rounded-[7px] border border-[#E1E3E8] bg-white px-2.5 py-1.5 text-[12px] text-[#4F5868]"
+              >
                 <span className="font-semibold text-[#121826]">{stock.name}</span>
                 <span className="tabular-nums text-[#8B92A1]">{stock.symbol}</span>
               </span>
@@ -1225,7 +1429,7 @@ function MarketHighlights({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 motion-reduce:transition-none"
+                className="inline-flex h-11 min-[769px]:h-8 items-center rounded-[7px] px-2 text-[10px] font-semibold text-[#7A5A8E] transition hover:bg-[#F8F3FA] hover:text-[#C9184A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 motion-reduce:transition-none"
               >
                 管理列表
               </button>
@@ -1268,10 +1472,7 @@ function StockStoryHero({
           srcSet="/assets/stocks/stock-story-hero-v1-mobile.webp"
           type="image/webp"
         />
-        <source
-          srcSet="/assets/stocks/stock-story-hero-v1-desktop.webp"
-          type="image/webp"
-        />
+        <source srcSet="/assets/stocks/stock-story-hero-v1-desktop.webp" type="image/webp" />
         <img
           src="/assets/stocks/stock-story-hero-v1.png"
           alt=""
@@ -1287,10 +1488,13 @@ function StockStoryHero({
           关注中的股票 · {stock.symbol}
         </p>
         <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.035em] text-[#542043] sm:text-[28px]">
-          {stock.name}{temporalCopy.storyTitleSuffix}
+          {stock.name}
+          {temporalCopy.storyTitleSuffix}
         </h2>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <span className="text-[22px] font-semibold tabular-nums text-[#25233A]">{formatStockPrice(stock)}</span>
+          <span className="text-[22px] font-semibold tabular-nums text-[#25233A]">
+            {formatStockPrice(stock)}
+          </span>
           <span
             className={cn(
               'text-[18px] font-semibold tabular-nums',
@@ -1301,11 +1505,15 @@ function StockStoryHero({
                   : MARKET_DOWN_CLASS,
             )}
           >
-            {changeUnavailable ? '—' : `${stock.changePct > 0 ? '+' : ''}${stock.changePct.toFixed(2)}%`}
+            {changeUnavailable
+              ? '—'
+              : `${stock.changePct > 0 ? '+' : ''}${stock.changePct.toFixed(2)}%`}
           </span>
         </div>
         <div className="mt-3 flex items-center gap-2 text-[10px] text-[#776D7D]">
-          <span>{temporalCopy.updateLabel} {stockDataUpdatedAt(updatedAt)}</span>
+          <span>
+            {temporalCopy.updateLabel} {stockDataUpdatedAt(updatedAt)}
+          </span>
           <span className="h-1 w-1 rounded-full bg-[#A874C4]" aria-hidden />
           <span>{temporalCopy.storyStatusLabel}</span>
         </div>
@@ -1345,7 +1553,9 @@ function StockHighlightCard({
                 {stock.symbol.slice(0, 2)}
               </div>
               <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold text-[#121826]">{stock.name}</div>
+                <div className="truncate text-[15px] font-semibold text-[#121826]">
+                  {stock.name}
+                </div>
                 <div className="mt-1 flex items-center gap-1.5 text-[12px] text-[#667085]">
                   <span className="tabular-nums">{stock.symbol}</span>
                   <span className="h-1 w-1 rounded-full bg-[#CBD0DA]" />
@@ -1354,8 +1564,13 @@ function StockHighlightCard({
               </div>
             </div>
             <div className="text-right">
-              <div className="whitespace-nowrap text-[22px] font-semibold leading-none tracking-normal tabular-nums text-[#25233A]">{formatStockPrice(stock)}</div>
-              <StockChangeBadge value={stock.price === '—' ? null : stock.changePct} className="mt-1.5 justify-end" />
+              <div className="whitespace-nowrap text-[22px] font-semibold leading-none tracking-normal tabular-nums text-[#25233A]">
+                {formatStockPrice(stock)}
+              </div>
+              <StockChangeBadge
+                value={stock.price === '—' ? null : stock.changePct}
+                className="mt-1.5 justify-end"
+              />
             </div>
           </div>
           {stock.spark.length >= 2 ? (
@@ -1384,11 +1599,30 @@ function StockHighlightCard({
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 self-start border-t border-[#F0ECF2] pt-3 lg:block lg:border-l lg:border-t-0 lg:pl-4 lg:pt-1">
           <StockRailMetric label="支撑 / 压力" value={stockRangeText(stock)} />
-          <StockRailMetric label="价格位置" value={stockPositionText(stock)} meta={stockPositionMeta(stock)} tone={stockPositionTone(stock)} />
+          <StockRailMetric
+            label="价格位置"
+            value={stockPositionText(stock)}
+            meta={stockPositionMeta(stock)}
+            tone={stockPositionTone(stock)}
+          />
           <StockRailMetric label="成交额" value={stockTurnoverText(stock)} />
-          <StockRailMetric label="成交活跃度" value={stockVolumeSignalText(stock)} meta={stockVolumeMeta(stock)} tone={stockVolumeTone(stock)} />
-          <StockRailMetric label="市场" value={marketContextText(marketIndex)} meta={marketContextMeta(marketIndex)} tone={marketContextTone(marketIndex)} />
-          <StockRailMetric label={temporalCopy.updateLabel} value={stockDataUpdatedAt(updatedAt)} meta={stockIntradayUpdatedMeta(stock)} />
+          <StockRailMetric
+            label="成交活跃度"
+            value={stockVolumeSignalText(stock)}
+            meta={stockVolumeMeta(stock)}
+            tone={stockVolumeTone(stock)}
+          />
+          <StockRailMetric
+            label="市场"
+            value={marketContextText(marketIndex)}
+            meta={marketContextMeta(marketIndex)}
+            tone={marketContextTone(marketIndex)}
+          />
+          <StockRailMetric
+            label={temporalCopy.updateLabel}
+            value={stockDataUpdatedAt(updatedAt)}
+            meta={stockIntradayUpdatedMeta(stock)}
+          />
           <div className="min-w-0 lg:mb-3.5">
             <StockRailMetric label="日报状态" value={stock.report} />
             {stock.report !== '已生成' ? (
@@ -1396,7 +1630,7 @@ function StockHighlightCard({
                 type="button"
                 disabled={!canGenerateBriefing || briefingGenerating}
                 onClick={onGenerateBriefing}
-                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#EA1F59]/20 bg-[#EA1F59]/10 px-2.5 text-[12px] font-medium text-[#EA1F59] transition hover:border-[#EA1F59]/40 hover:bg-[#EA1F59]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+                className="mt-2 inline-flex h-11 min-[769px]:h-8 items-center justify-center rounded-[7px] border border-[#FF0061]/20 bg-[#FF0061]/10 px-2.5 text-[12px] font-medium text-[#FF0061] transition hover:border-[#FF0061]/40 hover:bg-[#FF0061]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
               >
                 {briefingGenerating ? '生成中…' : temporalCopy.briefingCommand}
               </button>
@@ -1444,11 +1678,12 @@ function StockEvidenceCard({
   icon: typeof TrendingUp;
   tone: 'mint' | 'sky' | 'peach';
 }): JSX.Element {
-  const toneClass = tone === 'mint'
-    ? 'border-[#D7EEE3] bg-[#F0FBF6] text-[#12835D]'
-    : tone === 'sky'
-      ? 'border-[#D9E8F6] bg-[#F0F8FF] text-[#3378B8]'
-      : 'border-[#F2DFC9] bg-[#FFF6EB] text-[#C46D24]';
+  const toneClass =
+    tone === 'mint'
+      ? 'border-[#D7EEE3] bg-[#F0FBF6] text-[#12835D]'
+      : tone === 'sky'
+        ? 'border-[#D9E8F6] bg-[#F0F8FF] text-[#3378B8]'
+        : 'border-[#F2DFC9] bg-[#FFF6EB] text-[#C46D24]';
   return (
     <div className={cn('min-w-0 rounded-[13px] border px-3 py-2.5', toneClass)}>
       <div className="flex items-center gap-2">
@@ -1486,7 +1721,9 @@ function WatchlistManagerSheet({
   sample: boolean;
   saving: boolean;
   form: { symbol: string; market: Market; displayName: string; note: string };
-  onFormChange: React.Dispatch<React.SetStateAction<{ symbol: string; market: Market; displayName: string; note: string }>>;
+  onFormChange: React.Dispatch<
+    React.SetStateAction<{ symbol: string; market: Market; displayName: string; note: string }>
+  >;
   suggestions: SymbolSuggestion[];
   searching: boolean;
   onPickSuggestion: (suggestion: SymbolSuggestion) => void;
@@ -1495,19 +1732,27 @@ function WatchlistManagerSheet({
   onRemove: (symbol: string) => void;
 }): JSX.Element {
   const normalizedSymbol = normalizeSymbol(form.symbol);
-  const duplicateSymbol = Boolean(normalizedSymbol && stocks.some((row) => normalizeSymbol(row.symbol) === normalizedSymbol));
+  const duplicateSymbol = Boolean(
+    normalizedSymbol && stocks.some((row) => normalizeSymbol(row.symbol) === normalizedSymbol),
+  );
   const canAdd = normalizedSymbol.length > 0 && !saving && !duplicateSymbol;
-  const [drafts, setDrafts] = React.useState<Record<string, { displayName: string; note: string }>>({});
+  const [drafts, setDrafts] = React.useState<Record<string, { displayName: string; note: string }>>(
+    {},
+  );
 
   React.useEffect(() => {
     if (!open) return;
-    setDrafts(Object.fromEntries(stocks.map((row) => [
-      row.symbol,
-      {
-        displayName: row.displayName ?? '',
-        note: row.note ?? '',
-      },
-    ])));
+    setDrafts(
+      Object.fromEntries(
+        stocks.map((row) => [
+          row.symbol,
+          {
+            displayName: row.displayName ?? '',
+            note: row.note ?? '',
+          },
+        ]),
+      ),
+    );
   }, [open, stocks]);
 
   return (
@@ -1555,7 +1800,9 @@ function WatchlistManagerSheet({
                 <span className="text-[12px] font-medium text-[#4F5868]">市场</span>
                 <select
                   value={form.market}
-                  onChange={(event) => onFormChange((prev) => ({ ...prev, market: event.target.value as Market }))}
+                  onChange={(event) =>
+                    onFormChange((prev) => ({ ...prev, market: event.target.value as Market }))
+                  }
                   className="h-9 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-2 text-[13px] text-[#121826] outline-none"
                 >
                   <option value="A">A股</option>
@@ -1566,7 +1813,8 @@ function WatchlistManagerSheet({
             </div>
             {form.market !== 'A' ? (
               <div className="mt-2 rounded-[7px] border border-[#E1E3E8] bg-[#FCFCFD] px-2.5 py-2 text-[11px] leading-relaxed text-[#667085]">
-                当前实时行情优先支持 A 股。美股/港股可以加入关注列表，行情和走势接入前会明确显示暂不可用。
+                当前实时行情优先支持 A
+                股。美股/港股可以加入关注列表，行情和走势接入前会明确显示暂不可用。
               </div>
             ) : null}
             {searching || suggestions.length > 0 ? (
@@ -1585,8 +1833,12 @@ function WatchlistManagerSheet({
                     className="grid w-full grid-cols-[1fr_auto] items-center gap-3 border-t border-[#F1F2F5] px-3 py-2 text-left first:border-t-0 hover:bg-white"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-[12px] font-semibold text-[#121826]">{suggestion.name}</span>
-                      <span className="block text-[11px] tabular-nums text-[#8B92A1]">{suggestion.symbol}</span>
+                      <span className="block truncate text-[12px] font-semibold text-[#121826]">
+                        {suggestion.name}
+                      </span>
+                      <span className="block text-[11px] tabular-nums text-[#8B92A1]">
+                        {suggestion.symbol}
+                      </span>
                     </span>
                     <span className="rounded-[5px] border border-[#E1E3E8] px-1.5 py-0.5 text-[10px] text-[#667085]">
                       {marketLabel(suggestion.market as Market)}
@@ -1599,7 +1851,9 @@ function WatchlistManagerSheet({
               <span className="text-[12px] font-medium text-[#4F5868]">名称</span>
               <Input
                 value={form.displayName}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, displayName: event.target.value }))}
+                onChange={(event) =>
+                  onFormChange((prev) => ({ ...prev, displayName: event.target.value }))
+                }
                 placeholder="可选，例如 贵州茅台"
                 className="h-9 rounded-[8px] border-[#DCDDDD] text-[13px]"
               />
@@ -1608,7 +1862,9 @@ function WatchlistManagerSheet({
               <span className="text-[12px] font-medium text-[#4F5868]">备注</span>
               <Input
                 value={form.note}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, note: event.target.value }))}
+                onChange={(event) =>
+                  onFormChange((prev) => ({ ...prev, note: event.target.value }))
+                }
                 placeholder="可选，例如 长期关注白酒龙头"
                 className="h-9 rounded-[8px] border-[#DCDDDD] text-[13px]"
               />
@@ -1616,9 +1872,13 @@ function WatchlistManagerSheet({
             <button
               type="submit"
               disabled={!canAdd}
-              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#EA1F59] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(234,31,89,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
+              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#FF0061] px-3 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(255,0,97,0.18)] transition disabled:cursor-not-allowed disabled:opacity-55"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Plus className="h-3.5 w-3.5" aria-hidden />}
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+              )}
               {duplicateSymbol ? '已在关注列表' : '添加关注'}
             </button>
             {duplicateSymbol ? (
@@ -1648,62 +1908,67 @@ function WatchlistManagerSheet({
                     draft.displayName.trim() !== (row.displayName ?? '') ||
                     draft.note.trim() !== (row.note ?? '');
                   return (
-                  <div key={row.watchlistId} className="grid grid-cols-[1fr_auto] items-start gap-3 px-3 py-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-semibold text-[#121826]">{row.symbol}</span>
-                        <span className="rounded-[5px] border border-[#E1E3E8] px-1.5 py-0.5 text-[10px] text-[#667085]">
-                          {marketLabel(row.market as Market)}
-                        </span>
+                    <div
+                      key={row.watchlistId}
+                      className="grid grid-cols-[1fr_auto] items-start gap-3 px-3 py-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-semibold text-[#121826]">
+                            {row.symbol}
+                          </span>
+                          <span className="rounded-[5px] border border-[#E1E3E8] px-1.5 py-0.5 text-[10px] text-[#667085]">
+                            {marketLabel(row.market as Market)}
+                          </span>
+                        </div>
+                        <div className="mt-2 grid gap-2">
+                          <Input
+                            value={draft.displayName}
+                            onChange={(event) => {
+                              const displayName = event.target.value;
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [row.symbol]: { ...draft, displayName },
+                              }));
+                            }}
+                            placeholder="名称"
+                            className="h-8 rounded-[7px] border-[#DCDDDD] text-[12px]"
+                          />
+                          <Input
+                            value={draft.note}
+                            onChange={(event) => {
+                              const note = event.target.value;
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [row.symbol]: { ...draft, note },
+                              }));
+                            }}
+                            placeholder="备注"
+                            className="h-8 rounded-[7px] border-[#DCDDDD] text-[12px]"
+                          />
+                        </div>
                       </div>
-                      <div className="mt-2 grid gap-2">
-                        <Input
-                          value={draft.displayName}
-                          onChange={(event) => {
-                            const displayName = event.target.value;
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [row.symbol]: { ...draft, displayName },
-                            }));
-                          }}
-                          placeholder="名称"
-                          className="h-8 rounded-[7px] border-[#DCDDDD] text-[12px]"
-                        />
-                        <Input
-                          value={draft.note}
-                          onChange={(event) => {
-                            const note = event.target.value;
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [row.symbol]: { ...draft, note },
-                            }));
-                          }}
-                          placeholder="备注"
-                          className="h-8 rounded-[7px] border-[#DCDDDD] text-[12px]"
-                        />
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          disabled={saving || !changed}
+                          onClick={() => onUpdate(row.symbol, draft.displayName, draft.note)}
+                          className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => onRemove(row.symbol)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#FF0061]/30 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`移除 ${row.symbol}`}
+                          title={`移除 ${row.symbol}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <button
-                        type="button"
-                        disabled={saving || !changed}
-                        onClick={() => onUpdate(row.symbol, draft.displayName, draft.note)}
-                        className="inline-flex h-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] px-2 text-[12px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        保存
-                      </button>
-                      <button
-                        type="button"
-                        disabled={saving}
-                        onClick={() => onRemove(row.symbol)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E1E3E8] text-[#667085] transition hover:border-[#EA1F59]/30 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
-                        aria-label={`移除 ${row.symbol}`}
-                        title={`移除 ${row.symbol}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    </div>
-                  </div>
                   );
                 })}
               </div>
@@ -1730,7 +1995,10 @@ function InitialDashboardSkeleton(): JSX.Element {
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
             {Array.from({ length: 5 }).map((_, index) => (
-              <div key={index} className="min-h-[148px] rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-3">
+              <div
+                key={index}
+                className="min-h-[148px] rounded-[8px] border border-[#E7E7EB] bg-[#FEFEFF] p-3"
+              >
                 <div className="h-4 w-16 rounded-[5px] bg-[#ECEEF3]" />
                 <div className="mt-2 h-3 w-20 rounded-[5px] bg-[#F1F2F5]" />
                 <div className="mt-6 h-6 w-24 rounded-[6px] bg-[#ECEEF3]" />
@@ -1761,7 +2029,10 @@ function InitialDashboardSkeleton(): JSX.Element {
         <div className="h-5 w-20 rounded-[6px] bg-[#ECEEF3]" />
         <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-12">
           {[0, 1, 2].map((item) => (
-            <Panel key={item} className={item === 0 ? 'lg:col-span-8 lg:row-span-2' : 'lg:col-span-4'}>
+            <Panel
+              key={item}
+              className={item === 0 ? 'lg:col-span-8 lg:row-span-2' : 'lg:col-span-4'}
+            >
               <div className="h-5 w-24 rounded-[6px] bg-[#ECEEF3]" />
               <div className="mt-5 space-y-3">
                 <div className="h-4 w-5/6 rounded-[5px] bg-[#F1F2F5]" />
@@ -1801,13 +2072,22 @@ function InsightSheet({
           ) : (
             <div className="divide-y divide-[#F1F2F5] overflow-hidden rounded-[8px] border border-[#E1E3E8]">
               {rows.map((row, index) => (
-                <div key={`${row.label}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-3 text-[12px]">
+                <div
+                  key={`${row.label}-${index}`}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-3 text-[12px]"
+                >
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#121826]">{row.label}</div>
-                    {row.meta ? <div className="mt-0.5 text-[11px] leading-relaxed text-[#8B92A1]">{row.meta}</div> : null}
+                    {row.meta ? (
+                      <div className="mt-0.5 text-[11px] leading-relaxed text-[#8B92A1]">
+                        {row.meta}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="max-w-[180px] text-right">
-                    <div className="break-words font-medium tabular-nums text-[#344054]">{row.value}</div>
+                    <div className="break-words font-medium tabular-nums text-[#344054]">
+                      {row.value}
+                    </div>
                     {typeof row.changePct === 'number' ? (
                       <ChangeText value={row.changePct} compact className="mt-1 justify-end" />
                     ) : null}
@@ -1858,7 +2138,12 @@ function DailyBriefing({
   const quoteStocks = stocks.filter((stock) => stock.price !== '—');
   const riskStock = quoteStocks.find((s) => s.signal === '偏弱' || s.signal === '风险升高');
   const previewLines = briefing ? briefingPreviewLines(briefing.markdown) : [];
-  const opportunityItems = dailyOpportunityItems(stocks, marketIndices, sectors, leaderboards.gainers);
+  const opportunityItems = dailyOpportunityItems(
+    stocks,
+    marketIndices,
+    sectors,
+    leaderboards.gainers,
+  );
   const riskItems = dailyRiskItems(stocks, marketIndices, news, leaderboards.losers, temporalMode);
   const trackingItems = dailyTrackingItems(stocks, news, leaderboards.amount, temporalMode);
   return (
@@ -1885,27 +2170,27 @@ function DailyBriefing({
             : !canGenerateBriefing && observedTradeDate
               ? `此处展示 ${formatObservedTradeDate(observedTradeDate)} 的已收盘数据；新交易日行情到达后可生成日报。`
               : hasMarketSignals
-              ? dailyBriefingSourceLine(
-                  quoteStocks,
-                  marketIndices,
-                  sectors,
-                  news,
-                  leaderboards,
-                  temporalMode,
-                )
-              : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
+                ? dailyBriefingSourceLine(
+                    quoteStocks,
+                    marketIndices,
+                    sectors,
+                    news,
+                    leaderboards,
+                    temporalMode,
+                  )
+                : '当前真实市场数据不足。添加关注股票或稍后刷新后，可生成更完整的关注日报。'}
         </div>
       </div>
       {briefing ? (
         <div className="mt-4 rounded-[8px] border border-[#ECEEF3] bg-[#FCFCFD] px-4 py-3">
           <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#121826]">
-            <FileText className="h-3.5 w-3.5 text-[#EA1F59]" aria-hidden />
+            <FileText className="h-3.5 w-3.5 text-[#FF0061]" aria-hidden />
             {briefing.title} · {formatUpdateTime(briefing.generatedAt)}
           </div>
           <ul className="space-y-1.5">
             {previewLines.map((line) => (
               <li key={line} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
-                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#EA1F59]" />
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FF0061]" />
                 <span>{line}</span>
               </li>
             ))}
@@ -1954,7 +2239,10 @@ function MarketTable({
     <Panel className={className}>
       <SectionHeader title="市场行情" meta="全球" action="查看详情" onAction={onInspect} />
       {rows.length === 0 ? (
-        <EmptyState title="暂无真实行情数据" body="指数接口暂未返回可展示数据，刷新后会自动补齐。" />
+        <EmptyState
+          title="暂无真实行情数据"
+          body="指数接口暂未返回可展示数据，刷新后会自动补齐。"
+        />
       ) : null}
       <div className="mt-3">
         {rows.length > 0 ? (
@@ -1972,7 +2260,9 @@ function MarketTable({
                 >
                   <div className="min-w-0">
                     <div className="truncate font-medium text-[#121826]">{row.name}</div>
-                    <div className="whitespace-nowrap text-[10px] tabular-nums text-[#8B92A1]">成交 {row.turnover}</div>
+                    <div className="whitespace-nowrap text-[10px] tabular-nums text-[#8B92A1]">
+                      成交 {row.turnover}
+                    </div>
                   </div>
                   <div className="text-right tabular-nums text-[#344054]">{row.price}</div>
                   <div className="text-right">
@@ -2002,20 +2292,32 @@ function SectorTrends({
     <Panel className={cn('flex h-full flex-col', className)}>
       <SectionHeader title="行业趋势" meta="涨幅榜" action="查看详情" onAction={onInspect} />
       {sectors.length === 0 ? (
-        <EmptyState title="暂无真实行业数据" body="市场脉冲接口暂未返回行业排行，刷新后会自动补齐。" />
+        <EmptyState
+          title="暂无真实行业数据"
+          body="市场脉冲接口暂未返回行业排行，刷新后会自动补齐。"
+        />
       ) : null}
       <div className="mt-3 space-y-1">
         {sectors.map((sector) => {
           const trendValues = sectorTrendValues(sector.spark);
           return (
-            <div key={sector.name} className="grid grid-cols-[minmax(0,1fr)_auto_56px] items-center gap-3 border-b border-[#F1F2F5] py-2.5 last:border-b-0">
+            <div
+              key={sector.name}
+              className="grid grid-cols-[minmax(0,1fr)_auto_56px] items-center gap-3 border-b border-[#F1F2F5] py-2.5 last:border-b-0"
+            >
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-medium text-[#121826]">{sector.name}</div>
-                <div className="truncate text-[11px] text-[#8B92A1]">{sector.leader} · {sector.flow}</div>
+                <div className="truncate text-[11px] text-[#8B92A1]">
+                  {sector.leader} · {sector.flow}
+                </div>
               </div>
               <ChangeText value={sector.changePct} compact />
               {trendValues ? (
-                <Sparkline values={trendValues} positive={sector.changePct >= 0} className="h-6 w-14" />
+                <Sparkline
+                  values={trendValues}
+                  positive={sector.changePct >= 0}
+                  className="h-6 w-14"
+                />
               ) : null}
             </div>
           );
@@ -2027,7 +2329,8 @@ function SectorTrends({
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#667085]">
             <span>领涨方向 {sectors.length} 个</span>
             <span>
-              最高涨幅 <span className={MARKET_UP_CLASS}>{formatSignedPct(topSector.changePct)}</span>
+              最高涨幅{' '}
+              <span className={MARKET_UP_CLASS}>{formatSignedPct(topSector.changePct)}</span>
             </span>
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-[#667085]">
@@ -2062,7 +2365,10 @@ function StarStocks({
         onAction={onInspect}
       />
       {ranked.length === 0 ? (
-        <EmptyState title="暂无真实明星股票" body="只有拿到真实价格的股票才会进入这里，不使用模拟热度填充。" />
+        <EmptyState
+          title="暂无真实明星股票"
+          body="只有拿到真实价格的股票才会进入这里，不使用模拟热度填充。"
+        />
       ) : null}
       <div className="mt-3">
         {ranked.length > 0 ? (
@@ -2088,7 +2394,9 @@ function StarStocks({
                     <div className="truncate font-medium text-[#121826]">{stock.name}</div>
                     <div className="truncate text-[11px] text-[#8B92A1]">{stock.symbol}</div>
                   </td>
-                  <td className="px-1 py-2 text-right tabular-nums text-[#344054]">{stock.price}</td>
+                  <td className="px-1 py-2 text-right tabular-nums text-[#344054]">
+                    {stock.price}
+                  </td>
                   <td className="px-1 py-2 text-right">
                     <ChangeText value={stock.changePct} compact />
                   </td>
@@ -2116,7 +2424,10 @@ function MarketTemperature({
     return (
       <Panel>
         <SectionHeader title="市场温度" action="详情" onAction={onInspect} />
-        <EmptyState title="市场温度暂不可用" body="市场脉冲接口暂未返回涨跌家数、涨跌停或资金流数据。" />
+        <EmptyState
+          title="市场温度暂不可用"
+          body="市场脉冲接口暂未返回涨跌家数、涨跌停或资金流数据。"
+        />
       </Panel>
     );
   }
@@ -2128,15 +2439,23 @@ function MarketTemperature({
       <div className="mt-4 flex items-center gap-4">
         <div className="relative h-[118px] w-[118px] shrink-0">
           <div className="absolute inset-0 rounded-full border-[11px] border-[#E8EBF0]" />
-          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#EA1F59] rotate-45" />
+          <div className="absolute inset-0 rounded-full border-[11px] border-transparent border-l-[#18A76F] border-t-[#E0B30C] border-r-[#FF0061] rotate-45" />
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-[34px] font-semibold tabular-nums text-[#121826]">{score}</div>
             <div className="text-[12px] font-medium text-[#4F5868]">{mood}</div>
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-3 text-[13px]">
-          <MetricLine label="较昨日" value={formatDelta(temperature.dayDelta)} positive={deltaPositive(temperature.dayDelta)} />
-          <MetricLine label="较上周" value={formatDelta(temperature.weekDelta)} positive={deltaPositive(temperature.weekDelta)} />
+          <MetricLine
+            label="较昨日"
+            value={formatDelta(temperature.dayDelta)}
+            positive={deltaPositive(temperature.dayDelta)}
+          />
+          <MetricLine
+            label="较上周"
+            value={formatDelta(temperature.weekDelta)}
+            positive={deltaPositive(temperature.weekDelta)}
+          />
           <MetricLine label="历史位置" value={temperature.historicalPosition} />
         </div>
       </div>
@@ -2176,7 +2495,7 @@ function Leaderboard({
             className={cn(
               'border-b-2 px-0.5 pb-2 text-[12px] font-medium transition-colors',
               active === tab.label
-                ? 'border-[#EA1F59] text-[#EA1F59]'
+                ? 'border-[#FF0061] text-[#FF0061]'
                 : 'border-transparent text-[#667085] hover:text-[#121826]',
               !tab.enabled && 'cursor-not-allowed opacity-45 hover:text-[#667085]',
             )}
@@ -2190,14 +2509,20 @@ function Leaderboard({
       </div>
       <div className="mt-3 divide-y divide-[#F1F2F5]">
         {leaders.length === 0 ? (
-          <EmptyState title="暂无真实榜单数据" body="AkShare 排行接口暂未返回可展示个股，稍后刷新会自动更新。" />
+          <EmptyState
+            title="暂无真实榜单数据"
+            body="AkShare 排行接口暂未返回可展示个股，稍后刷新会自动更新。"
+          />
         ) : null}
         {leaders.map((leader) => (
-          <div key={leader.rank} className="grid grid-cols-[24px_1fr_auto] items-center gap-2 py-2.5 text-[12px]">
+          <div
+            key={leader.rank}
+            className="grid grid-cols-[24px_1fr_auto] items-center gap-2 py-2.5 text-[12px]"
+          >
             <span
               className={cn(
                 'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold',
-                leader.rank <= 3 ? 'bg-[#EA1F59] text-white' : 'bg-[#F2F3F6] text-[#667085]',
+                leader.rank <= 3 ? 'bg-[#FF0061] text-white' : 'bg-[#F2F3F6] text-[#667085]',
               )}
             >
               {leader.rank}
@@ -2217,7 +2542,7 @@ function Leaderboard({
         type="button"
         onClick={onInspect}
         disabled={leaders.length === 0}
-        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-3 inline-flex w-full items-center justify-center gap-1 border-t border-[#F1F2F5] pt-3 text-[12px] font-medium text-[#4F5868] hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-50"
       >
         查看全部榜单
         <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -2245,8 +2570,12 @@ function SectionHeader({
     <header className="flex items-center justify-between gap-3">
       <div className="min-w-0">
         <div className="flex items-baseline gap-2">
-          <h2 className="shrink-0 whitespace-nowrap text-[16px] font-semibold tracking-tight text-[#121826]">{title}</h2>
-          {meta ? <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{meta}</span> : null}
+          <h2 className="shrink-0 whitespace-nowrap text-[16px] font-semibold tracking-tight text-[#121826]">
+            {title}
+          </h2>
+          {meta ? (
+            <span className="min-w-0 truncate text-[11px] text-[#8B92A1]">{meta}</span>
+          ) : null}
         </div>
       </div>
       {action ? (
@@ -2254,7 +2583,7 @@ function SectionHeader({
           type="button"
           onClick={onAction}
           disabled={actionDisabled || actionBusy || !onAction}
-          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+          className="inline-flex h-11 min-[769px]:h-8 shrink-0 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium text-[#4F5868] transition-colors hover:bg-[#FFF5F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
         >
           {actionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {action}
@@ -2273,7 +2602,12 @@ function Panel({
   className?: string;
 }): JSX.Element {
   return (
-    <section className={cn('rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]', className)}>
+    <section
+      className={cn(
+        'rounded-[8px] border border-[#E1E3E8] bg-white p-4 shadow-[0_8px_24px_rgba(18,24,38,0.035)]',
+        className,
+      )}
+    >
       {children}
     </section>
   );
@@ -2314,7 +2648,7 @@ function BriefingLane({
   }[tone];
   const bulletClass = {
     green: 'bg-[#0E9F6E]',
-    red: 'bg-[#EA1F59]',
+    red: 'bg-[#FF0061]',
     blue: 'bg-[#175CD3]',
   }[tone];
   return (
@@ -2327,7 +2661,10 @@ function BriefingLane({
       {items.length > 0 ? (
         <ul className="space-y-2">
           {items.map((item, index) => (
-            <li key={`${item}-${index}`} className="flex gap-2 text-[12px] leading-relaxed text-[#344054]">
+            <li
+              key={`${item}-${index}`}
+              className="flex gap-2 text-[12px] leading-relaxed text-[#344054]"
+            >
               <span className={cn('mt-2 h-1.5 w-1.5 shrink-0 rounded-full', bulletClass)} />
               <span>{item}</span>
             </li>
@@ -2341,7 +2678,10 @@ function BriefingLane({
       {tags.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1">
           {tags.map((tag, index) => (
-            <span key={`${tag}-${index}`} className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]">
+            <span
+              key={`${tag}-${index}`}
+              className="rounded-[5px] border border-[#E1E3E8] bg-white px-1.5 py-0.5 text-[10px] text-[#667085]"
+            >
               {tag}
             </span>
           ))}
@@ -2383,7 +2723,11 @@ function ChangeText({
         className,
       )}
     >
-      {compact ? null : positive ? <TrendingUp className="h-3 w-3" aria-hidden /> : <TrendingDown className="h-3 w-3" aria-hidden />}
+      {compact ? null : positive ? (
+        <TrendingUp className="h-3 w-3" aria-hidden />
+      ) : (
+        <TrendingDown className="h-3 w-3" aria-hidden />
+      )}
       {positive ? '+' : ''}
       {value.toFixed(2)}%
     </span>
@@ -2399,14 +2743,24 @@ function StockChangeBadge({
 }): JSX.Element {
   if (value === null || !Number.isFinite(value)) {
     return (
-      <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
+      <span
+        className={cn(
+          'inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]',
+          className,
+        )}
+      >
         —
       </span>
     );
   }
   if (value === 0) {
     return (
-      <span className={cn('inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]', className)}>
+      <span
+        className={cn(
+          'inline-flex items-center rounded-[4px] bg-[#F2F4F7] px-1.5 py-1 text-[12px] font-semibold tabular-nums text-[#667085]',
+          className,
+        )}
+      >
         0.00%
       </span>
     );
@@ -2420,7 +2774,11 @@ function StockChangeBadge({
         className,
       )}
     >
-      {positive ? <TrendingUp className="h-3 w-3" aria-hidden /> : <TrendingDown className="h-3 w-3" aria-hidden />}
+      {positive ? (
+        <TrendingUp className="h-3 w-3" aria-hidden />
+      ) : (
+        <TrendingDown className="h-3 w-3" aria-hidden />
+      )}
       {positive ? '+' : ''}
       {value.toFixed(2)}%
     </span>
@@ -2438,17 +2796,20 @@ function StockRailMetric({
   meta?: string;
   tone?: 'neutral' | 'red' | 'green' | 'muted';
 }): JSX.Element {
-  const valueClass = tone === 'red'
-    ? MARKET_UP_CLASS
-    : tone === 'green'
-      ? MARKET_DOWN_CLASS
-      : tone === 'muted'
-        ? 'text-[#667085]'
-        : 'text-[#121826]';
+  const valueClass =
+    tone === 'red'
+      ? MARKET_UP_CLASS
+      : tone === 'green'
+        ? MARKET_DOWN_CLASS
+        : tone === 'muted'
+          ? 'text-[#667085]'
+          : 'text-[#121826]';
   return (
     <div className="min-w-0 lg:mb-3.5">
       <div className="text-[12px] font-medium leading-none text-[#777F8D]">{label}</div>
-      <div className={cn('mt-2 text-[12px] font-semibold leading-tight tabular-nums', valueClass)}>{value}</div>
+      <div className={cn('mt-2 text-[12px] font-semibold leading-tight tabular-nums', valueClass)}>
+        {value}
+      </div>
       {meta ? (
         <div className="mt-1 truncate text-[11px] leading-none text-[#98A2B3]">{meta}</div>
       ) : null}
@@ -2465,13 +2826,12 @@ function MetricLine({
   value: string;
   positive?: boolean;
 }): JSX.Element {
-  const valueClass = positive === true ? MARKET_UP_CLASS : positive === false ? MARKET_DOWN_CLASS : 'text-[#121826]';
+  const valueClass =
+    positive === true ? MARKET_UP_CLASS : positive === false ? MARKET_DOWN_CLASS : 'text-[#121826]';
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-[#667085]">{label}</span>
-      <span className={cn('font-semibold tabular-nums', valueClass)}>
-        {value}
-      </span>
+      <span className={cn('font-semibold tabular-nums', valueClass)}>{value}</span>
     </div>
   );
 }
@@ -2522,16 +2882,22 @@ function MarketMiniChart({
   showTimeline?: boolean;
 }): JSX.Element {
   const gradientId = React.useId();
-  const baseline = typeof baselineValue === 'number' && Number.isFinite(baselineValue) ? baselineValue : values[0] ?? Math.max(...values);
+  const baseline =
+    typeof baselineValue === 'number' && Number.isFinite(baselineValue)
+      ? baselineValue
+      : (values[0] ?? Math.max(...values));
   const xRatios = kind === 'intraday' ? intradayXRatios(labels, values.length) : undefined;
   const chart = chartGeometry(values, [baseline], xRatios);
-  const points = chart.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+  const points = chart.points
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(' ');
   const linePath = smoothPathFromPoints(chart.points);
   const firstPoint = chart.points[0];
   const lastPoint = chart.points[chart.points.length - 1];
-  const areaPath = linePath && firstPoint && lastPoint
-    ? `${linePath} L ${lastPoint.x.toFixed(2)} 38 L ${firstPoint.x.toFixed(2)} 38 Z`
-    : '';
+  const areaPath =
+    linePath && firstPoint && lastPoint
+      ? `${linePath} L ${lastPoint.x.toFixed(2)} 38 L ${firstPoint.x.toFixed(2)} 38 Z`
+      : '';
   const activeRatio = hover?.ratio ?? 1;
   const activePoint = sampledChartPoint(values, chart, activeRatio, latestChangePct, baseline);
   const activeValue = activePoint.value;
@@ -2541,25 +2907,30 @@ function MarketMiniChart({
   const baselineY = chart.yForValue(baseline);
   const baselinePct = Math.max(0, Math.min(100, (baselineY / 48) * 100));
   const showHover = hover !== null;
-  const hoverTooltipKind = showHover && hover
-    ? stockChartHoverTooltipKind({
-      pointerY: hover.y,
-      baselineY,
-    })
-    : 'point';
+  const hoverTooltipKind =
+    showHover && hover
+      ? stockChartHoverTooltipKind({
+          pointerY: hover.y,
+          baselineY,
+        })
+      : 'point';
   const showsBaselineTooltip = showHover && hoverTooltipKind === 'baseline';
-  const cursorX = showHover
-    ? chart.left + activeRatio * (chart.right - chart.left)
-    : activePoint.x;
+  const cursorX = showHover ? chart.left + activeRatio * (chart.right - chart.left) : activePoint.x;
   const axisTicks = stockChartAxisTicks(labels, kind, MARKET_CHART_LEFT, MARKET_CHART_RIGHT);
   const tooltipValue = showsBaselineTooltip ? baseline : activeValue;
   const tooltipY = showsBaselineTooltip ? baselineY : activePoint.y;
   const tooltipMeta = showsBaselineTooltip
-    ? kind === 'intraday' ? '昨日收盘价' : '首日收盘价'
+    ? kind === 'intraday'
+      ? '昨日收盘价'
+      : '首日收盘价'
     : kind === 'intraday'
       ? formatStockDateTimeLabel(labels[activePoint.index] ?? '')
       : `${formatStockDateLabel(labels[activePoint.index] ?? '')} 收盘`;
-  const updateHoverFromClientPoint = (svg: SVGSVGElement, clientX: number, clientY: number): void => {
+  const updateHoverFromClientPoint = (
+    svg: SVGSVGElement,
+    clientX: number,
+    clientY: number,
+  ): void => {
     if (!onHoverChange) return;
     const matrix = svg.getScreenCTM();
     let svgX: number;
@@ -2608,16 +2979,38 @@ function MarketMiniChart({
         onMouseLeave={handlePointerLeave}
       >
         <defs>
-          <linearGradient id={gradientId} x1="0" x2="0" y1="4" y2="38" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id={gradientId}
+            x1="0"
+            x2="0"
+            y1="4"
+            y2="38"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor={MARKET_UP_STROKE} />
             <stop offset={`${Math.max(0, baselinePct - 1)}%`} stopColor={MARKET_UP_STROKE} />
             <stop offset={`${Math.min(100, baselinePct + 1)}%`} stopColor={MARKET_DOWN_STROKE} />
             <stop offset="100%" stopColor={MARKET_DOWN_STROKE} />
           </linearGradient>
-          <linearGradient id={`${gradientId}-fill`} x1="0" x2="0" y1="4" y2="38" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id={`${gradientId}-fill`}
+            x1="0"
+            x2="0"
+            y1="4"
+            y2="38"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor={MARKET_UP_STROKE} stopOpacity="0.08" />
-            <stop offset={`${Math.max(0, baselinePct - 1)}%`} stopColor={MARKET_UP_STROKE} stopOpacity="0.055" />
-            <stop offset={`${Math.min(100, baselinePct + 1)}%`} stopColor={MARKET_DOWN_STROKE} stopOpacity="0.05" />
+            <stop
+              offset={`${Math.max(0, baselinePct - 1)}%`}
+              stopColor={MARKET_UP_STROKE}
+              stopOpacity="0.055"
+            />
+            <stop
+              offset={`${Math.min(100, baselinePct + 1)}%`}
+              stopColor={MARKET_DOWN_STROKE}
+              stopOpacity="0.05"
+            />
             <stop offset="100%" stopColor={MARKET_DOWN_STROKE} stopOpacity="0.075" />
           </linearGradient>
         </defs>
@@ -2625,12 +3018,29 @@ function MarketMiniChart({
         {showTimeline ? (
           <>
             {axisTicks.map((tick) => (
-              <line key={tick.label} x1={tick.x} x2={tick.x} y1="5" y2="38" stroke="#ECEFF3" strokeWidth="0.34" />
+              <line
+                key={tick.label}
+                x1={tick.x}
+                x2={tick.x}
+                y1="5"
+                y2="38"
+                stroke="#ECEFF3"
+                strokeWidth="0.34"
+              />
             ))}
           </>
         ) : null}
         {[8, 18, 28, 38].map((y) => (
-          <line key={y} x1={chart.left} x2={chart.right} y1={y} y2={y} stroke="#E8EBF0" strokeDasharray="0.35 1.45" strokeWidth="0.4" />
+          <line
+            key={y}
+            x1={chart.left}
+            x2={chart.right}
+            y1={y}
+            y2={y}
+            stroke="#E8EBF0"
+            strokeDasharray="0.35 1.45"
+            strokeWidth="0.4"
+          />
         ))}
         <line
           x1={chart.left}
@@ -2668,7 +3078,14 @@ function MarketMiniChart({
           <>
             <line x1={cursorX} x2={cursorX} y1="4" y2="38" stroke="#9FA6B3" strokeWidth="0.48" />
             {!showsBaselineTooltip ? (
-              <circle cx={activePoint.x} cy={activePoint.y} r="0.95" fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE} stroke="white" strokeWidth="0.5" />
+              <circle
+                cx={activePoint.x}
+                cy={activePoint.y}
+                r="0.95"
+                fill={positive ? MARKET_UP_STROKE : MARKET_DOWN_STROKE}
+                stroke="white"
+                strokeWidth="0.5"
+              />
             ) : null}
           </>
         ) : null}
@@ -2693,7 +3110,12 @@ function MarketMiniChart({
               className="absolute top-[93.75%] text-[12px] font-medium tabular-nums text-[#A5ADBA]"
               style={{
                 left: `${tick.x}%`,
-                transform: index === axisTicks.length - 1 ? 'translateX(-100%)' : index === 0 ? undefined : 'translateX(-50%)',
+                transform:
+                  index === axisTicks.length - 1
+                    ? 'translateX(-100%)'
+                    : index === 0
+                      ? undefined
+                      : 'translateX(-50%)',
               }}
             >
               {tick.label}
@@ -2710,7 +3132,9 @@ function MarketMiniChart({
             transform: cursorX > 76 ? 'translate(-100%, -50%)' : 'translate(10px, -50%)',
           }}
         >
-          <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">{tooltipValue.toFixed(2)}</div>
+          <div className="whitespace-nowrap text-[12px] font-semibold tabular-nums text-[#344054]">
+            {tooltipValue.toFixed(2)}
+          </div>
           <div className="mt-0.5 whitespace-nowrap text-[11px] font-medium tabular-nums text-[#8B92A1]">
             {tooltipMeta}
           </div>
@@ -2734,7 +3158,11 @@ function valuesToPoints(values: number[]): string {
     .join(' ');
 }
 
-function chartGeometry(values: number[], extraValues: number[] = [], xRatios?: number[]): {
+function chartGeometry(
+  values: number[],
+  extraValues: number[] = [],
+  xRatios?: number[],
+): {
   points: Array<{ x: number; y: number }>;
   yForValue: (value: number) => number;
   left: number;
@@ -2749,7 +3177,7 @@ function chartGeometry(values: number[], extraValues: number[] = [], xRatios?: n
   const yForValue = (value: number): number => 38 - ((value - min) / range) * 30;
   return {
     points: values.map((value, index) => ({
-      x: ((xRatios?.[index] ?? (index / Math.max(1, values.length - 1))) * (right - left)) + left,
+      x: (xRatios?.[index] ?? index / Math.max(1, values.length - 1)) * (right - left) + left,
       y: yForValue(value),
     })),
     yForValue,
@@ -2787,32 +3215,36 @@ function sampledChartPoint(
   baseline: number,
 ): { x: number; y: number; value: number; changePct: number; index: number } {
   const latest = values[values.length - 1] ?? 0;
-  const index = Math.max(0, Math.min(values.length - 1, Math.round(Math.max(0, Math.min(1, ratio)) * (values.length - 1))));
+  const index = Math.max(
+    0,
+    Math.min(values.length - 1, Math.round(Math.max(0, Math.min(1, ratio)) * (values.length - 1))),
+  );
   const value = values[index] ?? latest;
   return {
     x: chart.points[index]?.x ?? chart.right,
     y: chart.points[index]?.y ?? chart.yForValue(value),
     value,
-    changePct: index === values.length - 1 && Number.isFinite(latestChangePct)
-      ? latestChangePct
-      : baseline
-        ? ((value - baseline) / baseline) * 100
-        : 0,
+    changePct:
+      index === values.length - 1 && Number.isFinite(latestChangePct)
+        ? latestChangePct
+        : baseline
+          ? ((value - baseline) / baseline) * 100
+          : 0,
     index,
   };
 }
 
 function intradayXRatios(labels: string[], count: number): number[] | undefined {
   if (count <= 0) return undefined;
-  const ratios = labels
-    .slice(0, count)
-    .map((label) => intradayRatioFromLabel(label));
+  const ratios = labels.slice(0, count).map((label) => intradayRatioFromLabel(label));
   if (ratios.length !== count || ratios.some((ratio) => ratio === null)) return undefined;
   return ratios.map((ratio) => ratio ?? 0);
 }
 
 function stockTradeDate(stock: StockSnapshot): string | null {
-  return stock.sparkTradeDate ?? stockLabelDatePart(stock.sparkLabels?.[stock.sparkLabels.length - 1]);
+  return (
+    stock.sparkTradeDate ?? stockLabelDatePart(stock.sparkLabels?.[stock.sparkLabels.length - 1])
+  );
 }
 
 function stockIntradayScope(stock: StockSnapshot): string {
@@ -2863,7 +3295,10 @@ function stockTurnoverText(stock: StockSnapshot): string {
 
 function stockVolumeSignalText(stock: StockSnapshot): string {
   const signal = stock.volumeSignal ?? '待观察';
-  if (typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)) {
+  if (
+    typeof stock.averageTurnoverAmount === 'number' &&
+    Number.isFinite(stock.averageTurnoverAmount)
+  ) {
     return `${signal}：${formatMoneyAuto(stock.averageTurnoverAmount)}`;
   }
   return signal;
@@ -2937,12 +3372,16 @@ function stockNarrative(
 }
 
 function stockVolumeSummary(stock: StockSnapshot): string {
-  const averageAmount = typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)
-    ? `（近7日均额 ${formatMoneyAuto(stock.averageTurnoverAmount)}）`
-    : '';
-  if (stock.volumeSignal === '放量') return `成交活跃度高于近7日均额${averageAmount}，说明本交易日参与度放大`;
-  if (stock.volumeSignal === '缩量') return `成交活跃度低于近7日均额${averageAmount}，说明本交易日参与度偏弱`;
-  if (stock.volumeSignal === '接近均量') return `成交活跃度接近近7日均额${averageAmount}，暂未出现明显放量`;
+  const averageAmount =
+    typeof stock.averageTurnoverAmount === 'number' && Number.isFinite(stock.averageTurnoverAmount)
+      ? `（近7日均额 ${formatMoneyAuto(stock.averageTurnoverAmount)}）`
+      : '';
+  if (stock.volumeSignal === '放量')
+    return `成交活跃度高于近7日均额${averageAmount}，说明本交易日参与度放大`;
+  if (stock.volumeSignal === '缩量')
+    return `成交活跃度低于近7日均额${averageAmount}，说明本交易日参与度偏弱`;
+  if (stock.volumeSignal === '接近均量')
+    return `成交活跃度接近近7日均额${averageAmount}，暂未出现明显放量`;
   return '近7日均额仍在补齐，暂不判断成交活跃度';
 }
 
@@ -2994,7 +3433,9 @@ function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolea
   if (!snapshot) return false;
   if (snapshot.trust?.mode === 'unavailable') return false;
   return Boolean(
-    snapshot.watchlistStocks.some((stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2) ||
+    snapshot.watchlistStocks.some(
+      (stockRow) => stockRow.price !== '—' || stockRow.spark.length >= 2,
+    ) ||
       snapshot.marketIndices.length > 0 ||
       snapshot.sectors.length > 0 ||
       snapshot.news.length > 0 ||
@@ -3003,9 +3444,13 @@ function dashboardHasDisplayableData(snapshot: DashboardSnapshot | null): boolea
   );
 }
 
-function preserveDisplayableDashboard(next: DashboardSnapshot, previous: DashboardSnapshot | null): DashboardSnapshot {
+function preserveDisplayableDashboard(
+  next: DashboardSnapshot,
+  previous: DashboardSnapshot | null,
+): DashboardSnapshot {
   if (next.trust?.mode === 'unavailable') return next;
-  if (!previous || dashboardHasDisplayableData(next) || !dashboardHasDisplayableData(previous)) return next;
+  if (!previous || dashboardHasDisplayableData(next) || !dashboardHasDisplayableData(previous))
+    return next;
   return {
     ...previous,
     trust: next.trust,
@@ -3084,9 +3529,14 @@ function dailyBriefingSourceLine(
     marketIndices.length > 0 ? `${marketIndices.length} 个市场指数` : null,
     sectors.length > 0 ? `${sectors.length} 条行业趋势` : null,
     news.length > 0 ? `${marketNewsCount} 条新闻 / ${announcementCount} 条公告` : null,
-    leaderboards.gainers.length + leaderboards.losers.length + leaderboards.amount.length > 0 ? '榜单数据' : null,
+    leaderboards.gainers.length + leaderboards.losers.length + leaderboards.amount.length > 0
+      ? '榜单数据'
+      : null,
   ].filter((part): part is string => part !== null);
-  const prefix = temporalMode === 'historical' ? '本次回看仅使用已返回的真实数据' : '当前摘要仅使用已返回的真实数据';
+  const prefix =
+    temporalMode === 'historical'
+      ? '本次回看仅使用已返回的真实数据'
+      : '当前摘要仅使用已返回的真实数据';
   return parts.length > 0
     ? `${prefix}：${parts.join('、')}。`
     : temporalMode === 'historical'
@@ -3105,24 +3555,32 @@ function dailyOpportunityItems(
     .filter((stock) => stock.changePct > 0)
     .sort((a, b) => b.changePct - a.changePct)[0];
   if (strongestStock) {
-    items.push(`${strongestStock.name} ${strongestStock.price}，本交易日 ${formatSignedPct(strongestStock.changePct)}，为关注列表中涨幅最高。`);
+    items.push(
+      `${strongestStock.name} ${strongestStock.price}，本交易日 ${formatSignedPct(strongestStock.changePct)}，为关注列表中涨幅最高。`,
+    );
   }
 
   const strongestIndex = marketIndices
     .filter((index) => index.changePct > 0)
     .sort((a, b) => b.changePct - a.changePct)[0];
   if (strongestIndex) {
-    items.push(`${strongestIndex.name} ${strongestIndex.price}，本交易日 ${formatSignedPct(strongestIndex.changePct)}，成交 ${strongestIndex.turnover}。`);
+    items.push(
+      `${strongestIndex.name} ${strongestIndex.price}，本交易日 ${formatSignedPct(strongestIndex.changePct)}，成交 ${strongestIndex.turnover}。`,
+    );
   }
 
   const topSector = sectors[0];
   if (topSector) {
-    items.push(`${topSector.name} 行业 ${formatSignedPct(topSector.changePct)}，领涨股 ${topSector.leader || '未返回'}。`);
+    items.push(
+      `${topSector.name} 行业 ${formatSignedPct(topSector.changePct)}，领涨股 ${topSector.leader || '未返回'}。`,
+    );
   }
 
   const topGainer = gainers[0];
   if (topGainer) {
-    items.push(`涨幅榜第 ${topGainer.rank}：${topGainer.name} ${topGainer.price}，${formatSignedPct(topGainer.changePct)}。`);
+    items.push(
+      `涨幅榜第 ${topGainer.rank}：${topGainer.name} ${topGainer.price}，${formatSignedPct(topGainer.changePct)}。`,
+    );
   }
   return items.slice(0, 4);
 }
@@ -3139,25 +3597,33 @@ function dailyRiskItems(
     .filter((stock) => stock.changePct < 0)
     .sort((a, b) => a.changePct - b.changePct)[0];
   if (weakestStock) {
-    items.push(`${weakestStock.name} ${weakestStock.price}，本交易日 ${formatSignedPct(weakestStock.changePct)}，为关注列表中跌幅最大。`);
+    items.push(
+      `${weakestStock.name} ${weakestStock.price}，本交易日 ${formatSignedPct(weakestStock.changePct)}，为关注列表中跌幅最大。`,
+    );
   }
 
   const weakestIndex = marketIndices
     .filter((index) => index.changePct < 0)
     .sort((a, b) => a.changePct - b.changePct)[0];
   if (weakestIndex) {
-    items.push(`${weakestIndex.name} ${weakestIndex.price}，本交易日 ${formatSignedPct(weakestIndex.changePct)}，成交 ${weakestIndex.turnover}。`);
+    items.push(
+      `${weakestIndex.name} ${weakestIndex.price}，本交易日 ${formatSignedPct(weakestIndex.changePct)}，成交 ${weakestIndex.turnover}。`,
+    );
   }
 
   const announcements = news.filter((item) => item.category === '公告');
   if (announcements.length > 0) {
     const announcementLabel = temporalMode === 'historical' ? '其中' : '最新';
-    items.push(`近 7 日返回 ${announcements.length} 条公告，${announcementLabel}：${announcements[0]!.title}`);
+    items.push(
+      `近 7 日返回 ${announcements.length} 条公告，${announcementLabel}：${announcements[0]!.title}`,
+    );
   }
 
   const topLoser = losers[0];
   if (topLoser) {
-    items.push(`跌幅榜第 ${topLoser.rank}：${topLoser.name} ${topLoser.price}，${formatSignedPct(topLoser.changePct)}。`);
+    items.push(
+      `跌幅榜第 ${topLoser.rank}：${topLoser.name} ${topLoser.price}，${formatSignedPct(topLoser.changePct)}。`,
+    );
   }
   return items.slice(0, 4);
 }
@@ -3191,7 +3657,9 @@ function dailyTrackingItems(
 
   const amountLeader = amountLeaders[0];
   if (amountLeader) {
-    items.push(`成交额榜第 ${amountLeader.rank}：${amountLeader.name} ${amountLeader.price}，${formatSignedPct(amountLeader.changePct)}。`);
+    items.push(
+      `成交额榜第 ${amountLeader.rank}：${amountLeader.name} ${amountLeader.price}，${formatSignedPct(amountLeader.changePct)}。`,
+    );
   }
   return items.slice(0, 4);
 }
@@ -3214,16 +3682,21 @@ function dailyBriefingHeadline(stocks: StockSnapshot[], riskStock?: StockSnapsho
   if (weakCount >= Math.ceil(quoteStocks.length / 2)) {
     return `关注列表整体偏弱，${riskStock?.name ?? strong?.name ?? '重点标的'} 本交易日 ${formatSignedPct(riskStock?.changePct ?? strong?.changePct ?? 0)}。`;
   }
-  if (strong && strong.changePct > 0) return `${strong.name} 本交易日 ${formatSignedPct(strong.changePct)}，为关注列表中相对活跃标的。`;
+  if (strong && strong.changePct > 0)
+    return `${strong.name} 本交易日 ${formatSignedPct(strong.changePct)}，为关注列表中相对活跃标的。`;
   return `关注列表已返回 ${quoteStocks.length} 只真实行情，暂无上涨标的。`;
 }
 
-function marketInsight(rows: IndexRow[], temporalMode: StockTemporalMode = 'current'): InsightSheetState {
+function marketInsight(
+  rows: IndexRow[],
+  temporalMode: StockTemporalMode = 'current',
+): InsightSheetState {
   return {
     title: '市场行情',
-    description: temporalMode === 'historical'
-      ? '主要指数在该数据日的收盘点位、涨跌幅和成交额，仅用于历史回看。'
-      : '主要指数的最新点位、涨跌幅和成交额，用于判断当前交易日的整体风险偏好。',
+    description:
+      temporalMode === 'historical'
+        ? '主要指数在该数据日的收盘点位、涨跌幅和成交额，仅用于历史回看。'
+        : '主要指数的最新点位、涨跌幅和成交额，用于判断当前交易日的整体风险偏好。',
     rows: rows.map((row) => ({
       label: row.name,
       value: row.price,
@@ -3233,12 +3706,16 @@ function marketInsight(rows: IndexRow[], temporalMode: StockTemporalMode = 'curr
   };
 }
 
-function sectorInsight(sectors: SectorRow[], temporalMode: StockTemporalMode = 'current'): InsightSheetState {
+function sectorInsight(
+  sectors: SectorRow[],
+  temporalMode: StockTemporalMode = 'current',
+): InsightSheetState {
   return {
     title: '行业趋势',
-    description: temporalMode === 'historical'
-      ? '按该数据日市场脉冲整理的行业表现和领涨线索，仅用于历史回看。'
-      : '按市场脉冲整理的行业强弱和领涨线索，优先用于发现当日主线。',
+    description:
+      temporalMode === 'historical'
+        ? '按该数据日市场脉冲整理的行业表现和领涨线索，仅用于历史回看。'
+        : '按市场脉冲整理的行业强弱和领涨线索，优先用于发现当日主线。',
     rows: sectors.map((sector) => ({
       label: sector.name,
       value: sector.leader,
@@ -3255,9 +3732,10 @@ function starStockInsight(
 ): InsightSheetState {
   return {
     title: temporalCopy.starTitle,
-    description: temporalMode === 'historical'
-      ? '仅展示该数据日已核验价格的关注股票，用于回看当日表现。'
-      : '仅展示已拿到真实价格的关注股票，用于快速扫描当日异动。',
+    description:
+      temporalMode === 'historical'
+        ? '仅展示该数据日已核验价格的关注股票，用于回看当日表现。'
+        : '仅展示已拿到真实价格的关注股票，用于快速扫描当日异动。',
     rows: stocks.map((stock) => ({
       label: `${stock.name} ${stock.symbol}`,
       value: stock.price,
@@ -3276,28 +3754,32 @@ function newsFeed(item: NewsRow): NonNullable<NewsRow['feed']> {
   return newsDisplayType(item) === '公告' ? '重要公告' : '自选股新闻';
 }
 
-function temperatureInsight(temperature: DashboardSnapshot['temperature'] | null): InsightSheetState {
+function temperatureInsight(
+  temperature: DashboardSnapshot['temperature'] | null,
+): InsightSheetState {
   return {
     title: '市场温度',
     description: temperature
       ? '由涨跌家数、涨跌停、资金流等盘面指标估算，仅用于判断市场拥挤度和情绪方向。'
       : '市场脉冲接口暂未返回可展示数据，不展示模拟分数。',
-    rows: temperature ? [
-      {
-        label: '温度分',
-        value: String(temperature.score),
-        meta: temperature.mood,
-      },
-      {
-        label: '历史位置',
-        value: temperature.historicalPosition,
-        meta: '分数越高代表市场情绪越热',
-      },
-      ...temperature.notes.map((note, index) => ({
-        label: `观察 ${index + 1}`,
-        value: note,
-      })),
-    ] : [],
+    rows: temperature
+      ? [
+          {
+            label: '温度分',
+            value: String(temperature.score),
+            meta: temperature.mood,
+          },
+          {
+            label: '历史位置',
+            value: temperature.historicalPosition,
+            meta: '分数越高代表市场情绪越热',
+          },
+          ...temperature.notes.map((note, index) => ({
+            label: `观察 ${index + 1}`,
+            value: note,
+          })),
+        ]
+      : [],
   };
 }
 
@@ -3308,9 +3790,10 @@ function leaderboardInsight(
 ): InsightSheetState {
   return {
     title: active,
-    description: temporalMode === 'historical'
-      ? '该数据日榜单来自 AkShare 全市场个股排行，仅用于历史回看。'
-      : '当前榜单来自 AkShare 全市场个股排行，接口无数据时不展示模拟榜单。',
+    description:
+      temporalMode === 'historical'
+        ? '该数据日榜单来自 AkShare 全市场个股排行，仅用于历史回看。'
+        : '当前榜单来自 AkShare 全市场个股排行，接口无数据时不展示模拟榜单。',
     rows: leaders.map((leader) => ({
       label: `${leader.rank}. ${leader.name}`,
       value: leader.price,

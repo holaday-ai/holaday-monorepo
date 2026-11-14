@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { notify, type NotifyDeps } from './notification-service.js';
+import { type NotifyDeps, notify } from './notification-service.js';
 import type { sendWebhook } from './webhook-sender.js';
 
 /**
@@ -78,9 +78,7 @@ describe('notify', () => {
         delivery: 'in_app_only',
       },
     );
-    expect(inserted).toEqual([
-      expect.objectContaining({ userId: 42, plannedTaskId: 77 }),
-    ]);
+    expect(inserted).toEqual([expect.objectContaining({ userId: 42, plannedTaskId: 77 })]);
     expect(result.channelResults).toEqual([]);
     expect(result.inAppStored).toBe(true);
     expect(selectCount()).toBe(0);
@@ -114,9 +112,7 @@ describe('notify', () => {
         { externalId: 'nch_2', platform: 'feishu', webhookUrl: 'u2', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi.fn<SendFn>().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     const res = await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {
@@ -161,9 +157,7 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockRejectedValueOnce(new Error('unexpected throw'));
+    const sendMock = vi.fn<SendFn>().mockRejectedValueOnce(new Error('unexpected throw'));
     const res = await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {
@@ -224,9 +218,7 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi.fn<SendFn>().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {
@@ -249,9 +241,7 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi.fn<SendFn>().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {
@@ -273,9 +263,7 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi.fn<SendFn>().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {
@@ -297,9 +285,7 @@ describe('notify', () => {
         { externalId: 'nch_1', platform: 'wecom', webhookUrl: 'u1', customTemplate: null },
       ],
     });
-    const sendMock = vi
-      .fn<SendFn>()
-      .mockResolvedValue({ ok: true, status: 200, attempt: 1 });
+    const sendMock = vi.fn<SendFn>().mockResolvedValue({ ok: true, status: 200, attempt: 1 });
     await notify(
       { db, logger: NOOP_LOGGER, send: sendMock },
       {

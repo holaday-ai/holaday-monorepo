@@ -9,6 +9,7 @@ import {
   reloadFeatureFlagsForTest,
   setFeatureFlagsForTest,
 } from '../../execution/feature-flags.js';
+import { FileService } from '../../files/file-service.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
@@ -77,13 +78,14 @@ function context(state = { active: true }): Context {
 
 describe('tasks.create Qwen core planning reachability', () => {
   it.each([
-    ['generate', false],
-    ['scrape', false],
-    ['generate', true],
-    ['scrape', true],
+    ['generate', false, false],
+    ['scrape', false, false],
+    ['generate', true, false],
+    ['scrape', true, false],
+    ['scrape', false, true],
   ] as const)(
-    'handles %s planning without legacy dependencies, cancelled=%s',
-    async (lane, cancelled) => {
+    'handles %s planning without legacy dependencies, cancelled=%s, attached=%s',
+    async (lane, cancelled, attached) => {
       setFeatureFlagsForTest({
         EVIDENCE_LEDGER: true,
         EXECUTION_CONTRACT: true,
@@ -98,6 +100,18 @@ describe('tasks.create Qwen core planning reachability', () => {
         QWEN_MESSAGES_ADAPTER_ENABLED: true,
         DASHSCOPE_CN_API_KEY: 'synthetic-cn',
       });
+      if (attached) {
+        vi.spyOn(FileService.prototype, 'loadMany').mockResolvedValue([
+          {
+            row: {
+              externalId: 'fil_core_attachment',
+              filename: 'material.txt',
+              mimetype: 'text/plain',
+            },
+            buffer: Buffer.from('attachment-only router marker'),
+          },
+        ] as Awaited<ReturnType<FileService['loadMany']>>);
+      }
       vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
       vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
       vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
@@ -154,6 +168,7 @@ describe('tasks.create Qwen core planning reachability', () => {
             ? '整理给出的材料，提炼关键结论并形成一份简洁的分析提纲。'
             : '总结 https://public.example.test/article 这篇文章的主要内容。',
         expertMode: 'normal',
+        ...(attached ? { fileIds: ['fil_core_attachment'] } : {}),
       });
       expect(result.executionMode).toBe(lane);
       await vi.waitFor(() => expect(plan).toHaveBeenCalledTimes(1));
@@ -173,11 +188,24 @@ describe('tasks.create Qwen core planning reachability', () => {
       expect(plan).toHaveBeenCalledWith(
         expect.objectContaining({ modelDataRegion: 'cn', actorExternalId: 'usr_core_plan_test' }),
       );
-      if (lane === 'scrape')
+      if (lane === 'scrape') {
+        if (attached) {
+          const options = scrape.mock.calls[0]?.[0];
+          expect(options?.fileIds).toEqual(['fil_core_attachment']);
+          expect(
+            options?.attachments?.some(
+              (block) =>
+                block.type === 'text' &&
+                'text' in block &&
+                typeof block.text === 'string' &&
+                block.text.includes('attachment-only router marker'),
+            ),
+          ).toBe(true);
+        }
         expect(run).toHaveBeenCalledWith(
           expect.objectContaining({ executionPlan: '1. 整理材料\n2. 归纳结论' }),
         );
-      else
+      } else
         expect(generate.mock.calls[0]?.[0].verificationContext).toMatchObject({
           phase: 'direct',
           executionRevision: 1,

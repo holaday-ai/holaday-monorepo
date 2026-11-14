@@ -54,10 +54,8 @@ export function pickBrowserViewportProfile({
     return 'desktop';
   }
 
-  const effectivePanelWidth =
-    safePanelWidth ?? Math.min(560, Math.round(viewportWidth * 0.9));
-  const effectivePanelHeight =
-    safePanelHeight ?? Math.max(480, Math.round(viewportHeight * 0.72));
+  const effectivePanelWidth = safePanelWidth ?? Math.min(560, Math.round(viewportWidth * 0.9));
+  const effectivePanelHeight = safePanelHeight ?? Math.max(480, Math.round(viewportHeight * 0.72));
   const aspect = effectivePanelWidth / effectivePanelHeight;
 
   if (effectivePanelWidth <= SIDE_PANEL_MAX_PX) {
@@ -163,9 +161,7 @@ export function pickDefaultBrowserViewportProfile(): BrowserViewportProfile {
 }
 
 function positiveFinite(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function inlinePanelMaxWidth(

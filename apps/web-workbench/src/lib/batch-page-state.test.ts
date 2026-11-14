@@ -6,23 +6,21 @@ import {
   batchFinishedCount,
   batchListSummary,
   batchProgressPercent,
+  batchPromptImportStateReset,
   batchRemainingCount,
   batchShouldPoll,
-  batchStatusLabel,
   batchStatusCopy,
-  batchPromptImportStateReset,
+  batchStatusLabel,
   mergeBatchRows,
-  normalizeBatchPage,
   normalizeBatchDetail,
+  normalizeBatchPage,
   normalizeBatchRows,
   safeBatchCount,
 } from './batch-page-state';
 
 describe('batch page state helpers', () => {
   it('summarizes batch list states', () => {
-    expect(batchListSummary({ loading: true, error: null, count: 0 })).toBe(
-      '批量任务加载中…',
-    );
+    expect(batchListSummary({ loading: true, error: null, count: 0 })).toBe('批量任务加载中…');
     expect(batchListSummary({ loading: false, error: 'offline', count: 0 })).toBe(
       '批量任务暂时无法加载',
     );
@@ -52,22 +50,29 @@ describe('batch page state helpers', () => {
     expect(
       batchStatusCopy({ loading: true, error: null, hasData: false, target: 'list' })?.title,
     ).toBe('批量任务加载中…');
-    expect(batchStatusCopy({ loading: false, error: 'offline', hasData: false, target: 'detail' }))
-      .toEqual({
-        title: '批量任务详情暂时无法加载',
-        body: 'offline',
-      });
+    expect(
+      batchStatusCopy({ loading: false, error: 'offline', hasData: false, target: 'detail' }),
+    ).toEqual({
+      title: '批量任务详情暂时无法加载',
+      body: 'offline',
+    });
     expect(
       batchStatusCopy({ loading: false, error: 'offline', hasData: true, target: 'detail' })?.title,
     ).toBe('刷新失败，正在显示上次成功加载的批量任务详情');
-    expect(batchStatusCopy({ loading: false, error: null, hasData: true, target: 'list' })).toBeNull();
+    expect(
+      batchStatusCopy({ loading: false, error: null, hasData: true, target: 'list' }),
+    ).toBeNull();
   });
 
   it('calculates progress percent defensively', () => {
-    expect(batchProgressPercent({ total: 10, done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(80);
+    expect(batchProgressPercent({ total: 10, done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(
+      80,
+    );
     expect(batchProgressPercent({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(100);
     expect(batchProgressPercent({ total: 0, done: 1, review: 1, failed: 1, cancelled: 1 })).toBe(0);
-    expect(batchProgressPercent({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 })).toBe(0);
+    expect(
+      batchProgressPercent({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 }),
+    ).toBe(0);
     expect(
       batchProgressPercent({
         total: Number.NaN,
@@ -96,7 +101,9 @@ describe('batch page state helpers', () => {
     expect(batchRemainingCount({ total: 10, done: 4, review: 2, failed: 1, cancelled: 1 })).toBe(2);
     expect(batchRemainingCount({ total: 10, done: 99, failed: 0, cancelled: 0 })).toBe(0);
     expect(batchRemainingCount({ total: 0, done: 1, review: 1, failed: 1, cancelled: 1 })).toBe(0);
-    expect(batchRemainingCount({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 })).toBe(10);
+    expect(
+      batchRemainingCount({ total: 10, done: -1, review: -1, failed: -1, cancelled: -1 }),
+    ).toBe(10);
     expect(
       batchRemainingCount({
         total: Number.NaN,
@@ -243,9 +250,9 @@ describe('batch page state helpers', () => {
       items: [row],
       nextCursor: { id: 7, createdAt: '2026-08-05T00:00:00.000Z' },
     });
-    expect(
-      mergeBatchRows(page.items, [{ ...row, status: 'partial', itemsDone: 1 }]),
-    ).toEqual([{ ...row, status: 'partial', itemsDone: 1 }]);
+    expect(mergeBatchRows(page.items, [{ ...row, status: 'partial', itemsDone: 1 }])).toEqual([
+      { ...row, status: 'partial', itemsDone: 1 },
+    ]);
   });
 
   it('preserves unknown string batch statuses so new backend states are visible', () => {

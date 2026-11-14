@@ -69,9 +69,7 @@ function normalizeTaskView(raw: unknown): TaskView | null {
     ? raw.steps.flatMap(normalizeTaskStep).slice(0, MAX_TASK_STEPS)
     : [];
   const lastUpdated =
-    typeof raw.lastUpdated === 'number' && Number.isFinite(raw.lastUpdated)
-      ? raw.lastUpdated
-      : 0;
+    typeof raw.lastUpdated === 'number' && Number.isFinite(raw.lastUpdated) ? raw.lastUpdated : 0;
   const visionProgress = normalizeVisionProgress(raw.visionProgress);
   return {
     taskId,

@@ -12,22 +12,69 @@ export type {
   SupercarWebSearchEvent,
 } from './agent-loop.js';
 
-export {
-  supercarReply,
-  hasParkedSupercarHandle,
-  supercarHandoffToGenerate,
-  supercarHandleOriginalIntent,
-  supercarAbort,
+import { env } from '../../config/env.js';
+import {
+  hasParkedUnifiedTask,
+  runUnifiedSupercarTask,
+  unifiedParkedIntent,
+  unifiedSupercarAbort,
+  unifiedSupercarReply,
+} from '../browser-tools/unified-supercar-runner.js';
+import {
+  hasParkedSupercarHandle as hasParkedLegacyHandle,
+  supercarAbort as legacyAbort,
+  supercarHandleOriginalIntent as legacyOriginalIntent,
+  supercarReply as legacyReply,
 } from './agent-loop.js';
 
-/** Production may use the shared executor only with an admitted Qwen adapter. */
+export { supercarHandoffToGenerate } from './agent-loop.js';
+
+/** BROWSER_EXECUTOR: 'unified' (default, batch-04 tools) | 'legacy' (coordinate protocol, rollback). */
+export function browserExecutorMode(): 'legacy' | 'unified' {
+  return env.BROWSER_EXECUTOR === 'unified' ? 'unified' : 'legacy';
+}
+
+export function supercarReply(
+  taskId: string,
+  message: string,
+  attachmentBlocks?: Parameters<typeof legacyReply>[2],
+): boolean {
+  return unifiedSupercarReply(taskId, message) || legacyReply(taskId, message, attachmentBlocks);
+}
+
+export function hasParkedSupercarHandle(taskId: string): boolean {
+  return hasParkedUnifiedTask(taskId) || hasParkedLegacyHandle(taskId);
+}
+
+export function supercarHandleOriginalIntent(taskId: string): string | null {
+  return unifiedParkedIntent(taskId) ?? legacyOriginalIntent(taskId);
+}
+
+export function supercarAbort(taskId: string): boolean {
+  return unifiedSupercarAbort(taskId) || legacyAbort(taskId);
+}
+
+/**
+ * Production may use the shared executor only with an admitted adapter. The
+ * unified tool loop runs when BROWSER_EXECUTOR=unified and a Playwright
+ * executor is available; otherwise the legacy coordinate loop runs.
+ */
 export async function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
-  if (opts.messagesAdapter?.metadata.provider === 'alibaba-model-studio')
-    return runBrowserTask(opts);
-  return {
-    status: 'failed',
-    reason: '浏览器能力正在迁移到千问，暂时不可用。',
-    iterations: 0,
-    toolsUsed: [],
-  };
+  if (!opts.messagesAdapter)
+    return {
+      status: 'failed',
+      reason: '浏览器能力正在迁移到千问，暂时不可用。',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  if ((browserExecutorMode() === 'unified' || opts.messagesAdapter.browserBrain) && opts.executor)
+    return runUnifiedSupercarTask(opts);
+  if (opts.messagesAdapter.browserBrain)
+    return {
+      status: 'failed',
+      reason: '角色模型需要统一浏览器执行器。',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  return runBrowserTask(opts);
 }

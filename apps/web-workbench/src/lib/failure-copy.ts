@@ -1,4 +1,4 @@
-import { classifyBrowserErrorKind } from './browser-error-kind';
+import { assertedFailureText, classifyBrowserErrorKind } from './browser-error-kind';
 import { humaniseTaskError } from './error-copy';
 
 export interface FriendlyFailure {
@@ -9,10 +9,35 @@ export interface FriendlyFailure {
 
 function unsupportedOutputFormats(errorText: string): string | undefined {
   // Recognize the server's explicit format failure, not an input filename or plan restriction.
-  const match = /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(errorText.trim())
-    ?? /^任务未完成：当前文件生成工具不支持 ([a-z0-9]+(?:、[a-z0-9]+)*) 格式，升级套餐无法解决。/i.exec(errorText.trim());
+  const match =
+    /^FILE_FORMAT_UNSUPPORTED:([a-z0-9]+(?:,[a-z0-9]+)*)$/i.exec(errorText.trim()) ??
+    /^任务未完成：当前文件生成工具不支持 ([a-z0-9]+(?:、[a-z0-9]+)*) 格式，升级套餐无法解决。/i.exec(
+      errorText.trim(),
+    );
   return match?.[1]?.toUpperCase().replaceAll(',', '、');
 }
+
+/** The runner's captcha-handoff endings (unified-supercar-runner / unified-browser-loop). */
+const CAPTCHA_HANDOFF_ENDINGS: ReadonlyArray<readonly [RegExp, string, string]> = [
+  [
+    /等待用户完成验证码已超时[^。]*。?/,
+    '等待验证超时',
+    '重新执行；出现验证时，在下方浏览器里完成。',
+  ],
+  [/用户已放弃验证[^。]*。?/, '已放弃验证', '需要时重新执行，并在下方浏览器里完成验证。'],
+  [/等待验证时云端浏览器已关闭[^。]*。?/, '等待验证时浏览器已关闭', '重新执行当前任务。'],
+  // REBUILD-4 renamed 「验证码接管…」 to 「等待验证…」; the old wording stays for older tasks.
+  [
+    /(?:等待验证时画面通道异常关闭|验证码接管通道异常关闭)[^。]*。?/,
+    '等待验证中断',
+    '稍后重新执行当前任务。',
+  ],
+  [
+    /(?:等待验证已结束|验证码接管已结束|验证码等待已结束)[^。]*。?/,
+    '验证等待已结束',
+    '重新执行；出现验证时，在下方浏览器里完成。',
+  ],
+];
 
 /**
  * Map a raw terminal failure message to the two-line headline shown
@@ -20,7 +45,15 @@ function unsupportedOutputFormats(errorText: string): string | undefined {
  * so recovery copy must point to retrying the task, not "continue"
  * flows that only exist while the agent is still awaiting_user.
  */
-export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
+export interface FailureContext {
+  executionMode?: string;
+  errorCode?: string;
+}
+
+export function classifyFriendlyFailure(
+  errorText: string,
+  context: FailureContext = {},
+): FriendlyFailure {
   const unsupportedFormats = unsupportedOutputFormats(errorText ?? '');
   if (unsupportedFormats) {
     return {
@@ -29,9 +62,101 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '请确认是否接受其他可用格式，或使用支持该格式的工具。',
     };
   }
+  if (context.executionMode && context.executionMode !== 'browser') {
+    const label =
+      context.executionMode === 'scrape'
+        ? '网页采集'
+        : context.executionMode === 'image'
+          ? '图片生成'
+          : context.executionMode === 'video_creation'
+            ? '视频生成'
+            : '生成';
+    const qualityTitle =
+      context.executionMode === 'video_creation' ? '成片未通过质量检查' : '生成内容未通过质量检查';
+    if (
+      /未要求的文字或品牌/i.test(errorText) ||
+      /unauthorized_text_or_brand/i.test(context.errorCode ?? '')
+    ) {
+      return {
+        title: qualityTitle,
+        subtitle: '画面出现了未要求的文字或品牌，问题成片没有交付。',
+        nextStep: '调整描述后重新生成。',
+      };
+    }
+    if (
+      /QUALITY|质量|unauthorized_text_or_brand/i.test(`${context.errorCode ?? ''} ${errorText}`)
+    ) {
+      return {
+        title: qualityTitle,
+        subtitle: '生成内容未满足要求，问题内容没有交付。额度处理状态见下方。',
+        nextStep: '调整描述后重新生成。',
+      };
+    }
+    if (
+      /attachment|附件|文件.*不可用|未检测到.*\.(?:png|jpg|pdf)/i.test(
+        `${context.errorCode ?? ''} ${errorText}`,
+      )
+    ) {
+      return {
+        title: '无法读取任务附件',
+        subtitle: '生成流程未能读取所需的文件。',
+        nextStep: '确认附件可用，必要时重新上传后再执行。',
+      };
+    }
+    if (/429|rate.limit|限速|繁忙/i.test(errorText)) {
+      return {
+        title: `${label}服务繁忙`,
+        subtitle: '服务暂时限速，请稍后再试。',
+        nextStep: '稍后重新生成。',
+      };
+    }
+    if (/timeout|超时|timed.out/i.test(errorText)) {
+      return {
+        title: `${label}处理超时`,
+        subtitle: '生成服务没有及时完成此次请求。',
+        nextStep: '稍后重试，或缩小生成内容的范围。',
+      };
+    }
+    return {
+      title: `${label}任务未能完成`,
+      subtitle: `这次${label}没有完成，请检查输入与要求后重试。`,
+      nextStep:
+        context.executionMode === 'video_creation' || context.executionMode === 'image'
+          ? '调整描述后重新生成。'
+          : context.executionMode === 'scrape'
+            ? '确认采集来源与范围后重新执行。'
+            : '确认要求和附件后重新执行。',
+    };
+  }
   const haystack = (errorText ?? '').toLowerCase();
+  // FIX-53 #4 (Deploy-53 wall-zhihu): how a captcha handoff ended is the server's own sentence,
+  // shown as it is — never the generic 「操作超时 / 目标网站响应太慢」 its 「超时」 would match.
+  for (const [re, title, nextStep] of CAPTCHA_HANDOFF_ENDINGS) {
+    const sentence = re.exec(errorText ?? '')?.[0];
+    if (sentence) return { title, subtitle: sentence, nextStep };
+  }
+  // FIX-D11 — the executor gave up because the task needed something the
+  // browser lane cannot do (e.g. "当前环境不支持上传附件"). Not a site problem:
+  // never suggest switching to another URL.
+  if (
+    /VISION_GAVE_UP|vision_gave_up|无法完成任务|不支持上传|不支持.{0,8}附件|not supported in this environment/i.test(
+      `${context.errorCode ?? ''} ${errorText}`,
+    )
+  ) {
+    return {
+      title: '任务未能完成',
+      subtitle:
+        '执行时缺少完成这个任务所需的条件（例如当前环境不支持上传附件），不是网站本身的问题。',
+      nextStep:
+        '确认任务是否真的需要浏览器操作；写文章或根据附件生成内容时，直接说明要求后重新执行。',
+    };
+  }
   const browserKind = classifyBrowserErrorKind(errorText);
-  if (/ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(errorText)) {
+  if (
+    /ORCHESTRATOR_RESTART|orchestrator_restart|服务重启导致任务中断|orchestrator restarted/i.test(
+      errorText,
+    )
+  ) {
     return {
       title: '服务重启中断了任务',
       subtitle: '这个任务没能继续执行；旧记录会保留，重新执行会新开一次尝试。',
@@ -177,10 +302,29 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '稍后重新执行，或换一个响应更稳定的网址。',
     };
   }
+  // FIX-61 P1-7 (DEPLOY-60 dy-1): what really stopped the run, in plain words, before any guess it
+  // made about logins. A link the site sent to another page (Douyin's recommendation feed), or a
+  // guide layer over the page, is neither a login nor a check.
   if (
-    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(
-      haystack,
-    )
+    /重定向|跳转到|转到|redirect/i.test(errorText ?? '') &&
+    /推荐|精选|首页|别的页面|other page|feed|home ?page/i.test(errorText ?? '')
+  ) {
+    return {
+      title: '网站把链接转到了别的页面',
+      subtitle: '打开链接后，网站转到了推荐页等别的页面，没有打开你给的那一页。',
+      nextStep: '确认链接还有效后重新执行，或换一个能直接打开的链接。',
+    };
+  }
+  if (/引导层|引导浮层|新手引导|浮层挡|遮罩|overlay/i.test(assertedFailureText(errorText))) {
+    return {
+      title: '页面被一个引导层挡住了',
+      subtitle: '网站在页面上盖了一层引导提示，没能关掉它，挡住了要读的内容。',
+      nextStep: '重新执行；如果还是被挡住，可以直接在画面上把它关掉。',
+    };
+  }
+  const asserted = assertedFailureText(errorText).toLowerCase();
+  if (
+    /captcha|recaptcha|hcaptcha|验证码|人机|滑块|cloudflare|are you a (human|robot)/.test(asserted)
   ) {
     return {
       title: '网站要求验证身份',
@@ -188,18 +332,14 @@ export function classifyFriendlyFailure(errorText: string): FriendlyFailure {
       nextStep: '重新执行后在浏览器里完成验证。',
     };
   }
-  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(haystack)) {
+  if (/login|sign[\s_-]?in|登录|401|未登录|unauthor|凭据|需要授权/.test(asserted)) {
     return {
       title: '需要先登录',
       subtitle: '请重新执行；如果再次停在登录页，请先完成登录。',
       nextStep: '重新执行后在浏览器里完成登录。',
     };
   }
-  if (
-    /browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(
-      haystack,
-    )
-  ) {
+  if (/browser|chromium|brave|cdp|websocket|浏览器|frame[^\w]not|screencast/.test(haystack)) {
     return {
       title: '浏览器遇到问题',
       subtitle: '请重新执行任务；如果反复出现，可以换一个更稳定的网址。',
@@ -228,8 +368,8 @@ export function friendlyFailureDetail(errorText: string): string {
  * always renders as clean Chinese (it has a catch-all), so copying a
  * failed result never yields raw English or an empty string.
  */
-export function failureResultCopyText(errorText: string): string {
-  const friendly = classifyFriendlyFailure(errorText);
+export function failureResultCopyText(errorText: string, context: FailureContext = {}): string {
+  const friendly = classifyFriendlyFailure(errorText, context);
   return [friendly.title, friendly.subtitle, `下一步：${friendly.nextStep}`].join('\n');
 }
 

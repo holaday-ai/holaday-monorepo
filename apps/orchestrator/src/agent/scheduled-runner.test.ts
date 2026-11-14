@@ -378,6 +378,11 @@ describe('startScheduledRunner — tick integration', () => {
       ok: false,
       error: '非交易日，未生成简报',
       skipped: true,
+      // Batch 10.3 — streak/preferences travel with every notify call.
+      phase: 'dispatch',
+      consecutiveFailures: 0,
+      failureNotifyThreshold: 1,
+      notifyOnSuccess: false,
     });
     stopScheduledRunner();
   });

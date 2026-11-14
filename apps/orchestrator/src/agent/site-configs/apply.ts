@@ -21,10 +21,7 @@ import type { SiteConfig } from './types.js';
 
 interface PageLike {
   url: () => string;
-  evaluate: (
-    fn: (texts: string[]) => unknown,
-    arg: string[],
-  ) => Promise<unknown>;
+  evaluate: (fn: (texts: string[]) => unknown, arg: string[]) => Promise<unknown>;
 }
 
 /**
@@ -59,10 +56,7 @@ interface PageLike {
  */
 const EVALUATE_TIMEOUT_MS = 800;
 
-async function clickFirstByText(
-  page: PageLike,
-  texts: readonly string[],
-): Promise<string | null> {
+async function clickFirstByText(page: PageLike, texts: readonly string[]): Promise<string | null> {
   if (texts.length === 0) return null;
   try {
     // The function below runs in the BROWSER context — orchestrator
@@ -73,9 +67,7 @@ async function clickFirstByText(
       const w = globalThis as any;
       const doc = w.document;
       if (!doc) return null;
-      const candidates: any[] = Array.from(
-        doc.querySelectorAll('button, a, [role="button"]'),
-      );
+      const candidates: any[] = Array.from(doc.querySelectorAll('button, a, [role="button"]'));
       for (const el of candidates) {
         if (!el.offsetParent && el.tagName !== 'BODY') continue;
         const style = w.getComputedStyle ? w.getComputedStyle(el) : null;

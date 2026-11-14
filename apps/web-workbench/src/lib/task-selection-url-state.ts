@@ -5,4 +5,3 @@ export function shouldKeepProjectFilterForPickedTask(options: {
   if (!options.currentProjectId) return true;
   return options.taskProjectId === options.currentProjectId;
 }
-

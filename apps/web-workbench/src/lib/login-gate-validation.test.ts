@@ -36,9 +36,7 @@ describe('login gate validation helpers', () => {
       '稍后重试',
     );
     expect(authErrorMessage(new Error('验证码错误'), '稍后重试')).toBe('验证码错误');
-    expect(authErrorMessage({ message: 'database unavailable' }, '稍后重试')).toBe(
-      '稍后重试',
-    );
+    expect(authErrorMessage({ message: 'database unavailable' }, '稍后重试')).toBe('稍后重试');
     expect(authErrorMessage(new Error('Failed to fetch'), '登录失败，请稍后重试。')).toBe(
       '任务执行出错，请重试。如果反复出现请联系 support@holaday.ai。',
     );

@@ -159,10 +159,7 @@ describe('extension tool-call websocket lifecycle', () => {
     const newUserId = 'usr_extension_new_token_test';
     const oldToken = await signAccessToken({ sub: oldUserId, plan: 'free' });
     const newToken = await signAccessToken({ sub: newUserId, plan: 'free' });
-    const client = new WebSocket(`ws://127.0.0.1:${port}`, [
-      WS_SUBPROTOCOL,
-      `jwt.${oldToken}`,
-    ]);
+    const client = new WebSocket(`ws://127.0.0.1:${port}`, [WS_SUBPROTOCOL, `jwt.${oldToken}`]);
 
     let welcomeCount = 0;
     const nextWelcome = (): Promise<void> =>

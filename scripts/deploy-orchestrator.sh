@@ -20,6 +20,13 @@ source "$SCRIPT_DIR/ssh-password-auth.sh"
 [[ -n "${VULTR_PASSWORD:-}" ]] || fail MAINTENANCE_CREDENTIAL_REQUIRED
 build_ssh_password_prefix "$VULTR_PASSWORD"
 SSH_ARGS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 root@207.148.70.106)
+# Check stock service before discovering/closing the serving runtime. Stream
+# the reviewed gate so an older release cannot silently omit this check.
+if ! "${SSH_PASSWORD_PREFIX[@]}" ssh "${SSH_ARGS[@]}" \
+  "/opt/node22/bin/node --input-type=module - --verify-akshare" \
+  < "$SCRIPT_DIR/akshare-production-gate.mjs" >/dev/null 2>&1; then
+  fail AKSHARE_GATE_FAILED
+fi
 if ! PROOF="$("${SSH_PASSWORD_PREFIX[@]}" ssh "${SSH_ARGS[@]}" "bash -s -- browser-maintenance-probe" < "$SCRIPT_DIR/browser-maintenance-probe.sh" 2>/dev/null)"; then
   fail LEGACY_DRAIN_UNSUPPORTED
 fi

@@ -2,7 +2,7 @@ import { inspect } from 'node:util';
 import type { PartnerKycStatus } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
-import { partnerKycProfiles, type PartnerKycProfile } from '../db/schema/partner.js';
+import { type PartnerKycProfile, partnerKycProfiles } from '../db/schema/partner.js';
 import {
   KycService,
   canRechargeWithKycStatus,
@@ -212,7 +212,9 @@ describe('KycService', () => {
   });
 
   it('fails closed for unknown database statuses', async () => {
-    const service = new KycService(new FakeKycDb([{ userId: 123, status: 'provider_surprise' }]).asDB());
+    const service = new KycService(
+      new FakeKycDb([{ userId: 123, status: 'provider_surprise' }]).asDB(),
+    );
 
     await expect(service.getStatus(123)).resolves.toBe('review_required');
   });

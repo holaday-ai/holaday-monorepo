@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Isolated network fixture child only, never a production entry or uploaded code.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -7,6 +6,7 @@ import * as fs from 'node:fs/promises';
 import https from 'node:https';
 import { promisify } from 'node:util';
 import { createFirstCutoverIngressLifecycle } from '/source/browser-first-cutover-host.mjs';
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 import { serveFirstCutoverIngressSession } from '/source/browser-first-cutover-ingress-session.mjs';
 
 await fs.access('/.dockerenv');

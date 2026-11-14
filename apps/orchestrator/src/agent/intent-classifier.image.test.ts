@@ -1,10 +1,10 @@
+import type { Logger } from 'pino';
 /**
  * Sprint #5 — image-generation lane routing. Pins the new 'image'
  * mode so text-to-image / image-edit asks reach the nano-banana lane,
  * while charts/diagrams and image-understanding stay out of it.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { Logger } from 'pino';
 import { classifyExecutionMode } from './intent-classifier.js';
 
 function fakeLogger(): Logger {

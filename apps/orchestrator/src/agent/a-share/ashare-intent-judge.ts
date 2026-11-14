@@ -10,7 +10,7 @@
  * judge 抖动制造新降级（"⑦ 稳定出现"是 BOSS 第一诉求）。
  *
  * 判官**只判意图**，不评文采、不判分析对错、不判数据真假（数据接地仍归 regex 的 ungrounded）。
- * 注入式 `interpret`（与⑦生成同一 haiku，但调用侧用温度0 求确定性）→ 可 mock 做对抗性单测。
+ * 注入式 `interpret`（与⑦生成同一模型目录 generate 通道，调用侧用温度0 求确定性，见 ashare-model-callers.ts）→ 可 mock 做对抗性单测。
  */
 
 export type JudgeVerdict = 'pass' | 'block' | 'unclear';

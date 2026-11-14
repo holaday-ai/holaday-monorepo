@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import * as fs from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { serveFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
+import test from 'node:test';
 import { observeCutoverChild } from './browser-first-cutover-bridge-output.mjs';
+import { serveFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 const module = new URL('./browser-first-cutover-recovery-session.mjs', import.meta.url).pathname;
 const siteBytes = await fs.readFile(
   new URL('./browser-first-cutover-site.mjs', import.meta.url),
@@ -16,10 +16,10 @@ const siteBytes = await fs.readFile(
 const connection = siteBytes.slice(
   siteBytes.indexOf('recovery = await io.connectRecovery(approved,'),
 );
-const writer = connection.match(/output: ([\s\S]*?),\n      assertScope:/)?.[1];
+const writer = connection.match(/output: ([\s\S]*?),\n {6}assertScope:/)?.[1];
 assert.ok(writer, 'actual site recovery output expression');
 for (const fault of ['normal', 'early-attach', 'nonzero-exit', 'early-eof'])
-  test('real recovery pipe transport ' + fault, async (t) => {
+  test(`real recovery pipe transport ${fault}`, async (t) => {
     const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'holaday-bridge-pipe-')));
     t.after(() => fs.rm(directory, { recursive: true, force: true }));
     const binding = {
@@ -42,17 +42,17 @@ for (const fault of ['normal', 'early-attach', 'nonzero-exit', 'early-eof'])
       sourceOptions: { facility, directory: '/approved/source', attempt: binding.attempt },
       sourceIdentity: { serverUuid: '11111111-1111-4111-8111-111111111111', database: 'source' },
       destination: { facility, directory, attempt: binding.attempt },
-      identityFile: directory + '/identity',
+      identityFile: `${directory}/identity`,
       target: {
         containerId: '3'.repeat(64),
-        imageId: 'sha256:' + '4'.repeat(64),
-        volume: 'holaday-cutover-restore-' + binding.attempt,
+        imageId: `sha256:${'4'.repeat(64)}`,
+        volume: `holaday-cutover-restore-${binding.attempt}`,
         attempt: binding.attempt,
         identity: { serverUuid: '22222222-2222-4222-8222-222222222222', database: 'restore' },
       },
     };
     const bytes = JSON.stringify(scope);
-    await fs.writeFile(join(directory, 'first-cutover-' + binding.attempt + '.json'), bytes, {
+    await fs.writeFile(join(directory, `first-cutover-${binding.attempt}.json`), bytes, {
       mode: 0o600,
     });
     const request = {

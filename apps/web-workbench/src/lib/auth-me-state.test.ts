@@ -17,6 +17,7 @@ describe('auth.me state helpers', () => {
         teamProjectsEnabled: true,
         teamTaskLifecycleEnabled: true,
         modelDataRegion: 'intl',
+        modelDataRegionSelection: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -31,6 +32,7 @@ describe('auth.me state helpers', () => {
       teamProjectsEnabled: true,
       teamTaskLifecycleEnabled: true,
       modelDataRegion: 'intl',
+      modelDataRegionSelection: true,
     });
   });
 
@@ -48,6 +50,7 @@ describe('auth.me state helpers', () => {
       teamProjectsEnabled: false,
       teamTaskLifecycleEnabled: false,
       modelDataRegion: null,
+      modelDataRegionSelection: false,
     });
     expect(
       normalizeAuthMeProfile({
@@ -120,4 +123,11 @@ describe('auth.me state helpers', () => {
       }),
     ).toBe('用户');
   });
+});
+
+it('preserves a supplied avatar without changing malformed profile defaults', () => {
+  expect(normalizeAuthMeProfile({ avatarUrl: ' https://example.test/avatar.png ' }).avatarUrl).toBe(
+    'https://example.test/avatar.png',
+  );
+  expect(normalizeAuthMeProfile({ avatarUrl: { bad: true } }).avatarUrl).toBeUndefined();
 });

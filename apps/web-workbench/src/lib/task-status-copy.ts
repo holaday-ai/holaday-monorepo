@@ -1,5 +1,5 @@
 import type { UiTaskStatus } from '@/types/task';
-import { awaitingUserCopy, type AwaitingKind } from './awaiting-user-copy';
+import { type AwaitingKind, awaitingUserCopy } from './awaiting-user-copy';
 import { deriveTaskProductState } from './task-product-state';
 
 type ModelTaskUnavailableReason =
@@ -38,8 +38,7 @@ export function taskStatusLabel(
       return '执行中';
     case 'waiting_user':
       return awaitingUserCopy(
-        productState.blocker === 'max_steps' ||
-          productState.blocker === 'retries_exhausted'
+        productState.blocker === 'max_steps' || productState.blocker === 'retries_exhausted'
           ? undefined
           : productState.blocker,
       ).toolbarLabel;
@@ -59,7 +58,8 @@ export function taskStatusLabel(
 }
 
 function isKnownTaskStatus(status: string): boolean {
-  return status === 'pending' ||
+  return (
+    status === 'pending' ||
     status === 'planning' ||
     status === 'queued' ||
     status === 'executing' ||
@@ -69,7 +69,8 @@ function isKnownTaskStatus(status: string): boolean {
     status === 'partial_success' ||
     status === 'failed' ||
     status === 'cancelled' ||
-    status === 'unknown';
+    status === 'unknown'
+  );
 }
 
 export function pausedTaskNoticeCopy(reason?: string | null): {

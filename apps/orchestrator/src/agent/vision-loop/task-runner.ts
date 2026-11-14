@@ -18,13 +18,15 @@
  * or in higher-level orchestration that wraps this function.
  */
 
+import { logger } from '../../config/logger.js';
 import {
   dispatchVisionActionToSW,
   hasConnectedSwClient,
   requestVisionObservationFromSW,
 } from '../../ws/server.js';
-import { logger } from '../../config/logger.js';
 import { defaultBrowserNetworkPolicy } from '../browser-network-policy.js';
+import type { UnifiedBrowserLoopInput } from '../browser-tools/unified-browser-loop.js';
+import { cutWhole } from '../whole-text.js';
 import {
   type AntiBotSignal,
   describeSignal,
@@ -72,6 +74,21 @@ export interface StartVisionLoopTaskOptions {
    * boot, not per-task.
    */
   playwrightExecutor?: PlaywrightExecutor | null;
+  /**
+   * Batch 04: model-catalog adapter for the unified browser loop. When set
+   * together with `playwrightExecutor`, the task runs the unified tool set
+   * (snapshot/click/type…) on that page instead of the commander loop.
+   */
+  messagesAdapter?: import('../../llm/messages-adapter.js').MessagesAdapter;
+  recorder?: import('../llm-call-recorder.js').LlmCallRecorder;
+  webSearch?: UnifiedBrowserLoopInput['webSearch'];
+  /** Batch 06 self-evolution hooks (each flag-gated, all no-ops when off). */
+  evolution?: {
+    db: import('../../db/client.js').DB;
+    taskDbId: number;
+    generateAdapter: import('../../llm/messages-adapter.js').MessagesAdapter | null;
+    logger: import('pino').Logger;
+  };
   /**
    * Optional per-tick observer hook — called after the commander
    * returns a decision but before the action is dispatched. Used
@@ -563,10 +580,7 @@ export async function startVisionLoopTask(opts: StartVisionLoopTaskOptions): Pro
   return runner.run(opts.intent);
 }
 
-function formatAntiBotPauseMessage(
-  signal: AntiBotSignal,
-  hint: string | null,
-): string {
+function formatAntiBotPauseMessage(signal: AntiBotSignal, hint: string | null): string {
   const base = describeSignal(signal);
   return hint ? `${base}：${hint}` : base;
 }
@@ -574,7 +588,7 @@ function formatAntiBotPauseMessage(
 function cleanAntiBotHint(value: string | null): string | null {
   const trimmed = value?.replace(/\s+/g, ' ').trim();
   if (!trimmed) return null;
-  if (trimmed.length > 120) return `${trimmed.slice(0, 117)}...`;
+  if (trimmed.length > 120) return `${cutWhole(trimmed, 117)}...`;
   return trimmed;
 }
 
@@ -591,7 +605,7 @@ async function captureDisplayFrame(
   hookCast: NonNullable<StartVisionLoopTaskOptions['onScreencast']>,
 ): Promise<void> {
   try {
-    const page = (await executor.getPage()) as unknown as import('./playwright-executor.js').PageLike;
+    const page = (await executor.getPage()) as unknown as PageLike;
     const shot = await executor.screenshot(page);
     if (shot.error || !shot.base64) return;
     let url = '';
@@ -619,9 +633,7 @@ async function captureDisplayFrame(
  * discriminated union; unknown kinds fall through to the bare kind.
  */
 function describeAction(
-  action:
-    | import('./actions.js').VisionAction
-    | import('./actions-a11y.js').A11yAction,
+  action: import('./actions.js').VisionAction | import('./actions-a11y.js').A11yAction,
 ): string {
   switch (action.kind) {
     case 'click':

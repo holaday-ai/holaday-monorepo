@@ -1,0 +1,261 @@
+[
+  {
+    "width": 1100,
+    "height": 800,
+    "panel": {
+      "x": 590,
+      "right": 1100,
+      "y": 0,
+      "bottom": 800
+    },
+    "frame": {
+      "x": 591.5,
+      "right": 1100.5,
+      "y": 97,
+      "bottom": 415.125
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1100,
+    "height": 1000,
+    "panel": {
+      "x": 590,
+      "right": 1100,
+      "y": 0,
+      "bottom": 1000
+    },
+    "frame": {
+      "x": 591.5,
+      "right": 1100.5,
+      "y": 97,
+      "bottom": 415.125
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1100,
+    "height": 1300,
+    "panel": {
+      "x": 590,
+      "right": 1100,
+      "y": 0,
+      "bottom": 1300
+    },
+    "frame": {
+      "x": 591.5,
+      "right": 1100.5,
+      "y": 97,
+      "bottom": 415.125
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1200,
+    "height": 800,
+    "panel": {
+      "x": 640,
+      "right": 1200,
+      "y": 0,
+      "bottom": 800
+    },
+    "frame": {
+      "x": 641,
+      "right": 1200,
+      "y": 97,
+      "bottom": 446.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "panel": {
+      "x": 640,
+      "right": 1200,
+      "y": 0,
+      "bottom": 1000
+    },
+    "frame": {
+      "x": 641,
+      "right": 1200,
+      "y": 97,
+      "bottom": 446.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1200,
+    "height": 1300,
+    "panel": {
+      "x": 640,
+      "right": 1200,
+      "y": 0,
+      "bottom": 1300
+    },
+    "frame": {
+      "x": 641,
+      "right": 1200,
+      "y": 97,
+      "bottom": 446.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1280,
+    "height": 800,
+    "panel": {
+      "x": 680,
+      "right": 1280,
+      "y": 0,
+      "bottom": 800
+    },
+    "frame": {
+      "x": 681,
+      "right": 1280,
+      "y": 97,
+      "bottom": 471.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1280,
+    "height": 1000,
+    "panel": {
+      "x": 680,
+      "right": 1280,
+      "y": 0,
+      "bottom": 1000
+    },
+    "frame": {
+      "x": 681,
+      "right": 1280,
+      "y": 97,
+      "bottom": 471.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1280,
+    "height": 1300,
+    "panel": {
+      "x": 680,
+      "right": 1280,
+      "y": 0,
+      "bottom": 1300
+    },
+    "frame": {
+      "x": 681,
+      "right": 1280,
+      "y": 97,
+      "bottom": 471.375
+    },
+    "temporarySidebarChecked": true
+  },
+  {
+    "width": 1366,
+    "height": 800,
+    "panel": {
+      "x": 890,
+      "right": 1366,
+      "y": 0,
+      "bottom": 800
+    },
+    "frame": {
+      "x": 891,
+      "right": 1366,
+      "y": 97,
+      "bottom": 393.875
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "width": 1366,
+    "height": 1000,
+    "panel": {
+      "x": 890,
+      "right": 1366,
+      "y": 0,
+      "bottom": 1000
+    },
+    "frame": {
+      "x": 891,
+      "right": 1366,
+      "y": 97,
+      "bottom": 393.875
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "width": 1366,
+    "height": 1300,
+    "panel": {
+      "x": 890,
+      "right": 1366,
+      "y": 0,
+      "bottom": 1300
+    },
+    "frame": {
+      "x": 891,
+      "right": 1366,
+      "y": 97,
+      "bottom": 393.875
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "width": 1440,
+    "height": 800,
+    "panel": {
+      "x": 952,
+      "right": 1440,
+      "y": 0,
+      "bottom": 800
+    },
+    "frame": {
+      "x": 953,
+      "right": 1440,
+      "y": 97,
+      "bottom": 401.375
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "width": 1440,
+    "height": 1000,
+    "panel": {
+      "x": 952,
+      "right": 1440,
+      "y": 0,
+      "bottom": 1000
+    },
+    "frame": {
+      "x": 953,
+      "right": 1440,
+      "y": 97,
+      "bottom": 401.375
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "width": 1440,
+    "height": 1300,
+    "panel": {
+      "x": 952,
+      "right": 1440,
+      "y": 0,
+      "bottom": 1300
+    },
+    "frame": {
+      "x": 953,
+      "right": 1440,
+      "y": 97,
+      "bottom": 401.375
+    },
+    "temporarySidebarChecked": false
+  },
+  {
+    "longDraft": "1100x800",
+    "passed": true
+  }
+]

@@ -45,9 +45,7 @@ export function composeBatchTaskPrompt(draft: BatchTaskDraft): string {
 
 export function batchTaskDraftHasContent(draft: BatchTaskDraft): boolean {
   return (
-    draft.goal.trim().length > 0 ||
-    draft.steps.trim().length > 0 ||
-    draft.output.trim().length > 0
+    draft.goal.trim().length > 0 || draft.steps.trim().length > 0 || draft.output.trim().length > 0
   );
 }
 
@@ -59,10 +57,7 @@ export function batchTaskDialogHasDraftContent(input: {
   readonly name: string;
   readonly drafts: readonly BatchTaskDraft[];
 }): boolean {
-  return (
-    input.name.trim().length > 0 ||
-    input.drafts.some(batchTaskDraftHasContent)
-  );
+  return input.name.trim().length > 0 || input.drafts.some(batchTaskDraftHasContent);
 }
 
 export function batchTaskDraftMissingGoal(draft: BatchTaskDraft): boolean {
@@ -73,16 +68,12 @@ export function batchTaskDraftHasReusableDetail(draft: BatchTaskDraft): boolean 
   return draft.steps.trim().length > 0 || draft.output.trim().length > 0;
 }
 
-export function firstBatchTaskDraftMissingGoal(
-  drafts: readonly BatchTaskDraft[],
-): number | null {
+export function firstBatchTaskDraftMissingGoal(drafts: readonly BatchTaskDraft[]): number | null {
   const index = drafts.findIndex(batchTaskDraftMissingGoal);
   return index >= 0 ? index : null;
 }
 
-export function duplicateBatchTaskDraftIndices(
-  drafts: readonly BatchTaskDraft[],
-): Set<number> {
+export function duplicateBatchTaskDraftIndices(drafts: readonly BatchTaskDraft[]): Set<number> {
   const seen = new Set<string>();
   const duplicates = new Set<number>();
   drafts.forEach((draft, index) => {
@@ -125,12 +116,7 @@ function parseLabelledPrompt(prompt: string): BatchTaskDraft | null {
     const match = /^(目标|步骤|输出)\s*[:：]\s*(.*)$/u.exec(line);
     if (match) {
       sawLabel = true;
-      current =
-        match[1] === '目标'
-          ? 'goal'
-          : match[1] === '步骤'
-            ? 'steps'
-            : 'output';
+      current = match[1] === '目标' ? 'goal' : match[1] === '步骤' ? 'steps' : 'output';
       if (match[2]) fields[current].push(match[2]);
       continue;
     }

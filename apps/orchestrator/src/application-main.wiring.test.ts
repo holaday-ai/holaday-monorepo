@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { OrdinaryMaintenance, type MaintenanceRecord } from './execution/ordinary-maintenance.js';
 import type { OrdinaryApplicationHooks } from './execution/ordinary-application.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from './execution/ordinary-maintenance.js';
 
 // Factory wiring only: service behavior has separate real drain/IO tests. No
 // database, browser, HTTP server, queue or production authority is supplied here.
@@ -157,6 +157,7 @@ vi.mock('./planned/planned-runner.js', () => ({
   startPlannedRunner: s.planned,
   stopPlannedRunner: async () => {},
   recoverStuckRunningPlannedTasks: s.recoverPlanned,
+  configurePlannedOutcomeNotifier() {},
   configurePlannedRunSpecialDispatcher() {},
   queuePlannedRun: vi.fn(),
 }));
@@ -255,7 +256,11 @@ it.each(['retention', 'crystallize'] as const)(
     expect(s[kind]).not.toHaveBeenCalled();
     await f.coordinator.resumeServing();
     const interval = kind === 'retention' ? 24 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
-    const callback = vi.mocked(setInterval).mock.calls.find((call) => call[1] === interval)?.[0];
+    // The daily browser-profile sweep shares the 24h interval and registers first.
+    const callback = vi
+      .mocked(setInterval)
+      .mock.calls.filter((call) => call[1] === interval)
+      .at(-1)?.[0];
     expect(callback).toBeTypeOf('function');
     (callback as () => void)();
     await vi.waitFor(() => expect(s[kind]).toHaveBeenCalledOnce());

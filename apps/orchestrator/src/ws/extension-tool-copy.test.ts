@@ -11,7 +11,9 @@ describe('extension tool copy', () => {
   });
 
   it('keeps mid-call disconnect errors actionable', () => {
-    expect(extensionSocketClosedMessage()).toBe('浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试');
+    expect(extensionSocketClosedMessage()).toBe(
+      '浏览器扩展连接已断开，请重新打开 HOLA DAY 扩展后重试',
+    );
   });
 
   it('keeps timeout errors free of tool-call jargon', () => {

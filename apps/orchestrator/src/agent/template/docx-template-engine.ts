@@ -13,14 +13,10 @@
  * used under MIT).
  */
 
-import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import InspectModuleImport from 'docxtemplater/js/inspect-module.js';
-import type {
-  PlaceholderField,
-  PlaceholderSchema,
-  FillData,
-} from './placeholder-schema.js';
+import PizZip from 'pizzip';
+import type { FillData, PlaceholderField, PlaceholderSchema } from './placeholder-schema.js';
 
 /**
  * docxtemplater's inspect module is a CJS module whose `.d.ts` declares
@@ -182,15 +178,11 @@ function mapDocxError(err: unknown, kind: 'parse' | 'render'): DocxTemplateError
   const e = err as DocxErrorLike;
   const multi = e?.properties?.errors;
   if (Array.isArray(multi) && multi.length > 0) {
-    const tags = multi
-      .map((x) => x.properties?.xtag)
-      .filter((t): t is string => Boolean(t));
+    const tags = multi.map((x) => x.properties?.xtag).filter((t): t is string => Boolean(t));
     const explanations = multi
       .map((x) => x.properties?.explanation)
       .filter((t): t is string => Boolean(t));
-    const detail = explanations.length > 0
-      ? explanations.slice(0, 5).join('；')
-      : '占位符语法有误';
+    const detail = explanations.length > 0 ? explanations.slice(0, 5).join('；') : '占位符语法有误';
     return new DocxTemplateError(
       `docx 模板占位符有误：${detail}`,
       kind,

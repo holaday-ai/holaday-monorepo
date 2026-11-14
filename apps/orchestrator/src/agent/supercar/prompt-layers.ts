@@ -74,7 +74,7 @@ export const BASE_PROMPT = `你是 HOLA DAY，一个有大脑的浏览器任务�
 每次截图后，先把当前页面归到下面其中一类，再决定下一步：
 
 1. **正常内容页** → 继续执行计划
-2. **登录/注册页** → **暂停**，问 "[网站名] 需要登录，帮你输还是你自己来？"
+2. **登录/注册页** → **暂停**，说 "[网站名] 需要登录，请你自己登录后告诉我继续（我不会代填账号密码）"
 3. **Cookie / 隐私弹窗** → 自动找"拒绝全部"或关闭按钮点掉，**不**问用户
 4. **验证码 / 滑块验证** → **暂停**，告诉用户 "[网站名] 需要人工验证，请在右侧浏览器面板操作"
 5. **404 / 500 错误页** → 触发"错误恢复"
@@ -148,7 +148,7 @@ export const STYLE_PROMPT = `## 回复风格
 
 出错/确认简洁。
 - "页面超时，重试一次。"
-- "需要登录，帮你输还是你自己来？"
+- "需要登录，请你自己登录后告诉我继续。"
 - 不道歉三遍，不用"非常抱歉给您带来不便"
 
 来源标注。
@@ -407,9 +407,11 @@ function buildDatePrompt(): string {
   });
   // YYYY/MM/DD → YYYY-MM-DD for ISO-style readability.
   const cstIso = cstDate.replace(/\//g, '-');
+  // FIX-36 (Deploy-36 b-n06): the weekday too, so it is not worked out from the date.
+  const weekday = now.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' });
   return [
     '## 当前时间上下文',
-    `当前日期：${cstIso}（北京时间）`,
+    `当前日期：${cstIso}（${weekday}，北京时间）`,
     '用户时区：Asia/Shanghai (UTC+8)',
     '查询"最新"、"今天"、"本月"等信息时以上述日期为准。',
   ].join('\n');
@@ -474,14 +476,27 @@ const COMPLEX_ROLES = new Set([
  * worth it.
  */
 const SIMPLE_KEYWORDS: readonly string[] = [
-  '翻译', '术语表', '一句话', '简单查询', '单一查询',
-  'sop', '标准操作流程',
-  'translate ', 'translate.', 'glossary',
+  '翻译',
+  '术语表',
+  '一句话',
+  '简单查询',
+  '单一查询',
+  'sop',
+  '标准操作流程',
+  'translate ',
+  'translate.',
+  'glossary',
 ];
 
 const COMPLEX_KEYWORDS: readonly string[] = [
-  '多步骤', '跨领域', '综合分析', '深度研究', '深度调研',
-  '全面调研', '系统性分析', '战略研究',
+  '多步骤',
+  '跨领域',
+  '综合分析',
+  '深度研究',
+  '深度调研',
+  '全面调研',
+  '系统性分析',
+  '战略研究',
 ];
 
 function hasAny(intent: string, keywords: readonly string[]): boolean {

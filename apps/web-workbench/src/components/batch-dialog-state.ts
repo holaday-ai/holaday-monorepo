@@ -57,10 +57,9 @@ export interface NormalizedBatchCreateResult {
   readonly concurrency: number;
 }
 
-export function normalizeBatchCreateResult(
-  value: unknown,
-): NormalizedBatchCreateResult {
-  if (!isRecord(value)) throw new Error('批量任务已提交，但结果暂时无法确认，请刷新后查看任务列表。');
+export function normalizeBatchCreateResult(value: unknown): NormalizedBatchCreateResult {
+  if (!isRecord(value))
+    throw new Error('批量任务已提交，但结果暂时无法确认，请刷新后查看任务列表。');
   const batchId = typeof value.batchId === 'string' ? value.batchId.trim() : '';
   const itemsTotal = normalizePositiveInteger(value.itemsTotal);
   const concurrency = normalizePositiveInteger(value.concurrency);
@@ -71,9 +70,7 @@ export function normalizeBatchCreateResult(
 }
 
 function normalizePositiveInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

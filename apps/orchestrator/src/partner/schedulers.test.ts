@@ -3,12 +3,12 @@ import type { ApiCostPoolEvent } from '../db/schema/partner.js';
 import type { DailyLockedBonusSummary } from './allocation-service.js';
 import type { MonthlyReleaseSummary } from './release-service.js';
 import {
+  type PartnerAllocationService,
+  type PartnerReleaseService,
   parsePartnerDailyCliArgs,
   parsePartnerMonthlyCliArgs,
   runPartnerDailyJobs,
   runPartnerMonthlyRelease,
-  type PartnerAllocationService,
-  type PartnerReleaseService,
 } from './schedulers.js';
 
 const originalPartnerFxBps = process.env.PARTNER_FX_BPS;
@@ -32,7 +32,10 @@ afterEach(() => {
 });
 
 class FakeAllocationService implements PartnerAllocationService {
-  readonly calls: Array<{ name: 'buildDailyCostPool' | 'allocateDailyLockedBonus'; input: unknown }> = [];
+  readonly calls: Array<{
+    name: 'buildDailyCostPool' | 'allocateDailyLockedBonus';
+    input: unknown;
+  }> = [];
 
   constructor(private readonly apiUnits: number) {}
 
@@ -232,7 +235,11 @@ describe('runPartnerMonthlyRelease', () => {
       runPartnerMonthlyRelease({ releaseService, releaseMonth: '2026-13', budgetCreditCents: 1 }),
     ).rejects.toThrow(RangeError);
     await expect(
-      runPartnerMonthlyRelease({ releaseService, releaseMonth: '2026-07-01', budgetCreditCents: 1 }),
+      runPartnerMonthlyRelease({
+        releaseService,
+        releaseMonth: '2026-07-01',
+        budgetCreditCents: 1,
+      }),
     ).rejects.toThrow(RangeError);
     await expect(
       runPartnerMonthlyRelease({ releaseService, releaseMonth: '2026-07', budgetCreditCents: 1.5 }),

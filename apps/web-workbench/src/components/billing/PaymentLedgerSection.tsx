@@ -187,7 +187,7 @@ export function PaymentLedgerSection({ refreshKey }: { refreshKey: number }): JS
           type="button"
           aria-expanded={unfinishedExpanded}
           aria-controls="billing-unfinished-payments"
-          className="flex min-h-11 w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EA1F59]/25 sm:px-6"
+          className="flex min-h-11 w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#FF0061]/25 sm:px-6"
           onClick={() => setUnfinishedExpanded((value) => !value)}
         >
           <span className="min-w-0">
@@ -271,7 +271,7 @@ function PaymentList({
         <p className="max-w-md text-xs leading-5 text-muted-foreground">{state.error}</p>
         <button
           type="button"
-          className="mt-1 inline-flex min-h-11 items-center rounded-[7px] border border-[#DCDDDD] bg-white px-3 text-xs font-medium text-[#595757] hover:border-[#EA1F59]/35 hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
+          className="mt-1 inline-flex min-h-11 items-center rounded-[7px] border border-[#DCDDDD] bg-white px-3 text-xs font-medium text-[#595757] hover:border-[#FF0061]/35 hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25"
           onClick={onRetry}
         >
           重试
@@ -319,7 +319,7 @@ function PaymentList({
               <span className="text-[11px] text-amber-700">{loadMoreErrorTitle}</span>
               <button
                 type="button"
-                className="inline-flex min-h-11 items-center rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
+                className="inline-flex min-h-11 items-center rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25"
                 aria-label={`重试加载${listLabel}`}
                 title={`重试加载${listLabel}`}
                 onClick={onRetry}
@@ -330,7 +330,7 @@ function PaymentList({
           ) : (
             <button
               type="button"
-              className="inline-flex min-h-11 items-center gap-2 rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-11 items-center gap-2 rounded-[7px] px-3 text-xs font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 disabled:cursor-not-allowed disabled:opacity-60"
               aria-label={`加载更多${listLabel}`}
               title={`加载更多${listLabel}`}
               disabled={state.loadingMore}
@@ -393,7 +393,7 @@ function PaymentRow({
           </code>
           <button
             type="button"
-            className="inline-flex min-h-11 items-center gap-1 rounded-[7px] px-2 text-[11px] font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 min-[769px]:min-h-8"
+            className="inline-flex min-h-11 items-center gap-1 rounded-[7px] px-2 text-[11px] font-medium text-[#595757] hover:bg-[#F7F7F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 min-[769px]:min-h-8"
             aria-label={`复制订单 ${record.orderId}`}
             title={`复制订单 ${record.orderId}`}
             onClick={() => void onCopy(record.orderId)}
@@ -404,7 +404,7 @@ function PaymentRow({
           {section === 'settled' && (
             <a
               href={supportMailtoHref(receiptOptions)}
-              className="inline-flex min-h-11 items-center gap-1 rounded-[7px] px-2 text-[11px] font-medium text-[#595757] hover:bg-[#FFF5F7] hover:text-[#EA1F59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25 min-[769px]:min-h-8"
+              className="inline-flex min-h-11 items-center gap-1 rounded-[7px] px-2 text-[11px] font-medium text-[#595757] hover:bg-[#FFF5F7] hover:text-[#FF0061] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25 min-[769px]:min-h-8"
               aria-label={`申请订单 ${record.orderId} 的付款凭证或发票`}
             >
               <FileText className="h-3.5 w-3.5" aria-hidden />

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import { bucketByTime, isTaskDeletable } from './time-buckets';
 
 function task(overrides: Partial<UiTask>): UiTask {

@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  buildLayerCPrompt,
-  makeLayerCVeto,
-  parseLayerCVerdict,
-} from './explorer-layer-c.js';
+import { buildLayerCPrompt, makeLayerCVeto, parseLayerCVerdict } from './explorer-layer-c.js';
 
 const input = {
   kind: 'click',

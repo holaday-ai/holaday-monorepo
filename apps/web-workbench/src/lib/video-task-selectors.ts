@@ -1,6 +1,6 @@
+import { taskDisplayTitle } from '@/lib/task-display-copy';
 import type { TaskStore } from '@/stores/task-store';
 import type { UiAwaitingUser, UiStep, UiTask } from '@/types/task';
-import { taskDisplayTitle } from '@/lib/task-display-copy';
 
 /**
  * Stable, shared empty array for "this task has no steps yet".
@@ -46,18 +46,13 @@ export function hydrateMissingMediaTask(
 
 export function isVideoTaskRunning(status: string): boolean {
   return (
-    status === 'pending' ||
-    status === 'planning' ||
-    status === 'queued' ||
-    status === 'executing'
+    status === 'pending' || status === 'planning' || status === 'queued' || status === 'executing'
   );
 }
 
 export type VideoProductTab = 'normal' | 'pet' | 'ip';
 
-export function videoTabForTaskType(
-  videoType: UiTask['videoType'],
-): VideoProductTab | null {
+export function videoTabForTaskType(videoType: UiTask['videoType']): VideoProductTab | null {
   switch (videoType) {
     case 'normal':
       return 'normal';
@@ -108,9 +103,7 @@ export function currentMediaTaskText(input: {
   );
 }
 
-export function currentMediaTaskTitle(
-  task: Pick<UiTask, 'intent' | 'title'>,
-): string {
+export function currentMediaTaskTitle(task: Pick<UiTask, 'intent' | 'title'>): string {
   return taskDisplayTitle(task, 64);
 }
 
@@ -136,12 +129,7 @@ export function videoTaskStatusLabel(status: string): string {
   }
 }
 
-export type VideoTaskStatusIconKind =
-  | 'success'
-  | 'attention'
-  | 'failed'
-  | 'inactive'
-  | 'running';
+export type VideoTaskStatusIconKind = 'success' | 'attention' | 'failed' | 'inactive' | 'running';
 
 export function videoTaskStatusIconKind(status: string): VideoTaskStatusIconKind {
   switch (status) {

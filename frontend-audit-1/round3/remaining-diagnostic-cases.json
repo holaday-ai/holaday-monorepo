@@ -1,0 +1,17 @@
+[
+  "/projects/:projectId",
+  "/organizations/invitations/accept",
+  "/starred",
+  "/files",
+  "/video",
+  "/video/edit/:projectId",
+  "/image",
+  "/planned",
+  "/planned/legacy-scheduled",
+  "/planned/legacy-batch",
+  "/scheduled",
+  "/batch",
+  "/batch/:batchId",
+  "/connections",
+  "*"
+]

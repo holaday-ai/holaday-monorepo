@@ -286,8 +286,7 @@ export function decodeA11yToolUse(toolName: string, input: unknown): A11yAction 
     }
     case 'a11y_task_done': {
       const r = doneSchema.safeParse(input);
-      const summary =
-        (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
+      const summary = (r.success ? r.data.summary : '') || '(commander 未提供摘要)';
       return { kind: 'done', summary };
     }
     case 'a11y_task_give_up': {

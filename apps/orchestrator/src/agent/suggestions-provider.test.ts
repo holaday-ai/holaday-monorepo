@@ -10,6 +10,8 @@ const BASE_ENVIRONMENT = {
   QWEN_CORE_ALLOWLIST: 'usr_canary',
   QWEN_MESSAGES_ADAPTER_ENABLED: true,
   QWEN_RESPONSES_ADAPTER_ENABLED: true,
+  // FIX-60: these cases check the region selection step itself (on, as before).
+  MODEL_DATA_REGION_SELECTION_ENABLED: true,
   DASHSCOPE_API_KEY: '',
   DASHSCOPE_WORKSPACE_ID: '',
   DASHSCOPE_INTL_API_KEY: 'intl-key',
@@ -54,22 +56,25 @@ describe('resolveSuggestionsProviderRoute', () => {
     ).toEqual({ provider: 'unavailable', reason: 'ROLLOUT_NOT_ALLOWED' });
   });
 
-  it.each(['intl', 'cn'] as const)('uses fast Qwen Messages in the persisted %s region', (region) => {
-    const createMessages = vi.fn(() => buildAdapter(region));
-    const route = resolveSuggestionsProviderRoute({
-      environment: BASE_ENVIRONMENT,
-      userExternalId: 'usr_canary',
-      userModelDataRegion: region,
-      createMessages,
-    });
+  it.each(['intl', 'cn'] as const)(
+    'uses fast Qwen Messages in the persisted %s region',
+    (region) => {
+      const createMessages = vi.fn(() => buildAdapter(region));
+      const route = resolveSuggestionsProviderRoute({
+        environment: BASE_ENVIRONMENT,
+        userExternalId: 'usr_canary',
+        userModelDataRegion: region,
+        createMessages,
+      });
 
-    expect(route).toMatchObject({ provider: 'qwen', region });
-    expect(createMessages).toHaveBeenCalledWith({
-      environment: BASE_ENVIRONMENT,
-      region,
-      purpose: 'fast',
-    });
-  });
+      expect(route).toMatchObject({ provider: 'qwen', region });
+      expect(createMessages).toHaveBeenCalledWith({
+        environment: BASE_ENVIRONMENT,
+        region,
+        purpose: 'fast',
+      });
+    },
+  );
 
   it('fails closed when the lane is disabled', () => {
     expect(

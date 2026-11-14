@@ -2,16 +2,16 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
   readCutoverHostSnapshot,
+  readCutoverRehearsalArtifacts,
   validateCutoverDeferredWork,
   validateCutoverLegacyCapability,
   validateLegacyWorkBoundary,
-  readCutoverRehearsalArtifacts,
 } from './browser-cutover-evidence.mjs';
 import {
-  readFirstCutoverPersistedWork,
   readFirstCutoverAttributedWriters,
   readFirstCutoverCandidateRuntime,
   readFirstCutoverPaymentScope,
+  readFirstCutoverPersistedWork,
 } from './browser-first-cutover-host.mjs';
 const fail = () => {
   throw new Error('CUTOVER_PRODUCTION_FACTS_UNPROVEN');

@@ -141,7 +141,7 @@ export function BillingPage(): JSX.Element {
           >
             {paymentReturnStatus === 'checking' ? (
               <Loader2
-                className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]"
+                className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]"
                 aria-hidden
               />
             ) : paymentReturnStatus === 'completed' ? (
@@ -161,7 +161,7 @@ export function BillingPage(): JSX.Element {
           </div>
         ) : loadError ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">{loadErrorCopy.title}</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">
               {loadErrorCopy.body}
@@ -174,7 +174,7 @@ export function BillingPage(): JSX.Element {
                 asChild
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               >
                 <a
                   href={supportMailtoHref({
@@ -202,7 +202,7 @@ export function BillingPage(): JSX.Element {
                     asChild
                     variant="outline"
                     size="sm"
-                    className="h-8 border-[#DCDDDD] bg-white px-3 text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
+                    className="h-8 border-[#DCDDDD] bg-white px-3 text-[#FF0061] hover:border-[#FF0061]/35 hover:bg-white hover:text-[#FF0061]"
                   >
                     <Link to="/plan">{planActionLabel}</Link>
                   </Button>
@@ -226,7 +226,7 @@ export function BillingPage(): JSX.Element {
                     asChild
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#FF0061] hover:border-[#FF0061]/35 hover:bg-white hover:text-[#FF0061]"
                   >
                     <a
                       href={supportMailtoHref({
@@ -241,7 +241,7 @@ export function BillingPage(): JSX.Element {
                     套餐不会自动续费；退款或提前结束请联系：
                     <a
                       href={`mailto:${SUPPORT_EMAIL}`}
-                      className="inline-flex h-8 items-center text-[#EA1F59] underline-offset-2 hover:underline"
+                      className="inline-flex h-8 items-center text-[#FF0061] underline-offset-2 hover:underline"
                     >
                       {SUPPORT_EMAIL}
                     </a>
@@ -272,7 +272,7 @@ export function BillingPage(): JSX.Element {
                     asChild
                     variant="outline"
                     size="sm"
-                    className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="shrink-0 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   >
                     <a href={supportMailtoHref({ subject: 'HOLA DAY 支付支持' })}>
                       <Mail className="h-3.5 w-3.5" />

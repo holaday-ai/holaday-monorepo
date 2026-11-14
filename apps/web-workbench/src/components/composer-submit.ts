@@ -14,9 +14,7 @@ export function shouldClearComposerAfterSubmit(result: unknown): boolean {
   return submitResult.ok !== false;
 }
 
-export function composerSubmitErrorMessage(
-  raw: string | null | undefined,
-): string {
+export function composerSubmitErrorMessage(raw: string | null | undefined): string {
   return taskActionError('提交失败', raw);
 }
 

@@ -1,15 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  downloadMarkdownFile,
-  markdownDownloadFilename,
-} from './markdown-download';
+import { downloadMarkdownFile, markdownDownloadFilename } from './markdown-download';
 
 describe('markdownDownloadFilename', () => {
   it('uses a safe markdown filename from the task id', () => {
     expect(markdownDownloadFilename('task_abc-123')).toBe('task_abc-123.md');
-    expect(markdownDownloadFilename(' task / with : spaces ')).toBe(
-      'task-with-spaces.md',
-    );
+    expect(markdownDownloadFilename(' task / with : spaces ')).toBe('task-with-spaces.md');
   });
 
   it('falls back when the task id is empty or unsafe', () => {

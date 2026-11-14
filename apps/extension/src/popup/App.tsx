@@ -38,24 +38,24 @@ import { withDeadline } from '../shared/deadline.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { openOrFocusWorkbench } from '../shared/open-workbench.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
-import { normalizeHistorySummary, type HistorySyncSummary } from './history-summary.js';
-import { shouldClearRejectedPopupToken } from './auth-sync.js';
 import {
   type StoredUser,
   clearAccessToken,
   clearStoredUser,
   getAccessToken,
   getStoredUser,
-  normalizeStoredUser,
   normalizeAccessToken,
+  normalizeStoredUser,
   setStoredUser,
 } from '../shared/storage.js';
+import { shouldClearRejectedPopupToken } from './auth-sync.js';
 import {
   type ExtensionStatusResponse,
-  type WsConnectionStatus,
+  SITE_LOGIN_NOTICE,
   getConnectionStatusCopy,
   mergeConnectionStatusPoll,
 } from './connection-copy.js';
+import { type HistorySyncSummary, normalizeHistorySummary } from './history-summary.js';
 
 // chrome.storage keys mirrored from background/history-sync.ts. Reading
 // directly avoids a SW round-trip on every popup render.
@@ -242,18 +242,17 @@ export function App() {
           void sendRuntimeMessageWithRetry({ type: 'holaday.connect', token: tok });
         } else if (result.kind === 'unauthorized') {
           const current = normalizeAccessToken(await getAccessToken());
-          if (
-            shouldClearRejectedPopupToken(current, tok) &&
-            seq === authSyncSeq.current
-          ) {
+          if (shouldClearRejectedPopupToken(current, tok) && seq === authSyncSeq.current) {
             await clearAccessToken();
           }
         }
         // 'network' → leave token, render logged-out view this render
       } else {
-        const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>({
-          type: 'holaday.tryAutoLogin',
-        });
+        const response = await sendRuntimeMessageWithRetry<{ ok?: boolean; token?: string | null }>(
+          {
+            type: 'holaday.tryAutoLogin',
+          },
+        );
         if (cancelled || seq !== authSyncSeq.current || !mountedRef.current) return;
         const liftedToken = normalizeAccessToken(response?.token);
         if (!liftedToken) return;
@@ -266,10 +265,7 @@ export function App() {
           setToken(liftedToken);
         } else if (result.kind === 'unauthorized') {
           const current = normalizeAccessToken(await getAccessToken());
-          if (
-            shouldClearRejectedPopupToken(current, liftedToken) &&
-            seq === authSyncSeq.current
-          ) {
+          if (shouldClearRejectedPopupToken(current, liftedToken) && seq === authSyncSeq.current) {
             await clearAccessToken();
           }
         }
@@ -396,7 +392,14 @@ export function App() {
   }
 
   if (!user) {
-    return <LoggedOutView theme={t} onLogin={openWebLogin} onReset={retryConnection} resetting={resetting} />;
+    return (
+      <LoggedOutView
+        theme={t}
+        onLogin={openWebLogin}
+        onReset={retryConnection}
+        resetting={resetting}
+      />
+    );
   }
 
   return (
@@ -404,7 +407,13 @@ export function App() {
       <UserCard user={user} theme={t} />
       <ConnectionStatusBlock theme={t} refreshSignal={statusRefreshSignal} />
       <BrowsingStatusBlock theme={t} />
-      <BottomBar theme={t} onOpenWeb={openWebLogin} onReset={retryConnection} resetting={resetting} />
+      <SiteLoginNotice theme={t} />
+      <BottomBar
+        theme={t}
+        onOpenWeb={openWebLogin}
+        onReset={retryConnection}
+        resetting={resetting}
+      />
     </div>
   );
 }
@@ -444,7 +453,30 @@ function LoggedOutView({
           前往 HOLA DAY 登录
         </button>
       </div>
-      <BottomBar theme={theme} onOpenWeb={onLogin} onReset={onReset} resetting={resetting} hideOpenWeb />
+      <BottomBar
+        theme={theme}
+        onOpenWeb={onLogin}
+        onReset={onReset}
+        resetting={resetting}
+        hideOpenWeb
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Site login notice (replaces the retired silent cookie sync)
+// ---------------------------------------------------------------------------
+
+function SiteLoginNotice({ theme }: { theme: ThemeTokens }) {
+  return (
+    <div style={card(theme)} data-testid="site-login-notice">
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.textPrimary, marginBottom: 4 }}>
+        {SITE_LOGIN_NOTICE.title}
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.5, color: theme.textSecondary }}>
+        {SITE_LOGIN_NOTICE.detail}
+      </div>
     </div>
   );
 }
@@ -595,7 +627,9 @@ function ConnectionStatusBlock({
     <div style={connectionStatus(theme)} title={copy.detail}>
       <span aria-hidden="true" style={{ ...connectionDot, background: dotColor }} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ color: theme.textSecondary, fontSize: 12, fontWeight: 600 }}>{copy.title}</div>
+        <div style={{ color: theme.textSecondary, fontSize: 12, fontWeight: 600 }}>
+          {copy.title}
+        </div>
         <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{copy.detail}</div>
       </div>
     </div>
@@ -790,7 +824,12 @@ function BottomBar({
     <div style={bottomBar(theme)}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {!hideOpenWeb && (
-          <button type="button" onClick={onOpenWeb} style={secondaryBtn(theme)} title="打开 HOLA DAY 网页">
+          <button
+            type="button"
+            onClick={onOpenWeb}
+            style={secondaryBtn(theme)}
+            title="打开 HOLA DAY 网页"
+          >
             前往网页
           </button>
         )}
@@ -816,8 +855,7 @@ function BottomBar({
 const appShell = (t: ThemeTokens): React.CSSProperties => ({
   width: 360,
   background: t.bg,
-  fontFamily:
-    'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
   padding: 12,
   boxSizing: 'border-box',
   display: 'flex',

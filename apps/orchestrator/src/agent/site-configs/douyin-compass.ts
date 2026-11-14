@@ -9,11 +9,7 @@ import type { SiteConfig } from './types.js';
  */
 export const DOUYIN_COMPASS_SITE_CONFIG: SiteConfig = {
   siteId: 'douyin-compass',
-  domains: [
-    'compass.jinritemai.com',
-    'fxg.jinritemai.com',
-    'buyin.jinritemai.com',
-  ],
+  domains: ['compass.jinritemai.com', 'fxg.jinritemai.com', 'buyin.jinritemai.com'],
   requiresAuth: true,
   authNote: '抖音电商罗盘需要商家账号登录。',
   auth: {

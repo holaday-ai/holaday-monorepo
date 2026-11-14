@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   didTokenSwitchDuringTaskCreate,
   extractCreatedTaskId,
-  shouldClearAuthAfterUnauthorized,
   shouldClearAuthAfterCreateUnauthorized,
+  shouldClearAuthAfterUnauthorized,
 } from './create-task-response.js';
 
 describe('extractCreatedTaskId', () => {

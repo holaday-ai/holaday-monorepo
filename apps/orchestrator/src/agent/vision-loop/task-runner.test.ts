@@ -459,11 +459,11 @@ describe('startVisionLoopTask — DegradationChain on Layer 4 timeout', () => {
     if (prev.poll === undefined) delete process.env.CAPTCHA_POLL_INTERVAL_MS;
     else process.env.CAPTCHA_POLL_INTERVAL_MS = prev.poll;
 
-    // First degrade tier is profile_rotation; it should have called
-    // clearCookies on our fake context.
+    // FIX-31: there is no profile/UA rotation tier — a non-search task goes
+    // straight to the hand-off, and cookies are never cleared to disguise us.
     expect(degrades.length).toBeGreaterThanOrEqual(1);
-    expect(degrades[0]?.strategy).toBe('profile_rotation');
-    expect(clearCookiesCalls.length).toBeGreaterThanOrEqual(1);
+    expect(degrades[0]?.strategy).toBe('extension_fallback');
+    expect(clearCookiesCalls).toEqual([]);
   }, 15_000);
 
   it('escalates through successive tiers on repeated timeouts (regression)', async () => {
@@ -538,7 +538,8 @@ describe('startVisionLoopTask — DegradationChain on Layer 4 timeout', () => {
     await startVisionLoopTask({
       taskId: 'tsk_deg_multi',
       userId: 'usr_test',
-      intent: 'browse a protected site repeatedly',
+      // Search-flavoured so two tiers apply (engine swap → hand-off).
+      intent: 'search a protected site repeatedly',
       commander,
       playwrightExecutor: executor,
       maxSteps: 5,
@@ -672,9 +673,7 @@ describe('startVisionLoopTask — Layer 5 executor fallback', () => {
         const { viewportWidth, viewportHeight } = ctx.observation;
         const isFinal = tickCount >= 5;
         return {
-          action: isFinal
-            ? { kind: 'done', summary: 'ending' }
-            : { kind: 'click', x: 1, y: 1 },
+          action: isFinal ? { kind: 'done', summary: 'ending' } : { kind: 'click', x: 1, y: 1 },
           image: {
             base64: 'AA==',
             originalWidth: viewportWidth || 1,

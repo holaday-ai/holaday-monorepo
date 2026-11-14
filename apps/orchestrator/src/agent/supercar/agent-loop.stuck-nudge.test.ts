@@ -25,8 +25,8 @@ import { describe, expect, it } from 'vitest';
 import {
   STUCK_EXIT_THRESHOLD,
   STUCK_WARN_THRESHOLD,
-  buildEcommerceAuthWallFallbackSummary,
   buildAuthWallScraperRescueText,
+  buildEcommerceAuthWallFallbackSummary,
   buildStuckNudge,
   shouldUseScraperAfterAuthWall,
 } from './agent-loop.js';

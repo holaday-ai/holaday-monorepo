@@ -88,19 +88,18 @@ describe('resolveAlipayCheckoutUrl', () => {
       ),
     ).resolves.toBe('https://unitradeprod.alipay.com/pay/checkout.htm?token=opaque');
     const [requestedUrl, options] = fetchImpl.mock.calls[0] ?? [];
-    expect(String(requestedUrl)).toBe(
-      'https://openapi.alipay.com/gateway.do?sign=signed-order',
-    );
+    expect(String(requestedUrl)).toBe('https://openapi.alipay.com/gateway.do?sign=signed-order');
     expect(options?.redirect).toBe('manual');
     expect(options?.signal).toBeDefined();
   });
 
   it('rejects a redirect outside the official Alipay domain', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(null, {
-        status: 302,
-        headers: { location: 'https://checkout.example.com/pay' },
-      }),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://checkout.example.com/pay' },
+        }),
     );
 
     await expect(
@@ -123,11 +122,12 @@ describe('resolveAlipayCheckoutUrl', () => {
   });
 
   it('rejects a non-redirect response even when it includes a Location header', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { location: 'https://unitradeprod.alipay.com/pay/checkout.htm' },
-      }),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { location: 'https://unitradeprod.alipay.com/pay/checkout.htm' },
+        }),
     );
 
     await expect(
@@ -142,11 +142,12 @@ describe('resolveAlipayCheckoutUrl', () => {
     'https://user:secret@unitradeprod.alipay.com/pay/checkout.htm',
     'https://unitradeprod.alipay.com:4443/pay/checkout.htm',
   ])('rejects an official-host redirect with unsafe URL authority: %s', async (location) => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(null, {
-        status: 302,
-        headers: { location },
-      }),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location },
+        }),
     );
 
     await expect(

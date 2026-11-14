@@ -1,0 +1,3117 @@
+[
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_billing.png",
+    "sha256": "21700b0fe51473cb38ab027274ceb9d07382238f7dabc954a44f224ab59ce56a",
+    "bytes": 113910
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_connections.png",
+    "sha256": "10cb87877810f1cb390d0ff534b69ae0bfe6ffe72ca5d2aca5fc415497ddd2f4",
+    "bytes": 82682
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_cosmic.png",
+    "sha256": "15a6591eecc903033788cb9bdc3b32284387285b75a4bc74247221a7ab4b7623",
+    "bytes": 505719
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_files.png",
+    "sha256": "949ed12ded0ce9c72389738873eeaab19cfefd746ddf3fbfcb1a8364eaef8836",
+    "bytes": 78637
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_history.png",
+    "sha256": "0cbd5a3359255a7af7d6e8f17b213de9bb30a32fe9c81ac481ea31b7439b63e5",
+    "bytes": 108923
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_image.png",
+    "sha256": "b044873a248b93f3bd7a7814ed28647da90a37f4de7adc8eb8fab6ae08b52afa",
+    "bytes": 488724
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_plan.png",
+    "sha256": "398d73016c5468e5cd5e69e53a09f8312ba0548f4ba3e84b2b9f756d5cb6141d",
+    "bytes": 165125
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_planned.png",
+    "sha256": "f492ae34637caca2e084fc21c4be0fbce42f37d077302d0500d13e66830dccd7",
+    "bytes": 100506
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_plugins.png",
+    "sha256": "8c72bf8d4753532a1f770fa637c63da2de0ad422fc11028d8e66d71a828c3741",
+    "bytes": 74542
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_profile.png",
+    "sha256": "fc26c42a702ddb047b369c0e035434d9730b691bf851e0717bb8c3062dbb69e1",
+    "bytes": 107420
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_projects.png",
+    "sha256": "94c3bf0de02cdaae17f9578d01c7ff4636a71ca3b4f6d8b77fa611321f06ba46",
+    "bytes": 86388
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_projects_projectId.png",
+    "sha256": "d749235888926b496e8783fb26962146508c57f2955841d474f02cf4deafa88e",
+    "bytes": 90794
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_schedule.png",
+    "sha256": "24234003b0e1819593f18ba0b8a11c2955ee40e78162b71a95cd07385d200440",
+    "bytes": 88868
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_settings.png",
+    "sha256": "7d54d892150737888a58c70187b74e440bbd713e909dcb8b9fa817baebdd1b85",
+    "bytes": 111508
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_settings_roles.png",
+    "sha256": "309e39b06b3949f48ca632f861e610b5c589794b79d93a2c4afebce00ca9d325",
+    "bytes": 80158
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_skills.png",
+    "sha256": "0ddd873c1b77192b4833c9dd61b03bb4cc0fb46acb3e50ef0c69f2efaa1c40e1",
+    "bytes": 74537
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_starred.png",
+    "sha256": "4a833802f2c80b937aa6ddc9501be1a6982643aedf64d67961597835207d131e",
+    "bytes": 78801
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_stocks.png",
+    "sha256": "c6524648c75deb6618415ef82c382adc05bb2d49fe0aa3e5da954029a26e8608",
+    "bytes": 199860
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_stocks_discovery.png",
+    "sha256": "c515ee4985bc7f4919538d891d1675d5bc337646610e5fabcaed5819135523a0",
+    "bytes": 98457
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_usage.png",
+    "sha256": "7adf9de0e213c44c3a37673a86279016ce2588d1debaefd304bbe32f0655083c",
+    "bytes": 92470
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-_video.png",
+    "sha256": "eaf3179e4ea8db370d5aa36662e2a82f784def2ac61cd0c3d63eb1e349315211",
+    "bytes": 531447
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-home.png",
+    "sha256": "413fb17512f489a5fbc248ef5c2c32a87e043630674ee23b9907519770efc7c4",
+    "bytes": 144648
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_browser_awaiting_user.png",
+    "sha256": "560c985cfb2562fafb8178e6d0324dd4dcbea07d8acd336f3cefcbe596f5c0bd",
+    "bytes": 55189
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_browser_cancelled.png",
+    "sha256": "076a6c4cba3480afcc8f601a86dd518e2e1520a292acdce9581f25370cb06f98",
+    "bytes": 127157
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_browser_completed.png",
+    "sha256": "af0be4b52a81f797697c1fe2404ca1619e8e4000ea69e5560f855753b6fc6b53",
+    "bytes": 77256
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_browser_executing.png",
+    "sha256": "636c8a28b10a27d51e94077760565e7a46559ec0bdcad4a543912b30355553a4",
+    "bytes": 55597
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_browser_failed.png",
+    "sha256": "764d848b17dcc9ad561687fff36a7fc1c184eb348affa8e9b95327f6018c2949",
+    "bytes": 128263
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_generate_awaiting_user.png",
+    "sha256": "e97de797a3810cc206c608f89560c1f059cc0df7261291f6466535346dbb1645",
+    "bytes": 64825
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_generate_cancelled.png",
+    "sha256": "078bbf93d4a46a591c899689f209f1431b1cba785ead10ac454a8b5c0f342039",
+    "bytes": 72960
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_generate_completed.png",
+    "sha256": "ded854bb623266937ffe2bd5b0ee15b78128798de2373d7c554b8eae7c18489d",
+    "bytes": 66936
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_generate_executing.png",
+    "sha256": "0b2d6cdccb0d03fb7462abecbd3a70740b1136d1a041dddbb1815172c8912155",
+    "bytes": 65055
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1000-task_generate_failed.png",
+    "sha256": "d538c62052c5bd19d05a7508179350ff0e749122e39983a5da64ac7ac683e0ba",
+    "bytes": 85296
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_billing.png",
+    "sha256": "a7967bcf686b6d6728138336d88b8a12ef2ff7cd320d7bb3fce2b393cee06fc1",
+    "bytes": 153718
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_connections.png",
+    "sha256": "ca4af5aea17ef4790e50b956c5ae4e496ae179089fad2afb6d26e8edded76748",
+    "bytes": 93465
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_cosmic.png",
+    "sha256": "910e4c46a9c08a9f4c3e2345fc7591d4d1efd19e4ebb6dc52caaa822cf09e91c",
+    "bytes": 677135
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_files.png",
+    "sha256": "579ec7fce65f68bad159c6c71f5af77ef1cd1179cf5a6581cc79cd5fa02058fa",
+    "bytes": 89592
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_history.png",
+    "sha256": "95aaa847ab905d16d9f7c9ff35f226ef6b022d2b7e368bf5d21a5f79849cc92e",
+    "bytes": 119914
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_image.png",
+    "sha256": "046a6b8b9f647027bb4ec26d5009aba8e828408ca68140c52bd3515ae478e1ca",
+    "bytes": 617241
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_plan.png",
+    "sha256": "1ac2ab8d2f49583b6fe87b6946107876f163f8bf2a5af926324ef07739cbe36a",
+    "bytes": 208042
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_planned.png",
+    "sha256": "08650b848b91f4c5087bd5aa43c752453237959db013fbb4bbf387622de8c315",
+    "bytes": 111607
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_plugins.png",
+    "sha256": "19b02fdbdd6b053c6b8bf863674315d681eb3d8b9cefe62e4cc7878fdb833523",
+    "bytes": 85460
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_profile.png",
+    "sha256": "c923829e428074d35e90f0a9067c958375d0967c370f144702edcfbead578dbf",
+    "bytes": 136029
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_projects.png",
+    "sha256": "6efa9b57f0b9669148a5f82e94c1eac5263c0ee627681052085977069802c50f",
+    "bytes": 97356
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_projects_projectId.png",
+    "sha256": "eb457ce071f640c73de49247d9423b5007edf1615953fb345d80f7de0950cbe7",
+    "bytes": 101729
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_schedule.png",
+    "sha256": "e1a890b8fd44c418287c0f5d8571129bca45b21c745de57882918e2805f97b37",
+    "bytes": 103575
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_settings.png",
+    "sha256": "2e301006c7f190cc89b2f6087e8a971d3e57743b695b049e31a2cf60cd681621",
+    "bytes": 140019
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_settings_roles.png",
+    "sha256": "57ba07bb17e16a70674dfb2206636dc9951b5c537cba5ce31ac2de20267c5ae1",
+    "bytes": 91055
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_skills.png",
+    "sha256": "19b02fdbdd6b053c6b8bf863674315d681eb3d8b9cefe62e4cc7878fdb833523",
+    "bytes": 85460
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_starred.png",
+    "sha256": "33301c8b855b3d92b43abb3ca92ad23b096012731e24b60adcdf698ad69fccdf",
+    "bytes": 89735
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_stocks.png",
+    "sha256": "05cf49be2976d1143d04551ff0bfd15f6443ac59530797d9c8f96ab6df2c884d",
+    "bytes": 255825
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_stocks_discovery.png",
+    "sha256": "6b282784aa89fe6ae0b0fd116aac16dcb71d7a73125cb60acd5d02e07ac3a8bc",
+    "bytes": 109458
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_usage.png",
+    "sha256": "3e9d953fdc2192859674267b31dff573ecc5b13583d7e86fa6ca7940e72d4e74",
+    "bytes": 103440
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-_video.png",
+    "sha256": "746992cbff658acc8292115b589e93d392ebaf530cc39a2c8e6de8ea302cad07",
+    "bytes": 571147
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-home.png",
+    "sha256": "c55d9fc1e16aa89f61036b70f820213333b51bd9f7acb675490e22d986efe462",
+    "bytes": 160918
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_browser_awaiting_user.png",
+    "sha256": "4d37ec1617a8ef51fdaaaf3b8d7aeaa2fc1b828fc5d446ff5422d04982751f22",
+    "bytes": 57348
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_browser_cancelled.png",
+    "sha256": "c3ecff5594b112648e722ddf68c7a52e6bee3773bf43f37712d10a0a97db3912",
+    "bytes": 140410
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_browser_completed.png",
+    "sha256": "382dd8451d3450f7ddad1b5e7d231721a4c576141c17cc1777e7359e6832550d",
+    "bytes": 88123
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_browser_executing.png",
+    "sha256": "a60aad75c8d63305e25f15f304445b97ead8af4f02b3de0a8cb8081d9d1a3b5a",
+    "bytes": 57846
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_browser_failed.png",
+    "sha256": "f2c5c24592766baa399b47695ce1c0f17616ab8fba350c794d65b3785c05247a",
+    "bytes": 145654
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_generate_awaiting_user.png",
+    "sha256": "a0003bebe8e7a051b092afc481142c81543f824bfc17e6d86930417e52c2297c",
+    "bytes": 75867
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_generate_cancelled.png",
+    "sha256": "d9808242bff5d3521ceac942dad976eb549866d11e0842e805a79c7d8b7923c5",
+    "bytes": 84362
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_generate_completed.png",
+    "sha256": "7881599281ed3297f94ad9934fb1d726df6cdedb94c8bd965b10c32a895f8336",
+    "bytes": 77834
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_generate_executing.png",
+    "sha256": "935f4bcbeff4254117587bc7aae97bdf7e2dbbc8ca056bbebf5df4c937e69fda",
+    "bytes": 76085
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x1300-task_generate_failed.png",
+    "sha256": "7048389aef5b9d27be672ba516b06a596197e412322daef1729809be8fc79491",
+    "bytes": 96142
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_billing.png",
+    "sha256": "3f53b63a5cad2cfb873fef94e986030163e9f0dd0d1377221a909994ee5c004b",
+    "bytes": 93807
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_connections.png",
+    "sha256": "ca31dbab56a216fef65014a95a38b48768f62fd98eb666f789750911f051a98c",
+    "bytes": 72705
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_cosmic.png",
+    "sha256": "1d0eb7f00f84957500faebb89ba74a45a54e725e72884a7deb8e1049083d640e",
+    "bytes": 388928
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_files.png",
+    "sha256": "9de32c3eb99be72e17aff7390903b6234aaefefcdfbc7d1a23e95843d1c74b22",
+    "bytes": 68628
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_history.png",
+    "sha256": "d9c630639c149d84c2e4412df943f93ec2f34d2eb23529a797438721e5adfbbc",
+    "bytes": 95235
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_image.png",
+    "sha256": "0e729111df8353cc93272c80ee82817d0753fd74e9c3fcc878d4278af69d6f4f",
+    "bytes": 415541
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_plan.png",
+    "sha256": "16c17155ce9d02a2a2714b92de50a18a44702c255091086c6d05e426d7f37e78",
+    "bytes": 136609
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_planned.png",
+    "sha256": "44717083914b197496e27353c9ae6f55b8359095d833a6708c0bb429bf16fff9",
+    "bytes": 86232
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_plugins.png",
+    "sha256": "baba1760d316d59dcee41f07b83e5361233f18e76bb766982b85c7ee5fb8e72c",
+    "bytes": 64588
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_profile.png",
+    "sha256": "df9d6c09b7874b3ac88f4d6c6842eb381683fc73a7800012d81428ee1ff8feca",
+    "bytes": 82483
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_projects.png",
+    "sha256": "4fa0c624d0da88ec903e4f2ab4ca1bb1bf5bd50edd9dce9162b0e8ca4d0a9609",
+    "bytes": 76321
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_projects_projectId.png",
+    "sha256": "21d66c51511ae7577113c1afe51910342c1ac5e273a0f4d1d66ac2fee6a04f7c",
+    "bytes": 80736
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_schedule.png",
+    "sha256": "943b5b2401747ab0d6bc7e951265c387b58b251c9edd8c4d5691e684e7480266",
+    "bytes": 76729
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_settings.png",
+    "sha256": "539512d9c0349881bab48b69b356f06b1a82daa03829310329172130fc10d930",
+    "bytes": 88406
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_settings_roles.png",
+    "sha256": "1bb77450bc8575cf2977c750d7862703552136a912c6727cec45a77006d06976",
+    "bytes": 70183
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_skills.png",
+    "sha256": "6f13a8dfb9da64cbd3848b41cb263503035aaeea72703b8da041ecfd59313f97",
+    "bytes": 64584
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_starred.png",
+    "sha256": "77d569199c27139a37942e525708d372149720e53d9fb950a7d0f65a185760dc",
+    "bytes": 68832
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_stocks.png",
+    "sha256": "34d97b0d26ccf6af138a4b840e8e0b9d8be375661a91972f326c856d83ed49cf",
+    "bytes": 102361
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_stocks_discovery.png",
+    "sha256": "a1205272c6e3ed16a21c7c90c16ab23706d0e71e433d26cc9cf12a3f320bed7f",
+    "bytes": 88414
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_usage.png",
+    "sha256": "c3c188cf39c4ec9803bd9f30a217e0870a37e31ad3f43342403d434729217962",
+    "bytes": 82418
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-_video.png",
+    "sha256": "541af45f421afd44a3a773cae149b1aea9d6060cc7c28986237bce5fc88b4454",
+    "bytes": 450917
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-home.png",
+    "sha256": "e7ea4c3d3e6b025581611a295fd75fa2b403bd274c1c1cfba9d6c345577c16e3",
+    "bytes": 130341
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_browser_awaiting_user.png",
+    "sha256": "80f05dcdbb5fd117dde4b810eb87df3a583cc605088440026993eff13689a9bd",
+    "bytes": 53692
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_browser_cancelled.png",
+    "sha256": "303165b5f32b4082ee5f84bdf77d5c6ba77e1f2dc6dfb250ea363a5bdba63214",
+    "bytes": 108475
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_browser_completed.png",
+    "sha256": "3b1a116b8165f7c52983529945e694d2b2473c8e67cbac8456df6c6d6c30bcac",
+    "bytes": 66738
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_browser_executing.png",
+    "sha256": "369c568b869cdf2805ca5dd3b9497ed0f6d06c6a677f60e0507418dc11c9d3b2",
+    "bytes": 54068
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_browser_failed.png",
+    "sha256": "35aa98cba16c798d68a4c3a11e3c7dcfbb17c304c6f0aeee3aa54be738557351",
+    "bytes": 106660
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_generate_awaiting_user.png",
+    "sha256": "1ce95141734563b65a783c317385275e83971090b0b5a150abe878c8eaa49334",
+    "bytes": 54481
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_generate_cancelled.png",
+    "sha256": "050a6e99de78d9df883c2a1d7840869af82c59f70d7462c686e8863dfab1614a",
+    "bytes": 62930
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_generate_completed.png",
+    "sha256": "a8e0ed0200edbddd93d8e0c688f1b0090b4ab4b366ecfbcdd6dc0662e4cd16b7",
+    "bytes": 56778
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_generate_executing.png",
+    "sha256": "0b18003dc179976d227fbf423b767e392d4cb7dacb8e123f7789b5b133706a36",
+    "bytes": 54737
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1100x800-task_generate_failed.png",
+    "sha256": "2e7c191bb12b6126a53a3f3445dbe86fcfe049bea7aae1e0e585fd4414b31724",
+    "bytes": 74567
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_billing.png",
+    "sha256": "e5a59110196dcd277680985e9c5e517908b4868c01e720348ec45ffdce80ad97",
+    "bytes": 114324
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_connections.png",
+    "sha256": "16ba097b481bf56e38c783f8e6a210ea415bd6a5c92aacc9b68c95b8ed9751d0",
+    "bytes": 83060
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_cosmic.png",
+    "sha256": "4756b9effd21be7aecaf86cbc3ecf1fc0ac1654ba05b7c560a22815d5c011fd5",
+    "bytes": 553471
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_files.png",
+    "sha256": "07201ee830468ced5ce890c3d848c18d0bc914450883d3dba145ad68092487f3",
+    "bytes": 79463
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_history.png",
+    "sha256": "49da2b5a398f6a238585ab83a5cd43024998ed031914d8acb0a2ecb4c9db5d97",
+    "bytes": 108745
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_image.png",
+    "sha256": "8b850283dca3e9669d00bb588657f4ef3a0f6deacf413d34fc90f0dae96bca7e",
+    "bytes": 524793
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_plan.png",
+    "sha256": "b5cb936a6477af03569bd1794f3d32d67e08ce144bb5a3abc22b75e403608b47",
+    "bytes": 165031
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_planned.png",
+    "sha256": "65515a3860162cf04a88cd2dc0544eea3a8ad457439cc5e7169e871be454a324",
+    "bytes": 101231
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_plugins.png",
+    "sha256": "1f852ec2255553b64990a85530d2199b83be1f510545a89a561e43a0efa549e3",
+    "bytes": 74935
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_profile.png",
+    "sha256": "20a398fca80a99f94c4a60ee86588224efdefb008f927e796d83d9a462646af0",
+    "bytes": 107963
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_projects.png",
+    "sha256": "63bbfdd7ad2c5e08162a56bcd32899bb8efa9cb972b9750c4d23e93f194d6ea0",
+    "bytes": 86943
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_projects_projectId.png",
+    "sha256": "f00357fcef781ee733603e643cc5802bb9c12458425b84b76dd151a55334158d",
+    "bytes": 91262
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_schedule.png",
+    "sha256": "6c13dc8250c8ef5e668f00f7fb7ee59d5111b11715eebeef313c8cebd7944569",
+    "bytes": 89540
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_settings.png",
+    "sha256": "e61af6fae9340abe9f0ca2d1a9b1d6e97b3f73cd9f89c719458d9d8c99c2117a",
+    "bytes": 111373
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_settings_roles.png",
+    "sha256": "eb1cf0ca52faa522879e951aa907d3bef5bfbeaaf222677510f97bfa58858bf0",
+    "bytes": 80577
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_skills.png",
+    "sha256": "b0cd0963721d789aa4bffedbd4e38457700e4e99855ae01a786b3a735b936ee2",
+    "bytes": 74929
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_starred.png",
+    "sha256": "f7bfc674005e5e01b83b76660e364bab0d1f35eac2c7b1da7b950b5490006ca0",
+    "bytes": 79228
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_stocks.png",
+    "sha256": "b1912b622d05aa1301f9f68835facadef751c3080ff7f1f583eceed158aff978",
+    "bytes": 202229
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_stocks_discovery.png",
+    "sha256": "e10420b6a121b2c6e1119064888e3d52fdb3745fed8d7ce0339afd8a5f71c24a",
+    "bytes": 97848
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_usage.png",
+    "sha256": "3dfeccbf34ff61d583eea467e5dfa30eee17209806d6c2bca2a6123065630494",
+    "bytes": 92037
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-_video.png",
+    "sha256": "692350da12e11d20af815d6b8924ca6491436c01e0fb3f51aecda6bd67751280",
+    "bytes": 572437
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-home.png",
+    "sha256": "4e775561dc079a04a905bb5492621168488491c21eaa5385414d06c8391cba62",
+    "bytes": 147705
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_browser_awaiting_user.png",
+    "sha256": "0d9c199fa7f3a982df97e220565c8e45da2d6c5554d31ba10453786b2438d2a3",
+    "bytes": 56209
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_browser_cancelled.png",
+    "sha256": "c06c82a208f10627731808624e9ca4a5ae7fbc53a63a96c2f29106d4430721f2",
+    "bytes": 127746
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_browser_completed.png",
+    "sha256": "ffffbfd6119e0a91d5e20e98d1553f4828b4c38c676237cbfcfe026b8ad49a6d",
+    "bytes": 77636
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_browser_executing.png",
+    "sha256": "d76542d336ebaca5d3e337d99fb0ced9d4f4f334d8eb7d8c7cfd6362a16fbd2f",
+    "bytes": 56699
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_browser_failed.png",
+    "sha256": "3a4b0e42e9d378d6ac7d105a17c2c346a24e1c5adf0304a4dbb2ba49c10b8a3d",
+    "bytes": 128877
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_generate_awaiting_user.png",
+    "sha256": "91bd3509d24c7c1d240009adf4f1832e268995b86a7302c8603e9077beae6475",
+    "bytes": 65192
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_generate_cancelled.png",
+    "sha256": "596997e2b895c56ba6740de2da7f9a5b14899905209671fae1b895da41c87bf1",
+    "bytes": 73331
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_generate_completed.png",
+    "sha256": "fdffbb7bd679cbe27f26abe9d6a30b63e3db9f4e0cc1a4bd3e8ec6862098f535",
+    "bytes": 67236
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_generate_executing.png",
+    "sha256": "f0d53f1f613354f228642244c4d90044817b865955cb18f3edbacbb1fdd81f27",
+    "bytes": 65434
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1000-task_generate_failed.png",
+    "sha256": "d624e03bb208afb3344e219cf9b44198321bca55b1faf587c4d07598ee4bf943",
+    "bytes": 85653
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_billing.png",
+    "sha256": "ba2e6511769ad952690ca21bb88b63a27c5792a8a8a3d4179e0d6a874c12b931",
+    "bytes": 154350
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_connections.png",
+    "sha256": "df4f63059792bd3bed6a123d4d3757b7fa4611cdb3c3446747c84241e099776c",
+    "bytes": 94040
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_cosmic.png",
+    "sha256": "f62e4c18ee1c7a03a7a81f855f84c6bbba5dc47407fcae3cc2091496f326c9fb",
+    "bytes": 727504
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_files.png",
+    "sha256": "4876658b5d8285981d14b7527bbb595527b2423eee068f061945e9089e2182be",
+    "bytes": 90376
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_history.png",
+    "sha256": "ab2c6a8d56633e46717a427cbe30f652db2a8cae1f3a1f0d97adae435f3606e4",
+    "bytes": 119793
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_image.png",
+    "sha256": "50002efdedc6162b16ee8a013165d4e09121eb646f219b3da375eeee1c29962f",
+    "bytes": 669052
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_plan.png",
+    "sha256": "9c298387c934123f1b2c6ce43a0f851ac092d85bb3d75fefc934456ffaa6a8be",
+    "bytes": 205647
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_planned.png",
+    "sha256": "b86f88d60daf7f565367d8cc2f7c7b2a0d87db6075c8b95ab0ca8cdc04c31bd7",
+    "bytes": 112457
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_plugins.png",
+    "sha256": "0c3d835d795e69848384102bda31061e0f8e8fc84bb953d145d59803e9bb9c02",
+    "bytes": 85971
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_profile.png",
+    "sha256": "377c0d45654f75b9e7c55a6720ec50f4af03ea1b75650da43f45e1ecd8f3af80",
+    "bytes": 137196
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_projects.png",
+    "sha256": "42aed6e829be2fe26990c6cbe8e7e7f0101e5c08b6f03d0c9a881e2c246124c2",
+    "bytes": 98020
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_projects_projectId.png",
+    "sha256": "bfbd0f4ac7769c8035bb481bb8553fab39d69959645f3ebb5f85ef647f35e80d",
+    "bytes": 102315
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_schedule.png",
+    "sha256": "f098e75b1f0da3a5d7c81f37e3e08ffd14cb9070270767c13dfaecb1d6008944",
+    "bytes": 104347
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_settings.png",
+    "sha256": "e211f0eb075b2a2b8af44a583f9635e5efc0b9232d955d96f36d316d39a26b31",
+    "bytes": 140567
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_settings_roles.png",
+    "sha256": "8647fcaff88167f03c23d6d92943fbd723313ae93281f06c9d54b400a8fe8a9f",
+    "bytes": 91482
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_skills.png",
+    "sha256": "f0882d17fc4bd5f6ab72123f4bb118f089d2a52340911d849adaa792b9ac3f8b",
+    "bytes": 85965
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_starred.png",
+    "sha256": "1cbdfedb13ae08231743c36cd0663fe5d29c90f8a8a352fe0916d3e9e3242cb2",
+    "bytes": 90125
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_stocks.png",
+    "sha256": "969884bdef0d0be01bae08af556b4c8917cd91c9a6a7ac0861ab8aba9d170b60",
+    "bytes": 259322
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_stocks_discovery.png",
+    "sha256": "bf81df77ecdbbddb441d74c63752675eada8f6f749275bf8bb98a07c64a498e6",
+    "bytes": 108889
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_usage.png",
+    "sha256": "bc6c469794aa8976727492e657c0234b21a47d71889346c92458dca58ed0ff81",
+    "bytes": 103077
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-_video.png",
+    "sha256": "ddca84c3ed208cf1d4e25a41e42f9aa98693a3d9078e147deaee420a8481c962",
+    "bytes": 613384
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-home.png",
+    "sha256": "99205329461219d38d0de9d9652d4ef7e23036224707b42cd14339ef4ccae933",
+    "bytes": 164793
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_browser_awaiting_user.png",
+    "sha256": "4505ffc76222cdae32faa8de230b88af1acf4d4646c46fff467a9fc5519c235e",
+    "bytes": 58334
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_browser_cancelled.png",
+    "sha256": "59c80c442622176ecd88364df15a040bea328b3747b55ff26ffc0e433d16d255",
+    "bytes": 141055
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_browser_completed.png",
+    "sha256": "2997d14df4846e15bb4b81ef09aa3126f970360da93945eeb60bed8a8f85dfd2",
+    "bytes": 88577
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_browser_executing.png",
+    "sha256": "30a6aec009575a9c63812990d65d6885d2061a12a2051716b8b43ff13d625309",
+    "bytes": 58917
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_browser_failed.png",
+    "sha256": "94af33e709f5d22b5f5ffbc01c682d7b94aeaaed275bf3e8c71a3ae6dc86624a",
+    "bytes": 146382
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_generate_awaiting_user.png",
+    "sha256": "a981f4f4e1cd2b1d0d49a963d888776c83d3514f24cb6b63e29e7fc3c7682145",
+    "bytes": 76306
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_generate_cancelled.png",
+    "sha256": "8407ce9f2a811241527a29aa6d7199444a3c4ba01169d24e04c38f2741c7d27d",
+    "bytes": 84764
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_generate_completed.png",
+    "sha256": "624133d75b0e7e3b6dab80a61d94b8766bbe603ce90409195a5d1430a9523094",
+    "bytes": 78242
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_generate_executing.png",
+    "sha256": "18253268600665a5dac18bb7ce531c97983f7880523a9fdd3d0df078ef3362b5",
+    "bytes": 76511
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x1300-task_generate_failed.png",
+    "sha256": "a04133d5420b387ce8d6b5621f4d400a7ea778b1847272253f8e5235c4723ff9",
+    "bytes": 96619
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_billing.png",
+    "sha256": "a40eaac49a698a8a9dfd6165be5483b6583d862a50a88d017cf061dbdf6d2eb4",
+    "bytes": 94126
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_connections.png",
+    "sha256": "292279deb36e2e66a338af9c6ffb8c84fa0b81fe500c8bf7a68ed2d09ca19869",
+    "bytes": 73029
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_cosmic.png",
+    "sha256": "bd1a85d9415a876daa60b93184f408c38b207957c30ad742db4f98489a967fc1",
+    "bytes": 414542
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_files.png",
+    "sha256": "47165e22c5d67fcccd5b9a2b7652080b4e0ec6230c81f4ad35c264878678bf00",
+    "bytes": 69403
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_history.png",
+    "sha256": "b9e1b9ce6bc5798ce5cc6f4027d444584c240abf329103a981a0a0f8d83c989d",
+    "bytes": 96540
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_image.png",
+    "sha256": "66dd6af894f2791ecf549b828c512ab4af16dec713e9869e989c567d92206553",
+    "bytes": 450545
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_plan.png",
+    "sha256": "838e71ac65e8e8fd9eb688082fa71e558c947c3318a427b1b84b07003cfc700f",
+    "bytes": 135460
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_planned.png",
+    "sha256": "4595f85df7e8b74cf376ac98f110331f296a5897c0510324c5b8aa8dde6f9338",
+    "bytes": 86860
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_plugins.png",
+    "sha256": "630c240e40f2555f9a081cedb38cff5481b87190c619a115d45893de22c162ab",
+    "bytes": 64917
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_profile.png",
+    "sha256": "d55cf3aa7b4aaff26549c1d09e70c4ac5443716d2c4beb5ca7847c9760dd7c06",
+    "bytes": 82934
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_projects.png",
+    "sha256": "305d1fd39faa1ef9f2e40766d95ced23cc4530bf959d41b5bddbd810d9a167e0",
+    "bytes": 76853
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_projects_projectId.png",
+    "sha256": "d9a6e9a72e3298f66c5a355732ef1bea430a13b81b585d0909f004889b3390d8",
+    "bytes": 81148
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_schedule.png",
+    "sha256": "0ebd2fdd652c4c3efedcf2ec8b19e3e8adfc8130306e5f4f825391cb7d2235a4",
+    "bytes": 77307
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_settings.png",
+    "sha256": "2f8d8a3fa4511fee6b303f2670977a26812e1d735b605a68d2d81e137c917023",
+    "bytes": 88142
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_settings_roles.png",
+    "sha256": "381bc06ef8131a4208fffb1ebaaf5c2873dcefb6e39aaaddc03e0fec6dc3be62",
+    "bytes": 70549
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_skills.png",
+    "sha256": "f331d511664163190e946b2cb17061afcae5c8d238c1f2bf6c2990bcd389a5ca",
+    "bytes": 64912
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_starred.png",
+    "sha256": "2dce38564385cee701286e49a01b53cbd8d88094cf063e2c904980792369fc1a",
+    "bytes": 69198
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_stocks.png",
+    "sha256": "74c4dde48470c179beff43b88d3aad44f131d794515ec766387468aafe982ae3",
+    "bytes": 102136
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_stocks_discovery.png",
+    "sha256": "8b85cb8e51206452fddedf4a83a1c4a5b503abc59631dbdc940915703863471f",
+    "bytes": 87753
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_usage.png",
+    "sha256": "f12f60e672764db7983868fc0d2cc5cc1d87b67903bb97910799965ee0baebae",
+    "bytes": 81893
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-_video.png",
+    "sha256": "4b82b8a8884fc379678f56cfb20ce0f9bfc667766dcf03a66cb6ff21ad225f41",
+    "bytes": 488236
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-home.png",
+    "sha256": "f2f14061ec5fff1bfd468003ed744176d72f9ac1e8c1665a08040a740112f6f2",
+    "bytes": 132557
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_browser_awaiting_user.png",
+    "sha256": "80fff1b4fd2535faee9eedfb61e7e917db258d12844d944e5d7327c5781cecb6",
+    "bytes": 54582
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_browser_cancelled.png",
+    "sha256": "1bb20342d824b9c0bf762e420fb429a2cf52ee908830b1970651dce4ef0b52d2",
+    "bytes": 108988
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_browser_completed.png",
+    "sha256": "5683c269f0bdf6caafb135014b1fd42435518bf298759229fa83759b70cde313",
+    "bytes": 67080
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_browser_executing.png",
+    "sha256": "2f7aa35def956323341e10222e3a2c328701c960a3b9f999d1677bea873fc0d2",
+    "bytes": 55133
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_browser_failed.png",
+    "sha256": "7989714b5d8826f6e7413d97c80afa8e14ae13f6ac8961c03598c858e54d2567",
+    "bytes": 107189
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_generate_awaiting_user.png",
+    "sha256": "5f06f0120533035036a300463933965f49ee872c9a2a88399c51dcfcee96ca6a",
+    "bytes": 54752
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_generate_cancelled.png",
+    "sha256": "ace6bd6e198ff565525fa5300f5635a1b60a5320a505c75e3e514fe0db35546f",
+    "bytes": 63251
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_generate_completed.png",
+    "sha256": "cf7020565a9d33786655b91a5fea4f43b813f5d0465ff1d79326aea8246c5d69",
+    "bytes": 57108
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_generate_executing.png",
+    "sha256": "6ce2d16cb53003403d44c8424bc3fa289485aef3f176f95fef5ebcd48c113363",
+    "bytes": 55010
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1200x800-task_generate_failed.png",
+    "sha256": "11c9af72b67ef5d9baf028238e09e5dfbc1eba2739be275ce60b67f9da80ad0b",
+    "bytes": 74864
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_billing.png",
+    "sha256": "98798e67c7b7b3293e1840047fd2625811a2a6a18a64d8265a2007c6f2c0853a",
+    "bytes": 114972
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_connections.png",
+    "sha256": "e7e1561d1e1854dd162311d39a3f6c337a141920908a6162740d2fcf693541ac",
+    "bytes": 83546
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_cosmic.png",
+    "sha256": "4881bc8b590f8c21728ac0638448902b05933dee372acb31898bf98c62fd6d68",
+    "bytes": 598369
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_files.png",
+    "sha256": "cd815185a9a75fa2c9cd90909f1824701f244a8c747a0901e8466dcd6c896e0b",
+    "bytes": 80185
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_history.png",
+    "sha256": "1a6b134b0575049807d2da2d9f92c5e00b33aa6c30216b70eb3b5f86c07c3076",
+    "bytes": 109303
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_image.png",
+    "sha256": "4e90e1d769053af954ee7dfacb6805e6c8f3bdf27d39e87fed46df6749084f87",
+    "bytes": 579873
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_plan.png",
+    "sha256": "6f51c84b98dee8ce0c95b10df21f61cc90a2400d0bca1405e423bf2a7835da2a",
+    "bytes": 160656
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_planned.png",
+    "sha256": "05c6363468c20493b5bbd62a03d265c4fb2b99433a0b829096d90aee32401afe",
+    "bytes": 102474
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_plugins.png",
+    "sha256": "91c24c998ec42aa2a0b1007327f3c44559aea60a0032c8ea5e6559604ea586ca",
+    "bytes": 75405
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_profile.png",
+    "sha256": "47ade0516c0885bfaf0f3daa8901dfe7c4c5b1aba18e9151259dd9313afe77ec",
+    "bytes": 108552
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_projects.png",
+    "sha256": "01401c8def9fb9061155dc4db51d4bf2fb64062fa244ad32ceb46d45b3acae06",
+    "bytes": 87517
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_projects_projectId.png",
+    "sha256": "36fe20cf9c45225a2c1461d739f532f85a60ecc47a58c806bf73ff2397121bb7",
+    "bytes": 91860
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_schedule.png",
+    "sha256": "4b69090e089f23e44521438d9a14c86d0306741e03f1490293eafbda9d52ec18",
+    "bytes": 89835
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_settings.png",
+    "sha256": "926b2da49c4b0606774a6bd5fb1bd4c88d2ebb133a69b4d13d35950f11b3f3bd",
+    "bytes": 112098
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_settings_roles.png",
+    "sha256": "37ac235efb8e5ed80b9ae18c407210311355fe035eb88ade8f668bc97335ac73",
+    "bytes": 81092
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_skills.png",
+    "sha256": "4fb3ad1e63c37b7b17a44d231087c0c20d49a2963e9813d0889ff752899436d1",
+    "bytes": 75402
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_starred.png",
+    "sha256": "6f325eb65bb9d5e41e3cc064fcf22ede2dcf0c23d8212e0519808cc35f4b7aae",
+    "bytes": 79622
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_stocks.png",
+    "sha256": "3780a2cb420e1c52f155a3d4f7d5da03fe846020760dc6cff64cd618142faabd",
+    "bytes": 202134
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_stocks_discovery.png",
+    "sha256": "a64e154c6fc78b995b2ecd1964729dcfa58aeedd103d1bd309149a99b48602fb",
+    "bytes": 98344
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_usage.png",
+    "sha256": "f8179de9da68405bed1de3a720d4a8ca062a963fa9c8b43dfc37dcfb1a528cb9",
+    "bytes": 93585
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-_video.png",
+    "sha256": "0912c61e1eb5284bc1ce25a4f6445a083ff255557f1a52b138b437202bca115b",
+    "bytes": 612713
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-home.png",
+    "sha256": "7c2f7fd39437de719b3eaf5cac4f717e8f38a96784315e213facfef5aa42f04b",
+    "bytes": 150903
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_browser_awaiting_user.png",
+    "sha256": "9d92b1fd218a22f9ec9c6f5580187b4dbc4d17edeb79bb6ca2d21f4dbb50cd26",
+    "bytes": 57436
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_browser_cancelled.png",
+    "sha256": "e124e11f5eff2f5bfacd969127dc75d3c41ba3c76fc911bd621dddff06abcf15",
+    "bytes": 128560
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_browser_completed.png",
+    "sha256": "194d13e80b4ffd39164a44ba43ed33dfbe552f521a4d0ce6ed49dc1071043434",
+    "bytes": 78178
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_browser_executing.png",
+    "sha256": "2c8e7ee074cc6df6f1d9f27a5382ff39be162e620373002548e73210b416c544",
+    "bytes": 57861
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_browser_failed.png",
+    "sha256": "ebbee96579eb01b803e862f9d4d9e6923c1a5dd7aa871577b3169da839582081",
+    "bytes": 129691
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_generate_awaiting_user.png",
+    "sha256": "81412008dc1f2fa502e887a40e8aea070dc610e465b4fae5dccd43a5a4b71cdf",
+    "bytes": 65627
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_generate_cancelled.png",
+    "sha256": "66d2798b8d94be6ab8b253be10d5e9ab08ade8ae376e62759da05d9a0a5368d5",
+    "bytes": 73812
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_generate_completed.png",
+    "sha256": "e7f32359751c3961735aa27316e843f6291570120b4966ecf7f9313d5f9a57db",
+    "bytes": 67686
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_generate_executing.png",
+    "sha256": "c2f86de4e68498dcc329ed6a494fb9d831c16d7670f7bc20d4edd71a5c7505a3",
+    "bytes": 65876
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1000-task_generate_failed.png",
+    "sha256": "af8bd5ccafaac191adaf8a6253dd709f33a360e26e17e3ae34a744436b6cd218",
+    "bytes": 86178
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_billing.png",
+    "sha256": "698a7194aec7392c42670cce8c20314a045e73c2879d7c9261f6e32be3eae03c",
+    "bytes": 155391
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_connections.png",
+    "sha256": "74cba63a2db7737753d9617e91e92a8b533b0d6854b664bb0bd86c310dd2c992",
+    "bytes": 94658
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_cosmic.png",
+    "sha256": "68aa37eb040d57c5b26e6ebe0f8abe66e328aebd2de8694c61e3dd048b20551b",
+    "bytes": 775451
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_files.png",
+    "sha256": "5c5d85f10c05860038fa1640ea117476518212f7334e71500c9bba7204313aad",
+    "bytes": 91251
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_history.png",
+    "sha256": "0b4a169ab4b1f9f1672957fec3ec97dca834c3158736a0ae65947b6fb074f0fa",
+    "bytes": 120471
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_image.png",
+    "sha256": "e933409660ca415b82a94b44d1fe54354d4afa7d2b689f1afb14683a452210bb",
+    "bytes": 725588
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_plan.png",
+    "sha256": "7c079b0f12c3447b43e635c86dce020157b8bfb6c687c8e15b8230a7000de83c",
+    "bytes": 201611
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_planned.png",
+    "sha256": "7484c51ff3e835a553a0a2520eced7669e89c8d2f147e91273385b2af513a31d",
+    "bytes": 113884
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_plugins.png",
+    "sha256": "cd6cb95985d8fcd3e75ad34c83117a291756f90b10a74380ed6b3cbc3641d592",
+    "bytes": 86409
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_profile.png",
+    "sha256": "6d795b0ede45144f6656fbcb9893c91318b2f0941b076c8fdc3b3c0c90e93df1",
+    "bytes": 137994
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_projects.png",
+    "sha256": "964433afa32540bf47ee8e3cbc13d249bcb978c0a6e19a40a52f7827cddd6805",
+    "bytes": 98677
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_projects_projectId.png",
+    "sha256": "b19b857afa383fc624ad667cf1bfc238e588125af1fbef25e62ea0821ed4fb9a",
+    "bytes": 103033
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_schedule.png",
+    "sha256": "66b80821cc37d303c2414106ee7d75d89889cf3f669e694ec43af1e944b560ba",
+    "bytes": 104815
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_settings.png",
+    "sha256": "0cabc0ffecde9e680c6e544c624ac083169026210ec8faaafd1d890146339c77",
+    "bytes": 141589
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_settings_roles.png",
+    "sha256": "a4086e0c179ee0481df1ca5bd0831fec3f3c2f4b9320b040a1baa515b233c0f0",
+    "bytes": 92162
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_skills.png",
+    "sha256": "65375362e07ae0c8a13bc58294bca1e163aafcd60d9a0e3cd02a9e4416b439ff",
+    "bytes": 86399
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_starred.png",
+    "sha256": "8a174fc03a3e1fbb167223074452ad32c5b92f36635239829d20b9ef3c9ef8e2",
+    "bytes": 90628
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_stocks.png",
+    "sha256": "892933e7c78f58b5cb94710aed3c9b8242b8e5a6266c2a357e4965f1e662b6ba",
+    "bytes": 266158
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_stocks_discovery.png",
+    "sha256": "7bcd5b8c5a2109982461a3a072549fb149925aedaf3f9bb8cb354b86d633b4f9",
+    "bytes": 109497
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_usage.png",
+    "sha256": "c9e81530a090bc6174c96998bdddaefad0c30ef3a00861d2d13f889db9dc7d94",
+    "bytes": 104755
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-_video.png",
+    "sha256": "d3d67e7fff4e6a6432b4e356758e6ba5a08854b285e5327d46badb71b1451e9e",
+    "bytes": 655251
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-home.png",
+    "sha256": "17029b2f6597eb8665098c28b837a6e5b860f6799a2011090c4774d9811e6655",
+    "bytes": 167304
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_browser_awaiting_user.png",
+    "sha256": "a48bc3af7fb1c4c51e261cea45f549e212643099c479f21148a336aeeb8093f8",
+    "bytes": 59561
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_browser_cancelled.png",
+    "sha256": "76f46f8893bdad4bcd9215a41d6f179379c915687e0fb799a3cf19875d0b4f77",
+    "bytes": 141835
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_browser_completed.png",
+    "sha256": "010e569826e367da244b3d6e9af6d4ec538488254affd5126018d26987cf61da",
+    "bytes": 89210
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_browser_executing.png",
+    "sha256": "ab718549f909feeb98076fd032948a596ce0a41adec2486aac9419a2e761274b",
+    "bytes": 60075
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_browser_failed.png",
+    "sha256": "04550b6d4dfa44a59ac59d0ce49c1adf01a1ed9eb4589769dd1ff04816408418",
+    "bytes": 147283
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_generate_awaiting_user.png",
+    "sha256": "bcf70f5a249d92f0cb6d00ac0ab3e4d67fa02e79cf3a20f5a46f5e18de1e1c56",
+    "bytes": 76864
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_generate_cancelled.png",
+    "sha256": "74812a5e563371cd3e9b14f2e85a72f7e1681f371661e127825ad23367628c14",
+    "bytes": 85356
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_generate_completed.png",
+    "sha256": "536543bc3f33c7b2663005568078d8d098e57940932410bbe6362bf42ad7ce72",
+    "bytes": 78813
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_generate_executing.png",
+    "sha256": "f0a77cb916a5c077e802f318cd67ddad1eaa3681a47cd9aeb8aeb88a19e06b1f",
+    "bytes": 77086
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x1300-task_generate_failed.png",
+    "sha256": "9f623f6ab1a8a7738f4896f6a9b831de13898939a5c9ef8e900592842b1ff6f5",
+    "bytes": 97245
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_billing.png",
+    "sha256": "9e2d77d8c73cc10fb75ec0e4158cc867239e1d679e785379770c64c8358b3797",
+    "bytes": 94665
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_connections.png",
+    "sha256": "660fc09d9ccd09757d78a18a5b8499583c7cb2c2640098a56a7d11da28ec1964",
+    "bytes": 73461
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_cosmic.png",
+    "sha256": "3245594dca6f69b85924020c29778a09226739bd4dbe603476271eb938061a13",
+    "bytes": 438671
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_files.png",
+    "sha256": "608ac622f64c97390657e5bf482a6fa0090b173894bbd555c4b30bb65eb7ca19",
+    "bytes": 70060
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_history.png",
+    "sha256": "1389994597b9e4cbd158ddf166f70c31601680a3b95e12ed62e6a19dc110014a",
+    "bytes": 96995
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_image.png",
+    "sha256": "7b1391e8c39295f8dffaa93c83bd0ba1759dbbccf9dad3960ca2aa48d959240c",
+    "bytes": 499530
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_plan.png",
+    "sha256": "5af43f2981708b249bd23d43186cd3f5456aaa88f01f718b34d75dfe22d569e3",
+    "bytes": 131010
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_planned.png",
+    "sha256": "2ad7b28f54674f73684a684c42457bb725cd21a14decb0bbf39f02c065ae2083",
+    "bytes": 88037
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_plugins.png",
+    "sha256": "f6e68ca09b64b7ea017f7396c248d88f4c6982d2d344ff51cce994ae5cb308a0",
+    "bytes": 65312
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_profile.png",
+    "sha256": "cef39d891ae76514226334c8df0774c984850336b3c8840356f4831c701cc713",
+    "bytes": 83400
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_projects.png",
+    "sha256": "324691b053a94a9336a2134f1b0f18b7ad1e71f1afb778ac109de8b9d0fd697e",
+    "bytes": 77312
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_projects_projectId.png",
+    "sha256": "cd9e64310049714af04452fb95dc3c39533786e34efdc16c43ed5cc6e63ff3c7",
+    "bytes": 81638
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_schedule.png",
+    "sha256": "bb4abd3054b65399c6ee1295b3ca22b3067f1c17e0afadefd0334c09ba4bc909",
+    "bytes": 77514
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_settings.png",
+    "sha256": "08cf2ca145fd67f3c519e1235675d71edd0b2f833397bad618c890f80f482364",
+    "bytes": 88660
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_settings_roles.png",
+    "sha256": "ea153140ad0050a3fd7bf535b635672866ebfbdc298016a9b7a448e6b02cd079",
+    "bytes": 70978
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_skills.png",
+    "sha256": "ff6834a7d7bff42b6b70fe69da10dea802db949763d29cf4de6655aec13b1fb4",
+    "bytes": 65305
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_starred.png",
+    "sha256": "6cd512e7004e4f9183f2af0b7c6942d20a7bb87c513d9797d8ff7f2220e50e9b",
+    "bytes": 69509
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_stocks.png",
+    "sha256": "7d5e8536e3a79867e9a76e18ddaea343a57df3717c466bc2ae2bc9bb6d4aaed7",
+    "bytes": 104005
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_stocks_discovery.png",
+    "sha256": "38b294aa9e88a2d24e614aeede022e866281f2c2115691fc9d84e11347006ff3",
+    "bytes": 88170
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_usage.png",
+    "sha256": "7e6632bfc56679b84de5501813321401087a072b8f7cef02e1a9809a5d603e39",
+    "bytes": 83398
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-_video.png",
+    "sha256": "b0fbcf86a59d1dd034998c61f4c49eda79908f7ecc2099ac794cabce0efe7280",
+    "bytes": 527367
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-home.png",
+    "sha256": "9c3f573545d8838395b241326dccf814fb5d7b2e84194993e8df4b10245f26ce",
+    "bytes": 134991
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_browser_awaiting_user.png",
+    "sha256": "1d7d83d7b95bdee031f2198926941ef3da39ab346ffa7b31c93299cc25bb0d11",
+    "bytes": 55810
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_browser_cancelled.png",
+    "sha256": "a4a7cbc03844c474831fc2c3b5c691e55f3fc2afaf74d1d54fe7ccce069fe5a8",
+    "bytes": 109658
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_browser_completed.png",
+    "sha256": "6ae757199d3f27e030d60186c885a23f4629e0d4a00f9b2cfbaebe78162ec943",
+    "bytes": 67516
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_browser_executing.png",
+    "sha256": "2949782bfe8a205fa60164788de99f380b2c7337fbf6adaa860f87972adbaac9",
+    "bytes": 56212
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_browser_failed.png",
+    "sha256": "d72fe0fc575f45ab0c6882754a8b27e778d0553c35515477244f5e5d86a7cc44",
+    "bytes": 107880
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_generate_awaiting_user.png",
+    "sha256": "60d97ad1a8ea287d0e49a2f975c478fb96133dd72b677c84f5d74c1bcb915ca9",
+    "bytes": 55124
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_generate_cancelled.png",
+    "sha256": "1dcf15faa62ba7ce7735d6be55a5317e1536c0c83359ee1529ec2215f5739f9a",
+    "bytes": 63660
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_generate_completed.png",
+    "sha256": "205a82c1bdc838d77ea1aeecf7b2022d2abfb89decba61d116851d584f60f19f",
+    "bytes": 57484
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_generate_executing.png",
+    "sha256": "174346d97f2a7ec023c12e8a4da31f7e597c20910964d8c26db357b2b12b5e2d",
+    "bytes": 55380
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1280x800-task_generate_failed.png",
+    "sha256": "98f6bddddf0b6718803bddde4ca2752e7aa69f194420925985186e7e8fd19bb8",
+    "bytes": 75276
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_billing.png",
+    "sha256": "2230f181ec9e289deb1b5d813b8109d181a66fe51ce175727f5e6f83d6f3928f",
+    "bytes": 116782
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_connections.png",
+    "sha256": "79638d3de555f6231b3c39a80a93fa959483288532016ba4d0b34143b2617a64",
+    "bytes": 84932
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_cosmic.png",
+    "sha256": "e008ca68a1fb11e157a2871accbbda82383b61e760f778d57e6980d500957c0f",
+    "bytes": 591469
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_files.png",
+    "sha256": "bc6c38c06db3e20bdbc55c7f8374c2fb52985af63f099d9783d3c87032859d54",
+    "bytes": 81714
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_history.png",
+    "sha256": "bf6d6f0d5181899ab3b64b8b2e16e4851d9016c018687984988240533afc2fe9",
+    "bytes": 110711
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_image.png",
+    "sha256": "ad1b040b75ccc639a5f2ee9e01d604f675bdd46ea3f0eb032afd4320d4460732",
+    "bytes": 619505
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_plan.png",
+    "sha256": "74f3ecf176089855c71fccad3ffe4289f843862a42667ed482d70b0d21adb148",
+    "bytes": 169895
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_planned.png",
+    "sha256": "5dd322fa9d0180dacf3edc71555d6438cabf8da682cbdb98d53a612e0df741fd",
+    "bytes": 104372
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_plugins.png",
+    "sha256": "395c537b1b0d98cd2bdfb26577d6517704523ec0164b0e8648392fbb6ea56623",
+    "bytes": 76825
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_profile.png",
+    "sha256": "c919afe4607dc2fd848321d147288b478062ff92fb15ca161cfe61546c0753e6",
+    "bytes": 110225
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_projects.png",
+    "sha256": "dbeeb6e9ba68cbb119fb97f96939cbc715e9b8c5e5e8660a4f9fb6fa71bebf75",
+    "bytes": 88984
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_projects_projectId.png",
+    "sha256": "c8ee214be6a3dca84104a9c895279280c3eb0e7b215ea919afc55230d1f9ae88",
+    "bytes": 93300
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_schedule.png",
+    "sha256": "04b0e0a9ef23b7f3b31c3ab0d6dd19f56e08a200d8970c81601dd1a5dd68e31e",
+    "bytes": 91491
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_settings.png",
+    "sha256": "0cc0ba0ac4dfd2e681db94afcd7cd2b33b6b9ce92948ef592a63e2101a149a99",
+    "bytes": 113827
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_settings_roles.png",
+    "sha256": "b411abb15f6ef9d77a41a623ecbe51c606b933d7cdca48b28109ff8c52cabacd",
+    "bytes": 82281
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_skills.png",
+    "sha256": "395c537b1b0d98cd2bdfb26577d6517704523ec0164b0e8648392fbb6ea56623",
+    "bytes": 76825
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_starred.png",
+    "sha256": "c62c2df624c923017dae5bf70aa0873fd3491c953f5b5afba4e2e9fdf03411ff",
+    "bytes": 80828
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_stocks.png",
+    "sha256": "6738c90bde957b5a9523312e952acdb4b35dddd6b6b70180216327f4a1888813",
+    "bytes": 205621
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_stocks_discovery.png",
+    "sha256": "f33b88bf44b4c223cfca81ced4639db1c39a6cc8d39c0527776731a50c1d6ac1",
+    "bytes": 99869
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_usage.png",
+    "sha256": "6b82250c43a2ffde8c7f00cc2795f972af87050012c6fe9a9de07e299dbf055e",
+    "bytes": 95747
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-_video.png",
+    "sha256": "3c59f407cd80d2f0abb4282e49b1c7493ad66e50d79c240e24470ce1fcbd7c65",
+    "bytes": 653057
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-home.png",
+    "sha256": "f1ae626d5192931e21b1f3a2f9b7ddadae5457e68941a7f2cce19f02edb70fe3",
+    "bytes": 153886
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_browser_awaiting_user.png",
+    "sha256": "e2de2ea28b4d9bded1a0aeea7d824c49577e0537083112bab6e9520af6e22c76",
+    "bytes": 89403
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_browser_cancelled.png",
+    "sha256": "35f0b1348147e59e70392892d0ea7da14936c0cc59670ae2652dc7f64de92c6e",
+    "bytes": 130646
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_browser_completed.png",
+    "sha256": "e98848e550ead8de298acb2dc2b437415731e5e7cda7b61b74dbec4b13918427",
+    "bytes": 79654
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_browser_executing.png",
+    "sha256": "12f6838840be0c80b9128624ce00ef5fdbd4be8aec3a97b875715f5b7a8b0329",
+    "bytes": 90307
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_browser_failed.png",
+    "sha256": "c709033c700e5e760e368eb7b40e5ec2913abb655f0e9647695b4c051661372b",
+    "bytes": 131701
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_generate_awaiting_user.png",
+    "sha256": "36fa443b1df4bab2047907b9fee9c8f196148d4d2990604cab7555445f763cfa",
+    "bytes": 66859
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_generate_cancelled.png",
+    "sha256": "6821a0b2f07774b5247b8aa9f5aa32007a9fc5e710396b7e77113273936c9116",
+    "bytes": 75187
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_generate_completed.png",
+    "sha256": "1a6a255bd25ba50417f8c1bd0eb7aa14b1e54e5f075b0368b0be86e17d02214e",
+    "bytes": 69001
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_generate_executing.png",
+    "sha256": "4336bb931c2e1b00b0c721d34fe099d634a722e3a05d91540d5cdc34a1599e6e",
+    "bytes": 67115
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1000-task_generate_failed.png",
+    "sha256": "54bbdf49f15b20dbb1ed5fa700963391dd09c731c7ba0c4e063bd618ba88471d",
+    "bytes": 87576
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_billing.png",
+    "sha256": "8ba6c69b537a63e9c41de8177bc7ba589702cab8da82ea3502aa40242d0c1fa6",
+    "bytes": 157760
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_connections.png",
+    "sha256": "de90779b4ba1faf470fe6b82b024b4e163d26c7433850a1f26b92a39ab98f68f",
+    "bytes": 96318
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_cosmic.png",
+    "sha256": "fc4fe0b9269eb6e298b12b709356eb3b8de8466b0f607260cf2ac5be14703ac1",
+    "bytes": 788534
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_files.png",
+    "sha256": "278980f58fa8e318f52739762ae3e45f7c8babe3ec8893ef5e00552258edbb6a",
+    "bytes": 93056
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_history.png",
+    "sha256": "154d152ce27beae47120eaadca6e012698a09b34037f92b551f1bd403c2c727f",
+    "bytes": 122166
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_image.png",
+    "sha256": "9dec17a7d56ca0cd5fd1cfa5a85e453550cdf83a7c4f42016435264050c7afb1",
+    "bytes": 770808
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_plan.png",
+    "sha256": "501d39a9b6ffd63c11db4c1734ade851a1bf84973b220b3cfc608aa3fcc805da",
+    "bytes": 211815
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_planned.png",
+    "sha256": "f3f0ccd9575a7578c4b4f960d20b7440d3fb8c2f01e940f73b95d37a229f4c22",
+    "bytes": 116024
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_plugins.png",
+    "sha256": "36d011857ea3fbb6de9cf22346d1d5d9b1c0c694a5fb292f96a58e37b79b6e5c",
+    "bytes": 88121
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_profile.png",
+    "sha256": "67fc0260bd3c3b994c581ec51e6df793cf0e566e0c3731ae308831bcf40d03fc",
+    "bytes": 140023
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_projects.png",
+    "sha256": "57871cd4a9c94b5eba392dfbe4e1846a4d55496aff7edc87a3b26194c66e5a82",
+    "bytes": 100385
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_projects_projectId.png",
+    "sha256": "b0972507d00b0f18645a0957ff0dd65ca8203853af3fa328526e369544f58bdd",
+    "bytes": 104740
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_schedule.png",
+    "sha256": "54a9a3f9c0937f7cafa3c2ebbbbafd76a741c48d5eb71aecea5aec6cf7c0cf41",
+    "bytes": 106699
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_settings.png",
+    "sha256": "e788bc941fe218cdc9d2d735879ccb3cd5748b0c972aad51daa41eac551cc974",
+    "bytes": 143790
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_settings_roles.png",
+    "sha256": "308b147c0f73e9dd485f74e3e84981ff1aa72df9c409ee221236bf785a964f64",
+    "bytes": 93663
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_skills.png",
+    "sha256": "36d011857ea3fbb6de9cf22346d1d5d9b1c0c694a5fb292f96a58e37b79b6e5c",
+    "bytes": 88121
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_starred.png",
+    "sha256": "a07e61fc2440ae76272dbecd2969bf0d4550105e8fea9a2d78765c44acb90da3",
+    "bytes": 92116
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_stocks.png",
+    "sha256": "2e903688f6ae6561299e322ff7f8774f5e5b46c8de8bd9cf6b9d934c45895d52",
+    "bytes": 271945
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_stocks_discovery.png",
+    "sha256": "80a0514f79f29d101aef44e0ea445b049be7f1e4063fa25e861cd20f23ce70a4",
+    "bytes": 111298
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_usage.png",
+    "sha256": "1fd85d4b263446d79fc02ab6bcae9c6d8796e46c00bd18be1681cfe12fd0d445",
+    "bytes": 107178
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-_video.png",
+    "sha256": "8eb2e07c14ea3e95a6b36c0fee28b2b4e82f057894e06b37aea37194592d2817",
+    "bytes": 693711
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-home.png",
+    "sha256": "f7b4d165feb73120511d24bb283d9de92cfd9f2aa761798a94daa22c8a56771f",
+    "bytes": 171402
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_browser_awaiting_user.png",
+    "sha256": "38e58f64f2d5c89a6e01e9534a982ef701e9b951c8aa5887b78f31aae97a98d9",
+    "bytes": 103320
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_browser_cancelled.png",
+    "sha256": "377b404ea0be87b0a7df54de4e2779c23d61d9f1ce461cca01997a2326d64624",
+    "bytes": 144258
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_browser_completed.png",
+    "sha256": "d90a868ed68a2350ee659edf5c1fa26d50723543b751a86c4cb37404cddbcdba",
+    "bytes": 90991
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_browser_executing.png",
+    "sha256": "1ec9a8f0781bd9c40310fd7228ab2a01cf7c1225b6f9e0f45be4dbb4a755552c",
+    "bytes": 101833
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_browser_failed.png",
+    "sha256": "28d94a846bb768d99a05fe6d9095eefcdc3cde162c99b9bc4d6128b716062a16",
+    "bytes": 149573
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_generate_awaiting_user.png",
+    "sha256": "690e13a123413bb0af0829ab93e0f95caa350df6475fa5e0280950dbd74cbd2d",
+    "bytes": 78363
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_generate_cancelled.png",
+    "sha256": "3a21e1a24fac704517fad05546d04081926cfce6e675c91a53ae08db2adcd666",
+    "bytes": 87045
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_generate_completed.png",
+    "sha256": "7302691d7bacb13ebe5d0133cc9d46580fbab78b23e7f4c8f04029c5c00d7d59",
+    "bytes": 80358
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_generate_executing.png",
+    "sha256": "47f5037b77e89c6c9e2b78ddc96f26e372c41237858549c3c235d86406166a63",
+    "bytes": 78588
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x1300-task_generate_failed.png",
+    "sha256": "4d67d7b2a7cbb0eb4622b3a54c1df1ee399b65230e352d08f9c4e35da17d3971",
+    "bytes": 98967
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_billing.png",
+    "sha256": "6fd3da570a6cbae84c497da852e218c5d8d6381843dfc06176b8463a2a16d819",
+    "bytes": 95983
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_connections.png",
+    "sha256": "8115d50dd9ca49467b40e00ea657dc71425a7f044fe506f1d9a93b3f26d321a0",
+    "bytes": 74618
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_cosmic.png",
+    "sha256": "5405144266990bc72fdd9501e73e95708605f358f8b82260ab0a66b2b68d0fed",
+    "bytes": 436897
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_files.png",
+    "sha256": "6810fd72af87e73b692d3ae0e580ca0b545dc09f2e99c812ed07048ba4b1a20a",
+    "bytes": 71362
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_history.png",
+    "sha256": "fbc2fb5e38b95ed6b8f6379e588fb1b12bcd81c2ad34d746da45a24b6899eea0",
+    "bytes": 98143
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_image.png",
+    "sha256": "1dd2e53f6d4d6ee27549a924f4a8a32b3090ba209d9169ad44428ad478a4011d",
+    "bytes": 528694
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_plan.png",
+    "sha256": "3e203547dbf42866ddca701c8dd53009a3a13c9e7e0074d286ee1e920a384b48",
+    "bytes": 139717
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_planned.png",
+    "sha256": "d0d127c49601a5c1d8422ad0bf6e5d335ffcbb9591685c89f7bcb8d7f0e19048",
+    "bytes": 89532
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_plugins.png",
+    "sha256": "2b911bebde9004ad934f77df9d40b1245cd37712d40adecc31cf98c80653c13b",
+    "bytes": 66525
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_profile.png",
+    "sha256": "af21f1ffd9c47b2d107400917f759c4e868349f103b1ac7e9046a916a11fdf28",
+    "bytes": 84680
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_projects.png",
+    "sha256": "e753bde9edbf06a8cc89c22e0d39dc72fc88942022e4c040cf43202ede2d7cf8",
+    "bytes": 78542
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_projects_projectId.png",
+    "sha256": "13682a314e3839d5adc639c9a4160d97a89f9583ba1a6e0584777ee7b6333682",
+    "bytes": 82896
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_schedule.png",
+    "sha256": "0bf7bc1eb87e65e1ab89e230ad6e953d2b9c40a01d6941b606af218a4887b418",
+    "bytes": 78903
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_settings.png",
+    "sha256": "00e469f18460991ec3bf1bd2d20a2b664b65c14a1a8d59581c142f6e280d0f57",
+    "bytes": 89943
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_settings_roles.png",
+    "sha256": "24a841555b2d1009e42e811086787c777d96c342ff9ef93d611c0abcb9eab718",
+    "bytes": 71958
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_skills.png",
+    "sha256": "2b911bebde9004ad934f77df9d40b1245cd37712d40adecc31cf98c80653c13b",
+    "bytes": 66525
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_starred.png",
+    "sha256": "1921100ba3648497b35e046c6b2bb8d63a096f7dfda81d43f6dc59cd57c15227",
+    "bytes": 70504
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_stocks.png",
+    "sha256": "b9082fab823591f4b96daac3d58c5947db5c3d734350d2be7eda050a51b5993a",
+    "bytes": 106513
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_stocks_discovery.png",
+    "sha256": "ea225e3c9bb2020abc9bf6412b93a5f7e49d63e4ecc5fc358c5c011babfbc0c7",
+    "bytes": 89430
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_usage.png",
+    "sha256": "ca916e6885e3f708c57c9239d0d93b65196f670a121660a36fdbf556a74529f0",
+    "bytes": 85332
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-_video.png",
+    "sha256": "96c66836e8ec5cc5ccfc4503c4a3cf61025e9249b6837f297270d12fb67e88b4",
+    "bytes": 560065
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-home.png",
+    "sha256": "38339d9562d434cc52a60715a3b15bcc8142626d0508b43b75bed44ff2e8bd4a",
+    "bytes": 138333
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_browser_awaiting_user.png",
+    "sha256": "2cd665ffb2c62c178dac95ad2dd8a1958c9d396b834d17bcc1bacab6666e6dfe",
+    "bytes": 79068
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_browser_cancelled.png",
+    "sha256": "c0f76e04be6158a50b77465286ad21d7226090aeb77ad16007396ddc26cae4e5",
+    "bytes": 111486
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_browser_completed.png",
+    "sha256": "64e2bab83f3b5450ea05252f4913ad059f1b74e8801f7e37b704477442aaeabd",
+    "bytes": 68783
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_browser_executing.png",
+    "sha256": "17f8122614045323b421b01bbfe77d39b68e91610ec6b7022e028997106dd480",
+    "bytes": 79744
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_browser_failed.png",
+    "sha256": "faf05533a5610351d090ceecfefa136d4e6ddcd66ae5380f1ba3cb0e2555e37e",
+    "bytes": 109544
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_generate_awaiting_user.png",
+    "sha256": "cc91f1a8df55697f716223c572b90939e8fc6f768703817984504ba409fd77aa",
+    "bytes": 56197
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_generate_cancelled.png",
+    "sha256": "4051de04c2f8228991e2a55e882af5947003dc36767709ba0b11c4f1ba3cfc53",
+    "bytes": 64807
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_generate_completed.png",
+    "sha256": "6f5fb1e93b562d5557973aeb1a632f2e8bdf2acc98fdf42ebefaa102c0ddd637",
+    "bytes": 58578
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_generate_executing.png",
+    "sha256": "65450336bce99cf5c8d76bb3a8afc0162b7247a045dde922731016e821635ddf",
+    "bytes": 56486
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1366x800-task_generate_failed.png",
+    "sha256": "c5e8fb010620aa12875b6efa89b810bf812eea35cc66f09e8c9856d18eb5355d",
+    "bytes": 76468
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_billing.png",
+    "sha256": "2d537484b24901b5d35e111334ed7e40bd8bb7b8867579e02b575e99f72e85ba",
+    "bytes": 117743
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_connections.png",
+    "sha256": "e5a5cec0ce418182eb0b71f756b235d3a69f2a7e4cef6fb780b70570275fb2d1",
+    "bytes": 85575
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_cosmic.png",
+    "sha256": "65046511a92de8fef987585070b520121bd5b1b8f62d7a789980d33b0aee1068",
+    "bytes": 649564
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_files.png",
+    "sha256": "143c35749b414cc5ec60fc6508a363f08e1ea3c24fa9666e21c126fbf9be933a",
+    "bytes": 82239
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_history.png",
+    "sha256": "f40c6f6a414d821d213a64c0bb61b31b48e6fb33f46b3e418cc3b1f07442bfa2",
+    "bytes": 111410
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_image.png",
+    "sha256": "eb7c560fcaafe8144afb58b9fc2380b1810ec23a8938a7131a27f61d6b5a42ef",
+    "bytes": 652123
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_plan.png",
+    "sha256": "6407a7fd18709cfdfd0daa7544a138e02446545647e87002993c84b5722db755",
+    "bytes": 171915
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_planned.png",
+    "sha256": "b917f6fdedae1eed524b8a09b6ca6ecb18fa6be76a2d3eac11d6b64dd7a7ab4c",
+    "bytes": 105585
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_plugins.png",
+    "sha256": "9eb5de336c73f298f8edf7fbe97cfd150e5e708cd4bee199e9ed0cea7e3bce71",
+    "bytes": 77487
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_profile.png",
+    "sha256": "e9bb5f5150675ceedef806bbe26edb62fa6c69433fac70704b37a07dfe22fa6d",
+    "bytes": 111004
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_projects.png",
+    "sha256": "0366c0e56ae402d84393c4447234e4693201c69ab195aad526669c80ac9e15bd",
+    "bytes": 89461
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_projects_projectId.png",
+    "sha256": "3908532726a2fd1b24170288c8c86cf6525a84c03bcfddf8d69b097ff177fb74",
+    "bytes": 93973
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_schedule.png",
+    "sha256": "d292d9513c209a55b86b4b6745fc79aeb25dd22e0502655cefb038e0d60870a3",
+    "bytes": 92147
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_settings.png",
+    "sha256": "68a8d654d867351376f6bfc9981791b3c73c9ddbe2d46f81b9e717e1b48cdb3b",
+    "bytes": 114857
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_settings_roles.png",
+    "sha256": "ee8571fb05bfb9907cc67db53e9df383c23b6bd50dfdf667956f607562ac70a8",
+    "bytes": 82923
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_skills.png",
+    "sha256": "9eb5de336c73f298f8edf7fbe97cfd150e5e708cd4bee199e9ed0cea7e3bce71",
+    "bytes": 77487
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_starred.png",
+    "sha256": "b7aacfb72d729e6dfd10f2600a0bb3ddcc61cce95dd5b3a0289937480b4667f7",
+    "bytes": 81313
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_stocks.png",
+    "sha256": "f4b15ebd2f7af629c524fecdb0f410cd20ea45ad9cc38ef7059ffc6ef7963c6d",
+    "bytes": 208619
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_stocks_discovery.png",
+    "sha256": "f8473aa365427e97d782e3b5a4abd3e630854702feecff3a47e855eb58486dd8",
+    "bytes": 100623
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_usage.png",
+    "sha256": "bf2faecc508d1d0524272be8878076e242903863a3d583f0b1f45e5ccc12385e",
+    "bytes": 96537
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-_video.png",
+    "sha256": "a03408394a2a6e24fdcca62c3c967fb5615cb3e5e2faa2daa20582c192ea8b3b",
+    "bytes": 689650
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-home.png",
+    "sha256": "f45e69d2e508d22a66dc48bbd707d9469d0eaa0f0d44333cecef5bda7635b363",
+    "bytes": 156583
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_browser_awaiting_user.png",
+    "sha256": "91196ba0e7acc91bf5a71b0e1daf2fa02de1e6c019ea9feef57e3da1c11babda",
+    "bytes": 90812
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_browser_cancelled.png",
+    "sha256": "4c218ae95f5a697f11edf08a0249d38779293991843fdc943cfbedfed36bf40e",
+    "bytes": 131749
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_browser_completed.png",
+    "sha256": "0a7ad629c14ceb45b68c4701b4c17f473499985276c76d05b2578f4e50173725",
+    "bytes": 80231
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_browser_executing.png",
+    "sha256": "c18a22aac1e9bb7bd2a12b9c3c17aa740ec30fbaa52bbec96e649409c8c9bd6c",
+    "bytes": 91624
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_browser_failed.png",
+    "sha256": "46c9cf1d875b93f1fe99dd89ebf648438ea667e3d819d6f978266fae758352c2",
+    "bytes": 132703
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_generate_awaiting_user.png",
+    "sha256": "83119437653c2ee583bfde74eb519252bc0f8ec4c368edb5ed7fa812abfc7a83",
+    "bytes": 67326
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_generate_cancelled.png",
+    "sha256": "fbed2aa57f80c65efa4a61b9821a89599d3b44fb1f10897245febaca75eabf63",
+    "bytes": 75785
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_generate_completed.png",
+    "sha256": "85efdca5a808bb92a6ee7b851295aa772f71d40a43891ca6f069b7ee658bcd8c",
+    "bytes": 69504
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_generate_executing.png",
+    "sha256": "8ab029da660034c360f5f98ad80251441c14cbf221a01e7a440403e59eeb8396",
+    "bytes": 67594
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1000-task_generate_failed.png",
+    "sha256": "82a393870345c81f2a81f104be8e866ef6e737abb95e1d3563d75ca48a456bb8",
+    "bytes": 88189
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_billing.png",
+    "sha256": "8c0bb1a2bf5be935b8d2e9ad843d9682b1cae7c5711e9684f3ab26cf0533a1b7",
+    "bytes": 159192
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_connections.png",
+    "sha256": "8bc75719678f945e814a04968fffb52b94215a2454398e990cd89af8cfd2d017",
+    "bytes": 97146
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_cosmic.png",
+    "sha256": "17e76ba9cb92d9d9175f59a11c94eb21a8a80be02a6c4cc1fcdb27ec31d2ad00",
+    "bytes": 834396
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_files.png",
+    "sha256": "3faecb5a39dba2d7a3bd2df8f4563eea4f4bb81ea7ef426ed4b32646ac909108",
+    "bytes": 93727
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_history.png",
+    "sha256": "a9deb8b220ab1b020f13fcd6decd83b7b5c7de06653c8b8130751cc2c675cccd",
+    "bytes": 122995
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_image.png",
+    "sha256": "691e3180b1c2b6d8367365293f6136b1e9f1dfdf54530baaf254ee8bbc5867ad",
+    "bytes": 808251
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_plan.png",
+    "sha256": "d5e10e537408ecf61d60cf86e2b60b169761b9e1910bcec67d89abca311070f5",
+    "bytes": 214292
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_planned.png",
+    "sha256": "e55694f1d87bc06cb103ce3bc3a0a0fe13ff1a51061dd31649271125b8280291",
+    "bytes": 117362
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_plugins.png",
+    "sha256": "f4bdd152242356c061e2ce720843bc3a620e41ef72a499e50a94737dea234f16",
+    "bytes": 88872
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_profile.png",
+    "sha256": "eec0ddf54dcde5f6f3d0dc0cde5ebb53361998aebca97acc8b71fe5ee5f8ad13",
+    "bytes": 140869
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_projects.png",
+    "sha256": "6ad7af8d8e5ec2a082b1be46fece7efef2c4912285840781cb7d256a12a9b8ca",
+    "bytes": 101052
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_projects_projectId.png",
+    "sha256": "0d67766c08f85a5c8bfc320ba29dabf6c85aa3beddf16f0edb079e9c546ee6b2",
+    "bytes": 105558
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_schedule.png",
+    "sha256": "12a5c4c8c91b4eebc728db2ee64d84f484459dcd1f0a83f55bf13397a1a70dfe",
+    "bytes": 107502
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_settings.png",
+    "sha256": "12cb70ffac82d190cf79a0e1e825bc1b1c4cf6b928f63d0ec5b8aa72f60cdc97",
+    "bytes": 145011
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_settings_roles.png",
+    "sha256": "ea9c183bab7885d9859a97437718f00207c2b7498f0d7b09e5265ce659d12152",
+    "bytes": 94406
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_skills.png",
+    "sha256": "06e09bbe609acd36e7d3e91c6506c1ff035e421e9952dd2cdb0ff61981daf035",
+    "bytes": 88879
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_starred.png",
+    "sha256": "1bbde21f78330914b5f012f1e26cd7eddb3ff2b859bea48ac3b901994e3a3366",
+    "bytes": 92809
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_stocks.png",
+    "sha256": "4a78a21e6764f8e13b1f65ae810d1c144cf96a859404c4106e0a18f79eede2c9",
+    "bytes": 278137
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_stocks_discovery.png",
+    "sha256": "b0bf287c08649b0396d63951cf4ec5139b870c730bb50ff8e3cb98aec0ca3f73",
+    "bytes": 112198
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_usage.png",
+    "sha256": "b8ac7f66f41de84e3627f9684fed240540b762e08551cbd52d716c60ee01697b",
+    "bytes": 108120
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-_video.png",
+    "sha256": "c342c9bfed079ac0e632547e4e6d60b86561129adb48f8cd32825fc357bdd623",
+    "bytes": 725584
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-home.png",
+    "sha256": "0d8551a878efb58fe823dd9c00e955e925cbb83fc1d5bdb4e3d1a806a23b9984",
+    "bytes": 174424
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_browser_awaiting_user.png",
+    "sha256": "d7e8fbf72fc9c605323ffa0cc0e694a5d936b177ff31b02b4d6c9409daa416e0",
+    "bytes": 104912
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_browser_cancelled.png",
+    "sha256": "457668d224b0d860233a20b6b4342d4f0abb9c9d305754e3823245766bbe5c60",
+    "bytes": 145450
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_browser_completed.png",
+    "sha256": "801d54832c64cc0eb858a6dfb4dbd53204476f6a177a26fddeb891db39940d90",
+    "bytes": 91747
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_browser_executing.png",
+    "sha256": "0de3c1c43dc519020ae701c30e51296aab4c6fee454c34f73f29d705f252a856",
+    "bytes": 103339
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_browser_failed.png",
+    "sha256": "760b81ce359f6d093e6ae85b2b696786291f73c04fd4f61d1037770cdc5a6db8",
+    "bytes": 150639
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_generate_awaiting_user.png",
+    "sha256": "65c27811dc70a7925135e5adb098957d2ce118361e12308ca7cbd793b594ca0e",
+    "bytes": 78942
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_generate_cancelled.png",
+    "sha256": "642a2eb1c91f1334a9cb842c25920567bf2395cf87ac193ba93a73d5ba8b8068",
+    "bytes": 87782
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_generate_completed.png",
+    "sha256": "d9ecf060183c12bfe07a755379c374089e31dd8b91e18ae15760795ae55f2057",
+    "bytes": 81017
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_generate_executing.png",
+    "sha256": "0c7462d6dfda9393473e61262ad78c7fc685226ba5449ee32c680bdd4586cb65",
+    "bytes": 79205
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x1300-task_generate_failed.png",
+    "sha256": "e681c548e3e247b9eefaee72f4027ca3629429cd5a2d7641cb0307778752f546",
+    "bytes": 99767
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_billing.png",
+    "sha256": "22655e81a9538bee146f6760fd7ab729a75ac4ba57ed6fc41a5943e223fd213e",
+    "bytes": 96749
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_connections.png",
+    "sha256": "972491641914df4f4e48be0e2a820f6af18510bfca7eb84e614423b10dbe7951",
+    "bytes": 75179
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_cosmic.png",
+    "sha256": "e5ae8eeb9f07d2407b57eb9fe852528dbd31893dc6f7612b725febe3702556ea",
+    "bytes": 456369
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_files.png",
+    "sha256": "57a73f1634cd72042f707fc906ea9ae283500d6d26444bac94d078de71c6c826",
+    "bytes": 71810
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_history.png",
+    "sha256": "85dfce40a13e0ba25185cf93290035ba9161eab1e503306dacf41aaed022fd3b",
+    "bytes": 98715
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_image.png",
+    "sha256": "7194e1caa23ef512aee6c46b4402e82634a57307957e49df9306994f4c3f7a3b",
+    "bytes": 556792
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_plan.png",
+    "sha256": "23efd10ad927a1b455adb75815ba964f69e4e67e094753708c2f63bdf0d775f2",
+    "bytes": 141487
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_planned.png",
+    "sha256": "c7e1ea555e03cc56c5fa1dae5cf294c4a7e7f3bdc45a2e9807f5e3ba33c5a37c",
+    "bytes": 90654
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_plugins.png",
+    "sha256": "8367b351098867cf8e093b8c235349e95dfb83664ba26d33445b60ac698be9ef",
+    "bytes": 67064
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_profile.png",
+    "sha256": "15171b4601f7a792c5799c7c7caf760d1bd60ad20489e754cf423516d6e8aaed",
+    "bytes": 85207
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_projects.png",
+    "sha256": "5476f70c5fb8d7fa1f4fbd529ca61a458ab0617536df8e168c637eca4a0e74e6",
+    "bytes": 78916
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_projects_projectId.png",
+    "sha256": "ac89b11e250c6d33b2c861b8d26dd89a1655d0d4088c3422220b770be7cd6222",
+    "bytes": 83454
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_schedule.png",
+    "sha256": "c720bf0e5c520fd6327df1b5c00f61459e8f2a3404de133d9a133bd87daaf89b",
+    "bytes": 79425
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_settings.png",
+    "sha256": "9e32b82453ca7746a9997089e3438d46276a8e3788c143fa3fc69fa5165a097e",
+    "bytes": 90739
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_settings_roles.png",
+    "sha256": "acb9e47d35349e2a61fd5950cb06166e58de5e853413c6cf87c147e7b5c1ae29",
+    "bytes": 72466
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_skills.png",
+    "sha256": "8367b351098867cf8e093b8c235349e95dfb83664ba26d33445b60ac698be9ef",
+    "bytes": 67064
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_starred.png",
+    "sha256": "2ebe4746029d75dc172dd59fcb0281587f10c9b6c27453242ffbfb8792a68147",
+    "bytes": 70933
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_stocks.png",
+    "sha256": "83300e6456bd6dd33a3354787309fbe6e9c80bb2daf3ed1e1627d5fe8890e4a2",
+    "bytes": 107445
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_stocks_discovery.png",
+    "sha256": "3a9440605e640188da0c75fd628813deb98b4db21d4469427f03a0108c9fd078",
+    "bytes": 90070
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_usage.png",
+    "sha256": "e48de3c1cfcccc8d78438d4ae09fdb2937bbe125243286493f0744c8fab14895",
+    "bytes": 86046
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-_video.png",
+    "sha256": "1f60ce14072595ebc9eb8c35931880d3112509e4b9ce022d39a704ea924beddb",
+    "bytes": 588678
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-home.png",
+    "sha256": "420c485af682ab05129551a4d2f0cfce8f22fd5e8354fca808273190db1e9b1a",
+    "bytes": 140679
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_browser_awaiting_user.png",
+    "sha256": "8c71c341ab97af35a061604ff4ec49fe10e8e926db75cffdceb00d19ba90caee",
+    "bytes": 80398
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_browser_cancelled.png",
+    "sha256": "39d279d3af8a94c57cb4f764d18cbe1280960e9371b69037b15640450b24a97a",
+    "bytes": 112412
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_browser_completed.png",
+    "sha256": "815a5755f14c0523fa8bd8864c4e9d90d89ae7f18f0f8a2a4e74d8adc901f6ab",
+    "bytes": 69268
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_browser_executing.png",
+    "sha256": "32fcf6e66e29a4a0f65fb30123969475466c53cb729bda645301567297f78f0a",
+    "bytes": 80977
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_browser_failed.png",
+    "sha256": "f6974d89939ef12c9f7b8658df27b02da9b5b6b9c47afee55c7a3c36f27704db",
+    "bytes": 110376
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_generate_awaiting_user.png",
+    "sha256": "8658e19c178555a68e637a69cea9f44d4d187d27bef63ae0432f570a9663cb66",
+    "bytes": 56564
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_generate_cancelled.png",
+    "sha256": "ba2fa6c82643a7aa156413f930844225a31aa89305b1bc363c5e67326de186da",
+    "bytes": 65301
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_generate_completed.png",
+    "sha256": "30aa125054a539b8272fc275829fbf1fc5ae76f46b0fdb235840eb576c2bd67b",
+    "bytes": 58983
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_generate_executing.png",
+    "sha256": "5d6c0d8cde3ee783df0bba8b3b8a38579eab98ddafc0dcbc0101b163d6d6bb47",
+    "bytes": 56862
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/1440x800-task_generate_failed.png",
+    "sha256": "5cd681c0f4ae4e9463a983253f8f4b5fe733de9481445540e30c44ce6659b5a2",
+    "bytes": 77001
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/artifacts/build.log",
+    "sha256": "985f209c222b5cfea73e60ae458db5491945f40c33c56d97edf4e8e3bf636784",
+    "bytes": 10089
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/inventory.json",
+    "sha256": "64234d3b22e5fdf12c9025eebe35e294c21925daae7566eb56c90898f7d571a1",
+    "bytes": 793342
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/inventory.md",
+    "sha256": "08d323a512521b44a7d111c8c66be69c03eaecebde71ea863655ec108774a673",
+    "bytes": 1012727
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/report.json",
+    "sha256": "27230e20dc50e2673352491544736cf7766ca710ada4768bc5484fd49ef18460",
+    "bytes": 28362326
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/matrix-audit/report.md",
+    "sha256": "0b0ec2c90f81558dcdc31b58e136b973fbb307cd772826835d49d04a32b0b4df",
+    "bytes": 53292
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_billing.png",
+    "sha256": "2e64816d32ea41222568d865f1dd30c465d69c99a4d78486a146beb43206a70c",
+    "bytes": 145931
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_connections.png",
+    "sha256": "6b71d481504fe72eac03c66b258df28b662e6b529898bc960dfcf12b04c465e5",
+    "bytes": 93325
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_cosmic.png",
+    "sha256": "53174e8b661f00ffe7d0e5b81f7943416bee35dd1bb689dab030fad8878d90ce",
+    "bytes": 652231
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_files.png",
+    "sha256": "bdc2d65ec767d22de695e5ceb6a0027c952240ab922cfde00ac835dcc4b4182a",
+    "bytes": 89751
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_history.png",
+    "sha256": "ab7a5012c491dd9578a6c338496b9c477bfc252265427a21835d945f9f39796f",
+    "bytes": 118995
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_image.png",
+    "sha256": "e1faf502200b6d3d763ffada545a0fd51a26c8a0e4eba3e1ec05600b02c7b51f",
+    "bytes": 621545
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_plan.png",
+    "sha256": "3b5b51fd2848bdb7dbc915560eee07e31f9cd50a8a8810c90ffbcbef65ccf73f",
+    "bytes": 188379
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_planned.png",
+    "sha256": "a7c237fef01c9cdaede9ced83a98d8849c862409c59d4f08b36ac4323b7b5055",
+    "bytes": 111678
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_plugins.png",
+    "sha256": "552555f82f43ef59f8378515b31068543e4f8457987bde546417acd0cb90588d",
+    "bytes": 85194
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_profile.png",
+    "sha256": "8676dae92701a7f23c729964d53acf60555d792f0535e60ddc23792911397965",
+    "bytes": 136287
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_projects.png",
+    "sha256": "00997b74ff76554972c4d7afca19a6b17423afca74fd8e3d06d11581f414f661",
+    "bytes": 97276
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_projects_projectId.png",
+    "sha256": "e81d2b87952988aa778ec3751e560cc4ac1b22aeba3ccfd96c1060d822d7320c",
+    "bytes": 101533
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_schedule.png",
+    "sha256": "4a38ae14cdf704b186bf1460eb06fa24da1b4b24c91198db6886cb0fbd4ee985",
+    "bytes": 102028
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_settings.png",
+    "sha256": "0de5b614adbf2ecf29a8deb1c1987e72182f6e453b2d3ece527fef90038bf175",
+    "bytes": 134550
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_settings_roles.png",
+    "sha256": "d857dc9396764dc44df96597852d7f9fa02b94dcf41f42211af679c884527818",
+    "bytes": 90851
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_skills.png",
+    "sha256": "40b73a57746ca656aeed72545f6c5060380f43e2b38d831242b89be95c2c7a75",
+    "bytes": 85188
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_starred.png",
+    "sha256": "c2d464b2b9365ca15b1cebe1cab744df4c0522f9ab32a2066b40f900d44bef2e",
+    "bytes": 89484
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_stocks.png",
+    "sha256": "ce63fcd6419b5d4dd5d483e8132b0d9404d2ba75cdde093a47dddf10e3edd147",
+    "bytes": 242180
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_stocks_discovery.png",
+    "sha256": "2e4b3db9d34132346f1877608b5f575a93c90de187d6ab1d23b0700e31e196f7",
+    "bytes": 108103
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_usage.png",
+    "sha256": "59341cbc5438f17c8922ef7db8028f399d09ba10f4b155b14d440769fcb1bea6",
+    "bytes": 102284
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-_video.png",
+    "sha256": "1a9002d8eea3b989f1c2243452950dad978b0ea764bbae863b51280701dab1bb",
+    "bytes": 596861
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-home.png",
+    "sha256": "5fd45fb1071e128df436f8c460aa4904cbb9d5aa5ceed2348fa4ddd2d599c24c",
+    "bytes": 162009
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_browser_awaiting_user.png",
+    "sha256": "6b31d573fa53bc6b12b8853b049f28fdcbe30422129981c4542c07fe0c4aec37",
+    "bytes": 57664
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_browser_cancelled.png",
+    "sha256": "8e571722550691e50c8573c44904a05b24c5fa49177c17c770d59d5c72a19a8c",
+    "bytes": 140248
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_browser_completed.png",
+    "sha256": "ead15d9075472493363bf49915a0c46e3373bf9b207b20705147e2c789cc1bb7",
+    "bytes": 87830
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_browser_executing.png",
+    "sha256": "22b2bcc14ea173eb1af513f0cdb27f5cb239e87faa3bb9d6aa2cebd95645eb76",
+    "bytes": 58286
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_browser_failed.png",
+    "sha256": "23b48c6162e00faebe3b416bd915550545a6ddb226e213a769eb0e61cf884d8c",
+    "bytes": 145449
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_generate_awaiting_user.png",
+    "sha256": "8fb7c9c3512e30594ec63e8d75110e0d317859385b05deddbbf72ef63df70d5d",
+    "bytes": 75503
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_generate_cancelled.png",
+    "sha256": "c81b6aafd091e7bbf865d93e6532ce8dae51980caa555757f5344da7b0b07d85",
+    "bytes": 84053
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_generate_completed.png",
+    "sha256": "39b1e4134431d372cdf395a95cfd844c63476f12f5d1e3da79b1241b635df1e9",
+    "bytes": 77458
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_generate_executing.png",
+    "sha256": "18aef71722758531d650271a8d7efe2d28120f8c0426bdb2b8bc4c48a97d6e79",
+    "bytes": 75729
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1200x1200-task_generate_failed.png",
+    "sha256": "967f9bf57d1c965c20089aa862c8f83738ee0f7cccb6707de02d035094b289e0",
+    "bytes": 95858
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_billing.png",
+    "sha256": "5d4c85d0a7428460676d85992e4576b298c99eef7af2737a15e93e86f28fe899",
+    "bytes": 92486
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_connections.png",
+    "sha256": "aa867f26b67ff25fe4426b8daf07c6a9b2e8e1100df8f29efcb9bd4330c1b6cd",
+    "bytes": 72349
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_cosmic.png",
+    "sha256": "a0b58b6bc95913cc092bef8f6867a97584a029d247761cc753ff68add071df64",
+    "bytes": 407290
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_files.png",
+    "sha256": "c0fb11b1b9ea2d6180ca0d316f0ad6ba50eff7b881c54e992334e5f603a6845b",
+    "bytes": 69080
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_history.png",
+    "sha256": "6ddba42b2afe1a650533f1ec8f4d3599dea3967b3b4a28b26aaa0ca7d55c45b5",
+    "bytes": 95794
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_image.png",
+    "sha256": "2d617fbd440ab9eceba4af24aac423a7580a4abe915540e78e3500006fdf53dc",
+    "bytes": 519872
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_plan.png",
+    "sha256": "bca5e4fe091e9c95cbc63b23d1dc73a8cf21b6bcaa408060065b332516d8f486",
+    "bytes": 133275
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_planned.png",
+    "sha256": "4123ec27e1421df0e30f9f2f643e4012b191d7cac1ea4ce1c9b7321adc77811c",
+    "bytes": 87151
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_plugins.png",
+    "sha256": "6e4e6e84245fecc121937bc02edfa213fc0bff221232c1550330f9bf70200791",
+    "bytes": 64258
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_profile.png",
+    "sha256": "9a512342a5beabd5e3daf156a3466d2ba27a3c95f9e1230ab5d9774c7ee1cbda",
+    "bytes": 82412
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_projects.png",
+    "sha256": "0187b5dbe21c79f12fb5a9238028e09e32759956590cd6eaf2c4354544fe4b41",
+    "bytes": 76247
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_projects_projectId.png",
+    "sha256": "35dfe58e91b320d961238f9b3a1d7534b0dbc18ea4d79bf9abb8870e6a72de6d",
+    "bytes": 80599
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_schedule.png",
+    "sha256": "59ee7639dc72477c2b9be7ca32d87a3322d63ee352896c67c7d0ccda394aca55",
+    "bytes": 75887
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_settings.png",
+    "sha256": "3a8de1296a63d596169cb6b97cde2b9b56c8f7325ab229adfab57dec9123b80f",
+    "bytes": 87517
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_settings_roles.png",
+    "sha256": "c9ab0643b68061f7dc5d48d26e2a7313d95cd60e29535abab95324a0dc5acd9a",
+    "bytes": 69687
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_skills.png",
+    "sha256": "6e4e6e84245fecc121937bc02edfa213fc0bff221232c1550330f9bf70200791",
+    "bytes": 64258
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_starred.png",
+    "sha256": "414114ffcb4624cd04a5a93de3abddd4a4539cd9d764e8a0b45a42e77d469348",
+    "bytes": 68233
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_stocks.png",
+    "sha256": "a484c9d75b18c2877a8f8777dcef9316a390aa8d8e182194dbb547a22682a0f1",
+    "bytes": 98574
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_stocks_discovery.png",
+    "sha256": "232993f19db9386d1587940b3ab0dc9b0ac96e174406cad579336d0ae9258444",
+    "bytes": 87195
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_usage.png",
+    "sha256": "e7cdac699dbadf1c58cd91262b2e730925334073d89a825a95cfaa9c4cad2f38",
+    "bytes": 83020
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-_video.png",
+    "sha256": "a8cfc6976a1365caf4aa10e531542972e9464c0811bc5b50fa31cee4fed5e391",
+    "bytes": 551212
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-home.png",
+    "sha256": "b8f1b5e54540b3698cc4f5f03287e7ef3b293b5838310b5ae7f0e540a23ae671",
+    "bytes": 135538
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_browser_awaiting_user.png",
+    "sha256": "0b5a135bbacd979e50ee7148600a116f9f6885823b403ff20c1bc9288da80a2a",
+    "bytes": 76935
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_browser_cancelled.png",
+    "sha256": "c62ee9f52b315f5faae3e1dea895c85a9c7065ccb24a09082b90a70aa42b6cf5",
+    "bytes": 106795
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_browser_completed.png",
+    "sha256": "8a530575e208859b64c437b6653d1c6f2926a763e67811d6fbde012570f8c553",
+    "bytes": 66582
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_browser_executing.png",
+    "sha256": "31809e8f439699c89ec6be482913c7cf4b41428009dc31c832e54c280af88e52",
+    "bytes": 77500
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_browser_failed.png",
+    "sha256": "07d3e3d89316132f5c90ceca657eec62adb19ef33ddc07948007085cff87e915",
+    "bytes": 102171
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_generate_awaiting_user.png",
+    "sha256": "445af0072915110591e509b2f480b34036ca49647cbfd76597008e87604f0782",
+    "bytes": 53900
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_generate_cancelled.png",
+    "sha256": "5921c7ea419f02c968aa58d4a9490ea0f3c89a056d88854a538d47f6de809d66",
+    "bytes": 62552
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_generate_completed.png",
+    "sha256": "cfaa90054115098cb7d0748b1d23742ce1a0fa8f383f10639c288598e90ca50a",
+    "bytes": 55691
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_generate_executing.png",
+    "sha256": "b6081debbec21f4cf656c62ca5f77a9b32142bf36d8d6d6bf4e309946d5d6dea",
+    "bytes": 54209
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/artifacts/1366x768-task_generate_failed.png",
+    "sha256": "090f087340817169d90efc84559956d53e0eff46907b4b522d9192aa49e9143f",
+    "bytes": 74460
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/inventory.json",
+    "sha256": "64234d3b22e5fdf12c9025eebe35e294c21925daae7566eb56c90898f7d571a1",
+    "bytes": 793342
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/inventory.md",
+    "sha256": "08d323a512521b44a7d111c8c66be69c03eaecebde71ea863655ec108774a673",
+    "bytes": 1012727
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/report.json",
+    "sha256": "b1f018456467c003d4a3cde4ced55c413cb936fcfc1138142ef5c8aa0853d0a9",
+    "bytes": 3794324
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/extra-audit/report.md",
+    "sha256": "610dfbb419cc108232c442aa88ba33ce54415beaaeb501465523f1b33452c826",
+    "bytes": 8566
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/before-header-audit/artifacts/1200x1200-task_browser_executing.png",
+    "sha256": "d0ee6bf5deabe5b06ddc6200b5d6b71d8673ce64ec992422fc89a11d8ef0f0f8",
+    "bytes": 48384
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/before-header-audit/inventory.json",
+    "sha256": "260843139742517210a93ae92a6aaa06307ee419509f4527e0e09d6f4a054ee5",
+    "bytes": 793342
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/before-header-audit/inventory.md",
+    "sha256": "eb4768764ddece6157ffb205da9c3a942b45a9925587cf20b9d95756662451eb",
+    "bytes": 1012727
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/before-header-audit/report.json",
+    "sha256": "4462d630d84086158fe32d3d73e9c0996a301b7184841d5c763caaafa8b6e93c",
+    "bytes": 42781
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/before-header-audit/report.md",
+    "sha256": "2a9629f7bb888c410c84b9f5db9d66ffcd2045861b904eb29cde69b63f8c42fd",
+    "bytes": 2016
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_billing.png",
+    "sha256": "21700b0fe51473cb38ab027274ceb9d07382238f7dabc954a44f224ab59ce56a",
+    "bytes": 113910
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_cosmic.png",
+    "sha256": "e149d9886f1ee262d8bfc20ee3093805621158f495576c3f93afd2f483a1bda5",
+    "bytes": 485076
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_files.png",
+    "sha256": "300983daba324700915c540a1cc831ba71e057d13ed1d0530b7cf8a336bcabb6",
+    "bytes": 78630
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_history.png",
+    "sha256": "0cbd5a3359255a7af7d6e8f17b213de9bb30a32fe9c81ac481ea31b7439b63e5",
+    "bytes": 108923
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_plan.png",
+    "sha256": "398d73016c5468e5cd5e69e53a09f8312ba0548f4ba3e84b2b9f756d5cb6141d",
+    "bytes": 165125
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_plugins.png",
+    "sha256": "0ddd873c1b77192b4833c9dd61b03bb4cc0fb46acb3e50ef0c69f2efaa1c40e1",
+    "bytes": 74537
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_profile.png",
+    "sha256": "fc26c42a702ddb047b369c0e035434d9730b691bf851e0717bb8c3062dbb69e1",
+    "bytes": 107420
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_projects.png",
+    "sha256": "94c3bf0de02cdaae17f9578d01c7ff4636a71ca3b4f6d8b77fa611321f06ba46",
+    "bytes": 86388
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_projects_projectId.png",
+    "sha256": "d749235888926b496e8783fb26962146508c57f2955841d474f02cf4deafa88e",
+    "bytes": 90794
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_schedule.png",
+    "sha256": "f6383e215eaf2f90d67f1f06969f1325ceb001f0af37c437eaa816d9293083e6",
+    "bytes": 88880
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_settings.png",
+    "sha256": "7d54d892150737888a58c70187b74e440bbd713e909dcb8b9fa817baebdd1b85",
+    "bytes": 111508
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_settings_roles.png",
+    "sha256": "309e39b06b3949f48ca632f861e610b5c589794b79d93a2c4afebce00ca9d325",
+    "bytes": 80158
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_skills.png",
+    "sha256": "0ddd873c1b77192b4833c9dd61b03bb4cc0fb46acb3e50ef0c69f2efaa1c40e1",
+    "bytes": 74537
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_starred.png",
+    "sha256": "4a833802f2c80b937aa6ddc9501be1a6982643aedf64d67961597835207d131e",
+    "bytes": 78801
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_stocks.png",
+    "sha256": "7935c3b75b7d912e9a86a351b1c02dec33eee8667053d1e2bbf227f509ed0a12",
+    "bytes": 199849
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_stocks_discovery.png",
+    "sha256": "c515ee4985bc7f4919538d891d1675d5bc337646610e5fabcaed5819135523a0",
+    "bytes": 98457
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_usage.png",
+    "sha256": "7adf9de0e213c44c3a37673a86279016ce2588d1debaefd304bbe32f0655083c",
+    "bytes": 92470
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-_video.png",
+    "sha256": "eaf3179e4ea8db370d5aa36662e2a82f784def2ac61cd0c3d63eb1e349315211",
+    "bytes": 531447
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-home.png",
+    "sha256": "413fb17512f489a5fbc248ef5c2c32a87e043630674ee23b9907519770efc7c4",
+    "bytes": 144648
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_browser_awaiting_user.png",
+    "sha256": "560c985cfb2562fafb8178e6d0324dd4dcbea07d8acd336f3cefcbe596f5c0bd",
+    "bytes": 55189
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_browser_cancelled.png",
+    "sha256": "076a6c4cba3480afcc8f601a86dd518e2e1520a292acdce9581f25370cb06f98",
+    "bytes": 127157
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_browser_completed.png",
+    "sha256": "af0be4b52a81f797697c1fe2404ca1619e8e4000ea69e5560f855753b6fc6b53",
+    "bytes": 77256
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_browser_executing.png",
+    "sha256": "d4e3e4e5218f3775062bef7d34abf9aa45ae6d1daa9fa6fc02ba422cf5fee2f3",
+    "bytes": 55621
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_browser_failed.png",
+    "sha256": "764d848b17dcc9ad561687fff36a7fc1c184eb348affa8e9b95327f6018c2949",
+    "bytes": 128263
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_generate_awaiting_user.png",
+    "sha256": "e97de797a3810cc206c608f89560c1f059cc0df7261291f6466535346dbb1645",
+    "bytes": 64825
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_generate_cancelled.png",
+    "sha256": "078bbf93d4a46a591c899689f209f1431b1cba785ead10ac454a8b5c0f342039",
+    "bytes": 72960
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_generate_completed.png",
+    "sha256": "ded854bb623266937ffe2bd5b0ee15b78128798de2373d7c554b8eae7c18489d",
+    "bytes": 66936
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_generate_executing.png",
+    "sha256": "0b2d6cdccb0d03fb7462abecbd3a70740b1136d1a041dddbb1815172c8912155",
+    "bytes": 65055
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x1000-task_generate_failed.png",
+    "sha256": "d538c62052c5bd19d05a7508179350ff0e749122e39983a5da64ac7ac683e0ba",
+    "bytes": 85296
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_billing.png",
+    "sha256": "3f53b63a5cad2cfb873fef94e986030163e9f0dd0d1377221a909994ee5c004b",
+    "bytes": 93807
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_connections.png",
+    "sha256": "ca31dbab56a216fef65014a95a38b48768f62fd98eb666f789750911f051a98c",
+    "bytes": 72705
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_cosmic.png",
+    "sha256": "ad0d8b31a81f038de7abefcd15dd36b01669517e5dfed6f28eaa087111ae9c06",
+    "bytes": 385872
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_files.png",
+    "sha256": "ff08e68794ff369e1c6fbe127c2c6093f4daf850daf81ee1ef1f5298514566d2",
+    "bytes": 68622
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_history.png",
+    "sha256": "d9c630639c149d84c2e4412df943f93ec2f34d2eb23529a797438721e5adfbbc",
+    "bytes": 95235
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_image.png",
+    "sha256": "0e729111df8353cc93272c80ee82817d0753fd74e9c3fcc878d4278af69d6f4f",
+    "bytes": 415541
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_plan.png",
+    "sha256": "16c17155ce9d02a2a2714b92de50a18a44702c255091086c6d05e426d7f37e78",
+    "bytes": 136609
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_planned.png",
+    "sha256": "cdb57cf3011590e606fa6bf673a39782e80714a5bff1dbbfe1722a9fe3164864",
+    "bytes": 86235
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_plugins.png",
+    "sha256": "6f13a8dfb9da64cbd3848b41cb263503035aaeea72703b8da041ecfd59313f97",
+    "bytes": 64584
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_profile.png",
+    "sha256": "df9d6c09b7874b3ac88f4d6c6842eb381683fc73a7800012d81428ee1ff8feca",
+    "bytes": 82483
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_projects.png",
+    "sha256": "4fa0c624d0da88ec903e4f2ab4ca1bb1bf5bd50edd9dce9162b0e8ca4d0a9609",
+    "bytes": 76321
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_projects_projectId.png",
+    "sha256": "21d66c51511ae7577113c1afe51910342c1ac5e273a0f4d1d66ac2fee6a04f7c",
+    "bytes": 80736
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_schedule.png",
+    "sha256": "646104b1b5ea20f263811445d3f9c7e67351946438e2d477c35960f38ad26ffc",
+    "bytes": 76723
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_settings.png",
+    "sha256": "539512d9c0349881bab48b69b356f06b1a82daa03829310329172130fc10d930",
+    "bytes": 88406
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_settings_roles.png",
+    "sha256": "1bb77450bc8575cf2977c750d7862703552136a912c6727cec45a77006d06976",
+    "bytes": 70183
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_skills.png",
+    "sha256": "baba1760d316d59dcee41f07b83e5361233f18e76bb766982b85c7ee5fb8e72c",
+    "bytes": 64588
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_starred.png",
+    "sha256": "77d569199c27139a37942e525708d372149720e53d9fb950a7d0f65a185760dc",
+    "bytes": 68832
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_stocks.png",
+    "sha256": "b49059d5a8970c0753ebedb7a06b866aa42a3ed5f238709d091ffb1c19ac9f31",
+    "bytes": 102369
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_stocks_discovery.png",
+    "sha256": "a1205272c6e3ed16a21c7c90c16ab23706d0e71e433d26cc9cf12a3f320bed7f",
+    "bytes": 88414
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_usage.png",
+    "sha256": "c3c188cf39c4ec9803bd9f30a217e0870a37e31ad3f43342403d434729217962",
+    "bytes": 82418
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-_video.png",
+    "sha256": "541af45f421afd44a3a773cae149b1aea9d6060cc7c28986237bce5fc88b4454",
+    "bytes": 450917
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-home.png",
+    "sha256": "e7ea4c3d3e6b025581611a295fd75fa2b403bd274c1c1cfba9d6c345577c16e3",
+    "bytes": 130341
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_browser_awaiting_user.png",
+    "sha256": "80f05dcdbb5fd117dde4b810eb87df3a583cc605088440026993eff13689a9bd",
+    "bytes": 53692
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_browser_cancelled.png",
+    "sha256": "303165b5f32b4082ee5f84bdf77d5c6ba77e1f2dc6dfb250ea363a5bdba63214",
+    "bytes": 108475
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_browser_completed.png",
+    "sha256": "3b1a116b8165f7c52983529945e694d2b2473c8e67cbac8456df6c6d6c30bcac",
+    "bytes": 66738
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_browser_executing.png",
+    "sha256": "369c568b869cdf2805ca5dd3b9497ed0f6d06c6a677f60e0507418dc11c9d3b2",
+    "bytes": 54068
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_browser_failed.png",
+    "sha256": "35aa98cba16c798d68a4c3a11e3c7dcfbb17c304c6f0aeee3aa54be738557351",
+    "bytes": 106660
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_generate_awaiting_user.png",
+    "sha256": "1ce95141734563b65a783c317385275e83971090b0b5a150abe878c8eaa49334",
+    "bytes": 54481
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_generate_cancelled.png",
+    "sha256": "050a6e99de78d9df883c2a1d7840869af82c59f70d7462c686e8863dfab1614a",
+    "bytes": 62930
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_generate_completed.png",
+    "sha256": "a8e0ed0200edbddd93d8e0c688f1b0090b4ab4b366ecfbcdd6dc0662e4cd16b7",
+    "bytes": 56778
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_generate_executing.png",
+    "sha256": "0b18003dc179976d227fbf423b767e392d4cb7dacb8e123f7789b5b133706a36",
+    "bytes": 54737
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/artifacts/1100x800-task_generate_failed.png",
+    "sha256": "2e7c191bb12b6126a53a3f3445dbe86fcfe049bea7aae1e0e585fd4414b31724",
+    "bytes": 74567
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/inventory.json",
+    "sha256": "64234d3b22e5fdf12c9025eebe35e294c21925daae7566eb56c90898f7d571a1",
+    "bytes": 793342
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/inventory.md",
+    "sha256": "08d323a512521b44a7d111c8c66be69c03eaecebde71ea863655ec108774a673",
+    "bytes": 1012727
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/report.json",
+    "sha256": "7765d0e62cc0c8bb36ce2d7e45a9430213c2dcf86785ce6befd83af43327f700",
+    "bytes": 3532158
+  },
+  {
+    "path": "/private/tmp/holaday-tasks/fix-layout-1/interrupted-diagnostic/report.md",
+    "sha256": "807fb1ad1fbd4c26fe580ddc7511a2f4d4f7ddffb6e81a3f9a313d79af1dfe5a",
+    "bytes": 9522
+  }
+]

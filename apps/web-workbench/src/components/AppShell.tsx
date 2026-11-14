@@ -1,5 +1,16 @@
-import * as React from 'react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FeedbackDialog } from '@/components/FeedbackDialog';
+import { LoginGate } from '@/components/LoginGate';
+import { SearchOverlay } from '@/components/SearchOverlay';
+import { Sidebar } from '@/components/Sidebar';
+import { AppSkeleton } from '@/components/Skeleton';
+import { UpdateBanner } from '@/components/UpdateBanner';
+import { UserMenu } from '@/components/UserMenu';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { Button } from '@/components/ui/button';
+import { SidebarInset, SidebarProvider, useSidebar } from '@/components/ui/sidebar';
 import { Menu, PanelRight, WifiOff } from 'lucide-react';
+import * as React from 'react';
 import {
   Outlet,
   useLocation,
@@ -7,21 +18,6 @@ import {
   useOutletContext,
   useSearchParams,
 } from 'react-router-dom';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { FeedbackDialog } from '@/components/FeedbackDialog';
-import { LoginGate } from '@/components/LoginGate';
-import { NotificationBell } from '@/components/notifications/NotificationBell';
-import { SearchOverlay } from '@/components/SearchOverlay';
-import { Sidebar } from '@/components/Sidebar';
-import { UpdateBanner } from '@/components/UpdateBanner';
-import { UserMenu } from '@/components/UserMenu';
-import { AppSkeleton } from '@/components/Skeleton';
-import { Button } from '@/components/ui/button';
-import {
-  SidebarInset,
-  SidebarProvider,
-  useSidebar,
-} from '@/components/ui/sidebar';
 // Phase 26B — hd-popover-enter keyframe is defined in the calendar's
 // CSS but used by NotificationBell + other popovers too. Import here
 // so it's available globally even before the user opens /scheduled.
@@ -30,47 +26,42 @@ import { useToast } from '@/components/ui/toast';
 import { loadAppShellPersonalProjects } from '@/lib/app-shell-projects';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
+  type NormalizedAuthMeProfile,
   normalizeAuthMeProfile,
   preferredAuthDisplayName,
-  type NormalizedAuthMeProfile,
 } from '@/lib/auth-me-state';
 import { authSessionExpiredMessage, isAuthSessionError } from '@/lib/auth-session';
 import { taskActionError } from '@/lib/error-copy';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
-import { cn } from '@/lib/utils';
 import {
+  type ProjectTaskFilterState,
   projectFilterChipState,
-  projectTaskFilterAppendPage,
-  projectTaskFilterAfterUnsuccessfulTasksCleared,
   projectTaskFilterAfterTaskDelete,
   projectTaskFilterAfterTaskMove,
+  projectTaskFilterAfterUnsuccessfulTasksCleared,
+  projectTaskFilterAppendPage,
   projectTaskFilterFirstPage,
   projectTaskFilterLoadMoreFailed,
   projectTaskFilterStartLoadMore,
   refreshProjectTaskFilterState,
   resolveProjectFilteredTasks,
-  type ProjectTaskFilterState,
 } from '@/lib/project-task-filter-state';
 import { shouldKeepProjectFilterForPickedTask } from '@/lib/task-selection-url-state';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import {
   networkTransitionToast,
   normalizeTaskActionCount,
   realtimeConnectionTransition,
 } from '@/lib/workbench-state';
-import {
-  connect,
-  disconnect,
-  onServerMessage,
-  onStatus,
-  type ConnStatus,
-} from '@/lib/ws';
+import { type ConnStatus, connect, disconnect, onServerMessage, onStatus } from '@/lib/ws';
 import {
   normalizeTaskListCursor,
   normalizeTaskListRows,
   setStoreNavigate,
   useTaskStore,
 } from '@/stores/task-store';
+import { useCreativePageTheme } from '@/stores/theme-store';
 import type { UiProject, UiTask } from '@/types/task';
 import { applyHistoryRetention } from '@/utils/time-buckets';
 import { PLAN_CATALOGUE, type PlanId } from '@holaday/shared-types';
@@ -88,9 +79,7 @@ interface OutletContext {
   setBrowserAdaptiveSidebarCollapsed(collapsed: boolean): void;
 }
 
-type ProjectRefreshResult =
-  | { ok: true; projects: UiProject[] }
-  | { error: string };
+type ProjectRefreshResult = { ok: true; projects: UiProject[] } | { error: string };
 
 /**
  * The one and only authed shell. Every authed route renders inside
@@ -119,13 +108,12 @@ type ProjectRefreshResult =
 export function AppShell(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const creativeTheme = useCreativePageTheme(location.pathname);
   const [searchParams] = useSearchParams();
   const toast = useToast();
 
   // Auth state.
-  const [authed, setAuthed] = React.useState<boolean>(() =>
-    Boolean(getAccessToken()),
-  );
+  const [authed, setAuthed] = React.useState<boolean>(() => Boolean(getAccessToken()));
   const [bootstrapped, setBootstrapped] = React.useState(false);
   const [wsStatus, setWsStatus] = React.useState<ConnStatus>('idle');
   const [me, setMe] = React.useState<MeProfile | null>(null);
@@ -157,9 +145,7 @@ export function AppShell(): JSX.Element {
     setBrowserWorkbenchOpen((open) => !open);
   }, [location.pathname, navigate]);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<
-    string[] | null
-  >(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = React.useState<string[] | null>(null);
   const [confirmClearUnsuccessful, setConfirmClearUnsuccessful] = React.useState(false);
   const mountedRef = React.useRef(false);
   const authInvalidatedRef = React.useRef(false);
@@ -203,6 +189,10 @@ export function AppShell(): JSX.Element {
 
   // Task store selectors.
   const tasks = useTaskStore((s) => s.tasks);
+  const tasksHasMore = useTaskStore((s) => s.tasksHasMore);
+  const loadingMoreTasks = useTaskStore((s) => s.loadingMore);
+  const tasksVisiblePageLimitReached = useTaskStore((s) => s.tasksVisiblePageLimitReached);
+  const loadMoreTasks = useTaskStore((s) => s.loadMoreTasks);
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const selectTask = useTaskStore((s) => s.selectTask);
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
@@ -305,8 +295,7 @@ export function AppShell(): JSX.Element {
     };
 
     const urlTaskParam = new URLSearchParams(location.search).get('task');
-    const stateNewTask =
-      (location.state as { newTask?: boolean } | null)?.newTask === true;
+    const stateNewTask = (location.state as { newTask?: boolean } | null)?.newTask === true;
 
     if (stateNewTask) {
       enterNewTaskMode();
@@ -361,11 +350,7 @@ export function AppShell(): JSX.Element {
   React.useEffect(() => {
     if (!bootstrapped) return;
     if (!taskParam && composerMode === 'new') return;
-    if (
-      taskParam &&
-      composerMode === 'new' &&
-      taskParam === lastSelectedRef.current
-    ) {
+    if (taskParam && composerMode === 'new' && taskParam === lastSelectedRef.current) {
       return;
     }
     if (taskParam && taskParam !== selectedTaskId) {
@@ -385,14 +370,12 @@ export function AppShell(): JSX.Element {
   // same location.state pathway to seed the new-task composer.
   React.useEffect(() => {
     if (!bootstrapped) return;
-    const state = location.state as
-      | {
-          newTask?: boolean;
-          attachFile?: unknown;
-          attachFiles?: unknown;
-          skillTaskDraft?: unknown;
-        }
-      | null;
+    const state = location.state as {
+      newTask?: boolean;
+      attachFile?: unknown;
+      attachFiles?: unknown;
+      skillTaskDraft?: unknown;
+    } | null;
     if (!state?.newTask) return;
     enterNewTaskMode();
     const nextState: { attachFile?: unknown; attachFiles?: unknown; skillTaskDraft?: unknown } = {};
@@ -532,27 +515,26 @@ export function AppShell(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [
-    authed,
-    searchOpen,
-    feedbackOpen,
-    enterNewTaskMode,
-    location.pathname,
-    navigate,
-  ]);
+  }, [authed, searchOpen, feedbackOpen, enterNewTaskMode, location.pathname, navigate]);
 
-  const handleLogout = React.useCallback(() => {
+  const handleLogout = React.useCallback(async () => {
+    try {
+      await trpc.auth.logout.mutate();
+    } catch {
+      toast.show('退出未完成，请重试。', 'error');
+      return;
+    }
     clearAccessToken();
     disconnect();
     reset();
     setMe(null);
     setAuthed(false);
     setBootstrapped(false);
-  }, [reset]);
+  }, [reset, toast]);
 
   // Project filter chip — driven by ?project= in URL, surfaced in
   // sidebar header so the user knows the task list is scoped.
-  const projectFilter = searchParams.get('project');
+  const projectFilter = location.pathname === '/' ? searchParams.get('project') : null;
   const activeProject = React.useMemo(
     () => projects.find((p) => p.projectId === projectFilter) ?? null,
     [projects, projectFilter],
@@ -561,8 +543,7 @@ export function AppShell(): JSX.Element {
   // Retention slice — same as the workbench used to compute, but
   // centralised here so the Sidebar shows the same hidden-count on
   // every route. Pinned + selected tasks bypass retention.
-  const planForRetention: PlanId =
-    me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
+  const planForRetention: PlanId = me?.plan === 'basic' || me?.plan === 'pro' ? me.plan : 'free';
   const historyDays = PLAN_CATALOGUE[planForRetention].historyDays;
   // Pinned + currently-selected tasks bypass retention. Pin state
   // now lives in the server-backed `starred` flag on each row, so we
@@ -576,16 +557,16 @@ export function AppShell(): JSX.Element {
     if (selectedTaskId) set.add(selectedTaskId);
     return set;
   }, [tasks, selectedTaskId]);
-  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } =
-    React.useMemo(
-      () => applyHistoryRetention(tasks, historyDays, retentionPinned),
-      [tasks, historyDays, retentionPinned],
-    );
+  const { visible: visibleTasks, hiddenCount: hiddenByRetentionCount } = React.useMemo(
+    () => applyHistoryRetention(tasks, historyDays, retentionPinned),
+    [tasks, historyDays, retentionPinned],
+  );
 
   // Project-scoped task list. Only fetched when the URL pins a
   // project — sub-pages don't trigger this.
-  const [projectTaskFilter, setProjectTaskFilter] =
-    React.useState<ProjectTaskFilterState | null>(null);
+  const [projectTaskFilter, setProjectTaskFilter] = React.useState<ProjectTaskFilterState | null>(
+    null,
+  );
   React.useEffect(() => {
     if (!projectFilter) {
       setProjectTaskFilter(null);
@@ -594,41 +575,31 @@ export function AppShell(): JSX.Element {
     let cancelled = false;
     const requestId = projectFilterRequestRef.current + 1;
     projectFilterRequestRef.current = requestId;
-    setProjectTaskFilter((prev) =>
-      refreshProjectTaskFilterState(prev, projectFilter),
-    );
+    setProjectTaskFilter((prev) => refreshProjectTaskFilterState(prev, projectFilter));
     void trpc.tasks.list
       .query({ projectId: projectFilter, limit: 50 })
       .then((res) => {
-        if (
-          cancelled ||
-          !mountedRef.current ||
-          projectFilterRequestRef.current !== requestId
-        ) {
+        if (cancelled || !mountedRef.current || projectFilterRequestRef.current !== requestId) {
           return;
         }
         const fresh: UiTask[] = normalizeTaskListRows(res?.tasks);
-        setProjectTaskFilter(projectTaskFilterFirstPage({
-          projectId: projectFilter,
-          tasks: fresh,
-          nextCursor: normalizeTaskListCursor(
-            (res as { nextCursor?: unknown } | null)?.nextCursor,
-          ),
-        }));
+        setProjectTaskFilter(
+          projectTaskFilterFirstPage({
+            projectId: projectFilter,
+            tasks: fresh,
+            nextCursor: normalizeTaskListCursor(
+              (res as { nextCursor?: unknown } | null)?.nextCursor,
+            ),
+          }),
+        );
       })
       .catch((err) => {
-        if (
-          cancelled ||
-          !mountedRef.current ||
-          projectFilterRequestRef.current !== requestId
-        ) {
+        if (cancelled || !mountedRef.current || projectFilterRequestRef.current !== requestId) {
           return;
         }
         const msg = pageErrorMessage(err);
         setProjectTaskFilter((prev) =>
-          prev?.projectId === projectFilter
-            ? { ...prev, loading: false, error: msg }
-            : prev,
+          prev?.projectId === projectFilter ? { ...prev, loading: false, error: msg } : prev,
         );
         toast.show(taskActionError('项目任务暂时无法加载', msg), 'error');
       });
@@ -638,11 +609,7 @@ export function AppShell(): JSX.Element {
     };
   }, [projectFilter, toast]);
 
-  const filteredTasks = resolveProjectFilteredTasks(
-    projectFilter,
-    projectTaskFilter,
-    visibleTasks,
-  );
+  const filteredTasks = resolveProjectFilteredTasks(projectFilter, projectTaskFilter, visibleTasks);
   const projectFilterChip = projectFilterChipState({
     projectId: projectFilter,
     projectName: activeProject?.name,
@@ -667,10 +634,7 @@ export function AppShell(): JSX.Element {
     void trpc.tasks.list
       .query({ projectId: projectFilter, limit: 50, cursor })
       .then((res) => {
-        if (
-          !mountedRef.current ||
-          projectLoadMoreRequestRef.current !== requestId
-        ) {
+        if (!mountedRef.current || projectLoadMoreRequestRef.current !== requestId) {
           return;
         }
         const fresh = normalizeTaskListRows(res?.tasks);
@@ -685,10 +649,7 @@ export function AppShell(): JSX.Element {
         );
       })
       .catch((err) => {
-        if (
-          !mountedRef.current ||
-          projectLoadMoreRequestRef.current !== requestId
-        ) {
+        if (!mountedRef.current || projectLoadMoreRequestRef.current !== requestId) {
           return;
         }
         const msg = pageErrorMessage(err);
@@ -712,12 +673,28 @@ export function AppShell(): JSX.Element {
     };
   }, [loadMoreProjectTasks, projectFilter, projectTaskFilter]);
 
+  const retentionPagerOverride = {
+    hasMore: tasksHasMore && !tasksVisiblePageLimitReached,
+    loadingMore: loadingMoreTasks,
+    onLoadMore: () => {
+      void loadMoreTasks((rows) => {
+        const pinned = new Set(rows.filter((row) => row.starred).map((row) => row.taskId));
+        if (selectedTaskId) pinned.add(selectedTaskId);
+        return new Set(
+          applyHistoryRetention(rows, historyDays, pinned).visible.map((row) => row.taskId),
+        );
+      });
+    },
+    exhaustedCopy: tasksVisiblePageLimitReached
+      ? '没有更多可见任务'
+      : hiddenByRetentionCount > 0
+        ? `没有更多可见任务（${hiddenByRetentionCount} 条已超出保留期）`
+        : undefined,
+  };
+
   if (!authed) {
     return (
-      <LoginGate
-        onAuthenticated={handleAuthenticated}
-        onClosureRecovery={handleClosureRecovery}
-      />
+      <LoginGate onAuthenticated={handleAuthenticated} onClosureRecovery={handleClosureRecovery} />
     );
   }
   if (!bootstrapped) return <AppSkeleton />;
@@ -737,9 +714,11 @@ export function AppShell(): JSX.Element {
   return (
     <SidebarProvider
       defaultOpen={true}
+      forceCollapsed={browserAdaptiveSidebarCollapsed}
+      className={`holaday-shell${creativeTheme ? ' dark holaday-creative-shell' : ''}`}
       style={
         {
-          '--sidebar-width': '304px',
+          '--sidebar-width': '318px',
           '--sidebar-width-icon': '64px',
         } as React.CSSProperties
       }
@@ -748,11 +727,9 @@ export function AppShell(): JSX.Element {
         tasks={filteredTasks}
         hiddenTaskCount={projectFilter ? 0 : hiddenByRetentionCount}
         historyDays={historyDays}
-        projectFilter={
-          projectFilterChip
-        }
+        projectFilter={projectFilterChip}
         onClearProjectFilter={() => navigate('/')}
-        pagerOverride={projectPagerOverride}
+        pagerOverride={projectPagerOverride ?? retentionPagerOverride}
         selectedTaskId={selectedTaskId}
         onSelectTask={(taskId) => {
           if (location.pathname !== '/') {
@@ -816,7 +793,6 @@ export function AppShell(): JSX.Element {
         userRole={me?.role ?? 'user'}
         userPlan={me?.plan ?? 'free'}
         videoEnabled={me?.videoEnabled ?? false}
-        adaptiveCollapsed={browserAdaptiveSidebarCollapsed}
         onOpenSearch={() => setSearchOpen(true)}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
@@ -834,7 +810,10 @@ export function AppShell(): JSX.Element {
           Pages that need internal scroll still get it via their own
           flex-1 + overflow-y-auto blocks (WorkbenchApp, scheduled
           calendar). */}
-      <SidebarInset className="h-svh overflow-y-auto bg-background">
+      <SidebarInset className="holaday-main h-svh overflow-y-auto bg-background">
+        {/* Workbench owns its toolbar; a painted shell strip would cover the browser controls. */}
+        {location.pathname !== '/' && <div className="hd-shell-topbar" aria-hidden="true" />}
+        {!selectedTaskId && <WorkbenchBreadcrumb />}
         <Outlet context={ctx} />
       </SidebarInset>
       <DesktopAccountDock
@@ -842,6 +821,7 @@ export function AppShell(): JSX.Element {
         onToggleBrowserWorkbench={toggleBrowserWorkbench}
         taskSelected={Boolean(selectedTaskId)}
         displayName={displayName}
+        avatarUrl={me?.avatarUrl}
         email={me?.email ?? null}
         plan={me?.plan ?? 'free'}
         unsuccessfulTaskCount={serverUnsuccessfulCount}
@@ -896,9 +876,7 @@ export function AppShell(): JSX.Element {
         onSubmit={async (message) => {
           try {
             const ctxStr = selectedTaskId ? `task_id=${selectedTaskId}` : undefined;
-            await trpc.feedback.submit.mutate(
-              ctxStr ? { message, context: ctxStr } : { message },
-            );
+            await trpc.feedback.submit.mutate(ctxStr ? { message, context: ctxStr } : { message });
             return { ok: true as const };
           } catch (err) {
             const msg = pageErrorMessage(err);
@@ -923,9 +901,7 @@ export function AppShell(): JSX.Element {
           if (!mountedRef.current) return;
           if ('error' in res) toast.show(pageActionError('删除失败', res.error), 'error');
           else {
-            setProjectTaskFilter((prev) =>
-              projectTaskFilterAfterTaskDelete(prev, [taskId]),
-            );
+            setProjectTaskFilter((prev) => projectTaskFilterAfterTaskDelete(prev, [taskId]));
             toast.show('任务已删除');
             refreshDeletionDependentMeta();
           }
@@ -961,22 +937,15 @@ export function AppShell(): JSX.Element {
             .filter((entry) => !('error' in entry.result))
             .map((entry) => entry.id);
           const errs = results.filter(
-            (entry): entry is { id: string; result: { error: string } } =>
-              'error' in entry.result,
+            (entry): entry is { id: string; result: { error: string } } => 'error' in entry.result,
           );
           if (deletedIds.length > 0) {
-            setProjectTaskFilter((prev) =>
-              projectTaskFilterAfterTaskDelete(prev, deletedIds),
-            );
+            setProjectTaskFilter((prev) => projectTaskFilterAfterTaskDelete(prev, deletedIds));
           }
           if (errs.length === 0) toast.show(`已删除 ${ids.length} 个任务`);
           else if (errs.length === ids.length)
             toast.show(taskActionError('删除失败', errs[0]?.result.error), 'error');
-          else
-            toast.show(
-              `已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`,
-              'error',
-            );
+          else toast.show(`已删除 ${ids.length - errs.length} 个，${errs.length} 个失败`, 'error');
           refreshDeletionDependentMeta();
         }}
       />
@@ -1020,8 +989,8 @@ export function AppShell(): JSX.Element {
           aria-live="polite"
           className="pointer-events-none fixed inset-x-0 bottom-20 z-[90] flex justify-center px-3 sm:bottom-4"
         >
-          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#EA1F59]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#EA1F59]/35 dark:bg-card/90 dark:text-foreground/85">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#EA1F59]/10 text-[#EA1F59]">
+          <div className="inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-[8px] border border-[#FF0061]/20 bg-white/90 px-3 py-2 text-[12px] font-medium text-[#595757] shadow-[0_12px_30px_rgba(89,87,87,0.12)] backdrop-blur dark:border-[#FF0061]/35 dark:bg-card/90 dark:text-foreground/85">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[#FF0061]/10 text-[#FF0061]">
               <WifiOff className="h-3 w-3" aria-hidden />
             </span>
             <span className="truncate">当前离线，暂时无法创建新任务</span>
@@ -1045,7 +1014,7 @@ function MobileSubpageSidebarSlot(): JSX.Element | null {
         onClick={() => setOpenMobile(true)}
         aria-label="打开任务列表"
         title="打开任务列表"
-        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#EA1F59] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
+        className="h-9 w-9 rounded-[9px] border-[#DCDDDD] bg-white/92 text-[#595757] shadow-[0_1px_3px_rgba(17,24,39,0.05)] backdrop-blur hover:bg-[#EFEFEF] hover:text-[#FF0061] dark:border-white/10 dark:bg-card/90 dark:text-foreground/75 dark:hover:bg-white/10"
       >
         <Menu className="h-4 w-4" aria-hidden />
       </Button>
@@ -1067,10 +1036,7 @@ function MobileNotificationBellSlot({
   if (!isMobile || openMobile || browserWorkbenchOpen) return null;
   return (
     <div className="fixed right-3 top-1.5 z-40 flex items-center gap-1">
-      <BrowserWorkbenchButton
-        open={browserWorkbenchOpen}
-        onToggle={onToggleBrowserWorkbench}
-      />
+      <BrowserWorkbenchButton open={browserWorkbenchOpen} onToggle={onToggleBrowserWorkbench} />
       <NotificationBell placement="mobile-header" />
     </div>
   );
@@ -1081,6 +1047,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench,
   taskSelected,
   displayName,
+  avatarUrl,
   email,
   plan,
   unsuccessfulTaskCount,
@@ -1092,6 +1059,7 @@ function DesktopAccountDock({
   onToggleBrowserWorkbench(): void;
   taskSelected: boolean;
   displayName: string;
+  avatarUrl?: string | null;
   email: string | null;
   plan: string;
   unsuccessfulTaskCount: number;
@@ -1115,6 +1083,7 @@ function DesktopAccountDock({
       <UserMenu
         placement="topbar"
         displayName={displayName}
+        avatarUrl={avatarUrl}
         email={email}
         plan={plan}
         onLogout={onLogout}
@@ -1164,4 +1133,28 @@ function BrowserWorkbenchButton({
  */
 export function useAppShellContext(): OutletContext {
   return useOutletContext<OutletContext>();
+}
+
+function WorkbenchBreadcrumb() {
+  const { pathname } = useLocation();
+  const labels: Record<string, string> = {
+    '/': '新任务',
+    '/skills': '技能',
+    '/stocks': '股市任务',
+    '/cosmic': '今日能量',
+    '/video': '视频',
+    '/image': '图片',
+    '/planned': '规划任务',
+    '/files': '文件库',
+    '/projects': '项目',
+  };
+  const path = pathname.replace(/\/$/, '') || '/';
+  if (!labels[path]) return null;
+  return (
+    <div className="hd-workbench-breadcrumb">
+      <span>{path === '/video' || path === '/image' ? '创作' : '个人空间'}</span>
+      <span>/</span>
+      <strong>{labels[path]}</strong>
+    </div>
+  );
 }

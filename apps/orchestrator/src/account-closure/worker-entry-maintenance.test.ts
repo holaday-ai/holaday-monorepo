@@ -17,7 +17,9 @@ vi.mock('../execution/ordinary-maintenance-store.js', () => ({
   }),
 }));
 vi.mock('../auth/email-code.js', () => ({ privateResendSender: {} }));
-vi.mock('../config/env.js', () => ({ env: { ACCOUNT_CLOSURE_WORKER_ENABLED: true } }));
+vi.mock('../config/env.js', () => ({
+  env: { ACCOUNT_CLOSURE_WORKER_ENABLED: true, BROWSER_POOL_DIR: '/synthetic-browser-runtime' },
+}));
 vi.mock('../config/logger.js', () => ({ logger: { info() {} } }));
 vi.mock('../db/client.js', () => ({ db: {}, pool: { end: state.end } }));
 vi.mock('../files/storage-provider.js', async (original) => ({

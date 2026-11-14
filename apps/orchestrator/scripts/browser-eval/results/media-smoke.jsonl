@@ -1,0 +1,4 @@
+{"name":"dashscope_wan_image","model":"wan2.7-image","ok":true,"ms":25037,"images":1,"bytes":4585674}
+{"name":"dashscope_qwen_image_poster","model":"qwen-image-2.0-pro","ok":true,"ms":20359,"images":1,"bytes":3667288}
+{"name":"fal_nano_banana_2","model":"fal-ai/nano-banana-2","ok":false,"ms":30003,"kind":"timeout","status":null,"detail":"request timed out after 30000ms"}
+{"name":"dashscope_wan_t2v_5s","model":"wan2.7-t2v-2026-06-12","ok":false,"ms":52330,"kind":"timeout","status":null,"detail":"request timed out after 30000ms"}

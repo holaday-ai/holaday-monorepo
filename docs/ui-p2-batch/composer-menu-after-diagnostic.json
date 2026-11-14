@@ -1,0 +1,71 @@
+[
+  {
+    "repeat": 0,
+    "width": 1440,
+    "label": "自动执行",
+    "status": "idempotent",
+    "reason": "already checked menu radio choice"
+  },
+  {
+    "repeat": 0,
+    "width": 1440,
+    "label": "技能 自动",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  },
+  {
+    "repeat": 0,
+    "width": 1440,
+    "label": "模型 千问",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  },
+  {
+    "repeat": 1,
+    "width": 1280,
+    "label": "自动执行",
+    "status": "idempotent",
+    "reason": "already checked menu radio choice"
+  },
+  {
+    "repeat": 1,
+    "width": 1280,
+    "label": "技能 自动",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  },
+  {
+    "repeat": 1,
+    "width": 1280,
+    "label": "模型 千问",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  },
+  {
+    "repeat": 2,
+    "width": 1024,
+    "label": "自动执行",
+    "status": "idempotent",
+    "reason": "already checked menu radio choice"
+  },
+  {
+    "repeat": 2,
+    "width": 1024,
+    "label": "技能 自动",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  },
+  {
+    "repeat": 2,
+    "width": 1024,
+    "label": "模型 千问",
+    "status": "passed",
+    "reason": "observable state, route, input, request or download",
+    "requestCount": 0
+  }
+]

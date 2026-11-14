@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAstroReading,
   clearAstroProfile,
@@ -7,6 +6,7 @@ import {
   saveAstroProfile,
   zodiacFromBirthday,
 } from '@/lib/astrology';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('astrology helpers', () => {
   const storage = new Map<string, string>();

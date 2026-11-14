@@ -49,6 +49,11 @@ export interface CapturedBrowserFinalState {
   finalScreenshot?: string;
   finalUrl?: string;
   finalViewport?: { width: number; height: number };
+  /**
+   * FIX-30: the final page's visible text (bounded), the receipt that the page
+   * really loaded. Used in-process by the nav-failure check only; never persisted.
+   */
+  finalPageText?: string;
 }
 
 type BrowserFinalStateLogger = {
@@ -81,10 +86,7 @@ export async function persistAndBroadcastVisionLoopThrow(args: {
     });
     persisted = out.persisted;
   } catch (err) {
-    args.logger.error(
-      { err, taskId: args.taskId },
-      'vision loop: catch-block persist also failed',
-    );
+    args.logger.error({ err, taskId: args.taskId }, 'vision loop: catch-block persist also failed');
     return false;
   }
 
@@ -146,10 +148,7 @@ export async function persistAndBroadcastBrowserDispatchFailure(args: {
       reason: failedReason.slice(0, 200),
     });
   } catch (err) {
-    args.logger.warn(
-      { err, taskId: args.taskId },
-      'browser dispatch: terminal broadcast failed',
-    );
+    args.logger.warn({ err, taskId: args.taskId }, 'browser dispatch: terminal broadcast failed');
   }
 
   return true;
@@ -158,10 +157,7 @@ export async function persistAndBroadcastBrowserDispatchFailure(args: {
 export async function captureBrowserFinalState<TPage>(args: {
   executor: {
     getPage(): Promise<TPage>;
-    screenshot(
-      page: TPage,
-      options: { timeoutMs: number },
-    ): Promise<BrowserScreenshotResult>;
+    screenshot(page: TPage, options: { timeoutMs: number }): Promise<BrowserScreenshotResult>;
   };
   logger: BrowserFinalStateLogger;
   taskId: string;
@@ -186,7 +182,29 @@ export async function captureBrowserFinalState<TPage>(args: {
   } catch {
     finalUrl = undefined;
   }
-  const urlOnly: CapturedBrowserFinalState = finalUrl ? { finalUrl } : {};
+  let finalPageText: string | undefined;
+  const evaluate = (page as unknown as { evaluate?: (fn: () => string) => Promise<unknown> })
+    .evaluate;
+  if (typeof evaluate === 'function') {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const text = await Promise.race([
+        evaluate.call(page, () => (document.body?.innerText ?? '').slice(0, 6000)),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), 2_000);
+        }),
+      ]);
+      if (typeof text === 'string' && text.trim()) finalPageText = text;
+    } catch {
+      finalPageText = undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const urlOnly: CapturedBrowserFinalState = {
+    ...(finalUrl ? { finalUrl } : {}),
+    ...(finalPageText ? { finalPageText } : {}),
+  };
 
   try {
     const shot = await args.executor.screenshot(page, { timeoutMs: 5_000 });

@@ -1,0 +1,239 @@
+[
+  {
+    "width": 1440,
+    "route": "/settings",
+    "checks": [
+      {
+        "item": "p2-settings-nowrap-cover",
+        "metrics": {
+          "background": "rgb(255, 255, 255)",
+          "cover": "rgb(255, 255, 255)",
+          "coverTop": -9,
+          "coverHeight": 9,
+          "links": [
+            {
+              "label": "外观",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 视角",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "数据区域",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "API Key",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "浏览器数据",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 记忆",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "通知",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "账号",
+              "lines": 1,
+              "nowrap": "nowrap"
+            }
+          ]
+        },
+        "screenshot": "p2-1440-_settings.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1440,
+    "route": "/cosmic",
+    "checks": [
+      {
+        "item": "p2-energy-gap",
+        "gap": 34,
+        "screenshot": "p2-1440-_cosmic.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1440,
+    "route": "task:browser:completed",
+    "checks": [
+      {
+        "item": "p2-terminal-plan-hidden",
+        "screenshot": "p2-1440-task_browser_completed.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1280,
+    "route": "/settings",
+    "checks": [
+      {
+        "item": "p2-settings-nowrap-cover",
+        "metrics": {
+          "background": "rgb(255, 255, 255)",
+          "cover": "rgb(255, 255, 255)",
+          "coverTop": -9,
+          "coverHeight": 9,
+          "links": [
+            {
+              "label": "外观",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 视角",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "数据区域",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "API Key",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "浏览器数据",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 记忆",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "通知",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "账号",
+              "lines": 1,
+              "nowrap": "nowrap"
+            }
+          ]
+        },
+        "screenshot": "p2-1280-_settings.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1280,
+    "route": "/cosmic",
+    "checks": [
+      {
+        "item": "p2-energy-gap",
+        "gap": 34,
+        "screenshot": "p2-1280-_cosmic.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1280,
+    "route": "task:browser:completed",
+    "checks": [
+      {
+        "item": "p2-terminal-plan-hidden",
+        "screenshot": "p2-1280-task_browser_completed.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1024,
+    "route": "/settings",
+    "checks": [
+      {
+        "item": "p2-settings-nowrap-cover",
+        "metrics": {
+          "background": "rgb(255, 255, 255)",
+          "cover": "rgb(255, 255, 255)",
+          "coverTop": -9,
+          "coverHeight": 9,
+          "links": [
+            {
+              "label": "外观",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 视角",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "数据区域",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "API Key",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "浏览器数据",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "AI 记忆",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "通知",
+              "lines": 1,
+              "nowrap": "nowrap"
+            },
+            {
+              "label": "账号",
+              "lines": 1,
+              "nowrap": "nowrap"
+            }
+          ]
+        },
+        "screenshot": "p2-1024-_settings.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1024,
+    "route": "/cosmic",
+    "checks": [
+      {
+        "item": "p2-energy-gap",
+        "gap": 34,
+        "screenshot": "p2-1024-_cosmic.jpg"
+      }
+    ]
+  },
+  {
+    "width": 1024,
+    "route": "task:browser:completed",
+    "checks": [
+      {
+        "item": "p2-terminal-plan-hidden",
+        "screenshot": "p2-1024-task_browser_completed.jpg"
+      }
+    ]
+  }
+]

@@ -166,7 +166,13 @@ describe('auth router — profile rollout state', () => {
         selectedRoles: ['researcher'],
         role: 'user',
         modelDataRegion: null,
+        modelDataRegionSelection: false,
         videoEnabled: false,
+        mediaModels: {
+          image: expect.any(Array),
+          video: expect.any(Array),
+          petVideo: expect.any(Array),
+        },
         teamProjectsEnabled: expectedTeamProjectsEnabled,
         teamTaskLifecycleEnabled: expectedTeamTaskLifecycleEnabled,
       });

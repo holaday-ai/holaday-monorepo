@@ -1,4 +1,18 @@
+import { stripReasoning } from '../agent/internal-refs.js';
+import { logger } from '../config/logger.js';
+import {
+  type InvalidResponseForensics,
+  type InvalidResponseKind,
+  TRANSPORT_RESPONSE_META,
+  type TransportResponseMeta,
+  invalidResponseForensics,
+} from './invalid-response-forensics.js';
 import type { ModelDataRegion } from './model-data-region.js';
+import {
+  type ProviderErrorDiagnostics,
+  modelProviderFailureMessage,
+  safeProviderDiagnostics,
+} from './provider-error-diagnostics.js';
 import { QwenTransportError, createQwenMessagesTransport } from './qwen-messages-transport.js';
 import {
   type QwenPurpose,
@@ -19,6 +33,13 @@ export class MessagesAdapterError extends Error {
   constructor(
     public readonly code: MessagesAdapterErrorCode,
     message: string,
+    /** Provider HTTP status when known (e.g. 403 quota exhausted); diagnostics only. */
+    public readonly status: number | null = null,
+    public readonly diagnostics: ProviderErrorDiagnostics = safeProviderDiagnostics({
+      httpStatus: status,
+    }),
+    /** FIX-47: what came back, for an INVALID_RESPONSE only (masked, cut to 4 KB). */
+    public readonly forensics?: InvalidResponseForensics,
   ) {
     super(message);
     this.name = 'MessagesAdapterError';
@@ -27,6 +48,7 @@ export class MessagesAdapterError extends Error {
 
 export type MessagesProviderMetadata =
   | { provider: 'anthropic'; model: string }
+  | { provider: 'openai'; model: string }
   | {
       provider: 'alibaba-model-studio';
       model: string;
@@ -109,6 +131,8 @@ export interface NeutralMessagesRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxRetries?: number;
+  /** 1-based attempt of a call retried by `withModelRetry`; accounting only. */
+  attempt?: number;
 }
 
 export interface NeutralMessagesResponse {
@@ -126,6 +150,7 @@ export interface NeutralMessagesResponse {
 }
 
 export interface MessagesAdapter {
+  readonly browserBrain?: import('./browser-brain.js').BrowserBrainRoles;
   readonly metadata: MessagesProviderMetadata;
   create(
     request: NeutralMessagesRequest,
@@ -173,6 +198,8 @@ export type AnthropicCompatibleClientFactory = (
 export function createAnthropicCompatibleMessagesAdapter(input: {
   client: AnthropicCompatibleClient;
   metadata: MessagesProviderMetadata;
+  /** FIX-47: values masked out of a kept response body (the route's key and workspace). */
+  secrets?: readonly string[];
 }): MessagesAdapter {
   const metadata = Object.freeze({ ...input.metadata }) as MessagesProviderMetadata;
 
@@ -180,6 +207,27 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
     metadata,
     async create(request, options) {
       const providerRequest = buildMessagesProviderRequest(request, metadata);
+      // DEPLOY-48 复审 #3: the evidence never replaces the INVALID_RESPONSE it describes — if
+      // gathering it fails, the error goes on without it.
+      const evidence = (
+        kind: InvalidResponseKind,
+        raw: unknown,
+        meta?: TransportResponseMeta,
+      ): InvalidResponseForensics | undefined => {
+        try {
+          return invalidResponseForensics({
+            kind,
+            raw,
+            ...(meta ? { meta } : {}),
+            model: metadata.model,
+            request: providerRequest,
+            requestBytes: Buffer.byteLength(JSON.stringify(providerRequest), 'utf8'),
+            ...(input.secrets ? { secrets: input.secrets } : {}),
+          });
+        } catch {
+          return undefined;
+        }
+      };
       let rawResponse: unknown;
       try {
         rawResponse = await input.client.messages.create(
@@ -187,9 +235,42 @@ export function createAnthropicCompatibleMessagesAdapter(input: {
           toAnthropicCompatibleOptions(options),
         );
       } catch (error) {
-        throw normalizeProviderError(error, options);
+        const normalized = normalizeProviderError(error, options);
+        if (
+          normalized.code === 'INVALID_RESPONSE' &&
+          error instanceof QwenTransportError &&
+          error.responseMeta
+        )
+          throw new MessagesAdapterError(
+            normalized.code,
+            normalized.message,
+            normalized.status,
+            normalized.diagnostics,
+            evidence('not_json', undefined, error.responseMeta),
+          );
+        throw normalized;
       }
-      return normalizeAnthropicCompatibleResponse(rawResponse, metadata);
+      try {
+        return normalizeAnthropicCompatibleResponse(rawResponse, metadata);
+      } catch (error) {
+        if (!(error instanceof InvalidShapeError)) throw error;
+        const meta = isRecord(rawResponse)
+          ? (rawResponse as { [TRANSPORT_RESPONSE_META]?: TransportResponseMeta })[
+              TRANSPORT_RESPONSE_META
+            ]
+          : undefined;
+        throw new MessagesAdapterError(
+          'INVALID_RESPONSE',
+          'Message provider response is invalid',
+          null,
+          safeProviderDiagnostics({
+            httpStatus: meta?.httpStatus ?? null,
+            requestId: meta?.requestId ?? null,
+            elapsedMs: meta?.elapsedMs ?? 0,
+          }),
+          evidence(error.kind, rawResponse, meta),
+        );
+      }
     },
   };
 }
@@ -234,6 +315,7 @@ export function createQwenMessagesAdapter(input: {
   const adapter = createAnthropicCompatibleMessagesAdapter({
     client,
     metadata,
+    secrets: [route.apiKey, route.workspaceId ?? ''],
   });
   if (supportsQwenThinkingControl(route.model)) return adapter;
 
@@ -274,6 +356,15 @@ function buildMessagesProviderRequest(
   ) {
     const { thinking: _unsupportedThinking, ...rest } = request;
     supportedRequest = rest;
+  } else if (
+    metadata?.provider === 'alibaba-model-studio' &&
+    request.thinking === undefined &&
+    (request.toolChoice?.type === 'any' || request.toolChoice?.type === 'tool')
+  ) {
+    // Hybrid reasoning models (e.g. qwen3.6/3.7-plus) think by default, and
+    // DashScope rejects a forced tool choice in thinking mode (400
+    // InvalidParameter). A forced tool call never needs the thinking pass.
+    supportedRequest = { ...request, thinking: { type: 'disabled' } };
   }
   // Without an adapter only known input can be sized; no request will be sent.
   return toAnthropicCompatibleRequest(supportedRequest, metadata?.model ?? '');
@@ -382,26 +473,33 @@ function validateRequest(request: NeutralMessagesRequest): void {
   }
 }
 
+/** Which response check failed; turned into INVALID_RESPONSE with its evidence by `create`. */
+class InvalidShapeError extends Error {
+  constructor(public readonly kind: InvalidResponseKind) {
+    super('Message provider response is invalid');
+  }
+}
+
 function normalizeAnthropicCompatibleResponse(
   rawResponse: unknown,
   metadata: MessagesProviderMetadata,
 ): NeutralMessagesResponse {
-  if (
-    !isRecord(rawResponse) ||
-    !isNonEmptyString(rawResponse.id) ||
-    !Array.isArray(rawResponse.content)
-  ) {
-    throw new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
-  }
+  if (!isRecord(rawResponse)) throw new InvalidShapeError('not_object');
+  if (!isNonEmptyString(rawResponse.id)) throw new InvalidShapeError('no_id');
+  if (!Array.isArray(rawResponse.content)) throw new InvalidShapeError('no_content_array');
 
   const content: NeutralOutputContentBlock[] = [];
+  let inlineReasoningStripped = 0;
   for (const rawBlock of rawResponse.content) {
     if (!isRecord(rawBlock)) continue;
     if (rawBlock.type === 'text') {
-      if (typeof rawBlock.text !== 'string') {
-        throw new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
-      }
-      content.push({ type: 'text', text: rawBlock.text });
+      if (typeof rawBlock.text !== 'string') throw new InvalidShapeError('bad_text_block');
+      // FIX-61B P0-2: reasoning belongs in a thinking block (dropped above). Seen once in production
+      // (qwen3.7-plus, generate): it came inline in the text, closed by 「</think>」, and reached the
+      // user. It is cut here, for every channel; not reproduced in 10 direct calls.
+      const text = stripReasoning(rawBlock.text);
+      if (text !== rawBlock.text) inlineReasoningStripped += 1;
+      if (text.trim() || !rawBlock.text.trim()) content.push({ type: 'text', text });
       continue;
     }
     if (rawBlock.type === 'tool_use') {
@@ -410,7 +508,7 @@ function normalizeAnthropicCompatibleResponse(
         !isNonEmptyString(rawBlock.name) ||
         !('input' in rawBlock)
       ) {
-        throw new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
+        throw new InvalidShapeError('bad_tool_use_block');
       }
       content.push({
         type: 'tool_use',
@@ -420,9 +518,13 @@ function normalizeAnthropicCompatibleResponse(
       });
     }
   }
-  if (content.length === 0) {
-    throw new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
-  }
+  if (content.length === 0) throw new InvalidShapeError('empty_content');
+  if (inlineReasoningStripped > 0)
+    // Counted, never the text (it may quote the user).
+    logger.warn(
+      { model: metadata.model, blocks: inlineReasoningStripped },
+      'llm: inline reasoning stripped',
+    );
 
   const inputTokens = readTokenCount(rawResponse.usage, 'input_tokens');
   const outputTokens = readTokenCount(rawResponse.usage, 'output_tokens');
@@ -467,14 +569,34 @@ function normalizeProviderError(
   if (error instanceof QwenTransportError) {
     switch (error.code) {
       case 'REQUEST_ABORTED':
-        return new MessagesAdapterError('REQUEST_ABORTED', 'Message provider request was aborted');
+        return new MessagesAdapterError(
+          'REQUEST_ABORTED',
+          'Message provider request was aborted',
+          error.status,
+          error.diagnostics,
+        );
       case 'REQUEST_TIMEOUT':
-        return new MessagesAdapterError('REQUEST_TIMEOUT', 'Message provider request timed out');
+        return new MessagesAdapterError(
+          'REQUEST_TIMEOUT',
+          '模型服务请求超时，请稍后重试。',
+          error.status,
+          error.diagnostics,
+        );
       case 'INVALID_RESPONSE':
-        return new MessagesAdapterError('INVALID_RESPONSE', 'Message provider response is invalid');
+        return new MessagesAdapterError(
+          'INVALID_RESPONSE',
+          'Message provider response is invalid',
+          error.status,
+          error.diagnostics,
+        );
       case 'INVALID_ROUTE':
       case 'PROVIDER_ERROR':
-        return new MessagesAdapterError('PROVIDER_ERROR', 'Message provider request failed');
+        return new MessagesAdapterError(
+          'PROVIDER_ERROR',
+          modelProviderFailureMessage(error.status),
+          error.status,
+          error.diagnostics,
+        );
     }
   }
   if (options?.signal?.aborted || name === 'AbortError' || name === 'APIUserAbortError') {

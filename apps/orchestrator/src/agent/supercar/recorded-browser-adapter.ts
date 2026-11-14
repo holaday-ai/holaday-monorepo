@@ -3,6 +3,7 @@ import {
   MessagesAdapterError,
   type NeutralMessagesResponse,
 } from '../../llm/messages-adapter.js';
+import { safeProviderDiagnostics } from '../../llm/provider-error-diagnostics.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 
 /** Record at the actual adapter boundary, even when the loop discards a stale response. */
@@ -13,6 +14,7 @@ export function recordedBrowserAdapter(
     userExternalId?: string;
     taskId: string;
     iteration: number;
+    role?: import('../../llm/browser-brain.js').BrowserBrainRole;
     onRecordError: () => void;
   },
 ): MessagesAdapter {
@@ -27,6 +29,20 @@ export function recordedBrowserAdapter(
   };
   return {
     metadata: adapter.metadata,
+    ...(adapter.browserBrain
+      ? {
+          browserBrain: {
+            planning: recordedBrowserAdapter(adapter.browserBrain.planning, {
+              ...context,
+              role: 'planning',
+            }),
+            verification: recordedBrowserAdapter(adapter.browserBrain.verification, {
+              ...context,
+              role: 'verification',
+            }),
+          },
+        }
+      : {}),
     async create(request, options) {
       const start = Date.now();
       const base = {
@@ -35,8 +51,20 @@ export function recordedBrowserAdapter(
         provider: adapter.metadata.provider,
         model: adapter.metadata.model,
         region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
-        purpose: 'supercar.turn' as const,
-        requestMeta: { iteration: context.iteration, protocol: 'messages', lane: 'browser' },
+        purpose:
+          context.role === 'planning'
+            ? ('browser.planning' as const)
+            : context.role === 'verification'
+              ? ('browser.verification' as const)
+              : ('supercar.turn' as const),
+        requestMeta: {
+          iteration: context.iteration,
+          protocol: 'messages',
+          lane: 'browser',
+          role: context.role ?? 'execution',
+          // LLM-RETRY-1: every attempt is its own llm_calls row.
+          ...(options?.attempt ? { attempt: options.attempt } : {}),
+        },
       };
       let result: NeutralMessagesResponse;
       try {
@@ -52,6 +80,17 @@ export function recordedBrowserAdapter(
           status: 'error',
           // No provider bodies, credentials, prompts or URLs in the accounting record.
           errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+          ...(error instanceof MessagesAdapterError
+            ? {
+                providerRequestId: error.diagnostics.requestId ?? undefined,
+                requestMeta: {
+                  ...base.requestMeta,
+                  providerError: safeProviderDiagnostics(error.diagnostics),
+                  // FIX-47: which check failed and what came back (masked, ≤ 4 KB).
+                  ...(error.forensics ? { invalidResponse: error.forensics } : {}),
+                },
+              }
+            : {}),
         });
         throw error;
       }

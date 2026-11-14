@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  _getAllSiteConfigsForTest,
-  matchSiteConfig,
-} from './registry.js';
+import { _getAllSiteConfigsForTest, matchSiteConfig } from './registry.js';
 
 describe('matchSiteConfig — domain matching', () => {
   it('exact host match', () => {
@@ -97,9 +94,7 @@ describe('SiteConfig registry — shape', () => {
         const lower = d.toLowerCase();
         const prev = seen.get(lower);
         if (prev) {
-          throw new Error(
-            `domain "${lower}" appears in both "${prev}" and "${c.siteId}"`,
-          );
+          throw new Error(`domain "${lower}" appears in both "${prev}" and "${c.siteId}"`);
         }
         seen.set(lower, c.siteId);
       }

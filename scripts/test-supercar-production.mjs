@@ -16,10 +16,7 @@
  * Set HOLADAY_SMOKE_TASK_IDS=T01,T05 to run a focused subset.
  */
 
-import {
-  classifySmokePollStatus,
-  selectSmokeTasks,
-} from './supercar-smoke-state.mjs';
+import { classifySmokePollStatus, selectSmokeTasks } from './supercar-smoke-state.mjs';
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -37,13 +34,30 @@ const TASK_TIMEOUT_MS = 10 * 60 * 1_000; // 10 min per task
 const GAP_MS = 5_000; // between tasks
 
 const TASKS = [
-  { id: 'T01', intent: '做一份贵州茅台 vs 五粮液的对比分析，包括最新股价、PE、市值、近一年涨幅，给出投资建议' },
+  {
+    id: 'T01',
+    intent: '做一份贵州茅台 vs 五粮液的对比分析，包括最新股价、PE、市值、近一年涨幅，给出投资建议',
+  },
   { id: 'T02', intent: '查看今天 A 股半导体板块涨跌情况，列出涨幅前5和跌幅前5的个股' },
   { id: 'T03', intent: '分析比亚迪最近一个季度的财报，重点看营收、净利润、毛利率的同比变化' },
-  { id: 'T04', intent: '帮我写一封邮件给团队，通知本周五下午3点在会议室A开产品评审会，要求每个人准备15分钟的进展汇报' },
-  { id: 'T05', intent: '帮我调研一下目前市面上主流的 AI Agent 产品，包括 Manus、Claude、Codex、Devin，做一份竞品分析报告' },
-  { id: 'T06', intent: "帮我看看抖音上最近关于'AI 办公'话题的热门视频，列出前10个的标题、作者、点赞数" },
-  { id: 'T07', intent: "帮我写一篇小红书推荐帖，主题是'上海周末好去处推荐'，要有吸引人的标题、正文和标签" },
+  {
+    id: 'T04',
+    intent:
+      '帮我写一封邮件给团队，通知本周五下午3点在会议室A开产品评审会，要求每个人准备15分钟的进展汇报',
+  },
+  {
+    id: 'T05',
+    intent:
+      '帮我调研一下目前市面上主流的 AI Agent 产品，包括 Manus、Claude、Codex、Devin，做一份竞品分析报告',
+  },
+  {
+    id: 'T06',
+    intent: "帮我看看抖音上最近关于'AI 办公'话题的热门视频，列出前10个的标题、作者、点赞数",
+  },
+  {
+    id: 'T07',
+    intent: "帮我写一篇小红书推荐帖，主题是'上海周末好去处推荐'，要有吸引人的标题、正文和标签",
+  },
   { id: 'T08', intent: "帮我找到抖音上最近一条关于'半导体'的热门视频，把它的文案内容完整抓下来" },
   { id: 'T09', intent: '帮我比较京东和淘宝上 AirPods Pro 2 的价格，哪个更便宜，有没有优惠券' },
   { id: 'T10', intent: "在小红书上搜索'三亚旅游攻略'，帮我整理点赞最多的前5篇帖子的核心内容" },
@@ -51,9 +65,19 @@ const TASKS = [
   { id: 'T12', intent: '帮我查一下劳动合同法第四十七条关于经济补偿的具体内容，以及计算方式举例' },
   { id: 'T13', intent: '在 Boss 直聘上搜索上海的 AI 产品经理岗位，月薪 30k-50k，列出前10个' },
   { id: 'T14', intent: '帮我搜索一下猎聘上深圳的前端开发岗位，3年以上经验，看看薪资范围' },
-  { id: 'T15', intent: '帮我找到 Resend 的 API 文档页面，整理出发送邮件的 API 接口信息（endpoint、参数、认证方式）' },
-  { id: 'T16', intent: '用 Google 搜索 Playwright MCP Server 的最新文档，整理出它支持的所有工具列表' },
-  { id: 'T17', intent: '帮我在携程上搜索下周末上海的五星级酒店，价格在800-1500之间，按评分排序列出前5' },
+  {
+    id: 'T15',
+    intent:
+      '帮我找到 Resend 的 API 文档页面，整理出发送邮件的 API 接口信息（endpoint、参数、认证方式）',
+  },
+  {
+    id: 'T16',
+    intent: '用 Google 搜索 Playwright MCP Server 的最新文档，整理出它支持的所有工具列表',
+  },
+  {
+    id: 'T17',
+    intent: '帮我在携程上搜索下周末上海的五星级酒店，价格在800-1500之间，按评分排序列出前5',
+  },
   { id: 'T18', intent: '帮我用 Google 搜索最近一周全球 AI 领域的重大新闻，整理成一份中文简报' },
   { id: 'T19', intent: '帮我查看雪球上贵州茅台的最新讨论，整理出机构和大V们的主要观点' },
   { id: 'T20', intent: '帮我订今天从上海到北京的高铁票，二等座，下午出发' },
@@ -132,7 +156,7 @@ async function runOne(token, task, index, total) {
       summaryPreview: '',
       error: String(err?.message ?? err),
     };
-    fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
+    fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
     return row;
   }
   log(`       -> ${taskId}, polling`);
@@ -146,7 +170,7 @@ async function runOne(token, task, index, total) {
     } catch (err) {
       pollErrors += 1;
       if (pollErrors > 10) {
-        log(`       !! too many poll errors, abandoning poll`);
+        log('       !! too many poll errors, abandoning poll');
         break;
       }
       continue;
@@ -156,11 +180,7 @@ async function runOne(token, task, index, total) {
     }
   }
   const duration = Date.now() - started;
-  const summary =
-    detail?.result?.summary ??
-    detail?.result?.reason ??
-    detail?.errorMessage ??
-    '';
+  const summary = detail?.result?.summary ?? detail?.result?.reason ?? detail?.errorMessage ?? '';
   const toolsSet = new Set();
   const steps = detail?.steps ?? [];
   for (const s of steps) {
@@ -179,21 +199,19 @@ async function runOne(token, task, index, total) {
     summaryPreview: summary.slice(0, 200),
     errorCode: detail?.errorCode ?? null,
   };
-  fs.appendFileSync(JSONL_PATH, JSON.stringify(row) + '\n');
-  log(
-    `       done status=${row.status} iter=${row.iterations} ${Math.round(duration / 1000)}s`,
-  );
+  fs.appendFileSync(JSONL_PATH, `${JSON.stringify(row)}\n`);
+  log(`       done status=${row.status} iter=${row.iterations} ${Math.round(duration / 1000)}s`);
   return row;
 }
 
 function summaryPreview50(s) {
   const clean = (s ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > 50 ? clean.slice(0, 50) + '…' : clean;
+  return clean.length > 50 ? `${clean.slice(0, 50)}…` : clean;
 }
 
 function truncForTable(s, n) {
   const clean = (s ?? '').replace(/\s+/g, ' ').trim();
-  return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
+  return clean.length > n ? `${clean.slice(0, n - 1)}…` : clean;
 }
 
 function renderReport(rows) {
@@ -216,14 +234,12 @@ function renderReport(rows) {
   const completed = rows.filter((r) => r.status === 'completed');
   const failed = rows.filter((r) => r.status === 'failed');
   const timedOut = rows.filter((r) => r.status === 'timeout');
-  const other = rows.filter(
-    (r) =>
-      !['completed', 'failed', 'timeout'].includes(r.status),
-  );
+  const other = rows.filter((r) => !['completed', 'failed', 'timeout'].includes(r.status));
   const avgIter = rows.reduce((a, r) => a + r.iterations, 0) / Math.max(1, rows.length);
   const avgDur = rows.reduce((a, r) => a + r.durationMs, 0) / Math.max(1, rows.length);
   const toolCount = new Map();
-  for (const r of rows) for (const t of r.toolsUsed || []) toolCount.set(t, (toolCount.get(t) ?? 0) + 1);
+  for (const r of rows)
+    for (const t of r.toolsUsed || []) toolCount.set(t, (toolCount.get(t) ?? 0) + 1);
   const topTools = [...toolCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   lines.push('## Stats');
@@ -231,14 +247,19 @@ function renderReport(rows) {
   lines.push(`- Completed: ${completed.length}/${rows.length}`);
   lines.push(`- Failed:    ${failed.length}/${rows.length}`);
   lines.push(`- Timeouts:  ${timedOut.length}/${rows.length}`);
-  if (other.length) lines.push(`- Other:     ${other.length}/${rows.length} (${other.map((r) => r.status).join(', ')})`);
+  if (other.length)
+    lines.push(
+      `- Other:     ${other.length}/${rows.length} (${other.map((r) => r.status).join(', ')})`,
+    );
   lines.push(`- Avg iterations: ${avgIter.toFixed(1)}`);
   lines.push(`- Avg duration:   ${(avgDur / 1000).toFixed(1)}s`);
   lines.push(`- Top tools:      ${topTools.map(([t, n]) => `${t}×${n}`).join(', ')}`);
   lines.push('');
   lines.push('## Failures (errorCode)');
   for (const r of rows.filter((x) => x.status !== 'completed')) {
-    lines.push(`- **${r.id}** (${r.status}) \`${r.errorCode ?? ''}\` — ${truncForTable(r.summaryPreview || r.error || '', 120)}`);
+    lines.push(
+      `- **${r.id}** (${r.status}) \`${r.errorCode ?? ''}\` — ${truncForTable(r.summaryPreview || r.error || '', 120)}`,
+    );
   }
   return lines.join('\n');
 }
@@ -260,7 +281,7 @@ function renderReport(rows) {
   }
   const md = renderReport(rows);
   fs.writeFileSync(MD_PATH, md);
-  console.log('\n' + md);
+  console.log(`\n${md}`);
   log(`Report saved to ${MD_PATH}`);
 })().catch((err) => {
   console.error('FATAL', err);

@@ -8,10 +8,9 @@ import {
 describe('DivineAPI response contract', () => {
   it('rejects an HTTP-200 business denial as not authorized', () => {
     expect(() =>
-      assertDivineApiSuccess(
-        { success: 2, msg: 'You are not authorized to access this API' },
-        [['data']],
-      ),
+      assertDivineApiSuccess({ success: 2, msg: 'You are not authorized to access this API' }, [
+        ['data'],
+      ]),
     ).toThrowError(new DivineApiContractError('not-authorized'));
   });
 
@@ -23,10 +22,7 @@ describe('DivineAPI response contract', () => {
 
   it('returns data from a complete success envelope', () => {
     expect(
-      assertDivineApiSuccess(
-        { success: 1, data: { sign: 'Aries' } },
-        [['data', 'sign']],
-      ),
+      assertDivineApiSuccess({ success: 1, data: { sign: 'Aries' } }, [['data', 'sign']]),
     ).toEqual({ sign: 'Aries' });
   });
 

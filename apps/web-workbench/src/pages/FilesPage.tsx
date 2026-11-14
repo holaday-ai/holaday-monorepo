@@ -1,56 +1,35 @@
-import {
-  AlertCircle,
-  Check,
-  Download,
-  Copy,
-  Eye,
-  File as FileIcon,
-  FileSpreadsheet,
-  FileText,
-  Film,
-  Image as ImageIcon,
-  Loader2,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Scissors,
-  Trash2,
-} from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import {
-  FilePreviewModal,
-  type FilePreviewPayload,
-} from '@/components/FilePreviewModal';
+import { FilePreviewModal, type FilePreviewPayload } from '@/components/FilePreviewModal';
+import { FileThumbnail } from '@/components/FileThumbnail';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { copyTextToClipboard } from '@/lib/copy-text';
 import { useToast } from '@/components/ui/toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  type VideoEditingEntryArtifact,
+  canCombineVideoRows,
+  canContinueEditing,
+  createVideoEditingProject,
+} from '@/features/video-editing/video-edit-entry';
+import { copyTextToClipboard } from '@/lib/copy-text';
 import {
   downloadFailureMessage,
   downloadFileAuthed,
+  isUnavailableFileStatus,
 } from '@/lib/download-file';
 import { formatFileSize } from '@/lib/file-size';
+import { type FileFilter, filesEmptyCopy } from '@/lib/files-empty-copy';
 import {
+  type NormalizedFileRow,
   canApplyFilesResponse,
   fileReferenceText,
-  formatFileRelativeDate,
   normalizeFilesListPage,
-  type NormalizedFileRow,
 } from '@/lib/files-page-state';
-import { filesEmptyCopy, type FileFilter } from '@/lib/files-empty-copy';
 import { pageActionError } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import {
@@ -60,14 +39,28 @@ import {
   useUnavailableFiles,
 } from '@/lib/unavailable-file-registry';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { useUrlState } from '@/lib/use-url-state';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel } from '@/pages/PageShell';
 import {
-  canCombineVideoRows,
-  canContinueEditing,
-  createVideoEditingProject,
-  type VideoEditingEntryArtifact,
-} from '@/features/video-editing/video-edit-entry';
+  AlertCircle,
+  Check,
+  ChevronDown,
+  Copy,
+  Download,
+  Eye,
+  File as FileIcon,
+  LayoutGrid,
+  List,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  Scissors,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 type UiFile = NormalizedFileRow;
 
@@ -89,17 +82,22 @@ export function FilesPage(): JSX.Element {
   const navigate = useNavigate();
   const mountedRef = React.useRef(false);
   const requestIdRef = React.useRef(0);
-  const [filter, setFilter] = React.useState<Filter>('all');
-  const [q, setQ] = React.useState('');
+  const [filter, setFilter] = useUrlState<Filter>('type', 'all', [
+    'all',
+    'images',
+    'videos',
+    'documents',
+  ]);
+  const [q, setQ] = useUrlState<string>('q', '');
+  const [view, setView] = useUrlState<'grid' | 'list'>('view', 'grid', ['grid', 'list']);
+  const [sort, setSort] = useUrlState<'recent' | 'name'>('sort', 'recent', ['recent', 'name']);
   const [files, setFiles] = React.useState<UiFile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [nextCursor, setNextCursor] = React.useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = React.useState<UiFile | null>(null);
-  const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(
-    null,
-  );
+  const [previewing, setPreviewing] = React.useState<FilePreviewPayload | null>(null);
   const [videoEditingEnabled, setVideoEditingEnabled] = React.useState(false);
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedVideoFileIds, setSelectedVideoFileIds] = React.useState<string[]>([]);
@@ -113,12 +111,17 @@ export function FilesPage(): JSX.Element {
     setLoadingMore(false);
     setLoadError(null);
     try {
-      const page = normalizeFilesListPage(await trpc.files.list.query({
-        type: filter,
-        q: debouncedQuery || undefined,
-        limit: 50,
-      }));
+      const page = normalizeFilesListPage(
+        await trpc.files.list.query({
+          type: filter,
+          q: debouncedQuery || undefined,
+          limit: 50,
+        }),
+      );
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      page.items.forEach((file) => {
+        if (file.availability === 'unavailable') markFileUnavailable(file.fileId);
+      });
       setFiles(page.items);
       setNextCursor(page.nextCursor);
     } catch (err) {
@@ -137,36 +140,32 @@ export function FilesPage(): JSX.Element {
     setLoadingMore(true);
     setLoadError(null);
     try {
-      const page = normalizeFilesListPage(await trpc.files.list.query({
-        type: filter,
-        q: debouncedQuery || undefined,
-        cursor: nextCursor,
-        limit: 50,
-      }));
-      if (
-        !mountedRef.current ||
-        !canApplyFilesResponse(requestId, requestIdRef.current)
-      ) {
+      const page = normalizeFilesListPage(
+        await trpc.files.list.query({
+          type: filter,
+          q: debouncedQuery || undefined,
+          cursor: nextCursor,
+          limit: 50,
+        }),
+      );
+      if (!mountedRef.current || !canApplyFilesResponse(requestId, requestIdRef.current)) {
         return;
       }
+      page.items.forEach((file) => {
+        if (file.availability === 'unavailable') markFileUnavailable(file.fileId);
+      });
       setFiles((current) => {
         const seen = new Set(current.map((file) => file.fileId));
         return [...current, ...page.items.filter((file) => !seen.has(file.fileId))];
       });
       setNextCursor(page.nextCursor);
     } catch (err) {
-      if (
-        !mountedRef.current ||
-        !canApplyFilesResponse(requestId, requestIdRef.current)
-      ) {
+      if (!mountedRef.current || !canApplyFilesResponse(requestId, requestIdRef.current)) {
         return;
       }
       setLoadError(pageActionError('更多文件暂时无法加载', err));
     } finally {
-      if (
-        mountedRef.current &&
-        canApplyFilesResponse(requestId, requestIdRef.current)
-      ) {
+      if (mountedRef.current && canApplyFilesResponse(requestId, requestIdRef.current)) {
         setLoadingMore(false);
       }
     }
@@ -233,7 +232,8 @@ export function FilesPage(): JSX.Element {
     if (!mountedRef.current) return;
     if (!res.ok) {
       markFileUnavailableFromStatus(reference, res.status);
-      toast.show(downloadFailureMessage(res.status), 'error');
+      if (!isUnavailableFileStatus(res.status))
+        toast.show(downloadFailureMessage(res.status), 'error');
     }
   }
 
@@ -304,11 +304,11 @@ export function FilesPage(): JSX.Element {
     ? '文件加载中…'
     : loadError && files.length === 0
       ? '文件暂时无法加载'
-    : files.length > 0
-      ? `已加载 ${files.length} 个文件`
-      : q.trim()
-        ? '没有匹配文件'
-        : '文件库为空';
+      : files.length > 0
+        ? `已加载 ${files.length} 个文件`
+        : q.trim()
+          ? '没有匹配文件'
+          : '文件库为空';
 
   // 复制下载链接 is intentionally gone: the orchestrator's
   // /api/files/:id/download endpoint requires an Authorization
@@ -329,20 +329,39 @@ export function FilesPage(): JSX.Element {
     }
   }
 
+  const visibleFiles = React.useMemo(
+    () =>
+      sort === 'name'
+        ? [...files].sort((a, b) =>
+            a.filename.localeCompare(b.filename, 'zh-CN', { numeric: true }),
+          )
+        : files,
+    [files, sort],
+  );
   return (
     <TooltipProvider delayDuration={120}>
-      <PageContainer width="wide">
+      <PageContainer width="workspace" className="hd-files-page">
+        <span className="hd-page-eyebrow">YOUR CREATIVE LIBRARY</span>
         <PageHeader
           title="文件库"
-          description="管理你上传的文件和资料"
+          description="每一份资料，都可以成为下一个想法的起点。"
           action={
-            <div className="inline-flex items-center rounded-full border border-[#DCDDDD] bg-white px-3 py-1 text-[12px] font-medium text-[#595757] shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-              {summary}
-            </div>
+            <label className="hd-library-search">
+              <Search aria-hidden className="h-4 w-4" />
+              <input
+                aria-label="搜索文件名"
+                value={q}
+                onChange={(event) => setQ(event.target.value)}
+                placeholder="搜索文件名称"
+              />
+            </label>
           }
         />
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
+        <span className="sr-only" role="status">
+          {summary}
+        </span>
+        <div className="hd-files-toolbar mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="hd-file-tabs inline-flex w-fit items-center gap-0.5 rounded-[8px] border border-[#DCDDDD] bg-[#EFEFEF]/55 p-0.5">
             <FilterTab label="全部" active={filter === 'all'} onClick={() => setFilter('all')} />
             <FilterTab
               label="图片"
@@ -355,12 +374,58 @@ export function FilesPage(): JSX.Element {
               onClick={() => setFilter('videos')}
             />
             <FilterTab
-              label="文件"
+              label="文档"
               active={filter === 'documents'}
               onClick={() => setFilter('documents')}
             />
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="hd-sort-trigger"
+                  aria-label="文件排序"
+                  title="文件排序"
+                >
+                  {sort === 'recent' ? '最近添加' : '名称顺序'}
+                  <ChevronDown aria-hidden className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="rounded-xl p-1.5">
+                <DropdownMenuItem onSelect={() => setSort('recent')}>
+                  最近添加{sort === 'recent' && <Check className="ml-auto h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setSort('name')}>
+                  名称顺序{sort === 'name' && <Check className="ml-auto h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+                {nextCursor !== null && (
+                  <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                    排序应用于已加载的文件
+                  </p>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="hd-file-views" role="group" aria-label="文件视图">
+              <button
+                type="button"
+                aria-label="网格视图"
+                title="网格视图"
+                aria-pressed={view === 'grid'}
+                onClick={() => setView('grid')}
+              >
+                <LayoutGrid aria-hidden />
+              </button>
+              <button
+                type="button"
+                aria-label="列表视图"
+                title="列表视图"
+                aria-pressed={view === 'list'}
+                onClick={() => setView('list')}
+              >
+                <List aria-hidden />
+              </button>
+            </div>
             {videoEditingEnabled && filter === 'videos' ? (
               <Button
                 type="button"
@@ -376,15 +441,6 @@ export function FilesPage(): JSX.Element {
                 {selectionMode ? '退出拼接' : '选择视频拼接'}
               </Button>
             ) : null}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="搜索文件名…"
-                className="w-full rounded-[8px] border border-[#DCDDDD] bg-white py-1.5 pl-8 pr-3 text-sm shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#ADADAD] focus-visible:outline-none sm:w-64"
-              />
-            </div>
           </div>
         </div>
 
@@ -420,7 +476,7 @@ export function FilesPage(): JSX.Element {
           <PageLoadingPanel label="文件加载中" description="正在整理文件库" />
         ) : loadError && files.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
             <div className="text-sm font-medium text-foreground/80">文件暂时无法加载</div>
             <div className="max-w-md text-xs leading-5 text-muted-foreground">{loadError}</div>
             <Button type="button" size="sm" onClick={() => void refresh()}>
@@ -430,49 +486,47 @@ export function FilesPage(): JSX.Element {
         ) : files.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
             <FileIcon className="h-8 w-8 text-muted-foreground/40" />
-            <div className="text-sm font-medium text-foreground/80">
-              {emptyCopy.title}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {emptyCopy.body}
-            </div>
+            <div className="text-sm font-medium text-foreground/80">{emptyCopy.title}</div>
+            <div className="text-xs text-muted-foreground">{emptyCopy.body}</div>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-[8px] border border-[#DCDDDD] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-            <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-3 border-b border-[#EFEFEF] bg-white px-4 py-2 text-[11px] font-medium tracking-wider text-[#595757] sm:grid">
-              <div>名称</div>
-              <div>已修改</div>
-              <div>大小</div>
-              <div />
-            </div>
-            <div className="divide-y divide-[#EFEFEF]">
-              {files.map((f) => (
-                <FileRow
-                  key={f.fileId}
-                  file={f}
-                  unavailable={isFileUnavailable(
-                    { fileId: f.fileId, url: downloadUrl(f.fileId) },
-                    unavailableFiles,
-                  )}
-                  onPreview={() => onPreview(f)}
-                  onUseInNewTask={() => onUseInNewTask(f)}
-                  canContinueEditing={canContinueEditing({
-                    capabilityEnabled: videoEditingEnabled,
-                    artifact: editingArtifact(f),
-                  })}
-                  editing={editingFileId === f.fileId}
-                  selectionMode={selectionMode}
-                  selected={selectedVideoFileIds.includes(f.fileId)}
-                  onContinueEditing={() => void openEditingProject([f.fileId])}
-                  onToggleSelection={() => toggleVideoSelection(f.fileId)}
-                  onDownload={() => void onDownload(f)}
-                  onCopyReference={() => void onCopyReference(f)}
-                  onDelete={() => setPendingDelete(f)}
-                />
-              ))}
-            </div>
+          <div className="hd-file-collection" data-view={view}>
+            {groupFileDates(visibleFiles, sort).map((group) => (
+              <section className="hd-file-date-group" key={group.label}>
+                <h2>
+                  {group.label}
+                  <span>{group.date}</span>
+                </h2>
+                <div className="hd-file-rows">
+                  {group.files.map((f) => (
+                    <FileRow
+                      key={f.fileId}
+                      file={f}
+                      unavailable={isFileUnavailable(
+                        { fileId: f.fileId, url: downloadUrl(f.fileId) },
+                        unavailableFiles,
+                      )}
+                      onPreview={() => onPreview(f)}
+                      onUseInNewTask={() => onUseInNewTask(f)}
+                      canContinueEditing={canContinueEditing({
+                        capabilityEnabled: videoEditingEnabled,
+                        artifact: editingArtifact(f),
+                      })}
+                      editing={editingFileId === f.fileId}
+                      selectionMode={selectionMode}
+                      selected={selectedVideoFileIds.includes(f.fileId)}
+                      onContinueEditing={() => void openEditingProject([f.fileId])}
+                      onToggleSelection={() => toggleVideoSelection(f.fileId)}
+                      onDownload={() => void onDownload(f)}
+                      onCopyReference={() => void onCopyReference(f)}
+                      onDelete={() => setPendingDelete(f)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
             {loadError ? (
-              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#EA1F59]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 border-t border-[#EFEFEF] bg-[#FF0061]/[0.03] px-4 py-3 text-xs text-[#595757] sm:flex-row sm:items-center sm:justify-between">
                 <span>{loadError}</span>
                 <Button type="button" variant="outline" size="sm" onClick={() => void loadMore()}>
                   重试
@@ -502,9 +556,20 @@ export function FilesPage(): JSX.Element {
         )}
         <FilePreviewModal
           payload={previewing}
+          approved
+          createdAt={files.find((file) => file.fileId === previewing?.fileId)?.createdAt}
+          onUse={
+            previewing
+              ? () => {
+                  const file = files.find((item) => item.fileId === previewing.fileId);
+                  if (file) onUseInNewTask(file);
+                }
+              : undefined
+          }
           onClose={() => setPreviewing(null)}
         />
         <ConfirmDialog
+          overlayClassName="hd-approved-confirm"
           open={pendingDelete !== null}
           title="删除这个文件？"
           description={
@@ -540,6 +605,7 @@ function FilterTab({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         'h-8 rounded-md px-3 text-xs font-medium transition-[background-color,box-shadow,color]',
         active
@@ -581,11 +647,10 @@ function FileRow({
   onCopyReference: () => void;
   onDelete: () => void;
 }): JSX.Element {
-  const Icon = iconForMime(file.mimetype);
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
+        'hd-file-row flex flex-col gap-1.5 px-4 py-2.5 transition-colors sm:grid sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-3',
         unavailable ? 'bg-[#EFEFEF]/35' : 'hover:bg-[#EFEFEF]/35',
       )}
     >
@@ -594,42 +659,37 @@ function FileRow({
         type="button"
         onClick={onPreview}
         disabled={unavailable}
-        title={unavailable ? `${file.filename} 已失效` : `预览 ${file.filename}`}
+        title={unavailable ? `${file.filename} 文件已不可用` : `预览 ${file.filename}`}
         className="group flex min-w-0 items-center gap-2.5 text-left disabled:cursor-not-allowed"
       >
-        <span
-          className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white transition-colors',
-            unavailable
-              ? 'text-[#ADADAD]'
-              : 'text-[#595757] group-hover:border-[#ADADAD]',
-          )}
-        >
-          <Icon className="h-4 w-4" aria-hidden />
-        </span>
+        <FileThumbnail
+          fileId={file.fileId}
+          filename={file.filename}
+          mime={file.mimetype}
+          sizeBytes={file.sizeBytes}
+          unavailable={unavailable}
+        />
         <span className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
               'min-w-0 truncate text-sm font-medium',
-              unavailable
-                ? 'text-[#8B93A6]'
-                : 'text-foreground group-hover:text-[#EA1F59]',
+              unavailable ? 'text-[#8B93A6]' : 'text-foreground group-hover:text-[#FF0061]',
             )}
           >
             {file.filename}
           </span>
           {unavailable ? (
             <span className="shrink-0 rounded-full bg-[#EFEFEF] px-2 py-0.5 text-[10px] font-medium text-[#8B93A6]">
-              已失效
+              文件已不可用
             </span>
           ) : null}
         </span>
       </button>
       {/* Size + time always rendered. Mobile shows them inline beneath
           the filename; sm+ snaps them into the grid columns. */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground sm:contents">
+      <div className="hd-file-meta flex items-center gap-3 text-xs text-muted-foreground sm:contents">
         <span className="whitespace-nowrap sm:text-xs">
-          {formatFileRelativeDate(file.createdAt)}
+          {file.filename.split('.').pop()?.toUpperCase() || 'FILE'}
         </span>
         <span className="whitespace-nowrap sm:text-xs">{formatFileSize(file.sizeBytes)}</span>
       </div>
@@ -647,8 +707,8 @@ function FileRow({
               className={cn(
                 'inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors',
                 selected
-                  ? 'border-[#EA1F59] bg-[#EA1F59] text-white'
-                  : 'border-[#DCDDDD] bg-white text-[#8B8390] hover:border-[#EA1F59]/40 hover:text-[#EA1F59]',
+                  ? 'border-[#FF0061] bg-[#FF0061] text-white'
+                  : 'border-[#DCDDDD] bg-white text-[#8B8390] hover:border-[#FF0061]/40 hover:text-[#FF0061]',
               )}
             >
               <Check className="h-3.5 w-3.5" aria-hidden />
@@ -663,7 +723,7 @@ function FileRow({
               disabled={editing}
               aria-label={`继续剪辑 ${file.filename}`}
               title={`继续剪辑 ${file.filename}`}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#7A6473] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#7A6473] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-wait disabled:opacity-60"
             >
               {editing ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -679,12 +739,8 @@ function FileRow({
             onClick={onUseInNewTask}
             disabled={unavailable}
             aria-label={`把 ${file.filename} 用于新任务`}
-            title={
-              unavailable
-                ? `${file.filename} 已失效`
-                : `把 ${file.filename} 用于新任务`
-            }
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#EA1F59]/35 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
+            title={unavailable ? `${file.filename} 文件已不可用` : `把 ${file.filename} 用于新任务`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#595757] transition-colors hover:border-[#FF0061]/35 hover:bg-[#FF0061]/5 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:text-[#ADADAD] disabled:hover:border-[#DCDDDD] disabled:hover:bg-white"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -707,17 +763,19 @@ function FileRow({
               <Eye className="text-muted-foreground" />
               <span>预览</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onDownload} disabled={unavailable}>
-              <Download className="text-muted-foreground" />
-              <span>下载</span>
-            </DropdownMenuItem>
+            {!unavailable && (
+              <DropdownMenuItem onSelect={onDownload}>
+                <Download className="text-muted-foreground" />
+                <span>下载</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={onCopyReference} disabled={unavailable}>
               <Copy className="text-muted-foreground" />
               <span>复制引用</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={onDelete}
-              className="text-[#EA1F59] focus:bg-[#EA1F59]/[0.06] focus:text-[#EA1F59]"
+              className="text-[#FF0061] focus:bg-[#FF0061]/[0.06] focus:text-[#FF0061]"
             >
               <Trash2 />
               <span>删除</span>
@@ -744,15 +802,38 @@ function IconTooltip({
   );
 }
 
-function iconForMime(mime: string): typeof FileIcon {
-  if (mime.startsWith('image/')) return ImageIcon;
-  if (mime.startsWith('video/')) return Film;
-  if (mime.includes('pdf')) return FileText;
-  if (mime.includes('sheet') || mime.includes('excel') || mime.includes('csv')) {
-    return FileSpreadsheet;
+/** Group real timestamps in the user's local calendar, never infer sample dates. */
+function groupFileDates(files: UiFile[], sort: 'recent' | 'name') {
+  const groups = new Map<string, { label: string; date: string; files: UiFile[] }>();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  const week = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - ((now.getDay() + 6) % 7),
+  ).getTime();
+  for (const file of files) {
+    const at = new Date(file.createdAt).getTime();
+    const label =
+      sort === 'name'
+        ? '全部文件'
+        : !Number.isFinite(at)
+          ? '日期未知'
+          : at >= start
+            ? '今天'
+            : at >= yesterday
+              ? '昨天'
+              : at >= week
+                ? '本周'
+                : '更早';
+    const date =
+      label === '今天' || label === '昨天'
+        ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase()
+        : '';
+    const group = groups.get(label) ?? { label, date, files: [] };
+    group.files.push(file);
+    groups.set(label, group);
   }
-  if (mime.includes('text') || mime.includes('word') || mime.includes('document')) {
-    return FileText;
-  }
-  return FileIcon;
+  return [...groups.values()];
 }

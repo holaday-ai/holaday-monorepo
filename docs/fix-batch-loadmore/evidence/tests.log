@@ -1,0 +1,14 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/fix-batch-disabled-row/holaday-monorepo/apps/web-workbench
+
+ ✓ src/components/TaskListItem.test.ts (18 tests) 4ms
+ ✓ src/components/TaskListItem.native-button.test.ts (1 test) 7ms
+ ✓ src/lib/toast-state.test.ts (4 tests) 2ms
+ ✓ src/lib/sidebar-batch-selection.test.ts (2 tests) 1ms
+ ✓ src/components/TaskListItem.batch.test.tsx (6 tests) 32ms
+
+ Test Files  5 passed (5)
+      Tests  31 passed (31)
+   Start at  04:36:45
+   Duration  1.88s (transform 166ms, setup 0ms, collect 503ms, tests 46ms, environment 226ms, prepare 211ms)
+

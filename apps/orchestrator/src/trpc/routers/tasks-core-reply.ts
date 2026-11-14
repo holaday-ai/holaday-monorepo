@@ -13,6 +13,7 @@ import { parseFileForPrompt } from '../../files/parsers.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
+import { withTaskCostContext } from './media-task-background.js';
 import { publishCoreSettledSuggestions } from './tasks-core-suggestions.js';
 
 /** Receives exactly the already owner/origin-authorized row read by tasks.reply. */
@@ -95,7 +96,8 @@ export async function handleCoreTaskReply(args: {
   ) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
-      message: '此旧方案尚不支持恢复浏览器执行。可新建浏览器任务，或改用附件、粘贴数据继续分析；当前方案和要求未改变。',
+      message:
+        '此旧方案尚不支持恢复浏览器执行。可新建浏览器任务，或改用附件、粘贴数据继续分析；当前方案和要求未改变。',
     });
   }
   if (legacy) {
@@ -138,31 +140,34 @@ export async function handleCoreTaskReply(args: {
   const generation = resolve('generate');
   const semantic = resolve('verifier');
   const repo = new CoreTaskRepository(ctx.db);
-  const execution = await startCoreTaskExecution({
-    lifetime: ctx.executionLifetime,
-    scope: { taskId: input.taskId, userId: args.userId },
-    before: head,
-    ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
-    requirements,
-    blocks,
-    intakeIntent: prepared.intakeIntent,
-    actorExternalId: ctx.userId,
-    logger: ctx.logger,
-    repo,
-    responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
-    semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
-    publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
-    afterSettlement: (op) =>
-      publishCoreSettledSuggestions({
-        op,
-        requirements,
-        repo,
-        wiring: args.wiring,
-        actorExternalId: ctx.userId,
-        modelDataRegion: args.modelDataRegion,
-        rawIntent: input.message,
-      }),
-  });
+  const execution = await withTaskCostContext(ctx, input.taskId, () =>
+    startCoreTaskExecution({
+      lifetime: ctx.executionLifetime,
+      scope: { taskId: input.taskId, userId: args.userId },
+      before: head,
+      ...(legacy ? { legacySnapshot: legacy.legacySnapshot } : {}),
+      requirements,
+      blocks,
+      intakeIntent: prepared.intakeIntent,
+      actorExternalId: ctx.userId,
+      logger: ctx.logger,
+      repo,
+      responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      firecrawl: ctx.firecrawl ?? null,
+      semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
+      publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
+      afterSettlement: (op) =>
+        publishCoreSettledSuggestions({
+          op,
+          requirements,
+          repo,
+          wiring: args.wiring,
+          actorExternalId: ctx.userId,
+          modelDataRegion: args.modelDataRegion,
+          rawIntent: input.message,
+        }),
+    }),
+  );
   void execution.completion.catch(() => {});
   return {
     ok: execution.ack.state === 'resumed',
@@ -190,6 +195,15 @@ export function publishCoreExecutionEvent(userId: string, event: CoreExecutionEv
         event.type === 'verifying'
           ? '正在核验本轮结果'
           : '本轮结果保存未确认，请保留当前内容并刷新核对。',
+    });
+    return;
+  }
+  if (event.type === 'rerouted') {
+    broadcastToUser(userId, {
+      ...identity,
+      type: 'server.task.rerouted',
+      to: event.to,
+      message: event.reason,
     });
     return;
   }

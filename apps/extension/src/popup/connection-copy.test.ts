@@ -203,9 +203,9 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('client requested disconnect')).toBe('后台刚重载，正在恢复');
     expect(formatWsCloseReason('token swap')).toBe('登录态已切换，正在确认');
     expect(formatWsCloseReason('policy violation')).toBe('服务拒绝了当前连接');
-    expect(formatWsCloseReason('Error during WebSocket handshake: Unexpected response code: 502')).toBe(
-      '代理服务暂时不可用',
-    );
+    expect(
+      formatWsCloseReason('Error during WebSocket handshake: Unexpected response code: 502'),
+    ).toBe('代理服务暂时不可用');
     expect(formatWsCloseReason('ws route check failed')).toBe('代理服务暂时不可用');
     expect(formatWsCloseReason('net::ERR_CONNECTION_CLOSED')).toBe('网络连接被关闭');
     expect(formatWsCloseReason('net::ERR_CONNECTION_RESET')).toBe('网络连接已重置');
@@ -223,5 +223,13 @@ describe('formatWsCloseReason', () => {
     expect(formatWsCloseReason('Internal socket state machine failed at frame 42')).toBe(
       '连接异常，正在恢复',
     );
+  });
+});
+
+describe('retired cookie sync notice (FIX-PR252)', () => {
+  it('tells the user the site-grant import replaces automatic cookie sync', async () => {
+    const { SITE_LOGIN_NOTICE } = await import('./connection-copy.js');
+    expect(SITE_LOGIN_NOTICE.detail).toContain('已改为按站点授权导入（功能即将开放）');
+    expect(SITE_LOGIN_NOTICE.detail).toContain('连接 Chrome');
   });
 });

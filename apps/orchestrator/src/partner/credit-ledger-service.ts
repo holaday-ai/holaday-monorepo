@@ -1,9 +1,14 @@
 import { newExternalId } from '@holaday/shared-types';
 import { eq, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { holaCreditLedgerEntries, type HolaCreditLedgerEntry } from '../db/schema/partner.js';
+import { type HolaCreditLedgerEntry, holaCreditLedgerEntries } from '../db/schema/partner.js';
 
-export type CreditBucket = 'available' | 'locked' | 'withdrawable' | 'pending_withdrawal' | 'frozen';
+export type CreditBucket =
+  | 'available'
+  | 'locked'
+  | 'withdrawable'
+  | 'pending_withdrawal'
+  | 'frozen';
 export type LedgerDirection = 'credit' | 'debit';
 
 const CREDIT_BUCKET_VALUES: readonly CreditBucket[] = [
@@ -76,7 +81,11 @@ export function summarizeLedgerEntries(entries: readonly LedgerSummaryInput[]): 
   return summary;
 }
 
-function normalizeAmount(value: number | undefined, fieldName: string, maxValue = Number.MAX_SAFE_INTEGER): number {
+function normalizeAmount(
+  value: number | undefined,
+  fieldName: string,
+  maxValue = Number.MAX_SAFE_INTEGER,
+): number {
   const amount = value ?? 0;
   if (!Number.isSafeInteger(amount) || amount < 0 || amount > maxValue) {
     throw new RangeError(`${fieldName} must be a non-negative safe integer`);
@@ -150,7 +159,11 @@ function normalizePostEntryInput(input: {
     entryType: normalizeBoundedString(input.entryType, 'entryType', 48),
     direction: normalizeDirection(input.direction),
     bucket: normalizeBucket(input.bucket),
-    amountCreditCents: normalizeAmount(input.amountCreditCents, 'amountCreditCents', MYSQL_UNSIGNED_INT_MAX),
+    amountCreditCents: normalizeAmount(
+      input.amountCreditCents,
+      'amountCreditCents',
+      MYSQL_UNSIGNED_INT_MAX,
+    ),
     amountApiUnits: normalizeAmount(input.amountApiUnits, 'amountApiUnits'),
     status: 'posted',
     idempotencyKey: normalizeBoundedString(input.idempotencyKey, 'idempotencyKey', 160),

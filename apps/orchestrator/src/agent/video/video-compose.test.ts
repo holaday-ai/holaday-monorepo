@@ -10,8 +10,14 @@ function fc(args: string[]): string {
 
 describe('AI-generated metadata tag (深度合成 compliance)', () => {
   for (const [label, build] of [
-    ['buildComposeCommand', () => buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT })],
-    ['buildPetVideoCommand', () => buildPetVideoCommand({ clipPath: '/r2/pet.mp4', outputPath: OUT })],
+    [
+      'buildComposeCommand',
+      () => buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT }),
+    ],
+    [
+      'buildPetVideoCommand',
+      () => buildPetVideoCommand({ clipPath: '/r2/pet.mp4', outputPath: OUT }),
+    ],
   ] as const) {
     it(`${label} embeds a comment="AI 生成 …" metadata tag before the output path`, () => {
       const { args } = build();
@@ -51,14 +57,17 @@ describe('buildComposeCommand', () => {
     expect(graph).toContain('drawtext=text=');
     expect(graph).toContain('HOLA DAY');
     // encode settings
-    expect(cmd.args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p']));
+    expect(cmd.args).toEqual(
+      expect.arrayContaining(['-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p']),
+    );
     expect(cmd.args).toEqual(expect.arrayContaining(['-r', '30', '-movflags', '+faststart', '-y']));
     expect(cmd.args[cmd.args.length - 1]).toBe(OUT);
   });
 
   it('burns in subtitles when srtPath is given', () => {
     const graph = fc(
-      buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT, srtPath: '/r2/subs.srt' }).args,
+      buildComposeCommand({ segmentClipPaths: CLIPS, outputPath: OUT, srtPath: '/r2/subs.srt' })
+        .args,
     );
     expect(graph).toContain('subtitles=/r2/subs.srt');
   });
@@ -146,7 +155,9 @@ describe('buildComposeCommand', () => {
   });
 
   it('throws on no clips', () => {
-    expect(() => buildComposeCommand({ segmentClipPaths: [], outputPath: OUT })).toThrow(/no segment clips/);
+    expect(() => buildComposeCommand({ segmentClipPaths: [], outputPath: OUT })).toThrow(
+      /no segment clips/,
+    );
   });
 });
 
@@ -156,7 +167,12 @@ describe('buildPetVideoCommand — 宠物 i2v 单 clip (静默, Phase 2 第二�
   }
 
   it('pads single clip to 画幅 + 水印 + 静默音轨(anullsrc) + shortest, no concat/subtitles', () => {
-    const cmd = buildPetVideoCommand({ clipPath: '/r2/pet-raw.mp4', outputPath: OUT, width: 1080, height: 1920 });
+    const cmd = buildPetVideoCommand({
+      clipPath: '/r2/pet-raw.mp4',
+      outputPath: OUT,
+      width: 1080,
+      height: 1920,
+    });
     // the i2v clip is input 0; silent audio is the lavfi anullsrc input
     expect(cmd.args[cmd.args.indexOf('/r2/pet-raw.mp4') - 1]).toBe('-i');
     expect(cmd.args).toEqual(expect.arrayContaining(['-f', 'lavfi']));
@@ -170,7 +186,9 @@ describe('buildPetVideoCommand — 宠物 i2v 单 clip (静默, Phase 2 第二�
     expect(graph).toContain('HOLA DAY');
     // map padded video + the silent audio (input 1), clamp to video length
     expect(cmd.args).toEqual(expect.arrayContaining(['-map', '1:a', '-shortest']));
-    expect(cmd.args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p']));
+    expect(cmd.args).toEqual(
+      expect.arrayContaining(['-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p']),
+    );
   });
 
   it('honours custom 画幅 (横屏) + ffmpeg bin', () => {

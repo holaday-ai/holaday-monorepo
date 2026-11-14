@@ -25,9 +25,7 @@ let memoryClosureRecovery: string | null = null;
   const scrubFragment = (): void => {
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   };
-  const hasUnassociatedFactorFragment = /(?:^|[#&])(?:mfa|closure)=/.test(
-    window.location.hash,
-  );
+  const hasUnassociatedFactorFragment = /(?:^|[#&])(?:mfa|closure)=/.test(window.location.hash);
   if (hasUnassociatedFactorFragment && getAccessToken()) {
     scrubFragment();
     return;

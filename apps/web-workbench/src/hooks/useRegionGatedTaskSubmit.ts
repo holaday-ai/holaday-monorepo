@@ -1,7 +1,4 @@
-import {
-  modelTaskSubmitDecision,
-  type ModelDataRegion,
-} from '@/lib/model-data-region-state';
+import { type ModelDataRegion, modelTaskSubmitDecision } from '@/lib/model-data-region-state';
 import * as React from 'react';
 
 interface RegionProfile {
@@ -10,6 +7,8 @@ interface RegionProfile {
 
 interface UseRegionGatedTaskSubmitOptions<TPayload, TResult> {
   readonly region: unknown;
+  /** FIX-60 BOSS 决定: the region step is asked only when the server turns it on. */
+  readonly selectionEnabled?: boolean;
   readonly assignRegion: (region: ModelDataRegion) => Promise<unknown> | unknown;
   readonly refreshMe: () => Promise<RegionProfile | null>;
   readonly submit: (payload: TPayload) => Promise<TResult> | TResult;
@@ -24,6 +23,7 @@ const ASSIGN_ERROR = '暂时无法保存任务处理区域，请重试。';
 
 export function useRegionGatedTaskSubmit<TPayload, TResult>({
   region,
+  selectionEnabled = false,
   assignRegion,
   refreshMe,
   submit,
@@ -36,7 +36,7 @@ export function useRegionGatedTaskSubmit<TPayload, TResult>({
 
   const requestSubmit = React.useCallback(
     async (payload: TPayload): Promise<RegionSubmitDecision<TResult>> => {
-      if (modelTaskSubmitDecision(region) === 'submit') {
+      if (modelTaskSubmitDecision(region, selectionEnabled) === 'submit') {
         return { kind: 'submitted', result: await submit(payload) };
       }
 
@@ -45,7 +45,7 @@ export function useRegionGatedTaskSubmit<TPayload, TResult>({
       setDialogOpen(true);
       return { kind: 'choose_region' };
     },
-    [region, submit],
+    [region, selectionEnabled, submit],
   );
 
   const confirmRegion = React.useCallback(

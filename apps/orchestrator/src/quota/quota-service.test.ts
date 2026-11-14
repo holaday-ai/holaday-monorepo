@@ -6,11 +6,7 @@
 
 import { PLAN_CATALOGUE } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
-import {
-  QuotaService,
-  concurrencyExhaustedMessage,
-  getConcurrencyLimit,
-} from './quota-service.js';
+import { QuotaService, concurrencyExhaustedMessage, getConcurrencyLimit } from './quota-service.js';
 
 describe('getConcurrencyLimit — Phase 14 limits', () => {
   it('free → 1', () => {
@@ -55,15 +51,9 @@ describe('concurrencyExhaustedMessage — upgrade-pitch copy', () => {
     // Sanity: the numbers asserted above must equal the catalogue;
     // if someone bumps a plan's concurrency without rechecking the
     // copy, this test surfaces the discrepancy.
-    expect(concurrencyExhaustedMessage('free')).toContain(
-      String(getConcurrencyLimit('free')),
-    );
-    expect(concurrencyExhaustedMessage('basic')).toContain(
-      String(getConcurrencyLimit('basic')),
-    );
-    expect(concurrencyExhaustedMessage('pro')).toContain(
-      String(getConcurrencyLimit('pro')),
-    );
+    expect(concurrencyExhaustedMessage('free')).toContain(String(getConcurrencyLimit('free')));
+    expect(concurrencyExhaustedMessage('basic')).toContain(String(getConcurrencyLimit('basic')));
+    expect(concurrencyExhaustedMessage('pro')).toContain(String(getConcurrencyLimit('pro')));
   });
 });
 
@@ -171,9 +161,7 @@ function makeQuotaDb(init: Partial<FakeQuotaRow>): {
       };
     },
   };
-  const svc = new QuotaService(
-    fakeDb as unknown as ConstructorParameters<typeof QuotaService>[0],
-  );
+  const svc = new QuotaService(fakeDb as unknown as ConstructorParameters<typeof QuotaService>[0]);
   return { svc, row };
 }
 

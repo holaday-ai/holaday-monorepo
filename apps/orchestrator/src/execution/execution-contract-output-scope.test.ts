@@ -58,10 +58,16 @@ describe('classifyIntentForOutputRequirement — output scope', () => {
     ['生成3个京东商品的标题和价格清单', 3],
     ['给出京东排名前3的结果，候选是10款商品', 3],
   ])('keeps quantities attached to requested products: %s', (intent, minItems) => {
-    expect(classifyIntentForOutputRequirement(intent)).toEqual({
+    const result = classifyIntentForOutputRequirement(intent);
+    expect(result).toMatchObject({
       kind: 'ecommerce_listing',
       requirement: { kind: 'ecommerce', minItems, sortOrder: null },
     });
+    // FIX-31: rows need links only when the request asks for them.
+    const asksLinks = /链接|\blinks?\b/i.test(intent);
+    expect((result.requirement as { requireLinks?: boolean }).requireLinks).toBe(
+      asksLinks ? undefined : false,
+    );
   });
 
   it('retains search, count and ordering across sentences', () => {

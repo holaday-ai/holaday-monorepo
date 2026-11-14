@@ -74,14 +74,9 @@ export function parsePsProcessList(output: string): ProcessEntry[] {
 
 async function listPsProcesses(): Promise<ProcessEntry[]> {
   return await new Promise((resolve) => {
-    execFile(
-      'ps',
-      ['-axo', 'pid=,command='],
-      { maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout) => {
-        resolve(error ? [] : parsePsProcessList(stdout));
-      },
-    );
+    execFile('ps', ['-axo', 'pid=,command='], { maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      resolve(error ? [] : parsePsProcessList(stdout));
+    });
   });
 }
 
@@ -98,10 +93,7 @@ function matchesPool(cmd: string, config: PoolConfig): boolean {
   const xvfbMatch = /(?:^|\s)Xvfb\s+:(\d+)/.exec(cmd);
   if (xvfbMatch) {
     const d = Number.parseInt(xvfbMatch[1] ?? '-1', 10);
-    if (
-      d >= config.displayStart &&
-      d < config.displayStart + config.maxInstances
-    ) {
+    if (d >= config.displayStart && d < config.displayStart + config.maxInstances) {
       return true;
     }
   }
@@ -109,10 +101,7 @@ function matchesPool(cmd: string, config: PoolConfig): boolean {
   const rfbMatch = /-rfbport\s+(\d+)/.exec(cmd);
   if (rfbMatch) {
     const p = Number.parseInt(rfbMatch[1] ?? '-1', 10);
-    if (
-      p >= config.vncPortStart &&
-      p < config.vncPortStart + config.maxInstances
-    ) {
+    if (p >= config.vncPortStart && p < config.vncPortStart + config.maxInstances) {
       return true;
     }
   }
@@ -121,10 +110,7 @@ function matchesPool(cmd: string, config: PoolConfig): boolean {
   const wsMatch = /websockify\s+(?:127\.0\.0\.1:)?(\d+)/.exec(cmd);
   if (wsMatch) {
     const p = Number.parseInt(wsMatch[1] ?? '-1', 10);
-    if (
-      p >= config.wsPortStart &&
-      p < config.wsPortStart + config.maxInstances
-    ) {
+    if (p >= config.wsPortStart && p < config.wsPortStart + config.maxInstances) {
       return true;
     }
   }
@@ -165,15 +151,10 @@ export interface ReaperResult {
   pids: number[];
 }
 
-export async function reapOrphans(
-  config: PoolConfig,
-  logger: Logger,
-): Promise<ReaperResult> {
+export async function reapOrphans(config: PoolConfig, logger: Logger): Promise<ReaperResult> {
   const processes = await listProcesses();
   const victims = findOrphanProcessIds(processes, config);
-  const commandsByPid = new Map(
-    processes.map(({ pid, command }) => [pid, command]),
-  );
+  const commandsByPid = new Map(processes.map(({ pid, command }) => [pid, command]));
   for (const pid of victims) {
     const command = commandsByPid.get(pid) ?? '';
     logger.info({ pid, cmd: command.slice(0, 160) }, 'reaper: orphan match');

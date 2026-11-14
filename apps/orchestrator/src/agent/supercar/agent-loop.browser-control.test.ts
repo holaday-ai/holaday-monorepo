@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const { createMessage } = vi.hoisted(() => ({ createMessage: vi.fn() }));
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
@@ -11,7 +11,7 @@ import { MessagesAdapterError, createQwenMessagesAdapter } from '../../llm/messa
 import type { PlaywrightExecutor } from '../vision-loop/playwright-executor.js';
 import { runSupercarTask, supercarAbort, supercarReply } from './agent-loop.js';
 import { BrowserControlSessions } from './browser-control-sessions.js';
-import { BrowserControl } from './browser-control.js';
+import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
 import {
   supercarAbort as abortProductionBrowser,
   runSupercarTask as runProductionBrowser,
@@ -23,6 +23,29 @@ function deferred() {
     resolve = done;
   });
   return { promise, resolve };
+}
+/**
+ * REBUILD-4: the task's shared control with a clock the test can move. `waits()` counts the
+ * assistant's yields that started while the person was busy; `passIdle()` lets 2 s pass and wakes
+ * the waiting assistant (an input with no kind is not the person acting).
+ */
+function sharedControl() {
+  let skew = 0;
+  const control = new BrowserControl(() => Date.now() + skew);
+  let waits = 0;
+  const yieldToHuman = control.yieldToHuman.bind(control);
+  control.yieldToHuman = (options) => {
+    if (control.humanBusy()) waits++;
+    return yieldToHuman(options);
+  };
+  return {
+    control,
+    waits: () => waits,
+    passIdle: async () => {
+      skew += HUMAN_IDLE_MS;
+      await control.runHuman(async () => {});
+    },
+  };
 }
 function response(content: unknown[], stopReason = 'tool_use') {
   return {
@@ -94,6 +117,16 @@ function qwenTransport(fetchImpl: typeof fetch) {
 }
 
 describe('Supercar browser ownership checkpoints', () => {
+  // These cover the legacy coordinate loop behind the production entry; the
+  // default executor is unified since batch 08, so pin the rollback mode.
+  const executorBefore = env.BROWSER_EXECUTOR;
+  beforeAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: 'legacy' });
+  });
+  afterAll(() => {
+    Object.assign(env, { BROWSER_EXECUTOR: executorBefore });
+  });
+
   it.each([
     { provider: 'qwen', coordinate: [500, 500], pixels: [640, 360] },
     { provider: 'anthropic', coordinate: [500, 500], pixels: [500, 500] },
@@ -300,6 +333,25 @@ describe('Supercar browser ownership checkpoints', () => {
     expect(JSON.stringify(bodies[1])).toContain('viewport changed');
   });
 
+  it('shows a safe authentication reason without the provider body', async () => {
+    const adapter = qwenTransport(async () => {
+      throw new Error('unused');
+    });
+    adapter.create = async () => {
+      throw new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 401);
+    };
+    const result = await runProductionBrowser({
+      taskId: 'qwen-auth',
+      intent: '核对网页',
+      messagesAdapter: adapter,
+      executor: fixture(async () => {}).executor,
+    });
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: '模型服务认证失败，请联系管理员检查服务配置。',
+    });
+  });
+
   it('classifies Qwen transport timeout as timeout rather than generic failure', async () => {
     const adapter = qwenTransport(async () => {
       throw new Error('unused network boundary');
@@ -319,8 +371,9 @@ describe('Supercar browser ownership checkpoints', () => {
     createMessage.mockReset();
   });
 
-  it('reobserves manual changes through the Qwen wire and discards the stale model action', async () => {
-    const control = new BrowserControl();
+  it('reobserves the person’s changes through the Qwen wire and discards the stale model action', async () => {
+    const shared = sharedControl();
+    const { control } = shared;
     const release = deferred();
     const effects: string[] = [];
     const browser = fixture(async (url) => {
@@ -345,7 +398,9 @@ describe('Supercar browser ownership checkpoints', () => {
         );
       }
       return new Response(
-        JSON.stringify(response([{ type: 'text', text: '已根据接管后的页面继续。' }], 'end_turn')),
+        JSON.stringify(
+          response([{ type: 'text', text: '已根据你操作后的页面继续。' }], 'end_turn'),
+        ),
       );
     });
     const run = runProductionBrowser({
@@ -357,11 +412,14 @@ describe('Supercar browser ownership checkpoints', () => {
     });
     try {
       await vi.waitFor(() => expect(bodies).toHaveLength(1));
-      control.requestHuman();
+      // While the model thinks, the person navigates in the shared browser (no takeover).
+      await control.runHuman(async () => {
+        browser.manualNavigate('https://93.184.216.34/manual');
+      }, 'navigate');
       release.resolve();
-      await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
-      browser.manualNavigate('https://93.184.216.34/manual');
-      control.returnToAgent(control.snapshot().lease ?? '');
+      await vi.waitFor(() => expect(shared.waits()).toBe(1));
+      expect(bodies).toHaveLength(1);
+      await shared.passIdle();
       expect(await run).toMatchObject({ status: 'completed' });
       expect(effects).toEqual([]);
       expect(bodies).toHaveLength(2);
@@ -502,14 +560,16 @@ describe('Supercar browser ownership checkpoints', () => {
   });
 
   it.each(['login', 'confirmation', 'question'] as const)(
-    'honors takeover during an existing %s wait and holds the reply until handback',
+    'during an existing %s wait, browser use by the person is re-read before the reply is acted on',
     async (kind) => {
-      const control = new BrowserControl();
+      const shared = sharedControl();
+      const { control } = shared;
       const awaiting = deferred();
       const effects: string[] = [];
       const browser = fixture(async () => {
         effects.push('stale-action');
       });
+      const modelInputs: string[] = [];
       createMessage
         .mockResolvedValueOnce(
           kind === 'question'
@@ -526,7 +586,8 @@ describe('Supercar browser ownership checkpoints', () => {
                 },
               ]),
         )
-        .mockImplementation(async () => {
+        .mockImplementation(async (input) => {
+          modelInputs.push(JSON.stringify(input.messages));
           effects.push('replan');
           return response([{ type: 'text', text: '完成。' }], 'end_turn');
         });
@@ -548,14 +609,21 @@ describe('Supercar browser ownership checkpoints', () => {
       });
       try {
         await awaiting.promise;
-        control.requestHuman();
-        await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
+        // No takeover: the person uses the page directly, then replies.
+        expect(control.snapshot().phase).toBe('agent');
+        await control.runHuman(async () => {
+          browser.manualNavigate('https://93.184.216.34/after-login');
+        }, 'navigate');
         expect(supercarReply(taskId, '确认执行')).toBe(true);
-        await Promise.resolve();
+        // The reply waits until the person has been still for 2 s.
+        await vi.waitFor(() => expect(shared.waits()).toBe(1));
         expect(effects).toEqual([]);
-        control.returnToAgent(control.snapshot().lease ?? '');
+        await shared.passIdle();
         expect(await run).toMatchObject({ status: 'completed' });
         expect(effects).toEqual(['replan']);
+        expect(modelInputs.join('')).toContain(
+          Buffer.from('https://93.184.216.34/after-login').toString('base64'),
+        );
       } finally {
         supercarAbort(taskId);
         control.close();
@@ -564,82 +632,13 @@ describe('Supercar browser ownership checkpoints', () => {
     },
   );
 
+  // REBUILD-4 (legacy loop, BROWSER_EXECUTOR=legacy): a person who acts while an asynchronous veto
+  // is pending voids the planned goto / click (the last admission check also asks humanBusy()).
   it.each(['navigate', 'computer'] as const)(
-    'discards a pending %s if resize arrives during asynchronous preflight',
+    'does not start %s when the person acts during its asynchronous veto',
     async (tool) => {
-      const control = new BrowserControl();
-      const effects: string[] = [];
-      const browser = fixture(async () => {
-        effects.push('stale-navigation');
-      });
-      let width = 1280;
-      let height = 720;
-      const modelSizes: unknown[] = [];
-      Object.assign(browser.executor, {
-        screenshot: async () => ({
-          base64: Buffer.from(browser.page.url()).toString('base64'),
-          viewportWidth: width,
-          viewportHeight: height,
-        }),
-        click: async () => {
-          effects.push('stale-click');
-          return { ok: true };
-        },
-      });
-      let calls = 0;
-      createMessage.mockImplementation(async (input) => {
-        const computer = input.tools.find((tool: { name: string }) => tool.name === 'computer');
-        modelSizes.push([computer.display_width_px, computer.display_height_px]);
-        calls++;
-        if (calls > 1) {
-          expect(JSON.stringify(input.messages)).toContain(
-            Buffer.from('https://93.184.216.34/resized').toString('base64'),
-          );
-          effects.push('replanned');
-          return response([{ type: 'text', text: '完成。' }], 'end_turn');
-        }
-        return response([
-          {
-            type: 'tool_use',
-            id: 'old',
-            name: tool,
-            input:
-              tool === 'navigate'
-                ? { url: 'https://93.184.216.34/stale' }
-                : { action: 'left_click', coordinate: [10, 20] },
-          },
-        ]);
-      });
-      const result = await runSupercarTask({
-        taskId: `resize-preflight-${tool}`,
-        intent: '核对网页',
-        executor: browser.executor,
-        apiKey: 'test-key',
-        browserControl: control,
-        maxIterations: 3,
-        onBeforeAction: async () => {
-          control.queueViewport(async () => {
-            effects.push('resized');
-            width = 800;
-            height = 600;
-            browser.manualNavigate('https://93.184.216.34/resized');
-          });
-          return { allowed: true };
-        },
-      });
-      expect(result.status).toBe('completed');
-      expect(effects).toEqual(['resized', 'replanned']);
-      expect(modelSizes).toEqual([
-        [1280, 720],
-        [800, 600],
-      ]);
-    },
-  );
-
-  it.each(['navigate', 'computer'] as const)(
-    'does not start %s when takeover arrives during its asynchronous veto',
-    async (tool) => {
-      const control = new BrowserControl();
+      const shared = sharedControl();
+      const { control } = shared;
       const enteredVeto = deferred();
       const finishVeto = deferred();
       const effects: string[] = [];
@@ -683,11 +682,11 @@ describe('Supercar browser ownership checkpoints', () => {
       });
       try {
         await enteredVeto.promise;
-        control.requestHuman();
+        await control.runHuman(async () => {}, 'mouseDown');
         finishVeto.resolve();
-        await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
+        await vi.waitFor(() => expect(shared.waits()).toBe(1), { timeout: 1_000 });
         expect(effects).toEqual([]);
-        control.returnToAgent(control.snapshot().lease ?? '');
+        await shared.passIdle();
         expect(await run).toMatchObject({ status: 'completed' });
         expect(effects).toEqual([]);
       } finally {
@@ -699,8 +698,9 @@ describe('Supercar browser ownership checkpoints', () => {
     },
   );
 
-  it('waits for the current navigation, discards its stale sibling, then observes the manual page', async () => {
-    const control = new BrowserControl();
+  it('waits for the current navigation, discards its stale sibling, then observes the person’s page', async () => {
+    const shared = sharedControl();
+    const { control } = shared;
     const started = deferred();
     const finish = deferred();
     const navigations: string[] = [];
@@ -742,16 +742,16 @@ describe('Supercar browser ownership checkpoints', () => {
     });
     try {
       await started.promise;
-      control.requestHuman();
-      expect(control.snapshot().phase).toBe('requested');
-      expect(control.snapshot().lease).toBeNull();
-      finish.resolve();
-      await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
-      const token = control.snapshot().lease ?? '';
-      await control.runHuman(token, async () => {
+      // The person starts navigating while the assistant's first navigation is still loading;
+      // their navigation lands once the assistant's has.
+      const input = control.runHuman(async () => {
+        await vi.waitFor(() => expect(browser.page.url()).toBe('https://93.184.216.34/first'));
         browser.manualNavigate('https://93.184.216.34/manual');
-      });
-      control.returnToAgent(token);
+      }, 'navigate');
+      finish.resolve();
+      await input;
+      await vi.waitFor(() => expect(shared.waits()).toBe(1));
+      await shared.passIdle();
       expect(await run).toMatchObject({ status: 'completed' });
       expect(navigations).toEqual(['https://93.184.216.34/first']);
       const nextInput = JSON.stringify(modelInputs[1]);
@@ -767,8 +767,9 @@ describe('Supercar browser ownership checkpoints', () => {
     }
   });
 
-  it('does not run an old model response after handoff requested during model latency', async () => {
-    const control = new BrowserControl();
+  it('does not run an old model response when the person acted during model latency', async () => {
+    const shared = sharedControl();
+    const { control } = shared;
     const thinking = deferred();
     const finishThinking = deferred();
     const navigations: string[] = [];
@@ -803,14 +804,12 @@ describe('Supercar browser ownership checkpoints', () => {
     });
     try {
       await thinking.promise;
-      control.requestHuman();
-      finishThinking.resolve();
-      await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
-      const token = control.snapshot().lease ?? '';
-      await control.runHuman(token, async () => {
+      await control.runHuman(async () => {
         browser.manualNavigate('https://93.184.216.34/new');
-      });
-      control.returnToAgent(token);
+      }, 'navigate');
+      finishThinking.resolve();
+      await vi.waitFor(() => expect(shared.waits()).toBe(1));
+      await shared.passIdle();
       expect(await run).toMatchObject({ status: 'completed' });
       expect(navigations).toEqual([]);
       expect(JSON.stringify(modelInputs[1])).toContain('https://93.184.216.34/new');
@@ -822,12 +821,14 @@ describe('Supercar browser ownership checkpoints', () => {
     }
   });
 
-  it('aborts a manually parked task without waiting for a user return', async () => {
-    const control = new BrowserControl();
+  it('aborts a task waiting for a busy person without waiting for them to stop', async () => {
+    const shared = sharedControl();
+    const { control } = shared;
     const browser = fixture(async () => {});
-    control.requestHuman();
+    control.noteHumanInput('keyDown');
     createMessage.mockResolvedValue(response([{ type: 'text', text: '完成。' }], 'end_turn'));
     const taskId = 'browser-control-abort';
+    const started = Date.now();
     const run = runSupercarTask({
       taskId,
       intent: '核对网页',
@@ -836,10 +837,12 @@ describe('Supercar browser ownership checkpoints', () => {
       browserControl: control,
     });
     try {
-      await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
+      await vi.waitFor(() => expect(shared.waits()).toBe(1));
       expect(supercarAbort(taskId)).toBe(true);
       expect(await run).toMatchObject({ status: 'cancelled' });
+      expect(Date.now() - started).toBeLessThan(HUMAN_IDLE_MS);
       expect(control.snapshot().phase).toBe('closed');
+      expect(createMessage).not.toHaveBeenCalled();
     } finally {
       control.close();
       supercarAbort(taskId);
@@ -847,12 +850,18 @@ describe('Supercar browser ownership checkpoints', () => {
     }
   });
 
-  it('does not spend the AI execution deadline while the user owns the browser', async () => {
+  it('does not spend the AI execution deadline while waiting for a busy person', async () => {
     let now = 1_000;
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const control = new BrowserControl();
+    const control = new BrowserControl(() => Date.now());
+    let waits = 0;
+    const yieldToHuman = control.yieldToHuman.bind(control);
+    control.yieldToHuman = (options) => {
+      if (control.humanBusy()) waits++;
+      return yieldToHuman(options);
+    };
     const browser = fixture(async () => {});
-    control.requestHuman();
+    control.noteHumanInput('keyDown');
     createMessage.mockResolvedValue(response([{ type: 'text', text: '核对完成。' }], 'end_turn'));
     const taskId = 'browser-control-wait-budget';
     const run = runSupercarTask({
@@ -864,9 +873,10 @@ describe('Supercar browser ownership checkpoints', () => {
       timeoutMs: 1_000,
     });
     try {
-      await vi.waitFor(() => expect(control.snapshot().phase).toBe('human'));
+      await vi.waitFor(() => expect(waits).toBe(1));
+      // The person kept the assistant waiting a minute: that minute is not the AI's budget.
       now = 61_000;
-      control.returnToAgent(control.snapshot().lease ?? '');
+      await control.runHuman(async () => {});
       expect(await run).toMatchObject({ status: 'completed' });
     } finally {
       control.close();

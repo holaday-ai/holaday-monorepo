@@ -57,9 +57,9 @@ for (const fault of [
     const { readFirstCutoverCloudNativePreflight } = await import(
       './browser-first-cutover-native-preflight.mjs'
     );
-    let time = 1000,
-      executions = 0,
-      sourceReads = 0;
+    let time = 1000;
+    let executions = 0;
+    let sourceReads = 0;
     const attempt = '12345678-1234-4234-8234-123456789abc';
     const sources = {
       hostname: 'qa',

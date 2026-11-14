@@ -1,7 +1,4 @@
-import {
-  normalizeAwaitingKind,
-  type AwaitingKind,
-} from './awaiting-user-copy';
+import { type AwaitingKind, normalizeAwaitingKind } from './awaiting-user-copy';
 
 export type TaskProductLifecycle =
   | 'queued'
@@ -19,16 +16,9 @@ export type TaskProductPhase =
   | 'generating'
   | 'generating_image';
 
-export type TaskProductOutcome =
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'cancelled';
+export type TaskProductOutcome = 'completed' | 'partial_success' | 'failed' | 'cancelled';
 
-export type TaskProductBlocker =
-  | AwaitingKind
-  | 'max_steps'
-  | 'retries_exhausted';
+export type TaskProductBlocker = AwaitingKind | 'max_steps' | 'retries_exhausted';
 
 export type TaskProductState =
   | { lifecycle: 'queued'; queuePosition?: number }
@@ -48,18 +38,14 @@ export interface TaskProductStateInput {
   terminal?: boolean;
 }
 
-export function deriveTaskProductState(
-  input: TaskProductStateInput,
-): TaskProductState {
+export function deriveTaskProductState(input: TaskProductStateInput): TaskProductState {
   if (input.status === 'paused') {
     return { lifecycle: 'paused' };
   }
 
   const outcome = terminalOutcome(input.status);
   if (input.terminal || outcome) {
-    return outcome
-      ? { lifecycle: 'terminal', outcome }
-      : { lifecycle: 'terminal' };
+    return outcome ? { lifecycle: 'terminal', outcome } : { lifecycle: 'terminal' };
   }
 
   if (input.status === 'awaiting_user' || input.hasAwaitingUser || input.awaitingKind) {
@@ -76,9 +62,7 @@ export function deriveTaskProductState(
   if (isQueued(input)) {
     return {
       lifecycle: 'queued',
-      ...(typeof input.queuePosition === 'number'
-        ? { queuePosition: input.queuePosition }
-        : {}),
+      ...(typeof input.queuePosition === 'number' ? { queuePosition: input.queuePosition } : {}),
     };
   }
 

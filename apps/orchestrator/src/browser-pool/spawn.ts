@@ -15,7 +15,7 @@
  * land on the child.
  */
 
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import type { Logger } from 'pino';
 import { chromium } from 'playwright';
@@ -249,10 +249,7 @@ export function buildBraveArgs(opts: SpawnBraveOptions): string[] {
  * Linux-only Xvfb, Brave, x11vnc, and websockify sidecars on macOS.
  */
 export function buildNativeChromiumArgs(opts: SpawnBraveOptions): string[] {
-  return [
-    '--headless=new',
-    ...buildBraveArgs(opts).filter((arg) => arg !== '--start-maximized'),
-  ];
+  return ['--headless=new', ...buildBraveArgs(opts).filter((arg) => arg !== '--start-maximized')];
 }
 
 export function spawnNativeChromium(opts: SpawnBraveOptions, logger: Logger): SpawnedProcess {

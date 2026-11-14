@@ -1,0 +1,88 @@
+{
+  "diagnosticOnly": true,
+  "coverageGaps": [
+    "Case-filtered run: not full release acceptance"
+  ],
+  "findings": [
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:60190/planned",
+      "screenshot": "artifacts/1440-_planned-control-103.png",
+      "route": "/planned",
+      "width": 1440
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:60190/planned",
+      "screenshot": "artifacts/1280-_planned-control-103.png",
+      "route": "/planned",
+      "width": 1280
+    },
+    {
+      "rule": "unexplained-truncation",
+      "severity": "P2",
+      "control": "BUTTON||UI generate awaiting_us…||0",
+      "box": {
+        "x": 81,
+        "y": 843,
+        "width": 153,
+        "height": 32
+      },
+      "observedUrl": "http://127.0.0.1:60190/planned",
+      "screenshot": "artifacts/1024-_planned-control-103.png",
+      "route": "/planned",
+      "width": 1024
+    }
+  ],
+  "pages": [
+    {
+      "width": 1440,
+      "controls": 284,
+      "dateResults": {
+        "passed": 55,
+        "idempotent": 1
+      },
+      "selected": [
+        "9 每日测试计划 18:00 重复"
+      ]
+    },
+    {
+      "width": 1280,
+      "controls": 284,
+      "dateResults": {
+        "passed": 55,
+        "idempotent": 1
+      },
+      "selected": [
+        "9 每日测试计划 18:00 重复"
+      ]
+    },
+    {
+      "width": 1024,
+      "controls": 284,
+      "dateResults": {
+        "passed": 55,
+        "idempotent": 1
+      },
+      "selected": [
+        "9 每日测试计划 18:00 重复"
+      ]
+    }
+  ]
+}

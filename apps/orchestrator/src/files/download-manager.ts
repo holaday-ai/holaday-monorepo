@@ -126,10 +126,7 @@ export function buildDownloadUrl(baseUrl: string, fileId: string): string {
   return `${trimmed}/files/${fileId}/download`;
 }
 
-function toBuffer(
-  content: Buffer | string,
-  encoding: 'base64' | undefined,
-): Buffer {
+function toBuffer(content: Buffer | string, encoding: 'base64' | undefined): Buffer {
   if (Buffer.isBuffer(content)) return content;
   // Default string encoding is base64 — the agent's screenshot
   // helper produces base64, and that's the most common shape we'll

@@ -76,9 +76,7 @@ class FakeCreditLedgerDb {
                 ? this.lastIdempotencyKey
                 : null;
             if (!readbackKey) return [];
-            return this.rows
-              .filter((row) => row.idempotencyKey === readbackKey)
-              .slice(0, count);
+            return this.rows.filter((row) => row.idempotencyKey === readbackKey).slice(0, count);
           },
         }),
       }),
@@ -246,7 +244,9 @@ describe('CreditLedgerService postEntry', () => {
   ])('throws RangeError for %s', async (_name, patch) => {
     const fakeDb = new FakeCreditLedgerDb();
     const service = new CreditLedgerService(fakeDb.asDB());
-    const input = { ...validPostInput, ...patch } as Parameters<CreditLedgerService['postEntry']>[0];
+    const input = { ...validPostInput, ...patch } as Parameters<
+      CreditLedgerService['postEntry']
+    >[0];
 
     await expect(service.postEntry(input)).rejects.toBeInstanceOf(RangeError);
   });

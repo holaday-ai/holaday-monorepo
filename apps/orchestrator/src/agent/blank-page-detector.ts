@@ -61,27 +61,29 @@ export async function detectBlankPage(page: BlankProbePage): Promise<BlankPageRe
     // The function below runs in the browser context. Cast through
     // unknown to keep orchestrator typecheck happy (no DOM globals).
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const result = await page.evaluate((): {
-      textLength: number;
-      images: number;
-      iframes: number;
-      inputs: number;
-      buttons: number;
-    } => {
-      const w = globalThis as any;
-      const doc = w.document;
-      if (!doc?.body) {
-        return { textLength: 0, images: 0, iframes: 0, inputs: 0, buttons: 0 };
-      }
-      const rawText = (doc.body.innerText ?? doc.body.textContent ?? '') as string;
-      return {
-        textLength: rawText.trim().length,
-        images: doc.images?.length ?? 0,
-        iframes: doc.getElementsByTagName('iframe').length,
-        inputs: doc.getElementsByTagName('input').length,
-        buttons: doc.getElementsByTagName('button').length,
-      };
-    });
+    const result = await page.evaluate(
+      (): {
+        textLength: number;
+        images: number;
+        iframes: number;
+        inputs: number;
+        buttons: number;
+      } => {
+        const w = globalThis as any;
+        const doc = w.document;
+        if (!doc?.body) {
+          return { textLength: 0, images: 0, iframes: 0, inputs: 0, buttons: 0 };
+        }
+        const rawText = (doc.body.innerText ?? doc.body.textContent ?? '') as string;
+        return {
+          textLength: rawText.trim().length,
+          images: doc.images?.length ?? 0,
+          iframes: doc.getElementsByTagName('iframe').length,
+          inputs: doc.getElementsByTagName('input').length,
+          buttons: doc.getElementsByTagName('button').length,
+        };
+      },
+    );
     /* eslint-enable @typescript-eslint/no-explicit-any */
     const diagnostics = result;
     const blank =

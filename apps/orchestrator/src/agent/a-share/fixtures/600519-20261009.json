@@ -1,0 +1,208 @@
+{
+  "description": "Public provider responses recorded read-only on 2026-10-09; news trimmed to first five rows. No model-generated market facts.",
+  "responses": [
+    {
+      "path": "/quote/600519",
+      "http": 200,
+      "envelope": {
+        "data": [
+          {
+            "代码": "600519",
+            "最新价": 1272.08,
+            "涨跌幅": 1.3,
+            "成交量": 2005717.0,
+            "成交额": 2540125948.8705,
+            "行情时间": "2026-10-09 11:30:00"
+          }
+        ],
+        "count": 1,
+        "source": "akshare:stock_zh_a_minute(sina,1m,latest)",
+        "fetched_at": "2026-10-09T04:29:32.346929+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    },
+    {
+      "path": "/fundamentals/600519",
+      "http": 200,
+      "envelope": {
+        "data": [
+          {
+            "report_period": "2026-06-30",
+            "revenue": 92278000000.0,
+            "revenue_yoy": 1.3,
+            "net_profit": 44517000000.0,
+            "net_profit_yoy": -1.95,
+            "deduct_net_profit": 44464000000.0,
+            "deduct_net_profit_yoy": -2.04,
+            "gross_margin": 89.56,
+            "net_margin": 50.75,
+            "roe": 16.75,
+            "debt_ratio": 15.19,
+            "ocf_per_share": 56.55,
+            "eps_basic": 35.57,
+            "gross_margin_yoy": -1.74,
+            "net_profit_qoq": -36.59,
+            "revenue_qoq": -31.31,
+            "trend3y": [
+              {
+                "report_period": "2023",
+                "revenue": 150560000000.0,
+                "revenue_yoy": 18.04,
+                "net_profit": 74734000000.0,
+                "net_profit_yoy": 19.16,
+                "deduct_net_profit": 74753000000.0,
+                "deduct_net_profit_yoy": 19.05,
+                "gross_margin": 91.96,
+                "net_margin": 52.49,
+                "roe": 34.19,
+                "debt_ratio": 17.98,
+                "ocf_per_share": 53.01,
+                "eps_basic": 59.49
+              },
+              {
+                "report_period": "2024",
+                "revenue": 174144000000.0,
+                "revenue_yoy": 15.66,
+                "net_profit": 86228000000.0,
+                "net_profit_yoy": 15.38,
+                "deduct_net_profit": 86241000000.0,
+                "deduct_net_profit_yoy": 15.37,
+                "gross_margin": 91.93,
+                "net_margin": 52.27,
+                "roe": 36.02,
+                "debt_ratio": 19.04,
+                "ocf_per_share": 73.61,
+                "eps_basic": 68.64
+              },
+              {
+                "report_period": "2025",
+                "revenue": 172054000000.0,
+                "revenue_yoy": -1.2,
+                "net_profit": 82320000000.0,
+                "net_profit_yoy": -4.53,
+                "deduct_net_profit": 82293000000.0,
+                "deduct_net_profit_yoy": -4.58,
+                "gross_margin": 91.18,
+                "net_margin": 50.53,
+                "roe": 32.53,
+                "debt_ratio": 16.42,
+                "ocf_per_share": 49.13,
+                "eps_basic": 65.66
+              }
+            ]
+          }
+        ],
+        "count": 1,
+        "source": "akshare:stock_financial_abstract_ths(report+annual+quarter)",
+        "fetched_at": "2026-10-09T04:29:40.261166+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    },
+    {
+      "path": "/valuation/600519",
+      "http": 200,
+      "envelope": {
+        "data": [
+          {
+            "pe_ttm": 19.28,
+            "pb": 6.25,
+            "pe_pctile_5y": 3.7,
+            "pb_pctile_5y": 5.7,
+            "as_of": "2026-10-08",
+            "industry": "酒、饮料和精制茶制造业",
+            "industry_pe_median": null,
+            "total_mv_yi": 15698.4
+          }
+        ],
+        "count": 1,
+        "source": "akshare:zh_valuation_baidu(PE/PB+5y分位)+industry_pe_cninfo",
+        "fetched_at": "2026-10-09T04:29:48.622297+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    },
+    {
+      "path": "/announcements/600519?start_date=20261001&end_date=20261009",
+      "http": 200,
+      "envelope": {
+        "data": [],
+        "count": 0,
+        "source": "akshare:stock_zh_a_disclosure_report_cninfo(窗口内无公告)",
+        "fetched_at": "2026-10-09T04:29:49.811703+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    },
+    {
+      "path": "/kline/600519",
+      "http": 200,
+      "envelope": {
+        "data": [
+          {
+            "日期": "2026-10-08",
+            "收盘": 1255.79,
+            "开盘": 1252.9,
+            "最高": 1258.0,
+            "最低": 1242.0,
+            "成交额": 3145413157.0,
+            "涨跌幅": -0.22
+          }
+        ],
+        "count": 1,
+        "source": "akshare:stock_zh_a_daily(sina,末2行算涨跌幅)",
+        "fetched_at": "2026-10-09T04:29:51.524289+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    },
+    {
+      "path": "/stock-news/600519",
+      "http": 200,
+      "envelope": {
+        "data": [
+          {
+            "关键词": "600519",
+            "新闻标题": "百元股数量达199只，一日减少14只",
+            "新闻内容": "（数据宝） 高价股一览 代码 简称 最新收盘价（元） 今日涨跌（%） 换手率（%） 行业 688808 联讯仪器 1420.00 -8.19 0.06 机械设备 688498 源杰科技 1290.40 -20.00 0.04 电子 600519 贵州茅台 1255.79 -0.22",
+            "发布时间": "2026-10-08 16:41:00",
+            "文章来源": "证券时报网",
+            "新闻链接": "http://finance.eastmoney.com/a/202610083889730080.html"
+          },
+          {
+            "关键词": "600519",
+            "新闻标题": "贵州茅台：今日暂停！",
+            "新闻内容": "近日，贵州茅台(600519)旗下官微发布公告，为持续优化i茅台APP使用体验，提升系统稳定性与服务质量，计划于2026年10月6日全天对i茅台APP进行维护升级。 在此期间，i茅台APP将暂停使用，需依托i茅台APP办理的线下相关服务同步暂停。",
+            "发布时间": "2026-10-06 08:44:00",
+            "文章来源": "证券时报网",
+            "新闻链接": "http://finance.eastmoney.com/a/202610063888722080.html"
+          },
+          {
+            "关键词": "600519",
+            "新闻标题": "微软三季度市值增超1万亿美元；房贷贴息新政多家银行明确“免申即享”；江淮汽车回应与华为合作丨每经早参",
+            "新闻内容": "7 10月6日，茅台43家自营店暂停营业一天 贵州茅台（SH600519，股价1258.62元，市值1.57万亿元）：9月30日，贵州茅台酒销售有限公司官方微信公众号（醉美茅台）发布消息称，为持续优化消费者的i茅台APP使用体验，提升系统稳定性与服务质量，计划于2026年10月",
+            "发布时间": "2026-10-01 06:50:56",
+            "文章来源": "每日经济新闻",
+            "新闻链接": "http://bank.eastmoney.com/a/202610013888010688.html"
+          },
+          {
+            "关键词": "600519",
+            "新闻标题": "主力动向：9月30日特大单净流出32.12亿元",
+            "新闻内容": "特大单净流入资金排名 代码 简称 收盘价（元） 涨跌幅（%） 特大单净流入（亿元） 行业 603127 昭衍新药 49.30 10.00 5.52 医药生物 300394 天孚通信 260.77 1.87 4.74 通信 603538 美诺华 28.59 10.00 4.40 医药生物 600519",
+            "发布时间": "2026-09-30 17:27:00",
+            "文章来源": "证券时报网",
+            "新闻链接": "http://finance.eastmoney.com/a/202609303887781592.html"
+          },
+          {
+            "关键词": "600519",
+            "新闻标题": "食品饮料行业今日涨1.68%，主力资金净流入12.91亿元",
+            "新闻内容": "（数据宝） 食品饮料行业资金流入榜 代码 简称 今日涨跌幅（%） 今日换手率（%） 主力资金流量（万元） 600519 贵州茅台 1.86 0.31 47361.89 600059 古越龙山 10.04 9.87 26327.58 000858 五粮液 1.88 0.50 10568.57",
+            "发布时间": "2026-09-30 17:24:00",
+            "文章来源": "证券时报网",
+            "新闻链接": "http://finance.eastmoney.com/a/202609303887781691.html"
+          }
+        ],
+        "count": 5,
+        "source": "eastmoney:stock-news-search",
+        "fetched_at": "2026-10-09T04:30:57.051653+00:00",
+        "disclaimer": "数据来源 AkShare 聚合，仅供信息参考，不构成任何投资建议，不预测股价。"
+      }
+    }
+  ]
+}

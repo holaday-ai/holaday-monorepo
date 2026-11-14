@@ -88,7 +88,11 @@ describe('makeRunBrowseTask — clean-context contract', () => {
       newTaskExternalId: () => 'tsk_1',
       storageState: '/tmp/test-account-session.json', // A2: login mode
     });
-    const r = await run({ domain: 'x.com', intent: 'i', onBeforeAction: () => ({ allowed: true }) });
+    const r = await run({
+      domain: 'x.com',
+      intent: 'i',
+      onBeforeAction: () => ({ allowed: true }),
+    });
     expect(r.status).toBe('completed');
     expect(seenStorageState).toBe('/tmp/test-account-session.json'); // passed straight to connect
     expect(assertCalled).toBe(0); // 🔓 clean assert SKIPPED in login mode (cookies are expected)
@@ -161,7 +165,11 @@ describe('makeRunBrowseTask — clean-context contract', () => {
       newTaskExternalId: () => 'tsk_1',
       connectTimeoutMs: 20, // tiny timeout for the test
     });
-    const r = await run({ domain: 'x.com', intent: 'i', onBeforeAction: () => ({ allowed: true }) });
+    const r = await run({
+      domain: 'x.com',
+      intent: 'i',
+      onBeforeAction: () => ({ allowed: true }),
+    });
     expect(r.status).toBe('failed'); // bounded, not hung forever
     expect(ranSupercar).toBe(false);
     expect(connectCalls).toBe(2); // timed out then retried, both timed out
@@ -296,12 +304,18 @@ describe('buildBreakpointSummary — ALWAYS produces evidence (the force-abort �
   });
   it('veto-halt → 边界拦停 reason', () => {
     expect(
-      buildBreakpointSummary({ status: 'failed', reason: 'click blocked: sensitive control ("登录")', steps }),
+      buildBreakpointSummary({
+        status: 'failed',
+        reason: 'click blocked: sensitive control ("登录")',
+        steps,
+      }),
     ).toMatch(/veto 边界拦停/);
   });
   it('completed → done; empty steps → 无捕获动作', () => {
     expect(buildBreakpointSummary({ status: 'completed', steps: [] })).toMatch(/完成/);
-    expect(buildBreakpointSummary({ status: 'failed', reason: 'x', steps: [] })).toContain('无捕获动作');
+    expect(buildBreakpointSummary({ status: 'failed', reason: 'x', steps: [] })).toContain(
+      '无捕获动作',
+    );
   });
 });
 

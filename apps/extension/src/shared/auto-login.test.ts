@@ -90,9 +90,7 @@ describe('tryAutoLogin', () => {
     } as unknown as typeof chrome;
 
     await expect(tryAutoLogin()).resolves.toBe('hd_live_pending_token');
-    expect(executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({ target: { tabId: 5 } }),
-    );
+    expect(executeScript).toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 5 } }));
   });
 
   it('prefers pendingUrl over a stale previous url while a workbench tab loads', async () => {
@@ -113,9 +111,7 @@ describe('tryAutoLogin', () => {
     } as unknown as typeof chrome;
 
     await expect(tryAutoLogin()).resolves.toBe('hd_live_loading_token');
-    expect(executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({ target: { tabId: 7 } }),
-    );
+    expect(executeScript).toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 7 } }));
   });
 
   it('scrubs sensitive query params from auto-login logs', async () => {

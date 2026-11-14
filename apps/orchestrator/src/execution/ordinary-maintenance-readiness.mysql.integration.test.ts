@@ -16,7 +16,7 @@ describe.skipIf(process.env.CORE_MYSQL_INTEGRATION !== '1')(
       )
         throw new Error('QA_LOOPBACK_13316_REQUIRED');
       const connection = await mysql.createConnection(url.toString());
-      const database = 'holaday_maintenance_' + randomBytes(8).toString('hex') + '_integration';
+      const database = `holaday_maintenance_${randomBytes(8).toString('hex')}_integration`;
       let created = false;
       try {
         await connection.query(`CREATE DATABASE \`${database}\``);
