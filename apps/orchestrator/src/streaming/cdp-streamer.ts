@@ -167,6 +167,14 @@ export class CdpStreamer {
     return this.loader;
   }
   /**
+   * HOTFIX-R4A: the main frame's URL as the navigation events last reported it (a replaceState
+   * changes it without a new history entry). Empty until known.
+   */
+  private url = '';
+  currentUrl(): string {
+    return this.url;
+  }
+  /**
    * The main frame's loader read from the browser NOW — newer than documentLoader() when a
    * navigation committed whose event has not been handled yet. Null when it cannot be read in
    * time (a JS dialog blocks the page): the caller then cannot confirm the document.
@@ -268,6 +276,7 @@ export class CdpStreamer {
     this.historyGeneration++;
     for (const wake of [...this.historyWaiters]) wake();
     this.boundPage = page;
+    this.url = page.url();
     let id = this.pageIds.get(page);
     if (!id) {
       id = randomUUID();
@@ -395,6 +404,7 @@ export class CdpStreamer {
       if (params.frame.parentId) return;
       this.mainFrameId = params.frame.id;
       this.loader = params.frame.loaderId;
+      this.url = params.frame.url;
       this.historyEntry = null;
       void this.noteHistoryEntry(cdp, false);
       // A screenshot started on the prior document must never become the first
@@ -436,6 +446,8 @@ export class CdpStreamer {
       // sees — an Enter made on the old frame landed on the new page's focused 「Share」. A new
       // history entry retires the old frames; replaceState (a search box mirroring each letter
       // into the URL, a scroll or map position) keeps the entry and the frames (复审 #1/#2).
+      // Unknown main frame: the URL is unknown too (no same-document grace on it).
+      this.url = this.mainFrameId ? params.url : '';
       void this.noteHistoryEntry(cdp, true);
       // Only notify on the MAIN frame's pushState/replaceState; the
       // streamer keeps the main frame id implicit via the no-parent

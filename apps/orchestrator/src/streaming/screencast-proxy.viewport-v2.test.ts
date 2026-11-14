@@ -99,7 +99,8 @@ it.each([false, true])(
       await new Promise((r) => setTimeout(r, 120));
       expect(await page.evaluate(() => (window as unknown as { hits: number }).hits)).toBe(0);
       expect(await page.locator('#text').inputValue()).toBe('');
-      expect(calls).toBe(3);
+      // HOTFIX-R4A: the refused press's release is dropped before the policy (2, not 3).
+      expect(calls).toBe(2);
       policy = async (_, envelope) => ({
         request: {
           taskId: instance.taskId,

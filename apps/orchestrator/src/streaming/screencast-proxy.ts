@@ -43,6 +43,7 @@ import { db } from '../db/client.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
 import {
   BrowserActionConfirmations,
+  type BrowserFrameGrace,
   BrowserFrameGuard,
   frameGraceFor,
 } from './browser-viewport-v2.js';
@@ -341,6 +342,63 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return !!now && now.node === typed.node && now.dialogs === typed.dialogs && now.dialogs >= 0;
     };
     const confirmations = new BrowserActionConfirmations();
+    /** HOTFIX-R4A: the last press was refused, so its release is dropped too. */
+    let pressRefused = false;
+    /**
+     * HOTFIX-R4A: open dialogs counted while frames flow (at most every 300 ms), each stamped when
+     * the count was read. A press on an older frame of the same document goes through only if no
+     * more dialogs are open now than at a count read before that frame was captured.
+     */
+    const dialogSamples: Array<{ at: number; count: number }> = [];
+    let dialogSampling = false;
+    let lastDialogSample = 0;
+    const countDialogs = async (): Promise<number | null> => {
+      const session = streamer?.getSession();
+      if (!session) return null;
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const read = session.send('Runtime.evaluate', {
+          expression: OPEN_DIALOGS_EXPRESSION,
+          returnByValue: true,
+        }) as Promise<{ result?: { value?: unknown } }>;
+        // A JS dialog blocks the page: no answer in time means no count.
+        const late = new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 500);
+          timer.unref?.();
+        });
+        const answered = await Promise.race([read, late]);
+        const value = answered?.result?.value;
+        return typeof value === 'number' ? value : null;
+      } catch {
+        return null;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+    const sampleDialogs = (): void => {
+      const now = Date.now();
+      if (dialogSampling || now - lastDialogSample < 300) return;
+      dialogSampling = true;
+      lastDialogSample = now;
+      void countDialogs()
+        .then((count) => {
+          if (count === null) return;
+          dialogSamples.push({ at: Date.now(), count });
+          while (dialogSamples.length > 32) dialogSamples.shift();
+        })
+        .finally(() => {
+          dialogSampling = false;
+        });
+    };
+    /** No dialog opened since the frame the press names was captured. */
+    const noNewDialogSince = async (capturedAt: number | undefined): Promise<boolean> => {
+      if (capturedAt === undefined) return false;
+      let before: { at: number; count: number } | undefined;
+      for (const sample of dialogSamples) if (sample.at <= capturedAt) before = sample;
+      if (!before) return false;
+      const now = await countDialogs();
+      return now !== null && now <= before.count;
+    };
     const invalidate = () => {
       typingFocus = null;
       frameGuard.invalidate();
@@ -363,6 +421,13 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ? async (envelope, signal) => {
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
+            // HOTFIX-R4A: the release of a refused press has nothing to release (DEPLOY-R4 单列 5:
+            // 7 lone mouse-ups reached the page).
+            if (message.type === 'mouseUp' && pressRefused) {
+              pressRefused = false;
+              throw new Error('browser_release_without_press');
+            }
+            if (message.type === 'mouseDown') pressRefused = true;
             if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
               // The assistant has moved to another tab: the input was aimed at a page no longer
               // shown. Drop it, follow the assistant's page; the person sees it and acts again.
@@ -376,7 +441,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             }
             // FIX-61 复审 #2 #2 / DEPLOY-61 #1: keys, text and the release of a press are lenient;
             // Enter and Space activate the focused element and keep 250ms (frameGraceFor).
-            let inputKind = frameGraceFor(message);
+            let inputKind: BrowserFrameGrace = frameGraceFor(message);
             let relaxedForTyping = false;
             // FIX-61B P1-5: Enter / Space on a frame superseded only within the lenient grace go
             // through when the focus is still the element the person was typing into.
@@ -390,9 +455,34 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               inputKind = 'lenient';
               relaxedForTyping = true;
             }
+            // HOTFIX-R4A: a press, move or scroll on a frame of the same document that the page's
+            // own animation superseded a moment ago (same tab, revision and URL; for a press, no
+            // dialog opened since) is the person acting on what is still there.
+            if (
+              inputKind === 'pointer' &&
+              (message.type === 'mouseDown' ||
+                message.type === 'mouseMove' ||
+                message.type === 'scroll') &&
+              envelope.observation &&
+              !frameGuard.validate(envelope.observation, Date.now(), 'pointer') &&
+              frameGuard.validate(
+                envelope.observation,
+                Date.now(),
+                'document',
+                streamer?.currentUrl(),
+              ) &&
+              (message.type !== 'mouseDown' ||
+                (await noNewDialogSince(frameGuard.capturedAtOf(envelope.observation.frameId))))
+            )
+              inputKind = 'document';
             if (
               ('x' in message && (!Number.isFinite(message.x) || !Number.isFinite(message.y))) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind)
+              !frameGuard.validate(
+                envelope.observation,
+                Date.now(),
+                inputKind,
+                streamer?.currentUrl(),
+              )
             ) {
               streamer?.requestFrameRefresh();
               throw new Error('browser_observation_expired');
@@ -422,7 +512,12 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             // Recheck after the asynchronous policy: resize/navigation may have happened.
             if (
               !streamer.matchesPage(await args.instance.executor.getPage()) ||
-              !frameGuard.validate(envelope.observation, Date.now(), inputKind) ||
+              !frameGuard.validate(
+                envelope.observation,
+                Date.now(),
+                inputKind,
+                streamer.currentUrl(),
+              ) ||
               (relaxedForTyping && !(await stillTypingTarget()))
             )
               throw new Error('browser_observation_expired');
@@ -441,6 +536,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               !confirmations.consume(envelope.confirmationNonce, result.request)
             )
               throw new Error('browser_confirmation_invalid');
+            if (message.type === 'mouseDown') pressRefused = false;
           }
         : undefined,
       executionDrain: opts.executionDrain,
@@ -503,7 +599,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
             let kind = 'pointer';
             try {
               const sent = JSON.parse(raw.toString()) as { payload?: { type?: string } };
-              if (/^(?:keyDown|insertText)$/.test(sent.payload?.type ?? '')) kind = 'key';
+              const type = sent.payload?.type ?? '';
+              // HOTFIX-R4A: a release (the Enter that submitted the search, a press whose page
+              // just changed) is dropped quietly — there is nothing for the person to redo.
+              if (type === 'keyUp' || type === 'mouseUp') return;
+              if (/^(?:keyDown|insertText)$/.test(type)) kind = 'key';
             } catch {
               /* unreadable: pointer */
             }
@@ -556,7 +656,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ws: args.ws,
         logger: userLog,
         viewportV2: args.viewportV2,
-        onFrame: (frame) => frameGuard.observe(frame),
+        onFrame: (frame) => {
+          frameGuard.observe(frame, streamer?.currentUrl() ?? '');
+          sampleDialogs();
+        },
         onObservationInvalidated: invalidate,
       });
       await streamer.start();
@@ -566,6 +669,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         return;
       }
       userLog.info('screencast: streamer running; input handler attached');
+      sampleDialogs();
       // Pass a getter (not the session itself) so input keeps
       // working across the streamer's hard-restart (phase 19e
       // watchdog) — the streamer swaps in a fresh session, the
