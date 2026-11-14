@@ -1,4 +1,4 @@
-import { replyLanguageRule } from '@holaday/shared-types';
+import { hasToolCallMarkup, replyLanguageRule } from '@holaday/shared-types';
 import type { FirecrawlLane } from '../firecrawl/firecrawl-lane.js';
 import { articleUrl, fetchResearchArticles } from './fresh-research-fallback.js';
 /**
@@ -473,6 +473,7 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let truncatedAtCap = false;
+  let toolTextQuestion = false;
   const observedSources: NeutralResponseSource[] = [];
   const credibleSources = () => {
     const sources = dedupeSources(observedSources);
@@ -674,6 +675,21 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
           outputTokens: totalOutputTokens,
         });
       }
+      // 61.80 (s04 run 2): a "question" that is a tool call written out as text
+      // (「[SEARCH] query: … [/SEARCH] 我需要等待搜索结果」) is not asked; the text goes on as
+      // the answer, where the no-answer guard hands it to the browser or fails it honestly.
+      if (
+        !opts.planOnly &&
+        status === 'completed' &&
+        AWAITING_USER_MARKER_RE.test(combined) &&
+        hasToolCallMarkup(combined)
+      ) {
+        // 复审 #3: the loop ends as for any answer (the fresh-research gate still applies);
+        // only the source list and footer are left off — they would read as content.
+        toolTextQuestion = true;
+        accumulatedSummary = stripAwaitingUserMarker(combined);
+        break;
+      }
       if (!opts.planOnly && status === 'completed' && AWAITING_USER_MARKER_RE.test(combined)) {
         return {
           status: 'awaiting_user',
@@ -733,11 +749,11 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
       });
     }
     const visible = accumulatedSummary + (truncatedAtCap ? TRUNCATION_NOTICE : '');
-    const withSources = appendSources(visible, sources);
+    const withSources = toolTextQuestion ? visible : appendSources(visible, sources);
     // Core follow-up controls belong to the router's separate suggestion channel. Do not
     // mix legacy UI links (including encoded numbers) into the verified body.
     const summary =
-      workflow && !opts.verificationContext
+      workflow && !opts.verificationContext && !toolTextQuestion
         ? withSources + buildFollowUpFooter(workflow)
         : withSources;
     return {

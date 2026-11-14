@@ -209,7 +209,12 @@ export function stripReasoning(text: string): string {
       const endsReasoning =
         /(?:^|\n|[。！？.!?…])[ \t]*$/u.test(before) || /^[ \t]*(?:\n|$)/.test(after);
       const quoted = /[「“"'《（(]\s*$/u.test(before) || /^\s*[」”"'》）)]/u.test(after);
-      if (endsReasoning && !quoted) out = after;
+      if (endsReasoning && !quoted) {
+        // 61.80 (LEAK-1 retest, s04 run 8: 「</think>」 forty times and nothing else): after the
+        // reasoning ends, a further closing tag alone on its line is a leftover — only the tag goes,
+        // never the text around it (复审: an answer between two tags is the answer).
+        out = after.replace(/^[ \t]*<\/think>[ \t]*(?:\n|$)/gim, '');
+      }
     }
   }
   return out

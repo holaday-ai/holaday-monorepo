@@ -735,6 +735,28 @@ describe('runGenerateTask — lightweight and expert workflows', () => {
     const outcome = await run(makeAdapter({ text: '[AWAITING_USER_INPUT] 请补充目标。' }));
     expect(outcome).toMatchObject({ status: 'awaiting_user', summary: '请补充目标。' });
   });
+
+  it('61.80: a "question" that is a tool call written as text is not asked', async () => {
+    const outcome = await run(
+      makeAdapter({
+        text: '让我搜索一下。\n\n[SEARCH]\nquery: "2025年诺贝尔文学奖得主"\n[/SEARCH] 我需要等待搜索结果。[AWAITING_USER_INPUT]',
+      }),
+    );
+    expect(outcome.status).not.toBe('awaiting_user');
+    expect(outcome.summary).not.toContain('[AWAITING_USER_INPUT]');
+    expect(outcome.summary).not.toContain('核验来源');
+  });
+
+  it('61.80 复审 #3: a tool-text question still meets the fresh-research gate', async () => {
+    const outcome = await run(
+      makeAdapter({
+        text: 'BROWSE:web_search{"query": "今天的新闻"}\n据我所知今天的头条是某某事件。[AWAITING_USER_INPUT]',
+      }),
+      { intent: '今天的新闻头条是什么' },
+    );
+    expect(outcome.status).not.toBe('awaiting_user');
+    expect(outcome.status).not.toBe('completed');
+  });
 });
 
 it('falls back from failed native research to fetched dated articles without loosening provenance', async () => {
