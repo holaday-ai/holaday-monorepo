@@ -744,6 +744,7 @@ describe('runGenerateTask — lightweight and expert workflows', () => {
     );
     expect(outcome.status).not.toBe('awaiting_user');
     expect(outcome.summary).not.toContain('[AWAITING_USER_INPUT]');
+    expect(outcome.summary).not.toContain('核验来源');
   });
 });
 

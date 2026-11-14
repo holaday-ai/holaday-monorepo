@@ -48,7 +48,14 @@ const TOOL_JSON_START_RE = new RegExp(
  * `[SEARCH]\nquery: "2025年诺贝尔文学奖得主"\n[/SEARCH]` — open and close tag with the same name.
  */
 const BRACKET_CALL_RE =
-  /\[(SEARCH|WEB_SEARCH|SEARCH_QUERY|BROWSE|BROWSER|BROWSER_USE|TOOL|TOOL_CALLS?|TOOL_USE|FUNCTION_CALLS?|CALL)\][\s\S]*?\[\/\1\]/gi;
+  /\[(SEARCH|WEB_SEARCH|SEARCH_QUERY|BROWSE|BROWSER|BROWSER_USE|TOOL_CALLS?|TOOL_USE|FUNCTION_CALLS?)\]([\s\S]*?)\[\/\1\]/gi;
+/** 复审 #2: only a block carrying arguments (`query: "…"`, `url=…`) — a tagged word in prose stays. */
+const BRACKET_ARGS_RE = /(?:^|\n)\s*[a-z_]+\s*[:=]/i;
+function stripBrackets(text: string): string {
+  return text.replace(BRACKET_CALL_RE, (block, _name: string, inner: string) =>
+    BRACKET_ARGS_RE.test(inner) ? '' : block,
+  );
+}
 const CODE_RE = /```[\s\S]*?(?:```|$)|`[^`\n]+`/g;
 
 /** End index (exclusive) of the balanced `{…}` starting at `start`, or -1. */
@@ -99,7 +106,7 @@ const STRUCTURE_RE =
 function hasStructure(text: string): boolean {
   return (
     STRUCTURE_RE.test(text) ||
-    new RegExp(BRACKET_CALL_RE.source, 'i').test(text) ||
+    stripBrackets(text) !== text ||
     new RegExp(TOOL_JSON_START_RE.source).test(text) ||
     new RegExp(TOOL_NAME_LINE_RE.source, 'im').test(text)
   );
@@ -107,9 +114,10 @@ function hasStructure(text: string): boolean {
 
 function stripPlain(text: string, structured = hasStructure(text)): string {
   if (!structured) return text;
-  return stripToolJson(
-    text.replace(BRACKET_CALL_RE, '').replace(PAIRED_RE, '').replace(TAG_RE, ''),
-  ).replace(TOOL_NAME_LINE_RE, '');
+  return stripToolJson(stripBrackets(text).replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
+    TOOL_NAME_LINE_RE,
+    '',
+  );
 }
 
 /**

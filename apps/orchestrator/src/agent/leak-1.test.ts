@@ -114,3 +114,46 @@ describe('LEAK-1 · 「搜一下」 is a search, not writing from memory', () =>
     },
   );
 });
+
+describe('LEAK-1 复审 #2', () => {
+  const logger = { info() {}, warn() {}, debug() {}, error() {} } as never;
+  const route = async (intent: string) => (await explainExecutionMode({ intent, logger })).mode;
+  it.each([
+    '[SEARCH]\nquery: "2025年诺贝尔文学奖得主"\n[/SEARCH] 我需要等待搜索结果。',
+    'BROWSE:web_search{"query": "x"}\n请稍等，搜索结果返回后我会告诉你答案。',
+  ])('P1-1: what is left is a promise to wait — no answer: %s', (text) => {
+    expect(deliverableAnswer(text)).toBeNull();
+  });
+  it('P1-1: a real answer after a call still goes out', () => {
+    expect(
+      deliverableAnswer(
+        'BROWSE:web_search{"query": "x"}\n根据公开报道，2024 年诺贝尔文学奖得主是韩江。',
+      ),
+    ).toBe('根据公开报道，2024 年诺贝尔文学奖得主是韩江。');
+  });
+  it.each([
+    '帮我写个广告语：百度一下，你就知道',
+    '把这句翻译成英文：搜一下就知道了',
+    '润色：有空去网上查查资料',
+    '帮我润色这段：大家可以去搜一下相关资料',
+    '写一篇作文，题目：去搜一下',
+  ])('P2-3: writing stays in generate: %s', async (intent) => {
+    expect(await route(intent)).toBe('generate');
+  });
+  it.each([
+    '帮我在网上搜一下杭州明天的天气',
+    '你搜一下 2025 年诺贝尔文学奖得主',
+    '麻烦搜一下 Python 3.14 发布日期',
+    '可以帮忙搜一下 OpenAI 最近的新闻吗',
+  ])('P2-4: %s', async (intent) => {
+    expect(await route(intent)).toBe('scrape');
+  });
+  it.each([
+    '日志：\n[TOOL] started\n...\n[/TOOL]',
+    '[TOOL]\n锤子、螺丝刀\n[/TOOL]',
+    'BBCode [CALL]123[/CALL] 是电话标签',
+    '输入 [SEARCH]关键词[/SEARCH] 可以检索',
+  ])('P2-5: paired brackets in prose stay: %s', (text) => {
+    expect(stripToolCallMarkup(text)).toBe(text);
+  });
+});

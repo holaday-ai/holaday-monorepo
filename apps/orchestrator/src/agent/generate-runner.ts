@@ -683,8 +683,15 @@ export async function runGenerateTask(input: RunGenerateOpts): Promise<TaggedGen
         AWAITING_USER_MARKER_RE.test(combined) &&
         hasToolCallMarkup(combined)
       ) {
-        accumulatedSummary = stripAwaitingUserMarker(combined);
-        break;
+        // 复审 #2: returned as it stands — no source list or footer is added to it.
+        return {
+          status: 'completed',
+          generation: { completeness: 'complete', stopReason: 'end_turn' },
+          summary: stripAwaitingUserMarker(combined),
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          durationMs: Date.now() - start,
+        };
       }
       if (!opts.planOnly && status === 'completed' && AWAITING_USER_MARKER_RE.test(combined)) {
         return {
