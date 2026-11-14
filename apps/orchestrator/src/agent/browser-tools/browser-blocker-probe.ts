@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import type { Frame, Page } from 'playwright';
+import { captchaWidgetState } from '../captcha-widget.js';
 import { detectBrowserBlocker } from './browser-completion.js';
 import { canReadOutsideWall } from './browser-public-targets.js';
 import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
@@ -256,10 +257,29 @@ async function frameVisibility(frame: Frame) {
  * look at: read it again once it has loaded, and only then call it unreadable.
  */
 export async function probeBrowserBlocker(page: Page, intent?: string) {
-  const first = await probeOnce(page, intent);
-  if (first?.reason !== 'page_unreadable') return first;
-  await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {});
-  return probeOnce(page, intent);
+  let hit = await probeOnce(page, intent);
+  if (hit?.reason === 'page_unreadable') {
+    await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {});
+    hit = await probeOnce(page, intent);
+  }
+  return captchaByBox(page, hit);
+}
+
+/**
+ * CAPTCHA-UX-1（协调方追加）: a captcha is judged by its box on the page, not by the address. On a
+ * page with a known captcha component (reCAPTCHA / hCaptcha / Turnstile frame or response field),
+ * the wall stands only while a challenge is open or a visible box has no response; passed (or the
+ * box gone) is no wall — the reCAPTCHA demo page's own address contains /recaptcha, so after it was
+ * passed the assistant waited out its 10 minutes. Pages without a known component (sliders, a
+ * site's own check) keep the address / title / text rules.
+ */
+async function captchaByBox<T extends { reason: string } | null | undefined>(
+  page: Page,
+  hit: T,
+): Promise<T | null> {
+  if (hit?.reason !== 'captcha') return hit;
+  const state = await captchaWidgetState(page);
+  return state?.known && !state.unpassed ? null : hit;
 }
 
 /**

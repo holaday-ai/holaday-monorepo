@@ -30,9 +30,9 @@ import type { Duplex } from 'node:stream';
 import type { BrowserActionDecision, BrowserActionRequest } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { WebSocket, WebSocketServer } from 'ws';
+import { captchaWidgetStateCdp } from '../agent/captcha-widget.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import { captchaHandoffs } from '../agent/supercar/captcha-handoff.js';
-import { captchaWidgetStateCdp } from '../agent/captcha-widget.js';
 import {
   type AuthenticatedSession,
   authenticateStreamOrAccessSession,

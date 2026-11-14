@@ -1,6 +1,5 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import type { BrowserFrameGeometry } from '@holaday/shared-types';
 import { pino } from 'pino';
 import { chromium } from 'playwright';
 import { expect, it, vi } from 'vitest';
