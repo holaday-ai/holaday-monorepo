@@ -426,7 +426,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       if (!before) return false;
       const seen = new Set(before.dialogs);
       const now = await readDialogs();
-      return now !== null && now.every((dialog) => seen.has(dialog));
+      // No reading (a JS dialog blocks the page) is no proof: refuse.
+      return now?.every((dialog) => seen.has(dialog)) ?? false;
     };
     const invalidate = () => {
       typingFocus = null;
