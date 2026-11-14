@@ -744,6 +744,32 @@ const AMAP_COLLAPSAR_MODES = /^(?:web|h5|wap|pc|\d)$/i;
  * the next online pause names the exact shape to allow. FIX-55 #1 allowed `len19:a0._`; DEPLOY-56
  * 第 0 步 took it back (协调方决定) and records the shape segment by segment (`segmentShape`).
  */
+/**
+ * FIX-56 (Deploy-55/56 b-m01 online `mode=seg3=len9:a|.|len2:a0|_|len6:a`, 协调方确认): exactly
+ * that segment structure passes — 9 lower-case letters, 「.」, 2 lower-case letters or digits
+ * with at least one digit, 「_」, 6 lower-case letters (19 in all) — and only when no segment
+ * carries an action word or a personal word. It is checked only here (collapsar
+ * `/alc/h5/upload`); the other keys keep their own checks. Any other structure still pauses,
+ * with its segment evidence.
+ */
+const AMAP_MODE_ONLINE_STRUCTURE = /^([a-z]{9})\.((?:[a-z]\d|\d[a-z]|\d\d))_([a-z]{6})$/;
+const AMAP_MODE_PERSONAL_RE =
+  /user|e-?mail|mail|name|addr|id_?card|idcard|openid|unionid|tel|phone|mobile|account|cart|save|fav|start|loc|gps|lat|lng|sku|cookie|sess|wechat|wx|appid/i;
+const amapModeOk = (mode: string) => {
+  if (AMAP_COLLAPSAR_MODES.test(mode)) return true;
+  const parts = AMAP_MODE_ONLINE_STRUCTURE.exec(mode);
+  return (
+    !!parts &&
+    parts
+      .slice(1)
+      .every(
+        (segment) =>
+          !ACTION_WORD_RE.test(segment) &&
+          !PERSONAL_VALUE_RE.test(segment) &&
+          !AMAP_MODE_PERSONAL_RE.test(segment),
+      )
+  );
+};
 /** A key/value pair in readable text: 「phone=138…」「"mobile" : "138"」. */
 const KEY_VALUE_RE = /[A-Za-z_][\w.-]{0,30}\s*["']?\s*[=:]\s*["']?[A-Za-z0-9\u4e00-\u9fff]/;
 
@@ -829,7 +855,7 @@ function amapCollapsarCheck(postData: string): string | null {
   // FIX-53 #3: every key that is not listed, so the next pause says all of them.
   if (unlisted.length) return `key:${unlisted.join('+')}`;
   const mode = form.get('mode');
-  if (mode !== null && !AMAP_COLLAPSAR_MODES.test(mode)) return `mode=${segmentShape(mode)}`;
+  if (mode !== null && !amapModeOk(mode)) return `mode=${segmentShape(mode)}`;
   const notTime = ['timestamp', 'uploadTime'].find(
     (key) => !/^\d{0,16}$/.test(form.get(key) ?? ''),
   );
