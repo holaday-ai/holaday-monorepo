@@ -911,6 +911,7 @@ async function processTools(
           const gate = createDescriptionActionGate<typeof action>({
             pageUrl: () => options.target.expectedUrl,
             onBeforeAction: options.onBeforeAction ?? classifyRuntimeAction,
+            userIntent: options.intent,
             aborted: () => run.modelAbort.signal.aborted,
             stillLive: async () =>
               !(await cancellationRequested(options)) && options.control.canAgentAct(),
