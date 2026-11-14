@@ -126,6 +126,17 @@ export class BrowserFrameGuard {
         : prior && now - prior.supersededAt <= grace
           ? prior.frame
           : null;
+    // HOTFIX-R4A (复审 P1-b): the same document scrolled or zoomed since is not the same picture —
+    // a point on the old frame is another element now.
+    if (
+      input === 'document' &&
+      f &&
+      (f.scrollOffset.x !== this.frame.scrollOffset.x ||
+        f.scrollOffset.y !== this.frame.scrollOffset.y ||
+        f.pageScaleFactor !== this.frame.pageScaleFactor ||
+        f.offsetTop !== this.frame.offsetTop)
+    )
+      return false;
     return !!(
       f &&
       ref.tabId === f.tabId &&

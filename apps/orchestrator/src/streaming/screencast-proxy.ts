@@ -144,6 +144,28 @@ const FOCUSED_TEXT_BOX_EXPRESSION = `(() => {
 const OPEN_DIALOGS_EXPRESSION =
   "document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]').length";
 
+/**
+ * HOTFIX-R4A (复审 P1-a): the dialogs on screen now, one number each (a hash of kind, box and its
+ * first words, made in the page — no text leaves it). A dialog kept in the DOM while closed is
+ * not counted; a new one, or one shown again, is a number not seen before.
+ */
+const VISIBLE_DIALOGS_EXPRESSION = `(() => {
+  const out = [];
+  for (const el of document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]')) {
+    if (el.hidden || el.closest('[inert]')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) continue;
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+    const key = el.tagName + '|' + (el.getAttribute('role') || '') + '|' + Math.round(r.left) + ',' + Math.round(r.top) + ',' + Math.round(r.width) + ',' + Math.round(r.height) + '|' + (el.innerText || '').slice(0, 200);
+    let h = 2166136261;
+    for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+    out.push(h >>> 0);
+  }
+  return out;
+})()`;
+
 export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastProxy {
   const pathPattern = opts.pathPattern ?? /^\/screencast-ws\/([^/?#]+)/;
   const wss = new WebSocketServer({ noServer: true });
@@ -342,33 +364,34 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       return !!now && now.node === typed.node && now.dialogs === typed.dialogs && now.dialogs >= 0;
     };
     const confirmations = new BrowserActionConfirmations();
-    /** HOTFIX-R4A: the last press was refused, so its release is dropped too. */
-    let pressRefused = false;
     /**
-     * HOTFIX-R4A: open dialogs counted while frames flow (at most every 300 ms), each stamped when
-     * the count was read. A press on an older frame of the same document goes through only if no
-     * more dialogs are open now than at a count read before that frame was captured.
+     * HOTFIX-R4A: the visible dialogs read while frames flow (at most every 300 ms), each stamped
+     * when it was read. A press on an older frame of the same document goes through only if every
+     * dialog on screen now was already there in a reading taken before that frame was captured.
+     * Cleared with the observation (another document is not compared with this one).
      */
-    const dialogSamples: Array<{ at: number; count: number }> = [];
+    let dialogSamples: Array<{ at: number; dialogs: number[] }> = [];
+    let dialogGeneration = 0;
     let dialogSampling = false;
     let lastDialogSample = 0;
-    const countDialogs = async (): Promise<number | null> => {
+    const readDialogs = async (): Promise<number[] | null> => {
       const session = streamer?.getSession();
       if (!session) return null;
       let timer: NodeJS.Timeout | undefined;
       try {
         const read = session.send('Runtime.evaluate', {
-          expression: OPEN_DIALOGS_EXPRESSION,
+          expression: VISIBLE_DIALOGS_EXPRESSION,
           returnByValue: true,
         }) as Promise<{ result?: { value?: unknown } }>;
-        // A JS dialog blocks the page: no answer in time means no count.
+        // A JS dialog blocks the page: no answer in time means no reading.
         const late = new Promise<null>((resolve) => {
           timer = setTimeout(() => resolve(null), 500);
           timer.unref?.();
         });
-        const answered = await Promise.race([read, late]);
-        const value = answered?.result?.value;
-        return typeof value === 'number' ? value : null;
+        const value = (await Promise.race([read, late]))?.result?.value;
+        return Array.isArray(value) && value.every((n) => typeof n === 'number')
+          ? (value as number[])
+          : null;
       } catch {
         return null;
       } finally {
@@ -380,28 +403,36 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       if (dialogSampling || now - lastDialogSample < 300) return;
       dialogSampling = true;
       lastDialogSample = now;
-      void countDialogs()
-        .then((count) => {
-          if (count === null) return;
-          dialogSamples.push({ at: Date.now(), count });
+      const generation = dialogGeneration;
+      void readDialogs()
+        .then((dialogs) => {
+          if (dialogs === null || generation !== dialogGeneration) return;
+          dialogSamples.push({ at: Date.now(), dialogs });
           while (dialogSamples.length > 32) dialogSamples.shift();
         })
         .finally(() => {
           dialogSampling = false;
         });
     };
+    const clearDialogSamples = (): void => {
+      dialogSamples = [];
+      dialogGeneration++;
+    };
     /** No dialog opened since the frame the press names was captured. */
     const noNewDialogSince = async (capturedAt: number | undefined): Promise<boolean> => {
       if (capturedAt === undefined) return false;
-      let before: { at: number; count: number } | undefined;
+      let before: { at: number; dialogs: number[] } | undefined;
       for (const sample of dialogSamples) if (sample.at <= capturedAt) before = sample;
       if (!before) return false;
-      const now = await countDialogs();
-      return now !== null && now <= before.count;
+      const seen = new Set(before.dialogs);
+      const now = await readDialogs();
+      return now !== null && now.every((dialog) => seen.has(dialog));
     };
     const invalidate = () => {
       typingFocus = null;
       frameGuard.invalidate();
+      // HOTFIX-R4A (复审 P2-e): another document's dialogs are not this one's.
+      clearDialogSamples();
       confirmations.invalidate();
       if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
         args.ws.send(JSON.stringify({ type: 'observation-invalidated' }));
@@ -421,13 +452,6 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ? async (envelope, signal) => {
             const message = envelope.payload;
             if (!message) throw new Error('browser_input_missing');
-            // HOTFIX-R4A: the release of a refused press has nothing to release (DEPLOY-R4 单列 5:
-            // 7 lone mouse-ups reached the page).
-            if (message.type === 'mouseUp' && pressRefused) {
-              pressRefused = false;
-              throw new Error('browser_release_without_press');
-            }
-            if (message.type === 'mouseDown') pressRefused = true;
             if (!streamer?.matchesPage(await args.instance.executor.getPage())) {
               // The assistant has moved to another tab: the input was aimed at a page no longer
               // shown. Drop it, follow the assistant's page; the person sees it and acts again.
@@ -518,7 +542,11 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
                 inputKind,
                 streamer.currentUrl(),
               ) ||
-              (relaxedForTyping && !(await stillTypingTarget()))
+              (relaxedForTyping && !(await stillTypingTarget())) ||
+              // 复审 P2-f: a dialog that opened while the policy ran.
+              (inputKind === 'document' &&
+                message.type === 'mouseDown' &&
+                !(await noNewDialogSince(frameGuard.capturedAtOf(envelope.observation!.frameId))))
             )
               throw new Error('browser_observation_expired');
             if (
@@ -536,7 +564,6 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
               !confirmations.consume(envelope.confirmationNonce, result.request)
             )
               throw new Error('browser_confirmation_invalid');
-            if (message.type === 'mouseDown') pressRefused = false;
           }
         : undefined,
       executionDrain: opts.executionDrain,
@@ -656,8 +683,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
         ws: args.ws,
         logger: userLog,
         viewportV2: args.viewportV2,
-        onFrame: (frame) => {
-          frameGuard.observe(frame, streamer?.currentUrl() ?? '');
+        onFrame: (frame, meta) => {
+          frameGuard.observe(frame, meta?.url ?? '');
           sampleDialogs();
         },
         onObservationInvalidated: invalidate,

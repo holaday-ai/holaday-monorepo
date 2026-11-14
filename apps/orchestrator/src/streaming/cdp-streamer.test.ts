@@ -834,6 +834,8 @@ it('uses CSS layout units when Retina screencast metadata contains physical pixe
     await vi.waitFor(() => expect(onFrame).toHaveBeenCalled());
     expect(onFrame).toHaveBeenCalledWith(
       expect.objectContaining({ cssWidth: 400, cssHeight: 300, imageWidth: 800, imageHeight: 600 }),
+      // HOTFIX-R4A: the URL the frame was captured under.
+      expect.objectContaining({ url: expect.any(String) }),
     );
   } finally {
     await streamer.stop();

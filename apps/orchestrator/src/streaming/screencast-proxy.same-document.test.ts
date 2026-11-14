@@ -24,7 +24,8 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-const PAGE = `<!doctype html><body style="margin:0">
+const PAGE = `<!doctype html><body style="margin:0;height:3000px">
+<div id="kept" role="dialog" style="display:none;position:absolute;left:900px;top:600px;width:200px;height:80px;background:#fff">确认支付？</div>
 <div id="tick" style="position:absolute;left:700px;top:400px;width:120px;height:60px;background:#e22">0</div>
 <button id="b" style="position:absolute;left:100px;top:100px;width:160px;height:80px">按钮</button>
 <iframe id="f" src="https://tiles.fixture.test/tile?n=0" style="position:absolute;left:400px;top:100px;width:200px;height:200px;border:0"></iframe>
@@ -230,6 +231,36 @@ it('HOTFIX-R4A: another document is never the same document — after a pushStat
     s.click(180, 140, beforeNav);
     await vi.waitFor(() => expect(s.expired.length).toBe(2), { timeout: 3000 });
     await new Promise((r) => setTimeout(r, 300));
+    expect(await s.read()).toMatchObject({ hits: 0, ups: 0 });
+  } finally {
+    await s.close();
+  }
+}, 20000);
+
+it('HOTFIX-R4A 复审 P1-a: a dialog kept in the DOM and shown again after the frame — the press is refused', async () => {
+  const s = await screen();
+  try {
+    const shown = s.now();
+    await s.page.evaluate(() => {
+      document.getElementById('kept')!.style.display = 'block';
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    s.click(180, 140, shown);
+    await vi.waitFor(() => expect(s.expired).toEqual(['pointer']), { timeout: 3000 });
+    expect(await s.read()).toMatchObject({ hits: 0, ups: 0 });
+  } finally {
+    await s.close();
+  }
+}, 20000);
+
+it('HOTFIX-R4A 复审 P1-b: the page scrolled since the frame — the press is refused (the point is another element)', async () => {
+  const s = await screen();
+  try {
+    const shown = s.now();
+    await s.page.evaluate(() => scrollTo(0, 300));
+    await new Promise((r) => setTimeout(r, 500));
+    s.click(180, 440, shown);
+    await vi.waitFor(() => expect(s.expired).toEqual(['pointer']), { timeout: 3000 });
     expect(await s.read()).toMatchObject({ hits: 0, ups: 0 });
   } finally {
     await s.close();
