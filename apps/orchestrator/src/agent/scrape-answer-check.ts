@@ -324,3 +324,27 @@ export function answerNotObtained(answer: string, intent = ''): boolean {
     return true;
   return fields.length >= 2 && empty.length * 2 >= fields.length;
 }
+
+/**
+ * G2g (s01 「搜一下 HOLA DAY AI 是什么」, local B cuxBlr): the write-up answered 「"HOLA DAY" 是我自己的
+ * 名字——我是一个浏览器任务执行助手」 — the assistant's own name and role from its system prompt, not
+ * anything the search read. A sentence presenting the assistant itself (也就是我 / 我的名字 / 我就是 /
+ * 我是…助手) is not grounded in the fetched pages. Quoted text (「…」“…”) is the page's, never a
+ * self-description; a sentence a read page carries word for word is the page's too.
+ */
+const SELF_IDENTITY_RE =
+  /(?:也|即|就|正)是我(?![们國国])|是我(?:自己)?的名字|我(?:自己)?的名字|我就是|(?:^|[，,；;：:—\s])我(?:是|叫|作为)(?:一个|一款|一名|你的|您的)?[^。！？!?\n，,]{0,30}?(?:助手|智能体|\bAI\b|assistant|agent)|\b(?:I am|I'm|my name is)\b[^.!?\n]{0,40}?(?:HOLA DAY|assistant|agent)/i;
+const QUOTED_SPAN_RE = /「[^」\n]*」|『[^』\n]*』|《[^》\n]*》|“[^”\n]*”|"[^"\n]*"/g;
+const flat = (text: string) =>
+  text.replace(/\*\*|__|[`*_>#]/g, '').replace(/[\s「」『』“”"'。！？!?.,，、：:；;—-]+/g, '');
+
+/** The answer's sentences that present the assistant itself, as written (for removal). */
+export function selfIdentitySentences(answer: string, pageTexts: readonly string[]): string[] {
+  const pages = pageTexts.map(flat);
+  return (answer.match(/[^。！？!?\n]+[。！？!?]?/g) ?? []).filter((sentence) => {
+    const plain = sentence.replace(/\*\*|__/g, '').replace(QUOTED_SPAN_RE, ' ');
+    if (!SELF_IDENTITY_RE.test(plain)) return false;
+    const own = flat(sentence);
+    return !own || !pages.some((page) => page.includes(own));
+  });
+}
