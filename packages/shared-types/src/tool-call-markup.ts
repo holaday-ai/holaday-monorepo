@@ -40,8 +40,30 @@ const TOOL_WORD_NAMES = MODEL_TOOL_NAMES.filter((name) => !name.includes('_'));
 /** 61.80 retest run 11 (`{"type": "browser_navigate", …}`): any browser_ / computer_ / tool_ name. */
 const CALL_NAMES = `(?:(?:browser|computer|tool)_[a-z]+(?:_[a-z]+)*|${TOOL_ONLY_NAMES.join('|')})`;
 const INLINE_CALL = String.raw`(?<![\w.])(?:[A-Za-z][A-Za-z_]{2,}[ \t]*[:：][ \t]*(?:${CALL_NAMES}|${TOOL_WORD_NAMES.join('|')})|${CALL_NAMES})[ \t]*\(?[ \t]*\{\s*"`;
+/**
+ * LEAK-2 (online check after DEPLOY-R5, s04 on production): the scrape → generate fallback wrote
+ * 「web_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>」 — a tag named after a tool, its
+ * opening 「<」 missing. A tag pair named after a tool the model is offered (any name with an
+ * underscore, or browser_ / computer_ / tool_ …) is tool syntax, with or without that 「<」; a lone
+ * such tag goes too. Plain names (`<search>` is an HTML element) are not touched.
+ */
+/**
+ * 复审: without its 「<」 the opener must not be part of a word (「我查一下。web_search>」 counts) and is
+ * followed by a line break or the arguments — prose that names a tool mid-line does not reach a
+ * closing tag further down.
+ */
+const NAMED_PAIRED_RE = new RegExp(
+  String.raw`(?:<(${CALL_NAMES})\b[^<>\n]*>|(?<![\w.])(${CALL_NAMES})>(?=[ \t]*(?:\r?\n|[{[])))[\s\S]*?</(?:\1|\2)\s*>`,
+  'gi',
+);
+const NAMED_TAG_RE = new RegExp(String.raw`</?(?:${CALL_NAMES})\b[^<>]*/?>`, 'gi');
+/**
+ * 复审: a tool-named opener straight before its JSON arguments with no closing tag (a truncated
+ * stream: 「web_search>\n{"query": …}」, 「<web_search>{"query": …}」) — the opener and the JSON go.
+ */
+const NAMED_OPEN_CALL = String.raw`(?<![\w.])<?(?:${CALL_NAMES})\b[^<>\n]*>\s*\{\s*"`;
 const TOOL_JSON_START_RE = new RegExp(
-  String.raw`${INLINE_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|${CALL_NAMES})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
+  String.raw`${INLINE_CALL}|${NAMED_OPEN_CALL}|\{\s*(?:"(?:action|tool|tool_name|tool_use|function|function_call)"\s*:|"type"\s*:\s*"(?:tool_use|${CALL_NAMES})"|"name"\s*:\s*"(?:(?:[a-z]+_(?:use|call)|${TOOL_ONLY_NAMES.join('|')})"|(?:${TOOL_WORD_NAMES.join('|')})"\s*(?:,\s*"(?:arguments|parameters|input|args)"|\})|[\w.-]+"\s*,\s*"(?:arguments|parameters)"|[\w.-]+"\s*,\s*"(?:input|args)"\s*:\s*\{))`,
   'g',
 );
 /**
@@ -90,12 +112,20 @@ function stripToolJson(text: string): string {
     const start = match.index ?? 0;
     if (start < from) continue;
     // An inline call (`BROWSE:web_search{…}`) goes from its label; its JSON starts at the brace.
-    const end = jsonBlockEnd(text, text.indexOf('{', start));
-    // An unclosed call (truncated stream) runs to the end of its line.
+    const brace = text.indexOf('{', start);
+    const end = jsonBlockEnd(text, brace);
+    // An unclosed call (truncated stream) runs to the end of its line — or, after a tool-named
+    // opener (「web_search>\n{"query": …」, LEAK-2 复审), to the end of the text: the stream
+    // stopped inside the arguments.
     // `web_search({…})`: the closing parenthesis goes with it.
     const close = end > 0 ? /^[ \t]*\)/.exec(text.slice(end)) : null;
+    const namedOpener = text.slice(start, brace).includes('>');
     const stop =
-      end > 0 ? end + (close?.[0].length ?? 0) : text.indexOf('\n', start) + 1 || text.length;
+      end > 0
+        ? end + (close?.[0].length ?? 0)
+        : namedOpener
+          ? text.length
+          : text.indexOf('\n', start) + 1 || text.length;
     out += text.slice(from, start);
     from = stop;
   }
@@ -123,10 +153,13 @@ function hasStructure(text: string): boolean {
 
 function stripPlain(text: string, structured = hasStructure(text)): string {
   if (!structured) return text;
-  return stripToolJson(stripBrackets(text).replace(PAIRED_RE, '').replace(TAG_RE, '')).replace(
-    TOOL_NAME_LINE_RE,
-    '',
-  );
+  // A lone tool-named tag goes after the JSON pass: an opener without its closing tag
+  // (a truncated stream) is removed there together with its arguments.
+  return stripToolJson(
+    stripBrackets(text).replace(NAMED_PAIRED_RE, '').replace(PAIRED_RE, '').replace(TAG_RE, ''),
+  )
+    .replace(NAMED_TAG_RE, '')
+    .replace(TOOL_NAME_LINE_RE, '');
 }
 
 /**

@@ -113,3 +113,31 @@ describe('DEPLOY-R4 D16: the notice names every provider whose results the run s
     );
   });
 });
+
+describe('DEPLOY-R5: taking the run guard down never holds up the result', () => {
+  it('a context whose unroute never settles still returns the run (BestBuy hang, 4/4 on the candidate)', async () => {
+    const context = await browser.newContext();
+    // On some pages Playwright's unroute never settles; the task used to wait for the watchdog.
+    context.unroute = (() => new Promise<void>(() => {})) as typeof context.unroute;
+    const page = await context.newPage();
+    const started = Date.now();
+    const outcome = await runSearchWithFallback(
+      {
+        taskId: 'r5-hang',
+        intent: '请使用云端浏览器，在 BestBuy 搜索 usb c cable，告诉我第一个结果',
+        executor: { getPage: async () => page },
+        onEvidence: async () => {},
+      } as unknown as RunSupercarOptions,
+      {
+        originalIntent: '请使用云端浏览器，在 BestBuy 搜索 usb c cable，告诉我第一个结果',
+        searchProvider: new StubSearchProvider(),
+        searchApiFirst: true,
+        stop: () => true,
+        run: async () => done,
+      },
+    );
+    expect(outcome.status).toBe('completed');
+    expect(Date.now() - started).toBeLessThan(10_000);
+    await context.close();
+  }, 30_000);
+});
