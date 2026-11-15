@@ -11,6 +11,17 @@ import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { amazonVerificationUrl, verificationPost } from './cloud-observation.js';
+import {
+  type ConsentTarget,
+  consentButton,
+  consentRefusalMessage,
+  consentSentence,
+  consentToggle,
+  contactField,
+  contactRefusalMessage,
+  userAskedToConsent,
+  userGaveValue,
+} from './consent-guard.js';
 import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
 import type { ActionGateDecision } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
@@ -54,6 +65,8 @@ interface ElementSignals {
   credentialForm?: boolean;
   /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control. */
   loginControl?: boolean;
+  /** G2i: the click toggles a checkbox / radio / switch — its label and current state. */
+  toggle?: { label: string; checked: boolean } | null;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
@@ -135,6 +148,49 @@ const READ_ACTIONABLE = (
   const link = target.closest('a[href]') as HTMLAnchorElement | null;
   const form = (input.form ?? target.closest('form')) as HTMLFormElement | null;
   const submitter = target.tagName === 'BUTTON' || target.tagName === 'INPUT';
+  // G2i: what a click on a checkbox / radio / switch (or its label) ticks, named by its label.
+  const toggleRole = /^(?:checkbox|switch|radio|menuitemcheckbox|menuitemradio)$/i;
+  let box: Element | null = null;
+  if (target.tagName === 'INPUT' && /^(?:checkbox|radio)$/i.test(input.type)) box = target;
+  else if (toggleRole.test(target.getAttribute('role') || '')) box = target;
+  else if (target.tagName === 'LABEL') {
+    const control = (target as HTMLLabelElement).control;
+    box =
+      control &&
+      control.tagName === 'INPUT' &&
+      /^(?:checkbox|radio)$/i.test((control as HTMLInputElement).type)
+        ? control
+        : target.querySelector(
+            'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]',
+          );
+  }
+  let toggle: { label: string; checked: boolean } | null = null;
+  if (box) {
+    const parts: string[] = [];
+    parts.push(box.getAttribute('aria-label') || '');
+    for (const id of (box.getAttribute('aria-labelledby') || '').split(/\s+/)) {
+      const ref = id ? doc.getElementById(id) : null;
+      if (ref) parts.push(ref.textContent || '');
+    }
+    const boxInput = box as HTMLInputElement;
+    if (boxInput.labels)
+      for (const label of Array.from(boxInput.labels)) parts.push(label.textContent || '');
+    const wrapping = box.closest('label');
+    if (wrapping) parts.push(wrapping.textContent || '');
+    if (box !== target) parts.push(text);
+    if (box.getAttribute('role')) parts.push((box as HTMLElement).innerText || '');
+    // No label: the short text right around the box (「<input type=checkbox> I accept the terms」).
+    const around = String((box.parentElement as HTMLElement | null)?.innerText || '').trim();
+    if (!parts.join('').trim() && around.length <= 120) parts.push(around);
+    // Its name only when nothing names it (a survey's name="agreement_q1" is not its answer).
+    if (!parts.join('').trim())
+      parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
+    toggle = {
+      label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+      checked:
+        box.tagName === 'INPUT' ? boxInput.checked : box.getAttribute('aria-checked') === 'true',
+    };
+  }
   return {
     visibleText: text || value || null,
     ariaLabel: target.getAttribute('aria-label'),
@@ -165,6 +221,7 @@ const READ_ACTIONABLE = (
       !actionable && !text && String(el.tagName || '').includes('-') && !el.shadowRoot
         ? true
         : undefined,
+    toggle,
   };
 };
 
@@ -584,6 +641,10 @@ export interface UnifiedActionDescription {
   objects?: string;
   /** The site's own verification step this action would submit to: handed over, never sent. */
   verification?: string | null;
+  /** G2i: the click ticks / accepts an agreement — the user's own request must ask for it. */
+  consent?: ConsentTarget | null;
+  /** G2i: typing into a mailbox / phone box — only a value the user gave is typed. */
+  contact?: { kind: 'email' | 'phone'; value: string } | null;
 }
 
 /**
@@ -632,6 +693,33 @@ async function fieldSignals(
   return login?.loginField ? { ...signals, credentialForm: true } : signals;
 }
 
+/** G2i: a click that would tick a consent box, or a button that accepts as a whole. */
+function clickConsent(
+  signals: ElementSignals | null,
+  fallbackLabel: string | null,
+): ConsentTarget | null {
+  if (!signals) return null;
+  if (signals.toggle)
+    return consentToggle({
+      label: signals.toggle.label || fallbackLabel || '',
+      checked: signals.toggle.checked,
+    });
+  const tag = (signals.tagName ?? '').toLowerCase();
+  const type = (signals.type ?? '').toLowerCase();
+  const plain = ['div', 'span', 'li', 'p', 'label', 'i', 'em'].includes(tag);
+  const buttonLike =
+    plain ||
+    tag === 'button' ||
+    tag === 'a' ||
+    (tag === 'input' && ['submit', 'button'].includes(type));
+  if (!buttonLike) return null;
+  return (
+    consentButton([signals.visibleText, signals.ariaLabel, signals.title, fallbackLabel]) ??
+    // 复审: a custom checkbox drawn as a div / span with the agreement sentence as its text.
+    (plain ? consentSentence(signals.visibleText ?? signals.ariaLabel) : null)
+  );
+}
+
 function clickDescription(
   target: ReadTarget | null,
   fallbackLabel: string | null,
@@ -641,6 +729,7 @@ function clickDescription(
   const signals = target?.signals ?? null;
   return {
     descriptors: [descriptor('click', signals, fallbackLabel, pageUrl)],
+    consent: clickConsent(signals, fallbackLabel),
     unverified: !signals ? unreadable : signals.opaque ? UNREADABLE_HOST : null,
     transactional: null,
     bindings: [target?.binding ?? null],
@@ -718,6 +807,8 @@ export async function describeUnifiedAction(
         transactional: null,
         bindings: [handle ? { kind: 'handle', handle } : null],
         objects: JSON.stringify([action.value]),
+        // 复审 P2: choosing an option that agrees (「Yes, subscribe me」) is the same tick.
+        consent: consentToggle({ label: action.value, checked: false }),
       };
     }
     case 'type': {
@@ -732,7 +823,10 @@ export async function describeUnifiedAction(
           transactional: null,
           bindings: [binding],
         };
-      if (!action.submit) return { ...plain([typed]), bindings: [binding] };
+      // G2i: a mailbox / phone box outside a login form (a login box is refused by the policy).
+      const contactKind = signals.credentialForm ? null : contactField(typed);
+      const contact = contactKind ? { kind: contactKind, value: action.text } : null;
+      if (!action.submit) return { ...plain([typed]), bindings: [binding], contact };
       const form = handle ? await withTimeout(handle.evaluate(READ_SUBMIT_CONTEXT)) : null;
       if (!form)
         return {
@@ -760,6 +854,7 @@ export async function describeUnifiedAction(
           : null;
       return {
         descriptors: [typed, submit],
+        contact,
         unverified,
         transactional,
         bindings: [binding],
@@ -804,6 +899,11 @@ export interface UnifiedActionGateOptions {
    * it or takes another route. A transactional context is still confirmed.
    */
   readOnly?: boolean;
+  /**
+   * G2i: the user's own request. Agreement / consent / subscription boxes are ticked, and
+   * mailbox / phone boxes typed, only when it asks for that (or gives that value).
+   */
+  userIntent?: string | null;
 }
 
 /** FIX-61 DEPLOY-61 P1-2: what a read-only task is told instead of a confirmation. */
@@ -973,6 +1073,15 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
 
   return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
     const description = await options.describe(action, phase);
+    // G2i: agreeing and the user's own contact details are the user's — refused, the task goes on.
+    if (phase === 'before') {
+      const consent = description.consent;
+      if (consent && !userAskedToConsent(options.userIntent, consent.kind))
+        return { kind: 'skip', message: consentRefusalMessage(consent) };
+      const contact = description.contact;
+      if (contact && !userGaveValue(options.userIntent, contact.value, contact.kind))
+        return { kind: 'skip', message: contactRefusalMessage(contact.kind) };
+    }
     if (phase === 'before' && description.verification) {
       const question = buildAuthParkQuestion('captcha', description.verification);
       const reply = await options.park(userFacing(question), 'captcha');
@@ -1064,6 +1173,31 @@ export function describeUserBrowserAction(
       : {}),
     ...(element.loginControl && action.kind === 'click' ? { loginControl: true } : {}),
   };
+  // G2i: the extension reads no label or checked state for a box: its own name stands for it.
+  const toggleTarget =
+    /^(?:checkbox|radio)$/i.test(element.inputType ?? '') ||
+    /^(?:checkbox|switch|radio)$/i.test(element.role ?? '');
+  // 复审 P2: Space on a focused box ticks it like a click.
+  const toggles =
+    action.kind === 'click' ||
+    (action.kind === 'key' && /(?:^|\+)(?:space|spacebar| )$/i.test(action.payload.key));
+  const consent = !toggles
+    ? null
+    : action.kind === 'key' && !toggleTarget
+      ? null
+      : toggleTarget
+        ? consentToggle({
+            // Its name only when nothing names it (复审: a survey's name is not its answer).
+            label:
+              [element.visibleText, element.ariaLabel, element.title].filter(Boolean).join(' ') ||
+              (element.name ?? ''),
+            checked: false,
+          })
+        : consentButton([element.visibleText, element.ariaLabel, element.title]);
+  const contactKind =
+    action.kind === 'type' && !descriptor.credentialForm ? contactField(descriptor) : null;
+  const typedText = action.kind === 'type' ? String(action.payload.text ?? '') : '';
+  const contact = contactKind ? { kind: contactKind, value: typedText } : null;
   const form = target.form;
   const activates =
     action.kind === 'key' &&
@@ -1078,6 +1212,8 @@ export function describeUserBrowserAction(
   if (!submit || !form)
     return {
       ...identity,
+      consent,
+      contact,
       descriptors: [descriptor],
       unverified:
         (action.kind === 'click' || activates) &&
@@ -1096,6 +1232,8 @@ export function describeUserBrowserAction(
   const control = form.submitControl;
   return {
     ...identity,
+    consent,
+    contact,
     descriptors: [
       descriptor,
       {

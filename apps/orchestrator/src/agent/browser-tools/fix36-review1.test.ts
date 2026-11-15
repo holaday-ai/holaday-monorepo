@@ -66,7 +66,7 @@ async function refOf(page: Page, pattern: RegExp): Promise<string> {
   return ref;
 }
 
-function gateFor(page: Page) {
+function gateFor(page: Page, userIntent?: string) {
   const park = vi.fn(async (_question: string, _kind: string) => '确认执行');
   return {
     park,
@@ -76,6 +76,7 @@ function gateFor(page: Page) {
       labelForRef: () => null,
       park,
       aborted: () => false,
+      userIntent,
     }),
   };
 }
@@ -197,11 +198,15 @@ describe('FIX-36 复审 #1 · cloud browser: no popup needed', () => {
     await page.close();
   });
 
+  // G2i (Q-4): no login field — and filled with the values the user gave (never made up).
   it('复审 #2 #4 reverse: a contact or booking form’s phone and e-mail are filled', async () => {
     const page = await open(
       '<form><label>联系人 <input id="n"></label><label>手机号码 <input id="m" type="tel"></label><label>邮箱 <input id="e" type="email"></label><label>预约日期 <input type="date" id="d"></label><button>提交预约</button></form>',
     );
-    const { gate } = gateFor(page);
+    const { gate } = gateFor(
+      page,
+      '预约表单：联系人张三，手机号码 13800000000，邮箱 a@example.com',
+    );
     for (const [name, text] of [
       ['手机号码', '13800000000'],
       ['邮箱', 'a@example.com'],

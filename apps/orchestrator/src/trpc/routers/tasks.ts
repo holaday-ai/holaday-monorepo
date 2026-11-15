@@ -6528,6 +6528,9 @@ export const tasksRouter = router({
                   intent: effectiveIntent,
                   // G2g: what the user typed this turn, for the checks of what was asked.
                   userIntent: input.intent,
+                  // G2i 复审: consent and the user's own contact values come from what the user
+                  // typed only — never the previous answer or a preamble the model also sees.
+                  userRequest: parentUserContext + input.intent,
                   expertMode: expertModeOverride,
                   ...(memoryPreamble ? { memoryPreamble } : {}),
                   ...(playbookContext ? { playbookContext } : {}),
@@ -7481,6 +7484,7 @@ export const tasksRouter = router({
                     ...(capture ? { capture } : {}),
                     taskId,
                     intent: effectiveIntent,
+                    userRequest: parentUserContext + input.intent,
                     messagesAdapter: browserMessagesAdapter,
                     client: session.client,
                     control: session.control,

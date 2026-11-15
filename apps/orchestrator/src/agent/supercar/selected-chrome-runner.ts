@@ -42,6 +42,8 @@ type Observation = NonNullable<Extract<SelectedChromeClientReply, { ok: true }>[
 export interface RunSelectedChromeTaskOptions {
   taskId: string;
   intent: string;
+  /** G2i 复审: what the user typed (see RunSupercarOptions.userRequest). Defaults to `intent`. */
+  userRequest?: string;
   messagesAdapter: MessagesAdapter;
   client: SelectedChromeClient;
   control: BrowserControl;
@@ -911,6 +913,7 @@ async function processTools(
           const gate = createDescriptionActionGate<typeof action>({
             pageUrl: () => options.target.expectedUrl,
             onBeforeAction: options.onBeforeAction ?? classifyRuntimeAction,
+            userIntent: options.userRequest ?? options.intent,
             aborted: () => run.modelAbort.signal.aborted,
             stillLive: async () =>
               !(await cancellationRequested(options)) && options.control.canAgentAct(),
