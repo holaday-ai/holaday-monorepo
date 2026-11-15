@@ -290,7 +290,7 @@ export function engagementFindings(
     const other = [...marks].find(([kind, values]) => kind !== claim.kind && hit(values))?.[0];
     if (own?.size && !other && hit(bare)) {
       unverified.push(
-        `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容，未能确认哪个是本篇的）`,
+        `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容）`,
       );
     } else if (own?.size && !other) {
       out.push(

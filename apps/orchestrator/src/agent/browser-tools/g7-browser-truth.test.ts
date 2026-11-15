@@ -10,6 +10,7 @@ import {
   absentExplainedByPage,
   assessCompletionFacts,
   declaredAbsentFields,
+  unverifiedNote,
 } from './completion-fields.js';
 import { assessEngagementClaims, engagementFindings } from './engagement-counts.js';
 
@@ -45,7 +46,11 @@ describe('G7 #1: an engagement number read from the page is never pushed onto an
       ],
     });
     expect(facts.contradictions.some((c) => c.includes('点赞'))).toBe(false);
-    expect(facts.unverified.some((u) => u.includes('1584'))).toBe(true);
+    expect(facts.unverified[0]).toContain('1584');
+    // Its own line: the number is on the page, only not settled as this counter.
+    expect(unverifiedNote(facts.unverified)).toMatch(
+      /^未核实：以下数字页面上有，但没能确认属于这一项.*点赞数「1584」/,
+    );
   });
 
   it('a number that is nowhere on the page is still sent back — told to say 未能核实, offered no number', () => {
@@ -81,6 +86,23 @@ describe('G7 #3: 「页面不显示点赞」 explained by a quote about another 
         pageText,
       ]),
     ).toContain('点赞数');
+    // 复审 P2-3: a value or another field is not made absent by a counter's 「不显示」.
+    expect(
+      declaredAbsentFields(
+        '读这篇笔记的标题、作者和点赞数',
+        '作者是Clara（页面未显示点赞数）',
+        undefined,
+        [pageText],
+      ),
+    ).toEqual(['点赞数']);
+    expect(
+      declaredAbsentFields(
+        '读标题和作者',
+        '标题「秋日穿搭」下方点赞数不显示；作者小红薯看不到评论',
+        undefined,
+        [pageText],
+      ),
+    ).toEqual([]);
     // A value given is not absent.
     expect(
       declaredAbsentFields('读这篇笔记的标题、作者和点赞数', '点赞数：1584', undefined, [pageText]),

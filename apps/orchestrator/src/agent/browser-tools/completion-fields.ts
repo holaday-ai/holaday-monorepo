@@ -1437,7 +1437,8 @@ export function assessCompletionFacts(input: {
     input.pages.map((page) => page.text),
   );
   contradictions.push(...engagement.contradictions);
-  unverified.push(...engagement.unverified);
+  // G7 复审 P2-2: first, so the 8-item cut never drops the only note on such a number.
+  unverified.unshift(...engagement.unverified.map((item) => `${item}${COUNTER_MARK}`));
   return {
     contradictions: contradictions.slice(0, 8),
     unverified: unverified.slice(0, 8),
@@ -1458,6 +1459,11 @@ const UNREAD_PRICE_TOKEN_RE = /(?:S\$|US\$|HK\$|\$|¥|￥|SGD|USD|RMB|CNY)\s?\d/
 
 /** Marks a translated term in the 未核实 list; `unverifiedNote` gives such terms their own line. */
 const TRANSLATED_MARK = '（译述）';
+/** G7 复审 P2-1: an engagement number that is on the page but not settled as that counter. */
+const COUNTER_MARK = '（计数未定）';
+const COUNTER_LEAD = '未核实：以下数字页面上有，但没能确认属于这一项，请自行确认——';
+const COUNTER_LEAD_EN =
+  'Not verified: these numbers are on the page, but could not be confirmed as this counter — ';
 /** The answer gives `value` as the page's own words: in quotes, or after 页面提到 / 原文 / 写道. */
 function quotedAsPage(summary: string, value: string): boolean {
   const v = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1504,9 +1510,15 @@ export function unverifiedNote(
   const translated = items
     .filter((item) => item.endsWith(TRANSLATED_MARK))
     .map((item) => item.slice(0, -TRANSLATED_MARK.length));
-  const plain = items.filter((item) => !item.endsWith(TRANSLATED_MARK));
+  const counters = items
+    .filter((item) => item.endsWith(COUNTER_MARK))
+    .map((item) => item.slice(0, -COUNTER_MARK.length));
+  const plain = items.filter(
+    (item) => !item.endsWith(TRANSLATED_MARK) && !item.endsWith(COUNTER_MARK),
+  );
   const sep = opts.english ? '; ' : '；';
   return [
+    counters.length ? `${opts.english ? COUNTER_LEAD_EN : COUNTER_LEAD}${counters.join(sep)}` : '',
     plain.length ? `${opts.english ? UNVERIFIED_LEAD_EN : UNVERIFIED_LEAD}${plain.join(sep)}` : '',
     translated.length
       ? `${opts.english ? TRANSLATED_LEAD_EN : TRANSLATED_LEAD}${translated.join(sep)}`
@@ -1929,12 +1941,16 @@ export function declaredAbsentFields(
               'g',
             ),
           ),
-          ...prose.matchAll(
-            new RegExp(
-              `${name}[^。；;，,、\\n：:]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取)`,
-              'g',
-            ),
-          ),
+          // 复审 P2-3: counts only (「作者是Clara（页面未显示点赞数）」 is no missing author), and never
+          // across a value (是 / 为 / a bracket or quote).
+          ...(/数$/.test(name)
+            ? prose.matchAll(
+                new RegExp(
+                  `${name}[^。；;，,、\\n：:是为（(「《“"]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取|未能读到|未读到|没读到|未能读取)`,
+                  'g',
+                ),
+              )
+            : []),
         ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
         new RegExp(
           `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
