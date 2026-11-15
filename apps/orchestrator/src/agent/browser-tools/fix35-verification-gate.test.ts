@@ -238,3 +238,87 @@ describe('复审 #2: the submit button’s own formmethod decides the request me
     await page.close();
   });
 });
+
+/**
+ * G7 hotfix (INBOX Q-13; G7 A/B new-amazon-sg / reg-new-amazon-sg): amazon.sg serves the
+ * 「Continue shopping」 bot check at the home page's own URL; the button posts nowhere a form
+ * check can see (the page verifies through a background POST /_sec/verify). The page is judged.
+ */
+const INTERSTITIAL = `<!doctype html><title>Amazon.sg</title><body>
+  <div>Click the button below to continue shopping</div>
+  <button type="button" onclick="window.sent=(window.sent||0)+1">Continue shopping</button>
+  <div>© 1996-2025, Amazon.com, Inc. or its affiliates</div></body>`;
+
+describe('G7 hotfix: a bot-check page is handed over, whatever its button posts to', () => {
+  it('amazon.sg home-page 「Continue shopping」 (served at /, no form): handed over, not clicked', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: INTERSTITIAL }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    const decision = await gate(
+      { tool: 'click', ref: await refOf(page, /Continue shopping/) },
+      'before',
+    );
+    expect(park).toHaveBeenCalledTimes(1);
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('the type-the-characters page: its 「Continue shopping」 submit is handed over', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<title>Amazon.sg</title><h4>Enter the characters you see below</h4>
+          <p>Sorry, we just need to make sure you're not a robot.</p>
+          <form method="get" action="/s" onsubmit="window.sent=(window.sent||0)+1;return false">
+            <input name="field-keywords" aria-label="Type characters"><button type="submit">Continue shopping</button></form>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    const decision = await gate(
+      { tool: 'click', ref: await refOf(page, /Continue shopping/) },
+      'before',
+    );
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('a normal amazon page’s 「Continue shopping」 (cart, no bot-check wording) is not a verification step', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<title>Amazon.sg Shopping Cart</title><h1>Shopping Cart</h1><p>Your cart is empty.</p>
+          <button type="button" onclick="window.sent=(window.sent||0)+1">Continue shopping</button>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/gp/cart/view.html');
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Continue shopping/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+
+  it('on a bot-check page an unrelated control (a footer link) is not taken for the check', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `${INTERSTITIAL}<a href="https://www.amazon.sg/gp/help/customer/display.html">Conditions of Use</a>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Conditions of Use/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+});

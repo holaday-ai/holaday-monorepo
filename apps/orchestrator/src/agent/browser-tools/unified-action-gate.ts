@@ -6,7 +6,7 @@ import {
 } from '@holaday/shared-types';
 import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
 import { stripInternalRefs, stripSnapshotSyntax } from '../internal-refs.js';
-import { buildAuthParkQuestion } from '../login-detector.js';
+import { buildAuthParkQuestion, detectCaptchaPage } from '../login-detector.js';
 import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
 import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
@@ -680,6 +680,42 @@ function verificationTarget(
   return raw && form.method?.toLowerCase() === 'post' && verificationPost(url) ? url : null;
 }
 
+/**
+ * G7 hotfix (INBOX Q-13; G7 A/B new-amazon-sg / reg-new-amazon-sg): amazon.sg now serves its
+ * 「Continue shopping」 bot check at the home page's own URL and verifies through a background
+ * POST /_sec/verify, so the button posts nowhere FIX-35 could see and the click went through —
+ * passing the check for the user. The page itself is judged: a bot-check page (its title or its
+ * opening text, `detectCaptchaPage`) and a button that continues / verifies / proves you are human
+ * is the site's own verification step — handed over, never clicked.
+ */
+const BOT_CHECK_BUTTON_RE =
+  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm)\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|继续购物|继续访问|我不是机器人|验证|提交/i;
+export function botCheckClick(
+  page: { url: string; title: string | null; text: string | null } | null,
+  labels: ReadonlyArray<string | null | undefined>,
+): string | null {
+  if (!page) return null;
+  const onCheckPage = detectCaptchaPage({
+    url: page.url,
+    title: page.title,
+    prominentText: page.text,
+  }).matched;
+  if (!onCheckPage) return null;
+  const label = labels.filter(Boolean).join(' ').trim();
+  // A login popup's 「获取验证码」「发送验证码」「登录」 is a login control (refused by the login rule),
+  // never the bot check.
+  if (!label || LOGIN_CONTROL_LABEL_RE.test(label)) return null;
+  return BOT_CHECK_BUTTON_RE.test(label) ? page.url : null;
+}
+const LOGIN_CONTROL_LABEL_RE =
+  /获取|发送|短信|登录|登陆|注册|授权|sign ?in|log ?in|sign ?up|send code|get code/i;
+
+/** The page's title and opening text (bounded) for `botCheckClick`. */
+const READ_PAGE_HEAD = (): { title: string; text: string } => ({
+  title: String(document.title || '').slice(0, 200),
+  text: String(document.body?.innerText || '').slice(0, 800),
+});
+
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
 
 /** A typed / selected field's own signals, with whether it is a login field. */
@@ -725,6 +761,7 @@ function clickDescription(
   fallbackLabel: string | null,
   pageUrl: string,
   unreadable: string,
+  pageHead: { title: string; text: string } | null = null,
 ): UnifiedActionDescription {
   const signals = target?.signals ?? null;
   return {
@@ -738,17 +775,24 @@ function clickDescription(
       signals?.formAction ?? null,
       signals?.formMethod ?? null,
     ]),
-    verification: verificationTarget(
-      signals?.url ?? pageUrl,
-      signals?.formAction != null
-        ? {
-            // `formAction` is 「resolved as-written」; the as-written part is the action.
-            rawAction: signals.formAction.split(' ').slice(1).join(' '),
-            method: signals.formMethod ?? null,
-          }
-        : null,
-      signals?.href,
-    ),
+    verification:
+      verificationTarget(
+        signals?.url ?? pageUrl,
+        signals?.formAction != null
+          ? {
+              // `formAction` is 「resolved as-written」; the as-written part is the action.
+              rawAction: signals.formAction.split(' ').slice(1).join(' '),
+              method: signals.formMethod ?? null,
+            }
+          : null,
+        signals?.href,
+      ) ??
+      botCheckClick(
+        pageHead && !signals?.loginControl && !signals?.credentialForm
+          ? { url: pageUrl, ...pageHead }
+          : null,
+        [signals?.visibleText, signals?.ariaLabel, signals?.title, fallbackLabel],
+      ),
   };
 }
 
@@ -790,6 +834,7 @@ export async function describeUnifiedAction(
         labelForRef(action.ref),
         pageUrl,
         '无法读取要点击的元素',
+        await withTimeout(page.evaluate(READ_PAGE_HEAD)),
       );
     case 'click_at':
       return clickDescription(
@@ -797,6 +842,7 @@ export async function describeUnifiedAction(
         null,
         pageUrl,
         '无法识别该坐标处的元素（可能位于无法读取的嵌入页面中）',
+        await withTimeout(page.evaluate(READ_PAGE_HEAD)),
       );
     case 'select': {
       const handle = locator ? await withTimeout(locator.elementHandle()) : null;
