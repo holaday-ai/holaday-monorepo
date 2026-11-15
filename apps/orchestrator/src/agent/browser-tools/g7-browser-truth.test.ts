@@ -37,6 +37,11 @@ describe('G7 #1: an engagement number read from the page is never pushed onto an
     // No number to switch to.
     expect(found.unverified[0]).not.toContain('「1」');
     expect(assessEngagementClaims(answer, [snapshot, pageText])).toEqual([]);
+    // Repeated in the answer, noted once.
+    expect(
+      engagementFindings(`${answer}\n通过截图核实，点赞数为 1584。`, [snapshot, pageText])
+        .unverified,
+    ).toHaveLength(1);
     const facts = assessCompletionFacts({
       summary: answer,
       intent: '打开 https://www.xiaohongshu.com/explore/x 读这篇笔记的标题、作者和点赞数',

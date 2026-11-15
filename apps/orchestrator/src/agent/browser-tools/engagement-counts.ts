@@ -289,6 +289,8 @@ export function engagementFindings(
     if (hit(own) || hit(worded.get(claim.kind))) continue;
     const other = [...marks].find(([kind, values]) => kind !== claim.kind && hit(values))?.[0];
     if (own?.size && !other && hit(bare)) {
+      // One line per number, however often the answer repeats it (local g7y2 / g7y3).
+      if (unverified.some((line) => line.startsWith(`${claim.kind}数「${claim.value}」`))) continue;
       unverified.push(
         `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容）`,
       );
