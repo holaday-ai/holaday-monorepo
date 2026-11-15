@@ -169,6 +169,28 @@ describe('decideExecutionRoute', () => {
     expect(result.decision).toBe(legacyDecision);
   });
 
+  it('G7: flag on, reading one named page keeps the scrape lane — the router is not asked', async () => {
+    const readPage: ExecutionModeDecision = {
+      mode: 'scrape',
+      source: 'kw:read-only-page',
+      match: 'https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8',
+    };
+    const route = vi.fn(
+      async (): Promise<ToolRouteDecision> => ({
+        lane: 'browser',
+        source: 'tool-router:explicit-site',
+        match: 'https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8',
+      }),
+    );
+    const result = await decideExecutionRoute({
+      enabled: true,
+      legacy: async () => readPage,
+      route,
+    });
+    expect(route).not.toHaveBeenCalled();
+    expect(result).toEqual({ decision: readPage, toolRoute: null });
+  });
+
   it('flag on: the router decides generate / scrape / browser', async () => {
     const route = vi.fn(
       async (): Promise<ToolRouteDecision> => ({

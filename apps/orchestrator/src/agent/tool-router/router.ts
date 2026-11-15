@@ -77,13 +77,20 @@ const DEDICATED_LANES: ReadonlySet<ExecutionModeDecision['mode']> = new Set([
  * the legacy classifier still claims the dedicated media / file lanes; everything else is the
  * router's decision.
  */
+/** The keyword rules' 「read one named page」 decision (intent-classifier `kw:read-only-page`). */
+const READ_ONLY_PAGE = 'kw:read-only-page';
+
 export async function decideExecutionRoute(opts: {
   enabled: boolean;
   legacy: () => Promise<ExecutionModeDecision>;
   route: () => Promise<ToolRouteDecision>;
 }): Promise<{ decision: ExecutionModeDecision; toolRoute: ToolRouteDecision | null }> {
   const legacy = await opts.legacy();
-  if (!opts.enabled || DEDICATED_LANES.has(legacy.mode))
+  // G7 (INBOX 迭代上限裁定; G6 r5 xhs-read ×2 fabricated in the cloud browser): reading one named
+  // page (「打开 <网址> 读标题、作者和点赞数」) stays in the scrape lane the keyword rules gave it —
+  // 3/3 right there — which still hands the page to the browser when it cannot be read. The
+  // router's explicit-site rule no longer turns such a read into a browser run.
+  if (!opts.enabled || DEDICATED_LANES.has(legacy.mode) || legacy.source === READ_ONLY_PAGE)
     return { decision: legacy, toolRoute: null };
   const toolRoute = await opts.route();
   return { decision: toExecutionModeDecision(toolRoute), toolRoute };
