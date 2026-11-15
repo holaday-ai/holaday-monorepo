@@ -689,32 +689,52 @@ function verificationTarget(
  * is the site's own verification step — handed over, never clicked.
  */
 const BOT_CHECK_BUTTON_RE =
-  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm)\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|继续购物|继续访问|我不是机器人|验证|提交/i;
-export function botCheckClick(
-  page: { url: string; title: string | null; text: string | null } | null,
-  labels: ReadonlyArray<string | null | undefined>,
-): string | null {
-  if (!page) return null;
-  const onCheckPage = detectCaptchaPage({
-    url: page.url,
-    title: page.title,
-    prominentText: page.text,
-  }).matched;
-  if (!onCheckPage) return null;
-  const label = labels.filter(Boolean).join(' ').trim();
-  // A login popup's 「获取验证码」「发送验证码」「登录」 is a login control (refused by the login rule),
-  // never the bot check.
-  if (!label || LOGIN_CONTROL_LABEL_RE.test(label)) return null;
-  return BOT_CHECK_BUTTON_RE.test(label) ? page.url : null;
-}
+  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm|proceed|try again|start verification|continue to (?:site|website|page))\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|start verification|继续购物|继续访问|^\s*继续\s*$|我不是机器人|验证|提交/i;
 const LOGIN_CONTROL_LABEL_RE =
   /获取|发送|短信|登录|登陆|注册|授权|sign ?in|log ?in|sign ?up|send code|get code/i;
+/** 复审 P2: a search engine's results page is a list of pages, never a bot check itself. */
+const SEARCH_RESULTS_RE =
+  /^https?:\/\/(?:www\.)?(?:baidu\.com\/s\b|google\.[a-z.]+\/search\b|bing\.com\/search\b|sogou\.com\/web\b|so\.com\/s\b|duckduckgo\.com\/)/i;
+/** 复审 P2: a bot-check page says little; a readable page (an article about captchas) says more. */
+const BOT_CHECK_MAX_TEXT = 2500;
 
-/** The page's title and opening text (bounded) for `botCheckClick`. */
-const READ_PAGE_HEAD = (): { title: string; text: string } => ({
-  title: String(document.title || '').slice(0, 200),
-  text: String(document.body?.innerText || '').slice(0, 800),
-});
+/** The page itself is a bot check: its URL / title / opening text say so and it holds little else. */
+export function onBotCheckPage(
+  page: { url: string; title: string | null; text: string | null; textLength?: number } | null,
+): boolean {
+  if (!page || SEARCH_RESULTS_RE.test(page.url)) return false;
+  if ((page.textLength ?? page.text?.length ?? 0) > BOT_CHECK_MAX_TEXT) return false;
+  return detectCaptchaPage({ url: page.url, title: page.title, prominentText: page.text }).matched;
+}
+
+/** A button label as the runtime gives it (`button "Continue"`): its quoted name, else the text. */
+function buttonName(label: string): string {
+  return (label.match(/"([^"]+)"/)?.[1] ?? label).trim();
+}
+
+export function botCheckClick(
+  page: { url: string; title: string | null; text: string | null; textLength?: number } | null,
+  labels: ReadonlyArray<string | null | undefined>,
+): string | null {
+  if (!onBotCheckPage(page)) return null;
+  // 复审 P1: each label on its own (the runtime label is 「button "Continue"」, and joined labels
+  // never matched a one-word button).
+  const names = labels.filter((label): label is string => Boolean(label?.trim())).map(buttonName);
+  // A login popup's 「获取验证码」「发送验证码」「登录」 is a login control (refused by the login rule),
+  // never the bot check.
+  if (!names.length || names.some((name) => LOGIN_CONTROL_LABEL_RE.test(name))) return null;
+  return names.some((name) => BOT_CHECK_BUTTON_RE.test(name)) ? page!.url : null;
+}
+
+/** The page's title, opening text (bounded) and text length for the bot-check rule. */
+const READ_PAGE_HEAD = (): { title: string; text: string; textLength: number } => {
+  const all = String(document.body?.innerText || '');
+  return {
+    title: String(document.title || '').slice(0, 200),
+    text: all.slice(0, 800),
+    textLength: all.length,
+  };
+};
 
 const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
 
@@ -761,7 +781,7 @@ function clickDescription(
   fallbackLabel: string | null,
   pageUrl: string,
   unreadable: string,
-  pageHead: { title: string; text: string } | null = null,
+  pageHead: { title: string; text: string; textLength: number } | null = null,
 ): UnifiedActionDescription {
   const signals = target?.signals ?? null;
   return {
@@ -911,7 +931,17 @@ export async function describeUnifiedAction(
           form.fieldSignal,
           form.submitControl?.visibleText ?? null,
         ]),
-        verification: verificationTarget(pageUrl, form),
+        // 复审 P2: typing and submitting on a bot-check page (the type-the-characters box) is the
+        // check itself, wherever its form posts.
+        verification:
+          verificationTarget(pageUrl, form) ??
+          (onBotCheckPage(
+            await withTimeout(page.evaluate(READ_PAGE_HEAD)).then((head) =>
+              head ? { url: pageUrl, ...head } : null,
+            ),
+          )
+            ? pageUrl
+            : null),
       };
     }
     default:
