@@ -815,6 +815,14 @@ export interface RunSupercarOptions {
   /** Free-form user intent — the first user message. */
   intent: string;
   /**
+   * G2g (REBUILD-4 本机验收, tsk_Rogoz5VGbEiqodiH44vat): the user's own words this turn, when
+   * `intent` also carries a follow-up's parent context or a plan / workflow preamble. Read only
+   * by the form-fill receipt check, and only when this turn is plainly read-only — a parent
+   * task's 「填写」 is no request of 「看一下表单里填了什么，不要修改」; every other check (price
+   * pairing, asked fields, reply language…) keeps the full `intent`.
+   */
+  userIntent?: string;
+  /**
    * Connected Playwright executor. Nullable: when null and no other
    * lane handles the task, runSupercarTask fails fast with a clear
    * reason rather than crashing on `executor.observe()`.

@@ -6526,6 +6526,8 @@ export const tasksRouter = router({
                   // `input.intent` (what the user typed); only the model sees
                   // the prefixed version.
                   intent: effectiveIntent,
+                  // G2g: what the user typed this turn, for the checks of what was asked.
+                  userIntent: input.intent,
                   expertMode: expertModeOverride,
                   ...(memoryPreamble ? { memoryPreamble } : {}),
                   ...(playbookContext ? { playbookContext } : {}),
