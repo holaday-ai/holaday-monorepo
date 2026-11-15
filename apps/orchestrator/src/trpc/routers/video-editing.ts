@@ -7,7 +7,7 @@ import { env } from '../../config/env.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { users } from '../../db/schema/users.js';
 import { FileService } from '../../files/file-service.js';
-import { resolveCoreModelRuntime } from '../../llm/core-model-runtime.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import {
   type VideoEditingFeatureConfig,
   canAccessVideoEditing,
@@ -670,15 +670,16 @@ const productionDependencies: VideoEditingRouterDependencies = {
   createRuntime(ctx, user) {
     const repository = VideoEditProjectRepository.fromDb(ctx.db);
     const fileService = new FileService(ctx.db, ctx.logger);
-    const plannerRuntime = resolveCoreModelRuntime({
-      environment: env,
-      actorExternalId: user.externalId,
-      lane: 'video_edit_planner',
-      ownership: { scope: 'personal', userRegion: user.modelDataRegion },
-    });
+    const plannerRuntime = modelGateway({ core: { environment: env } }).resolve(
+      'video_edit_planner',
+      {
+        actorExternalId: user.externalId,
+        ownership: { scope: 'personal', userRegion: user.modelDataRegion },
+      },
+    );
     const plannerClient =
       plannerRuntime.kind === 'ready'
-        ? createQwenVideoEditPlannerClient({ messagesAdapter: plannerRuntime.messages('fast') })
+        ? createQwenVideoEditPlannerClient({ messagesAdapter: plannerRuntime.messages() })
         : null;
     const sourceDependencies = createVideoSourceImportDependencies({
       db: ctx.db,

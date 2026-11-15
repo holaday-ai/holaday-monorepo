@@ -6,6 +6,7 @@ import {
   resolveBrowserBrainSelection,
 } from './browser-brain.js';
 import {
+  type CoreModelGatewayHook,
   type CoreModelRuntimeEnvironment,
   type CoreModelRuntimeInput,
   type CoreModelRuntimeResolution,
@@ -13,6 +14,11 @@ import {
   resolveCoreModelRuntime,
 } from './core-model-runtime.js';
 import { createAnthropicMessagesAdapter } from './dormant/anthropic-messages-adapter.js';
+import {
+  type ModelGatewayEnvironment,
+  type ModelGatewaySettings,
+  modelGatewaySettings,
+} from './gateway/settings.js';
 import type { MessagesAdapter } from './messages-adapter.js';
 import {
   BUILTIN_MODEL_CATALOG,
@@ -57,7 +63,8 @@ export interface ExternalProviderEnvironment {
 
 export type ModelRuntimeEnvironment = CoreModelRuntimeEnvironment &
   ExternalProviderEnvironment &
-  BrowserBrainEnvironment;
+  BrowserBrainEnvironment &
+  ModelGatewayEnvironment;
 
 export interface ReadyModelRuntime {
   kind: 'ready';
@@ -94,12 +101,19 @@ export interface RuntimeFactories
 
 export interface ProductionModelRuntimeWiring {
   readonly policy: 'model_catalog';
+  /**
+   * REBUILD-2 model gateway switch + role models, read once from the environment. Absent (test
+   * doubles) means the gateway is off. Business code reaches models through llm/gateway.
+   */
+  readonly gateway?: ModelGatewaySettings;
   resolveCore(input: {
     actorExternalId: string;
     lane: CoreModelLane;
     ownership: CoreModelRuntimeInput['ownership'];
     /** Explicit brain; otherwise the task's bound brain, otherwise the catalog default. */
     brain?: BrainEntry;
+    /** Set by the model gateway only while LLM_GATEWAY_V2 is on. */
+    gateway?: CoreModelGatewayHook;
     /**
      * BROWSER-HOME-1 only (see QwenEndpointOverride): set through withQwenEndpoint by tasks.create
      * for an admitted cloud-browser task. Changes the Qwen endpoint of a `cn` account, nothing else.
@@ -123,6 +137,9 @@ export function withQwenEndpoint(
 ): ProductionModelRuntimeWiring {
   return {
     policy: wiring.policy,
+    // G2a: the per-request wiring keeps the shared wiring's model gateway settings; without them
+    // a cloud-browser task would silently leave LLM_GATEWAY_V2 (gateway off) while it is on.
+    ...(wiring.gateway ? { gateway: wiring.gateway } : {}),
     resolveCore: (input) => wiring.resolveCore({ ...input, qwenEndpoint: endpoint }),
     resolveUnmigrated: (lane) => wiring.resolveUnmigrated(lane),
   };
@@ -151,6 +168,7 @@ export function createProductionModelRuntimeWiring(
 
   const wiring: ProductionModelRuntimeWiring = {
     policy: 'model_catalog',
+    gateway: modelGatewaySettings(environment),
     resolveCore(input) {
       const brain = input.brain ?? currentBrain()?.brain ?? selectDefaultBrain(catalog());
       if (input.lane === 'browser') {
@@ -170,7 +188,17 @@ export function createProductionModelRuntimeWiring(
               provider: choice.provider,
               laneModels: { browser: choice.model, vision: choice.model },
             };
-            return resolveBase({ ...input, brain: roleBrain });
+            // An explicit browser-brain model (env / canary request) wins over the gateway's
+            // role model; the gateway still labels the call.
+            const roleInput =
+              model && input.gateway
+                ? {
+                    ...input,
+                    brain: roleBrain,
+                    gateway: { ...input.gateway, modelFor: () => null },
+                  }
+                : { ...input, brain: roleBrain };
+            return resolveBase(roleInput);
           };
           const execution = roleRuntime(selected.execution);
           const planning = roleRuntime(selected.planning);
@@ -217,6 +245,7 @@ export function createProductionModelRuntimeWiring(
       ownership: input.ownership,
       ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
       ...qwenFactories,
+      ...(input.gateway ? { gateway: input.gateway } : {}),
     });
     if (resolution.kind === 'ready') {
       const withMcp = MCP_LANES.has(input.lane) && options.mcpTools;

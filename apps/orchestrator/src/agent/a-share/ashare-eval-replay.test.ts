@@ -11,6 +11,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { afterAll, describe, expect, it } from 'vitest';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -112,9 +113,8 @@ function catalogAdapter(script: { interpret?: string; judge?: string }) {
       return adapter;
     },
   });
-  const runtime = wiring.resolveCore({
+  const runtime = modelGateway({ wiring }).resolve('generate', {
     actorExternalId: 'usr_replay',
-    lane: 'generate',
     ownership: { scope: 'personal', userRegion: 'cn' },
   });
   const adapter = ashareMessagesAdapter(runtime);

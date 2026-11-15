@@ -769,6 +769,11 @@ export interface RunSupercarOptions {
    */
   searchWallReplaceable?: (url: string) => boolean;
   /**
+   * REBUILD-2 协调方决定 (TOOL_ROUTER_V2): a read task the caller answers from public sources
+   * when the browser ends on a wall; its verification page is not handed to the user.
+   */
+  wallFallback?: boolean;
+  /**
    * FIX-57 #5 (unified runner): a read task stopped by a login wall first tries other
    * public routes before the handover. Default on; tests of the park itself turn it off.
    */
@@ -809,6 +814,14 @@ export interface RunSupercarOptions {
   taskId: string;
   /** Free-form user intent — the first user message. */
   intent: string;
+  /**
+   * G2g (REBUILD-4 本机验收, tsk_Rogoz5VGbEiqodiH44vat): the user's own words this turn, when
+   * `intent` also carries a follow-up's parent context or a plan / workflow preamble. Read only
+   * by the form-fill receipt check, and only when this turn is plainly read-only — a parent
+   * task's 「填写」 is no request of 「看一下表单里填了什么，不要修改」; every other check (price
+   * pairing, asked fields, reply language…) keeps the full `intent`.
+   */
+  userIntent?: string;
   /**
    * Connected Playwright executor. Nullable: when null and no other
    * lane handles the task, runSupercarTask fails fast with a clear
