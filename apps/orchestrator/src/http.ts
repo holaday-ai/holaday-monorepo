@@ -18,6 +18,7 @@ import type { ExecutionRouter } from './agent/supercar/index.js';
 import type { VisionLoopCommander } from './agent/vision-loop/commander.js';
 import type { PlaywrightExecutor } from './agent/vision-loop/playwright-executor.js';
 import { createWebhookTasksHandler } from './api-keys/webhook-handler.js';
+import { fetchAvatar } from './auth/avatar-proxy.js';
 import { signStreamToken } from './auth/jwt.js';
 import { bearerAuth } from './auth/middleware.js';
 import { AuthService, isClosureRecoveryResult } from './auth/service.js';
@@ -148,6 +149,22 @@ export function createHttpApp(deps: HttpAppDeps) {
     send: async (user, options) =>
       (await import('./ws/server.js')).sendExtensionToolCall(user, options),
     purgeLegacy: (user) => purgeLegacyCookiesForVault(db, user),
+  });
+
+  // G7 / Q-8: the signed-in user's Google avatar through HOLA DAY (no request from the user's
+  // browser to Google). Public like the source-cover proxy: an <img> sends no bearer token, and
+  // only Google profile-photo URLs pass (auth/avatar-proxy.ts).
+  get('/avatar', async (req, res) => {
+    const result = await fetchAvatar(req.query.url);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Length', String(result.body.byteLength));
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.status(200).send(result.body);
   });
 
   get('/stock-news/source-cover', async (req, res) => {

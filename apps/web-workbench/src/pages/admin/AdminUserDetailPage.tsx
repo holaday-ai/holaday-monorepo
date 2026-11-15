@@ -11,6 +11,7 @@
  * Single `admin.userDetail` query backs everything.
  */
 
+import { avatarSrc } from '@/lib/avatar-src';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -341,10 +342,12 @@ function Avatar({
   url: string | null;
   fallback: string;
 }): JSX.Element {
-  if (url) {
+  // G7 / Q-8: a Google photo through /api/avatar; another site's address shows the letter.
+  const src = avatarSrc(url);
+  if (src) {
     return (
       <img
-        src={url}
+        src={src}
         alt=""
         className="h-14 w-14 shrink-0 rounded-full object-cover"
         loading="lazy"
