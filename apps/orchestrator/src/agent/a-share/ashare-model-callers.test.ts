@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -9,7 +10,6 @@ import { createProductionModelRuntimeWiring } from '../../llm/model-runtime-wiri
 import {
   ASHARE_INTERPRET_REQUEST,
   ASHARE_JUDGE_REQUEST,
-  ASHARE_MODEL_PURPOSE,
   ashareMessagesAdapter,
   createAshareModelCallers,
 } from './ashare-model-callers.js';
@@ -82,15 +82,15 @@ describe('ashare-model-callers（模型目录 generate 通道）', () => {
         },
         create: vi.fn(),
       };
-      expect(purpose).toBe(ASHARE_MODEL_PURPOSE);
+      // Gateway off: the generate role resolves the generate lane's 'standard' purpose as before.
+      expect(purpose).toBe('standard');
       return adapter;
     });
     const wiring = createProductionModelRuntimeWiring(ASHARE_SYNTHETIC_MODEL_ENV, {
       createMessages,
     });
-    const runtime = wiring.resolveCore({
+    const runtime = modelGateway({ wiring }).resolve('generate', {
       actorExternalId: 'usr_any',
-      lane: 'generate',
       ownership: { scope: 'personal', userRegion: 'cn' },
     });
     const adapter = ashareMessagesAdapter(runtime);
@@ -100,9 +100,8 @@ describe('ashare-model-callers（模型目录 generate 通道）', () => {
 
   it('runtime 不可用 → null（调用侧按 reasonCode 失败，不回落旧模型）', () => {
     const wiring = createProductionModelRuntimeWiring(ASHARE_SYNTHETIC_MODEL_ENV);
-    const runtime = wiring.resolveCore({
+    const runtime = modelGateway({ wiring }).resolve('generate', {
       actorExternalId: 'usr_any',
-      lane: 'generate',
       ownership: { scope: 'personal', userRegion: null },
     });
     expect(runtime.kind).toBe('unavailable');
@@ -120,9 +119,8 @@ describe('ashare-model-callers（模型目录 generate 通道）', () => {
       { ...ASHARE_SYNTHETIC_MODEL_ENV, ANTHROPIC_API_KEY: 'synthetic-anthropic-key' },
       { createExternalMessages },
     );
-    const runtime = wiring.resolveCore({
+    const runtime = modelGateway({ wiring }).resolve('generate', {
       actorExternalId: 'usr_any',
-      lane: 'generate',
       ownership: { scope: 'personal', userRegion: null },
       brain: claude,
     });
@@ -177,11 +175,12 @@ it('records stock interpretation exactly once in its task scope, preserving unkn
     },
     create: vi.fn(async () => textResponse('公开事实解读')),
   };
-  const runtime = createProductionModelRuntimeWiring(ASHARE_SYNTHETIC_MODEL_ENV, {
-    createMessages: () => adapter,
-  }).resolveCore({
+  const runtime = modelGateway({
+    wiring: createProductionModelRuntimeWiring(ASHARE_SYNTHETIC_MODEL_ENV, {
+      createMessages: () => adapter,
+    }),
+  }).resolve('generate', {
     actorExternalId: 'usr_stock',
-    lane: 'generate',
     ownership: { scope: 'personal', userRegion: 'cn' },
   });
   const observed = ashareMessagesAdapter(runtime);

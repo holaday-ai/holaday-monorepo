@@ -1,4 +1,5 @@
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { modelGateway } from '../llm/gateway/model-gateway.js';
 import type { ProductionModelRuntimeWiring } from '../llm/model-runtime-wiring.js';
 import { type NextStep, generateNextSteps } from './next-steps-generator.js';
 
@@ -33,15 +34,14 @@ export async function publishCoreTaskSuggestions(input: {
   )
     return;
   try {
-    const runtime = input.wiring.resolveCore({
+    const runtime = modelGateway({ wiring: input.wiring }).resolve('suggestions', {
       actorExternalId: input.actorExternalId,
-      lane: 'suggestions',
       ownership: { scope: 'personal', userRegion: input.modelDataRegion },
     });
     if (runtime.kind !== 'ready' || !(await input.isCurrent())) return;
     const recentIntents = await input.recentIntents?.().catch(() => []);
     const suggestions = await generateNextSteps({
-      messagesAdapter: runtime.messages('fast'),
+      messagesAdapter: runtime.messages(),
       intent: input.intent,
       outcome: 'completed',
       summary: input.summary,
