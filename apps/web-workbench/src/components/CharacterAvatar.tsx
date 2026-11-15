@@ -1,3 +1,4 @@
+import { avatarSrc } from '@/lib/avatar-src';
 import { cn } from '@/lib/utils';
 import * as React from 'react';
 const CHARACTERS = [
@@ -21,7 +22,9 @@ export function CharacterAvatar({
   );
   const fallback = `/holaday-ui/avatars/${CHARACTERS[hash % CHARACTERS.length]}.webp`;
   const [failed, setFailed] = React.useState<string[]>([]);
-  const photo = src && !failed.includes(src) ? src : fallback;
+  // G7 / Q-8: a Google photo through /api/avatar; another site's address is not loaded.
+  const own = avatarSrc(src);
+  const photo = own && !failed.includes(own) ? own : fallback;
   return (
     <span className={cn('hd-character-avatar', className)} aria-hidden>
       {failed.includes(photo) ? (

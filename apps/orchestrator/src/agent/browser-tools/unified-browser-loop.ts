@@ -663,6 +663,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let videoCountAsked = false;
   /** G2g (BestBuy): an ad label put on a result whose own card does not carry it, sent back once. */
   let adLabelAsked = false;
+  // G7: one look at an engagement number on the page but not settled as that counter.
+  let counterAsked = false;
   let bindingCorrected = false;
   /** FIX-34: one correction for listed prices no read page shows. */
   let pricesCorrected = false;
@@ -1569,6 +1571,23 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               toolResult(
                 call.id,
                 `${adLabel}。只写该结果自己的条目里实际显示的标识；页面别处（如列表上方的广告位）的标识不属于它。其余内容不变，重新 finish。`,
+                true,
+              ),
+            );
+            continue;
+          }
+          // G7 (local g7x3: 「点赞数：1824」 was the 收藏 count, delivered with only a note): a count the
+          // page shows but no mark settles as that counter is sent back once — no number offered —
+          // to be checked against the counter's own icon or label; what comes back is delivered,
+          // still unsettled numbers with their 未核实 line.
+          if (!counterAsked && !concludeNow && facts.unsettledCounts?.length) {
+            counterAsked = true;
+            const why = `答案里的这些数字页面上有，但没能确认属于这一项：${facts.unsettledCounts.join('；')}`;
+            await rejected(summary, given, why);
+            results.push(
+              toolResult(
+                call.id,
+                `${why}。请对照截图或 snapshot 里这一项自己的图标 / 标签（不是评论、相关推荐里的数字）再核对一次：确认是这一项的数字才写；确认不了就如实写「未能核实」。不要为了通过核对随意改数。其余内容不变，重新 finish。`,
                 true,
               ),
             );

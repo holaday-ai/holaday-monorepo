@@ -1,7 +1,7 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
-import { assessEngagementClaims } from './engagement-counts.js';
+import { engagementFindings, engagementKindsIn } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
 import { unsupportedSpecPricePairings } from './spec-price-pairing.js';
 import {
@@ -240,6 +240,11 @@ export interface FactAssessment {
    * its size budget: the page may well show them, and they get one correction to read further.
    */
   cutPrices?: string[];
+  /**
+   * G7 (local g7x3 「点赞数：1824」 = the 收藏 count): engagement numbers on the page but not settled
+   * as that counter. The browser loop sends them back once before they go out as 未核实.
+   */
+  unsettledCounts?: string[];
 }
 
 interface Fact {
@@ -1431,12 +1436,14 @@ export function assessCompletionFacts(input: {
     ),
   );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
-  contradictions.push(
-    ...assessEngagementClaims(
-      input.summary,
-      input.pages.map((page) => page.text),
-    ),
+  // G7: a number read from the page that a different same-kind mark cannot settle is told as 未核实.
+  const engagement = engagementFindings(
+    input.summary,
+    input.pages.map((page) => page.text),
   );
+  contradictions.push(...engagement.contradictions);
+  // G7 复审 P2-2: first, so the 8-item cut never drops the only note on such a number.
+  unverified.unshift(...engagement.unverified.map((item) => `${item}${COUNTER_MARK}`));
   return {
     contradictions: contradictions.slice(0, 8),
     unverified: unverified.slice(0, 8),
@@ -1446,6 +1453,7 @@ export function assessCompletionFacts(input: {
       ? { unreadPrices }
       : {}),
     ...(cutPrices.length ? { cutPrices: cutPrices.slice(0, 8) } : {}),
+    ...(engagement.unverified.length ? { unsettledCounts: engagement.unverified } : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
@@ -1457,6 +1465,11 @@ const UNREAD_PRICE_TOKEN_RE = /(?:S\$|US\$|HK\$|\$|¥|￥|SGD|USD|RMB|CNY)\s?\d/
 
 /** Marks a translated term in the 未核实 list; `unverifiedNote` gives such terms their own line. */
 const TRANSLATED_MARK = '（译述）';
+/** G7 复审 P2-1: an engagement number that is on the page but not settled as that counter. */
+const COUNTER_MARK = '（计数未定）';
+const COUNTER_LEAD = '未核实：以下数字页面上有，但没能确认属于这一项，请自行确认——';
+const COUNTER_LEAD_EN =
+  'Not verified: these numbers are on the page, but could not be confirmed as this counter — ';
 /** The answer gives `value` as the page's own words: in quotes, or after 页面提到 / 原文 / 写道. */
 function quotedAsPage(summary: string, value: string): boolean {
   const v = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1503,9 +1516,15 @@ export function unverifiedNote(
   const translated = items
     .filter((item) => item.endsWith(TRANSLATED_MARK))
     .map((item) => item.slice(0, -TRANSLATED_MARK.length));
-  const plain = items.filter((item) => !item.endsWith(TRANSLATED_MARK));
+  const counters = items
+    .filter((item) => item.endsWith(COUNTER_MARK))
+    .map((item) => item.slice(0, -COUNTER_MARK.length));
+  const plain = items.filter(
+    (item) => !item.endsWith(TRANSLATED_MARK) && !item.endsWith(COUNTER_MARK),
+  );
   const sep = opts.english ? '; ' : '；';
   return [
+    counters.length ? `${opts.english ? COUNTER_LEAD_EN : COUNTER_LEAD}${counters.join(sep)}` : '',
     plain.length ? `${opts.english ? UNVERIFIED_LEAD_EN : UNVERIFIED_LEAD}${plain.join(sep)}` : '',
     translated.length
       ? `${opts.english ? TRANSLATED_LEAD_EN : TRANSLATED_LEAD}${translated.join(sep)}`
@@ -1919,13 +1938,25 @@ export function declaredAbsentFields(
           (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
       ) ||
         // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
+        // G7 (G6 r5 xhs-read f24-cuxBxon3): 「因此未能读到点赞数」 and 「点赞数在未登录时不显示具体数字」
+        // went out as an honest 部分完成 with no second look, while the screenshot showed 1583.
         [
           ...prose.matchAll(
             new RegExp(
-              `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+              `(?:页面(?:上|中)?)?(?:未|没有|未能|没能|无法)(?:显示|提供|列出|给出|找到|读到|读取到|获取到|读取|获取)[^。；;，,、\\n：:「」]{0,6}?${name}`,
               'g',
             ),
           ),
+          // 复审 P2-3: counts only (「作者是Clara（页面未显示点赞数）」 is no missing author), and never
+          // across a value (是 / 为 / a bracket or quote).
+          ...(/数$/.test(name)
+            ? prose.matchAll(
+                new RegExp(
+                  `${name}[^。；;，,、\\n：:是为（(「《“"]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取|未能读到|未读到|没读到|未能读取|未能获取|未获取到|没获取到)`,
+                  'g',
+                ),
+              )
+            : []),
         ].some((m) => !filledAfter(prose, m.index! + m[0].length, name, pages)) ||
         new RegExp(
           `${name}(?:名称|字段)?[^。；;\\n：:（(]{0,10}?[为写]\\s*[“"「]?(?:页面(?:上|中)?未显示|未显示|未获取到|未读到|未找到)`,
@@ -2071,15 +2102,29 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
  * only pushed the run into another variant's price. A gap is explained when the line that says it
  * was not obtained quotes words a page the run read really shows: deliver it as 部分完成.
  */
+/** G7: words that say a value was not read, anywhere in a clause (「点赞数：未获取到」). */
+const ABSENT_WORD_RE =
+  /未获取到|没拿到|拿不到|未显示|不显示|没有显示|未读到|未能读到|读不到|未找到|看不到|无法读取|not (?:shown|found|read|displayed)/i;
 export function absentExplainedByPage(summary: string, pages: readonly string[]): boolean {
   const norm = pages.map((page) => normalizeFact(unescapeLiteralBreaks(page)));
   const lines = unescapeLiteralBreaks(summary)
     .split('\n')
     .filter((line) => DECLARED_ABSENT_RE.test(line) || /未获取到|没拿到|拿不到|无单一/.test(line));
   if (!lines.length) return false;
-  return lines.every((line) =>
-    [...line.matchAll(/[「“"『]([^」”"』]{4,120})[」”"』]/gu)].some((m) =>
-      norm.some((page) => page.includes(normalizeFact(m[1]!))),
-    ),
-  );
+  // G7 (G6 r5 xhs-read f24-cuxBxon3): 「点赞数在未登录时不显示…；评论数页面显示为「共 24 条评论」」 —
+  // a quote about another counter explains nothing about the missing 点赞; the page's own words
+  // must name the counter said to be missing (「登录后查看点赞」), or the run takes its second look.
+  return lines.every((line) => {
+    // Only the clause that says something is missing names what needs explaining.
+    const kinds = line
+      .replace(/[「“"『][^」”"』]*[」”"』]/gu, '')
+      .split(/[；;。，,]/)
+      .filter((clause) => DECLARED_ABSENT_RE.test(clause) || ABSENT_WORD_RE.test(clause))
+      .flatMap((clause) => engagementKindsIn(clause));
+    return [...line.matchAll(/[「“"『]([^」”"』]{4,120})[」”"』]/gu)].some(
+      (m) =>
+        norm.some((page) => page.includes(normalizeFact(m[1]!))) &&
+        (!kinds.length || engagementKindsIn(m[1]!).some((kind) => kinds.includes(kind))),
+    );
+  });
 }

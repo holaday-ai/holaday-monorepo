@@ -8,6 +8,7 @@
  * Clicking a row routes to /admin/users/:id (the detail page).
  */
 
+import { avatarSrc } from '@/lib/avatar-src';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
@@ -330,9 +331,11 @@ function Avatar({
   url: string | null;
   fallback: string;
 }): JSX.Element {
-  if (url) {
+  // G7 / Q-8: a Google photo through /api/avatar; another site's address shows the letter.
+  const src = avatarSrc(url);
+  if (src) {
     return (
-      <img src={url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" loading="lazy" />
+      <img src={src} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" loading="lazy" />
     );
   }
   const letter = (fallback || '?').charAt(0).toUpperCase();
