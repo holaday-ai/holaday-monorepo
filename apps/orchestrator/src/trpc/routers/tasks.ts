@@ -1950,6 +1950,7 @@ export const tasksRouter = router({
             const routedExecution = retryCore
               ? null
               : await decideExecutionRoute({
+                  intent: input.intent,
                   enabled:
                     taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                     !ctx.scrapeBrowserRetry &&
