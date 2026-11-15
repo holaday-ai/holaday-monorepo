@@ -47,6 +47,8 @@ describe('G7 #1: an engagement number read from the page is never pushed onto an
     });
     expect(facts.contradictions.some((c) => c.includes('点赞'))).toBe(false);
     expect(facts.unverified[0]).toContain('1584');
+    // The browser loop sends it back once before it goes out (local g7x3: 1824 = 收藏).
+    expect(facts.unsettledCounts).toEqual([expect.stringContaining('点赞数「1584」')]);
     // Its own line: the number is on the page, only not settled as this counter.
     expect(unverifiedNote(facts.unverified)).toMatch(
       /^未核实：以下数字页面上有，但没能确认属于这一项.*点赞数「1584」/,
@@ -103,6 +105,15 @@ describe('G7 #3: 「页面不显示点赞」 explained by a quote about another 
         [pageText],
       ),
     ).toEqual([]);
+    // Local g7x2: words between the verb and the field, and 「未能获取」.
+    expect(
+      declaredAbsentFields(
+        '读这篇笔记的标题、作者和点赞数',
+        '部分完成：已读到标题和作者。但当前页面（未登录状态）没有显示笔记的点赞数，只看到「共 24 条评论」，点赞数未能获取。',
+        undefined,
+        [pageText],
+      ),
+    ).toContain('点赞数');
     // A value given is not absent.
     expect(
       declaredAbsentFields('读这篇笔记的标题、作者和点赞数', '点赞数：1584', undefined, [pageText]),

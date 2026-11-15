@@ -240,6 +240,11 @@ export interface FactAssessment {
    * its size budget: the page may well show them, and they get one correction to read further.
    */
   cutPrices?: string[];
+  /**
+   * G7 (local g7x3 「点赞数：1824」 = the 收藏 count): engagement numbers on the page but not settled
+   * as that counter. The browser loop sends them back once before they go out as 未核实.
+   */
+  unsettledCounts?: string[];
 }
 
 interface Fact {
@@ -1448,6 +1453,7 @@ export function assessCompletionFacts(input: {
       ? { unreadPrices }
       : {}),
     ...(cutPrices.length ? { cutPrices: cutPrices.slice(0, 8) } : {}),
+    ...(engagement.unverified.length ? { unsettledCounts: engagement.unverified } : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
@@ -1937,7 +1943,7 @@ export function declaredAbsentFields(
         [
           ...prose.matchAll(
             new RegExp(
-              `(?:页面(?:上|中)?)?(?:未|没有|未能|没能|无法)(?:显示|提供|列出|给出|找到|读到|读取到|获取到|读取)${name}`,
+              `(?:页面(?:上|中)?)?(?:未|没有|未能|没能|无法)(?:显示|提供|列出|给出|找到|读到|读取到|获取到|读取|获取)[^。；;，,、\\n：:「」]{0,6}?${name}`,
               'g',
             ),
           ),
@@ -1946,7 +1952,7 @@ export function declaredAbsentFields(
           ...(/数$/.test(name)
             ? prose.matchAll(
                 new RegExp(
-                  `${name}[^。；;，,、\\n：:是为（(「《“"]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取|未能读到|未读到|没读到|未能读取)`,
+                  `${name}[^。；;，,、\\n：:是为（(「《“"]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取|未能读到|未读到|没读到|未能读取|未能获取|未获取到|没获取到)`,
                   'g',
                 ),
               )
