@@ -186,9 +186,72 @@ describe('decideExecutionRoute', () => {
       enabled: true,
       legacy: async () => readPage,
       route,
+      intent:
+        '打开 https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8 读这篇笔记的标题、作者和点赞数',
     });
     expect(route).not.toHaveBeenCalled();
     expect(result).toEqual({ decision: readPage, toolRoute: null });
+  });
+
+  it('G7: a page written without a scheme keeps the scrape lane too', async () => {
+    const route = vi.fn(
+      async (): Promise<ToolRouteDecision> => ({
+        lane: 'browser',
+        source: 'tool-router:explicit-site',
+      }),
+    );
+    const legacy: ExecutionModeDecision = {
+      mode: 'scrape',
+      source: 'kw:read-only-page',
+      match: 'item.jd.com/100142621606.html',
+    };
+    const result = await decideExecutionRoute({
+      enabled: true,
+      legacy: async () => legacy,
+      route,
+      intent: '打开 item.jd.com/100142621606.html 读商品标题和页面显示的价格',
+    });
+    expect(route).not.toHaveBeenCalled();
+    expect(result.decision).toBe(legacy);
+  });
+
+  it('G7 复审 P2: a home page, or a step beyond reading the page, still goes to the router', async () => {
+    const page = (match: string): ExecutionModeDecision => ({
+      mode: 'scrape',
+      source: 'kw:read-only-page',
+      match,
+    });
+    const note = 'https://www.xiaohongshu.com/explore/6929ba55000000001e023ef8';
+    const cases: Array<[string, string]> = [
+      ['https://jd.com', '打开 jd.com 告诉我 iPhone 16 的价格'],
+      ['jd.com', '打开 jd.com 告诉我 iPhone 16 的价格'],
+      ['https://flights.ctrip.com/', '打开 https://flights.ctrip.com 查看明天上海到北京的机票价格'],
+      [note, `打开 ${note} 点进作者主页看粉丝数`],
+      [note, `打开 ${note} 翻到第2页读标题`],
+      [note, `打开 ${note} 点开评论区读前5条评论`],
+      [
+        'https://www.amazon.sg/dp/B0ABC12345',
+        '打开 https://www.amazon.sg/dp/B0ABC12345 选择黑色款读价格',
+      ],
+      [note, `open ${note} and click 'more' then read`],
+      [note, `打开 ${note} 读标题，把它填到 https://docs.qq.com 表格里`],
+    ];
+    for (const [match, intent] of cases) {
+      const route = vi.fn(
+        async (): Promise<ToolRouteDecision> => ({
+          lane: 'browser',
+          source: 'tool-router:explicit-site',
+        }),
+      );
+      const result = await decideExecutionRoute({
+        enabled: true,
+        legacy: async () => page(match),
+        route,
+        intent,
+      });
+      expect(route, intent).toHaveBeenCalledTimes(1);
+      expect(result.decision.mode, intent).toBe('browser');
+    }
   });
 
   it('flag on: the router decides generate / scrape / browser', async () => {

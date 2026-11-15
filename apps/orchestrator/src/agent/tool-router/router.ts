@@ -72,25 +72,53 @@ const DEDICATED_LANES: ReadonlySet<ExecutionModeDecision['mode']> = new Set([
   'template_fill',
 ]);
 
-/**
- * The single switch tasks.create calls. Flag off: the legacy classifier, and only it. Flag on:
- * the legacy classifier still claims the dedicated media / file lanes; everything else is the
- * router's decision.
- */
 /** The keyword rules' 「read one named page」 decision (intent-classifier `kw:read-only-page`). */
 const READ_ONLY_PAGE = 'kw:read-only-page';
+/**
+ * G7 复审 P2: words that make a 「打开 <网址>」 more than reading that page — clicking into another
+ * page, paging, choosing a variant, searching or filling on the site, writing somewhere else.
+ */
+const BEYOND_ONE_PAGE_RE =
+  /点进|点开|点击|进入|翻页|翻到|下一页|第\s*[\d一二三四五六七八九十]+\s*页|选择|选中|切换|搜索|搜一下|查找|筛选|填|写入|写到|登录|click|select|choose|search|filter|fill|next page|page \d|log ?in|sign ?in/i;
 
+/**
+ * G7 (INBOX 迭代上限裁定; G6 r5 xhs-read ×2 fabricated in the cloud browser): reading one named
+ * page (「打开 <网址> 读标题、作者和点赞数」) stays in the scrape lane the keyword rules gave it —
+ * 3/3 right there — which hands the page to the browser when it cannot be read. Only a page with
+ * its own path (not a site's home page, where the answer needs a search) and no step beyond
+ * reading it (复审 P2).
+ */
+export function keepsReadOnlyPage(legacy: ExecutionModeDecision, intent: string): boolean {
+  if (legacy.source !== READ_ONLY_PAGE || !legacy.match) return false;
+  let url: URL;
+  try {
+    // The classifier gives the page as written in the request (cut at 64), with or without a scheme.
+    url = new URL(/^https?:\/\//i.test(legacy.match) ? legacy.match : `https://${legacy.match}`);
+  } catch {
+    return false;
+  }
+  if (url.pathname.replace(/\/+$/, '') === '' && !url.search) return false;
+  return !BEYOND_ONE_PAGE_RE.test(intent);
+}
+
+/**
+ * The single switch tasks.create calls. Flag off: the legacy classifier, and only it. Flag on:
+ * the legacy classifier still claims the dedicated media / file lanes and a one-page read
+ * (`keepsReadOnlyPage`); everything else is the router's decision.
+ */
 export async function decideExecutionRoute(opts: {
   enabled: boolean;
   legacy: () => Promise<ExecutionModeDecision>;
   route: () => Promise<ToolRouteDecision>;
+  /** The request, for the one-page read rule. */
+  intent?: string;
 }): Promise<{ decision: ExecutionModeDecision; toolRoute: ToolRouteDecision | null }> {
   const legacy = await opts.legacy();
-  // G7 (INBOX 迭代上限裁定; G6 r5 xhs-read ×2 fabricated in the cloud browser): reading one named
-  // page (「打开 <网址> 读标题、作者和点赞数」) stays in the scrape lane the keyword rules gave it —
-  // 3/3 right there — which still hands the page to the browser when it cannot be read. The
-  // router's explicit-site rule no longer turns such a read into a browser run.
-  if (!opts.enabled || DEDICATED_LANES.has(legacy.mode) || legacy.source === READ_ONLY_PAGE)
+  if (
+    !opts.enabled ||
+    DEDICATED_LANES.has(legacy.mode) ||
+    (opts.intent !== undefined && keepsReadOnlyPage(legacy, opts.intent))
+  )
     return { decision: legacy, toolRoute: null };
   const toolRoute = await opts.route();
   return { decision: toExecutionModeDecision(toolRoute), toolRoute };
