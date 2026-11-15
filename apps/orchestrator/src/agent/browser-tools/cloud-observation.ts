@@ -250,13 +250,20 @@ export function amazonToasterDismiss(url: URL, method: string, body: string): bo
   );
 }
 
+/** G7: a body any sensor-shaped path accepts, to tell a path refusal from a body refusal. */
+const SENSOR_PROBE_BODY = `{"body":"${'x'.repeat(1000)}"}`;
 function safeBodyShape(request: Request, url?: URL): string {
   try {
     const body = request.postData() ?? '';
     // FIX-45 (Deploy-45 b-m01: no value of the collapsar log was ever seen): a keyed log
     // endpoint's pause says which check refused it.
     const why = url ? keyedLogCheck(url, body) : null;
-    return `${postBodyShape(body)}${why ? ` check:${why}` : ''}`;
+    // G7: a BestBuy POST that paused says which sensor check refused it (a code, never the body).
+    const sensor =
+      url?.hostname === 'www.bestbuy.com'
+        ? ` sensor:${sensorBodyVerdict(body)} path:${bestBuySensorShape(url, 'POST', SENSOR_PROBE_BODY) ? 'sensor' : 'other'}`
+        : '';
+    return `${postBodyShape(body)}${why ? ` check:${why}` : ''}${sensor}`;
   } catch {
     return 'unreadable';
   }
@@ -360,26 +367,37 @@ export function bestBuySensorShape(url: URL, method: string, postData: string): 
  * (`{"body":"{\"action\":\"addToCart\"…}"}`) nor `key=value&key=…` pairs.
  */
 export function opaqueSensorBody(postData: string): boolean {
+  return sensorBodyVerdict(postData) === 'ok';
+}
+
+/**
+ * G7 (G3 online BestBuy, tsk_2SuHXGSfKqSd29ft88xxH: `json{body} 4699B` on a sensor-shaped path still
+ * paused; the body is never stored): which part of the sensor-body check refused it, as a code only,
+ * so the next online pause says why without carrying any of the body.
+ */
+export function sensorBodyVerdict(
+  postData: string,
+): 'ok' | 'not-one-member' | 'not-string' | 'short' | 'inner-json' | 'pairs' {
   const member = postData.match(
     /^\s*\{\s*"(?:body|sensor_data)"\s*:\s*("(?:[^"\\]|\\.)*")\s*\}\s*$/,
   );
-  if (!member) return false;
+  if (!member) return 'not-one-member';
   let value: string;
   try {
     value = JSON.parse(member[1]!) as string;
   } catch {
-    return false;
+    return 'not-string';
   }
-  if (value.length < 1000) return false;
+  if (value.length < 1000) return 'short';
   if (/^\s*[{[]/.test(value)) {
     try {
       const inner: unknown = JSON.parse(value);
-      if (inner && typeof inner === 'object') return false;
+      if (inner && typeof inner === 'object') return 'inner-json';
     } catch {
       /* Not JSON: an opaque string that starts with a bracket. */
     }
   }
-  return !/[A-Za-z_][\w.%-]{0,40}=[^&=]{0,200}&[A-Za-z_][\w.%-]{0,40}=/.test(value);
+  return /[A-Za-z_][\w.%-]{0,40}=[^&=]{0,200}&[A-Za-z_][\w.%-]{0,40}=/.test(value) ? 'pairs' : 'ok';
 }
 
 /**
@@ -394,6 +412,8 @@ export function opaqueSensorBody(postData: string): boolean {
 const ANCHORED_LOG_ENDPOINTS: ReadonlyArray<readonly [host: RegExp, path: string]> = [
   [/^upa-logger\.[a-z0-9-]+\.aws\.openshift\.bestbuy\.com$/, '/log-events'],
   [/^t2\.xiaohongshu\.com$/, '/api/v2/collect'],
+  // G7 (G6 r5 xhs-read f24-cuxBxon2): the same log under Xiaohongshu's rednote host after the rename.
+  [/^t2\.rnote\.com$/, '/api/v2/collect'],
 ];
 
 /** Largest log body let through (observed: 0 B BestBuy, 680 B Xiaohongshu). */
@@ -1895,7 +1915,11 @@ export class CloudObservation {
       method: r.method(),
       url: safeObservationUrl(url.origin + url.pathname),
       at: Date.now(),
-      ...(unknownPost ? { bodyShape: safeBodyShape(r, url) } : {}),
+      ...(unknownPost
+        ? {
+            bodyShape: `${safeBodyShape(r, url)}${url.hostname === 'www.bestbuy.com' ? ` search:${cause?.searchField ? 'yes' : 'no'}` : ''}`,
+          }
+        : {}),
     };
     if (write && cause) {
       cause.causes.delete(key);

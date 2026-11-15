@@ -1,7 +1,7 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
-import { assessEngagementClaims } from './engagement-counts.js';
+import { engagementFindings, engagementKindsIn } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
 import { unsupportedSpecPricePairings } from './spec-price-pairing.js';
 import {
@@ -1431,12 +1431,13 @@ export function assessCompletionFacts(input: {
     ),
   );
   // FIX-29: a like/comment/favourite/share number must be that counter's, not the icon next to it.
-  contradictions.push(
-    ...assessEngagementClaims(
-      input.summary,
-      input.pages.map((page) => page.text),
-    ),
+  // G7: a number read from the page that a different same-kind mark cannot settle is told as 未核实.
+  const engagement = engagementFindings(
+    input.summary,
+    input.pages.map((page) => page.text),
   );
+  contradictions.push(...engagement.contradictions);
+  unverified.push(...engagement.unverified);
   return {
     contradictions: contradictions.slice(0, 8),
     unverified: unverified.slice(0, 8),
@@ -1919,10 +1920,18 @@ export function declaredAbsentFields(
           (label === name || label.endsWith(name)) && vals.some((v) => DECLARED_ABSENT_RE.test(v)),
       ) ||
         // 「页面未显示作者名称」「作者字段按页面原样写“页面未显示”」 — prose, not a 作者：value line.
+        // G7 (G6 r5 xhs-read f24-cuxBxon3): 「因此未能读到点赞数」 and 「点赞数在未登录时不显示具体数字」
+        // went out as an honest 部分完成 with no second look, while the screenshot showed 1583.
         [
           ...prose.matchAll(
             new RegExp(
-              `(?:页面(?:上|中)?)?(?:未|没有)(?:显示|提供|列出|给出|找到|读到|获取到)${name}`,
+              `(?:页面(?:上|中)?)?(?:未|没有|未能|没能|无法)(?:显示|提供|列出|给出|找到|读到|读取到|获取到|读取)${name}`,
+              'g',
+            ),
+          ),
+          ...prose.matchAll(
+            new RegExp(
+              `${name}[^。；;，,、\\n：:]{0,14}?(?:不显示|未显示|没有显示|不展示|读不到|看不到|无法读取)`,
               'g',
             ),
           ),
@@ -2071,15 +2080,29 @@ function countState(prose: string, name: string): 'value' | 'doubt' | null {
  * only pushed the run into another variant's price. A gap is explained when the line that says it
  * was not obtained quotes words a page the run read really shows: deliver it as 部分完成.
  */
+/** G7: words that say a value was not read, anywhere in a clause (「点赞数：未获取到」). */
+const ABSENT_WORD_RE =
+  /未获取到|没拿到|拿不到|未显示|不显示|没有显示|未读到|未能读到|读不到|未找到|看不到|无法读取|not (?:shown|found|read|displayed)/i;
 export function absentExplainedByPage(summary: string, pages: readonly string[]): boolean {
   const norm = pages.map((page) => normalizeFact(unescapeLiteralBreaks(page)));
   const lines = unescapeLiteralBreaks(summary)
     .split('\n')
     .filter((line) => DECLARED_ABSENT_RE.test(line) || /未获取到|没拿到|拿不到|无单一/.test(line));
   if (!lines.length) return false;
-  return lines.every((line) =>
-    [...line.matchAll(/[「“"『]([^」”"』]{4,120})[」”"』]/gu)].some((m) =>
-      norm.some((page) => page.includes(normalizeFact(m[1]!))),
-    ),
-  );
+  // G7 (G6 r5 xhs-read f24-cuxBxon3): 「点赞数在未登录时不显示…；评论数页面显示为「共 24 条评论」」 —
+  // a quote about another counter explains nothing about the missing 点赞; the page's own words
+  // must name the counter said to be missing (「登录后查看点赞」), or the run takes its second look.
+  return lines.every((line) => {
+    // Only the clause that says something is missing names what needs explaining.
+    const kinds = line
+      .replace(/[「“"『][^」”"』]*[」”"』]/gu, '')
+      .split(/[；;。，,]/)
+      .filter((clause) => DECLARED_ABSENT_RE.test(clause) || ABSENT_WORD_RE.test(clause))
+      .flatMap((clause) => engagementKindsIn(clause));
+    return [...line.matchAll(/[「“"『]([^」”"』]{4,120})[」”"』]/gu)].some(
+      (m) =>
+        norm.some((page) => page.includes(normalizeFact(m[1]!))) &&
+        (!kinds.length || engagementKindsIn(m[1]!).some((kind) => kinds.includes(kind))),
+    );
+  });
 }

@@ -234,8 +234,23 @@ export function engagementClaims(
  * is fine. Returns the contradictions.
  */
 export function assessEngagementClaims(answer: string, pageTexts: readonly string[]): string[] {
+  return engagementFindings(answer, pageTexts).contradictions;
+}
+
+/**
+ * G7 (G6 r5 xhs-read, tsk f24-cuxBxon1): the run read 「1584」 from the note's own bar
+ * (get_page_text 「评论\n1584\n1823\n24」), but a comment's like button was marked 点赞 「1」, the
+ * check said 「页面标注为点赞的数字是「1」」 and the answer was changed to 「点赞数：1」 to pass. A
+ * page marks other items' counters too (comments, related notes), so a number the run did read
+ * from the page, marked as no other kind, is not contradicted by a different 点赞 mark: it is
+ * delivered with an 未核实 note instead, and no message ever offers another number to switch to.
+ */
+export function engagementFindings(
+  answer: string,
+  pageTexts: readonly string[],
+): { contradictions: string[]; unverified: string[] } {
   const claims = engagementClaims(answer);
-  if (!claims.length) return [];
+  if (!claims.length) return { contradictions: [], unverified: [] };
   const marks = new Map<EngagementKind, Set<string>>();
   const bare = new Set<string>();
   const worded = new Map<EngagementKind, Set<string>>();
@@ -266,15 +281,25 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
     }
   }
   const out: string[] = [];
+  const unverified: string[] = [];
   for (const claim of claims) {
     const own = marks.get(claim.kind);
     const hit = (values?: Set<string>) =>
       !!values && [...values].some((v) => sameCount(claim.value, v));
     if (hit(own) || hit(worded.get(claim.kind))) continue;
     const other = [...marks].find(([kind, values]) => kind !== claim.kind && hit(values))?.[0];
-    if (own?.size) {
+    if (own?.size && !other && hit(bare)) {
+      unverified.push(
+        `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容，未能确认哪个是本篇的）`,
+      );
+    } else if (own?.size && !other) {
       out.push(
-        `答案的${claim.kind}数「${claim.value}」与页面不符：页面标注为${claim.kind}的数字是「${[...own].join('、')}」${other ? `，「${claim.value}」标注的是${other}数` : ''}`,
+        `答案的${claim.kind}数「${claim.value}」在已读页面上没有找到（页面上标为${claim.kind}的数字也可能属于评论等其他内容）：只写你在页面上确认属于这一项的数字；确认不了就如实写「${claim.kind}数未能核实」，不要为了通过核对改成页面上别的数字`,
+      );
+    } else if (own?.size) {
+      out.push(
+        // A definite wrong counter (FIX-29 Douyin 97 = 分享): the page's own mark may be named.
+        `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数：页面标注为${claim.kind}的数字是「${[...own].join('、')}」；确认不了就如实写「${claim.kind}数未能核实」`,
       );
     } else if (other) {
       out.push(
@@ -286,5 +311,10 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
       );
     }
   }
-  return out;
+  return { contradictions: out, unverified };
+}
+
+/** Engagement kinds a line names (「点赞数在未登录时不显示」 → 点赞). */
+export function engagementKindsIn(line: string): EngagementKind[] {
+  return ENGAGEMENT_KINDS.filter((kind) => KIND_WORDS[kind].test(line));
 }
