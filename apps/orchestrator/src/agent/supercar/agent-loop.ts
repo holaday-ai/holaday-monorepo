@@ -815,6 +815,12 @@ export interface RunSupercarOptions {
   /** Free-form user intent — the first user message. */
   intent: string;
   /**
+   * G2i 复审: only what the user typed — the parent task's own request plus this turn's input,
+   * never plan / expert preambles or a previous answer. Agreeing to terms and the user's own
+   * mailbox / phone values are judged from this alone. Defaults to `intent`.
+   */
+  userRequest?: string;
+  /**
    * G2g (REBUILD-4 本机验收, tsk_Rogoz5VGbEiqodiH44vat): the user's own words this turn, when
    * `intent` also carries a follow-up's parent context or a plan / workflow preamble. Read only
    * by the form-fill receipt check, and only when this turn is plainly read-only — a parent
