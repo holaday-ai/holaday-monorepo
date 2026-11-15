@@ -6,6 +6,10 @@
 
 import { pino } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  linkRoutingOwner,
+  markRoutingUnreliable,
+} from '../agent/search-fallback/search-results-page.js';
 import { AWAITING_REPLY, BrowserPool } from './browser-pool.js';
 import type { BrowserInstance, BrowserSessionTarget, PoolConfig } from './types.js';
 
@@ -268,5 +272,19 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
     expect(pool.peek('tsk_1')).toBe(home);
     expect(pool.peek('bhs_usr_A')).toBeNull();
+  });
+
+  it('G2d: a browser whose route removal stalled during the task is not given back', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool, 'usr_A');
+    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous')).toBe(home);
+    const context = {};
+    linkRoutingOwner(context, home.executor);
+    markRoutingUnreliable(context);
+
+    // The caller then finishes the task browser the normal way (retain refuses → release).
+    expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
+    expect(pool.peek('bhs_usr_A')).toBeNull();
+    expect(pool.retain('tsk_1', 60_000, 'terminal-review')).toBe(false);
   });
 });

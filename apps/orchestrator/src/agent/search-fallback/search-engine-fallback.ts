@@ -1,12 +1,17 @@
-import type { BrowserContext, Route } from 'playwright';
+import type { BrowserContext, Frame, Page, Route } from 'playwright';
+import { logger } from '../../config/logger.js';
 import { TEXT_URL_RE, trimTextUrl } from '../../execution/text-urls.js';
 import type { RunSupercarOptions, SupercarOutcome, SupercarTickEvent } from '../supercar/index.js';
 import type { SearchProvider, WebSearchResult } from './search-provider.js';
 import {
+  ENGINE_RESULTS_ROUTE,
   engineResultsQuery,
+  isEngineHost,
+  linkRoutingOwner,
   redirectHtml,
+  routeWithin,
+  routingUnreliable,
   serveSearchResults,
-  unrouteWithin,
 } from './search-results-page.js';
 
 type Engine = 'Google' | 'Bing' | 'DuckDuckGo' | '百度';
@@ -166,6 +171,10 @@ async function viaSearchApi(
     const results = await searchWithRetry(provider, plan.query);
     const page = await args.executor?.getPage();
     if (!results.length || !page) return null;
+    linkRoutingOwner(page.context(), args.executor);
+    // G2d: a route installed in a context whose routing went wrong may silently never apply —
+    // the results page would end on a DNS error; the alternate engine is used instead.
+    if (routingUnreliable(page.context())) return null;
     await recordApiResults(results, provider, args);
     // The provider that answered this search (a chain names the one that answered last).
     const label = provider.label;
@@ -176,7 +185,10 @@ async function viaSearchApi(
     });
     /** DEPLOY-R4 D16: every provider whose results page this run served, in order. */
     const labels = new Set([label]);
-    const unguard = await guardEngineSearches(page.context(), provider, args, served, labels);
+    // G2d: without the guard (not installed in time) the served page still answers.
+    const unguard = await guardEngineSearches(page.context(), provider, args, served, labels).catch(
+      () => async () => {},
+    );
     const alternate = withAlternate(
       {
         from: plan.from as Engine,
@@ -246,8 +258,9 @@ async function guardEngineSearches(
   args: RunSupercarOptions,
   served: Awaited<ReturnType<typeof serveSearchResults>>,
   labels?: Set<string>,
+  /** G2d: the raw query of every engine results navigation this guard saw (answered or not). */
+  seen?: Set<string>,
 ): Promise<() => Promise<void>> {
-  const matcher = (url: URL) => engineResultsQuery(url.href) !== null;
   const handler = async (route: Route) => {
     const request = route.request();
     let mainFrame = false;
@@ -257,7 +270,9 @@ async function guardEngineSearches(
     } catch {
       /* no frame yet: not a page navigation we redirect */
     }
-    const query = engineResultsQuery(request.url())?.trim();
+    const raw = engineResultsQuery(request.url());
+    if (mainFrame && raw !== null) seen?.add(raw);
+    const query = raw?.trim();
     if (!mainFrame || !query || query.length > 500) return route.fallback();
     const results = await provider
       .search(query, { count: 10, signal: AbortSignal.timeout(15_000) })
@@ -279,8 +294,18 @@ async function guardEngineSearches(
       body: redirectHtml(to),
     });
   };
-  await context.route(matcher, handler);
-  return () => unrouteWithin(context, matcher, handler);
+  // G2d: engine result URLs only (matched inside Playwright), bounded like its removal.
+  const remove = await routeWithin(context, ENGINE_RESULTS_ROUTE, handler);
+  if (!remove) {
+    logger.warn(
+      { taskId: args.taskId },
+      'search guard: route not installed in time; the run continues without it',
+    );
+    throw new Error('search_guard_route_unavailable');
+  }
+  return async () => {
+    await remove();
+  };
 }
 
 /**
@@ -320,31 +345,118 @@ const ENGINE_NAMED =
 /**
  * CAPTCHA-UX-1 第 1 条: SEARCH-GUARD-1's redirect for a whole run, before any search happened. The
  * results page origin starts with an empty page; each redirected search adds its own.
+ *
+ * G2d: installed only when the run heads for an engine. With Playwright on Chromium any context
+ * route — whatever its matcher — pauses every request of the context and turns the cache off, and
+ * taking the last one down stalled on heavy pages (BestBuy). A run that never goes near an engine
+ * now has no route at all. The guard goes in (bounded) before a page of the context navigates to an
+ * engine results page, and when a page arrives on an engine's own site (its search box is next).
+ * A results page reached another way is opened again once the guard is in, so it is answered by
+ * the search API too.
+ *
+ * Known limit (kept on purpose — no run-wide route again): a link, form or redirect from a
+ * non-engine page straight to an engine results URL reaches the engine once before that reopen
+ * (the old run-wide route intercepted it before the request left); the reopen then serves the
+ * search API page. Only page.goto and the engine's own pages are guarded before the request.
  */
 async function guardRunSearches(
   provider: SearchProvider,
   args: RunSupercarOptions,
 ): Promise<(() => Promise<void>) | null> {
-  let served: Awaited<ReturnType<typeof serveSearchResults>> | undefined;
+  let page: Page | undefined;
   try {
-    const page = await args.executor?.getPage();
-    if (!page) return null;
-    served = await serveSearchResults(page.context(), {
-      query: '',
-      label: provider.label,
-      results: [],
-    });
-    const pages = served;
-    const unguard = await guardEngineSearches(page.context(), provider, args, pages);
-    return async () => {
-      await unguard().catch(() => {});
-      await pages.dispose();
-    };
+    page = (await args.executor?.getPage()) as Page | undefined;
   } catch {
-    // 复审 P2: a guard that could not be installed leaves no results-page route behind.
-    await served?.dispose().catch(() => {});
     return null;
   }
+  if (!page) return null;
+  const context = page.context();
+  linkRoutingOwner(context, args.executor);
+  let stopped = false;
+  const seen = new Set<string>();
+  const reopened = new Set<string>();
+  type Installed = { dispose: () => Promise<void> };
+  let installing: Promise<Installed | null> | null = null;
+  const install = () => {
+    installing ??= (async () => {
+      if (stopped || routingUnreliable(context)) return null;
+      let served: Awaited<ReturnType<typeof serveSearchResults>> | undefined;
+      try {
+        served = await serveSearchResults(context, {
+          query: '',
+          label: provider.label,
+          results: [],
+        });
+        const pages = served;
+        const unguard = await guardEngineSearches(context, provider, args, pages, undefined, seen);
+        return {
+          dispose: async () => {
+            await unguard().catch(() => {});
+            await pages.dispose();
+          },
+        };
+      } catch {
+        // 复审 P2: a guard that could not be installed leaves no results-page route behind.
+        logger.warn({ taskId: args.taskId }, 'search guard: not installed; run continues without');
+        await served?.dispose().catch(() => {});
+        return null;
+      }
+    })();
+    return installing;
+  };
+
+  type Goto = Page['goto'];
+  const watched = new Map<Page, { goto: Goto; own: boolean; original: Goto }>();
+  const onNavigated = (frame: Frame) => {
+    if (stopped) return;
+    let target: Page;
+    try {
+      target = frame.page();
+      if (frame !== target.mainFrame()) return;
+    } catch {
+      return;
+    }
+    const url = frame.url();
+    if (!isEngineHost(url)) return;
+    // Landed on an engine results page the guard never saw: it was not in yet (not started, or
+    // still installing — e.g. started on the engine's home page and the search was submitted at
+    // once) or the page got there another way. Reopened once, through the guard, when it is in.
+    // A query the guard saw and let through (the API had nothing) stays on the engine.
+    const query = engineResultsQuery(url);
+    const reopen = query !== null && !seen.has(query) && !reopened.has(query);
+    if (reopen) reopened.add(query);
+    void install().then((installed) => {
+      if (!installed || !reopen || stopped || target.url() !== url) return;
+      void target.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    });
+  };
+  const watch = (target: Page) => {
+    if (stopped || watched.has(target)) return;
+    const own = Object.prototype.hasOwnProperty.call(target, 'goto');
+    const original = target.goto;
+    const goto: Goto = async (url, options) => {
+      if (!stopped && engineResultsQuery(url) !== null) await install();
+      return original.call(target, url, options);
+    };
+    target.goto = goto;
+    watched.set(target, { goto, own, original });
+    target.on('framenavigated', onNavigated);
+  };
+  for (const open of context.pages()) watch(open);
+  watch(page);
+  context.on('page', watch);
+  return async () => {
+    stopped = true;
+    context.off('page', watch);
+    for (const [target, hook] of watched) {
+      target.off('framenavigated', onNavigated);
+      if (target.goto !== hook.goto) continue;
+      if (hook.own) target.goto = hook.original;
+      else delete (target as Partial<Pick<Page, 'goto'>>).goto;
+    }
+    const installed = await installing;
+    await installed?.dispose();
+  };
 }
 
 /** Partial weather information is useful; missing temperature alone is not failure. */
