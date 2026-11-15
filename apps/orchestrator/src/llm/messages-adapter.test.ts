@@ -500,6 +500,28 @@ describe('createAnthropicCompatibleMessagesAdapter', () => {
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST', message: 'Message request is invalid' });
     expect(client.messages.create).not.toHaveBeenCalled();
   });
+
+  it('sends a thinking budget as budget_tokens and rejects one that leaves no answer room', async () => {
+    const client = buildClient({});
+    const adapter = createAnthropicCompatibleMessagesAdapter({
+      client,
+      metadata: { provider: 'anthropic', model: 'claude-opus-4-7' },
+    });
+    const messages = [{ role: 'user' as const, content: 'x' }];
+    for (const budgetTokens of [4_096, 5_000, 0]) {
+      await expect(
+        adapter.create({ maxTokens: 4_096, messages, thinking: { type: 'enabled', budgetTokens } }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    }
+    expect(client.messages.create).not.toHaveBeenCalled();
+    await adapter
+      .create({ maxTokens: 4_096, messages, thinking: { type: 'enabled', budgetTokens: 2_048 } })
+      .catch(() => undefined);
+    expect(vi.mocked(client.messages.create).mock.calls[0]?.[0]).toMatchObject({
+      max_tokens: 4_096,
+      thinking: { type: 'enabled', budget_tokens: 2_048 },
+    });
+  });
 });
 
 describe('createAnthropicMessagesAdapter', () => {

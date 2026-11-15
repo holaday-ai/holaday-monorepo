@@ -269,8 +269,11 @@ export async function probeBrowserBlocker(page: Page, intent?: string) {
  * CAPTCHA-UX-1（协调方追加）: a captcha matched only by the page's address (the reCAPTCHA demo page's
  * own address contains /recaptcha) is judged by its box on the page: once the provider's response
  * is filled and no challenge is open, it is no wall — after it was passed the assistant used to
- * wait out its 10 minutes. 复审 P0: only then — every other captcha (a Cloudflare check, text, a
- * frame, a slider) keeps its rules, and not seeing a box is never taken as passed.
+ * wait out its 10 minutes. 复审 P0: only then — every other captcha (text, a frame, a slider, a
+ * Cloudflare check matched by its text) keeps its rules, and not seeing a box is never taken as
+ * passed. G2e: a Cloudflare check matched only by its address (e.g. a /challenge path) is judged
+ * the same way — its Turnstile box, found even inside a closed shadow root, passes only with its
+ * own cf-turnstile-response filled.
  */
 async function captchaByBox<
   T extends { reason: string; evidence?: { rule?: string; scope?: string } } | null | undefined,

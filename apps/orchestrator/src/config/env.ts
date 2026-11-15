@@ -345,6 +345,38 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  /**
+   * REBUILD-2 unified model gateway (llm/gateway). Off: every model call takes its legacy
+   * lane/purpose path unchanged. On: role → model per region from the role-model table, DashScope
+   * differences normalised, llm_calls purpose `role:<role>`.
+   */
+  LLM_GATEWAY_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /** JSON role-model overrides, e.g. {"cn":{"judge":"qwen3.8-flash"}}; invalid entries ignored. */
+  LLM_GATEWAY_ROLE_MODELS: z.string().default(''),
+  /**
+   * REBUILD-2 part 2 tool router (agent/tool-router). Off: tasks.create routes with the legacy
+   * keyword classifier (live-fact / search / browser rules) unchanged. On: a small model turn
+   * chooses between answering directly, an enabled interface tool (Bailian MCP) and the browser;
+   * an explicit 「打开/在…网站上」 always goes to the browser, a failed or empty interface too.
+   */
+  TOOL_ROUTER_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  /**
+   * G2a: the model data regions TOOL_ROUTER_V2 applies to (comma list: cn, intl). Default empty =
+   * the router runs for nobody even with TOOL_ROUTER_V2 on; DEPLOY-R1 opens it for `cn` only.
+   * A user outside these regions is routed by the mainline keyword rules unchanged.
+   */
+  TOOL_ROUTER_V2_REGIONS: z.string().default(''),
+  /**
+   * Interface tools the router may offer (comma list of registry ids); unknown ids ignored.
+   * Review #1: 高德 (amap_maps, BOSS enabled it) is on by default with the web search.
+   */
+  TOOL_ROUTER_TOOLS: z.string().default('bailian_web_search,amap_maps'),
   /** Provider-neutral Messages/Tools adapter gate. On by default; 'false' is an emergency off. */
   QWEN_MESSAGES_ADAPTER_ENABLED: z
     .enum(['true', 'false'])

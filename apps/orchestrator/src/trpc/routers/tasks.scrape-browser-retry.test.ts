@@ -379,3 +379,123 @@ describe('a page Firecrawl could not read goes to the browser', () => {
     expect(spies.retryCreate).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * G2b — production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」 (cr-a299ab67): the search found a
+ * cernet.edu.cn page with the answer, the write-up of the results failed, and the task went
+ * scrape → generate; generate, which cannot search, delivered a web_search call as the
+ * answer. A web lookup the scrape lane could not answer goes to the cloud browser, and fails
+ * honestly when that cannot start — it is never answered by generate.
+ */
+describe('a web lookup the scrape lane could not answer', () => {
+  const NOBEL = '帮我搜一下 2025 年诺贝尔文学奖得主是谁';
+  const CERNET =
+    'https://www.cernet.edu.cn/rd/special_topic/nobel/wx/202510/t20251010_2693501.shtml';
+  const failedSearch = (
+    kind: scraping.ScrapeFailureKind,
+    reason: string,
+    sources: string[] = [CERNET],
+  ): scraping.ScrapeOutcome => ({
+    status: 'failed',
+    summary: '',
+    reason,
+    failureKind: kind,
+    source: 'search',
+    sources,
+    inputTokens: 0,
+    outputTokens: 0,
+    durationMs: 1,
+    firecrawl: { calls: 1, credits: 5 },
+  });
+
+  /** What generate produced in production: a tool call written out as the answer. */
+  const generated = (summary: string) =>
+    ({
+      status: 'completed',
+      summary,
+      inputTokens: 1,
+      outputTokens: 1,
+      durationMs: 1,
+    }) as unknown as Awaited<ReturnType<typeof generating.runGenerateTask>>;
+
+  it('a failed write-up of the search results goes to the browser, not generate', async () => {
+    const spies = setup('', [], failedSearch('synthesis', '内容整理服务暂时不可用，请稍后重试。'));
+    const generate = vi
+      .spyOn(generating, 'runGenerateTask')
+      .mockResolvedValue(
+        generated('......\n\nweb_search>\n{"query": "2025年诺贝尔文学奖得主"}\n</web_search>'),
+      );
+    const result = await tasksRouter.createCaller(context()).create({
+      intent: NOBEL,
+      expertMode: 'normal',
+    });
+    await vi.waitFor(() => expect(spies.retryCreate).toHaveBeenCalledTimes(1));
+    expect(spies.handoffs[0]?.scrapeBrowserRetry).toEqual({
+      taskId: result.taskId,
+      reason: '搜索结果没能整理成回答，已自动改用云端浏览器去页面上查',
+      firecrawl: { calls: 1, credits: 5 },
+    });
+    expect(spies.retryCreate).toHaveBeenCalledWith({ intent: NOBEL, expertMode: 'normal' });
+    expect(spies.consume).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(generate).not.toHaveBeenCalled();
+    expect(spies.persisted).not.toHaveBeenCalled();
+    expect(spies.settled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['synthesis', '内容整理服务暂时不可用，请稍后重试。'],
+    [
+      'empty',
+      '网页抓取没有拿到所需内容（页面可能要求交互或动态加载），已自动改用云端浏览器重试一次',
+    ],
+  ] as const)('%s: fails honestly when the browser cannot start', async (kind, reason) => {
+    const spies = setup('', [], failedSearch(kind, reason));
+    spies.retryCreate.mockRejectedValueOnce(new Error('BROWSER_RETRY_RUNTIME_UNAVAILABLE'));
+    const generate = vi.spyOn(generating, 'runGenerateTask');
+    await tasksRouter.createCaller(context()).create({ intent: NOBEL, expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(generate).not.toHaveBeenCalled();
+    expect(terminalMetadata(spies)).toMatchObject({
+      executionMode: 'scrape',
+      finalExecutionMode: 'scrape',
+      fallbackChain: ['scrape'],
+      scrapeFailureKind: kind,
+      browserRetryFailure: expect.stringContaining('但浏览器重试未能启动'),
+    });
+    const write = JSON.stringify(
+      spies.persisted.mock.calls.at(-1) ?? spies.settled.mock.calls.at(-1),
+    );
+    expect(write).toContain('failed');
+    expect(write).not.toContain('web_search');
+  });
+
+  it('复审: a writing task that searched first keeps the generate fallback after a timeout', async () => {
+    const WRITE = '搜索最新资料，帮我写一篇关于新能源汽车的3000字深度报告';
+    const spies = setup('', [], failedSearch('synthesis', '内容整理超时，请简化任务后重试。'));
+    const generate = vi
+      .spyOn(generating, 'runGenerateTask')
+      .mockResolvedValue(generated('# 新能源汽车深度报告\n\n正文……'.repeat(20)));
+    await tasksRouter.createCaller(context()).create({ intent: WRITE, expertMode: 'normal' });
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(spies.retryCreate).not.toHaveBeenCalled();
+  });
+
+  it('a search with no query is not handed to the browser', async () => {
+    const spies = setup('', [], failedSearch('input', '请输入要搜索的内容。', []));
+    vi.spyOn(generating, 'runGenerateTask').mockResolvedValue(
+      generated('你想搜索什么内容？告诉我关键词，我来帮你整理。'),
+    );
+    await tasksRouter
+      .createCaller(context())
+      .create({ intent: '帮我搜一下', expertMode: 'normal' });
+    await vi.waitFor(
+      () => expect(spies.persisted.mock.calls.length + spies.settled.mock.calls.length).toBe(1),
+      { timeout: 10_000 },
+    );
+    expect(spies.retryCreate).not.toHaveBeenCalled();
+  });
+});
