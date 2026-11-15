@@ -9,6 +9,7 @@ import {
   gateRoleForUser,
   newExternalId,
   normalizeSkillIds,
+  replyLanguage,
   skillById,
   stripToolCallBlocks,
   videoParameterIssue,
@@ -46,7 +47,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { asksForWriting, explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -60,7 +61,7 @@ import { detectNavFailure } from '../../agent/nav-failure-detector.js';
 import { generateNextStepsWithTitle } from '../../agent/next-steps-generator.js';
 import { isExplicitPlanApproval, isPurePlanHold } from '../../agent/plan-mode.js';
 import type { SkillCatalogueEntry } from '../../agent/planner.js';
-import { createAskedFieldJudge } from '../../agent/scrape-field-judge.js';
+import { type AskedFieldJudge, createAskedFieldJudge } from '../../agent/scrape-field-judge.js';
 import { type ScrapeOutcome, runScrapeTask } from '../../agent/scrape-runner.js';
 import {
   type SearchFallbackEvent,
@@ -143,6 +144,23 @@ import {
   sanitizeFinalText,
   stripStopReasonMarkers,
 } from '../../agent/text-sanitizer.js';
+import {
+  composeFallback,
+  decideExecutionRoute,
+  fallbackGaveFields,
+  fallbackIntent,
+  fallbackQuery,
+  formatSourceLine,
+  freshnessHandover,
+  freshnessProblem,
+  interfaceSearchLane,
+  routeTask,
+  toolRouterSettings,
+  toolsForRegion,
+  wallEnd,
+  wallFallbackAllowed,
+  withInterfaceSource,
+} from '../../agent/tool-router/index.js';
 import {
   injectResolvedUrl,
   resolveIntentUrl,
@@ -641,6 +659,11 @@ function gatewayFor(wiring: ProductionModelRuntimeWiring) {
   return wiring === modelRuntimeWiring ? tasksModelGateway : modelGateway({ wiring });
 }
 
+/** REBUILD-2 part 2: interface-tool routing, only while TOOL_ROUTER_V2 is on (default off). */
+const taskToolRouter = toolRouterSettings(appEnv, (message) =>
+  console.warn(`[tool-router] ${message}`),
+);
+
 function personalModelContext(actorExternalId: string, modelDataRegion: unknown) {
   return {
     actorExternalId,
@@ -664,7 +687,10 @@ function resolveScrapeRuntimeForUser(
   modelDataRegion: unknown,
   wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
 ) {
-  return gatewayFor(wiring).resolve('scrape', personalModelContext(actorExternalId, modelDataRegion));
+  return gatewayFor(wiring).resolve(
+    'scrape',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function resolveVerifierRuntimeForUser(
@@ -1918,16 +1944,43 @@ export const tasksRouter = router({
             // skill-hint + keyword fast paths inside the classifier short-
             // circuit most cases for free.
             // The decision keeps its reason (rule source + match) for task metadata.
-            const executionModeDecision = retryCore
+            // REBUILD-2 part 2: with TOOL_ROUTER_V2 on, the tool router decides generate /
+            // interface / browser instead of the keyword rules (media and file lanes keep theirs).
+            // A forced browser (scrape retry, local Chrome) needs no routing turn.
+            const routedExecution = retryCore
               ? null
-              : await explainExecutionMode({
-                  intent: input.intent,
-                  skillId: taskSkillId,
-                  // §5 fileIds-aware soft template-fill: an attachment + a fill clue
-                  // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
-                  hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
-                  logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+              : await decideExecutionRoute({
+                  enabled:
+                    taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                    !ctx.scrapeBrowserRetry &&
+                    !input.localChrome,
+                  legacy: () =>
+                    explainExecutionMode({
+                      intent: input.intent,
+                      skillId: taskSkillId,
+                      // §5 fileIds-aware soft template-fill: an attachment + a fill clue
+                      // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
+                      hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
+                      logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+                    }),
+                  route: async () => {
+                    const judge = gatewayFor(taskModelWiring).resolve(
+                      'judge',
+                      personalModelContext(ctx.userId, userRow.modelDataRegion),
+                    );
+                    return routeTask({
+                      intent: input.intent,
+                      messages: judge.kind === 'ready' ? judge.messages() : null,
+                      tools:
+                        judge.kind === 'ready'
+                          ? toolsForRegion(taskToolRouter.tools, judge.region)
+                          : [],
+                      logger: ctx.logger.child({ userId: ctx.userId, stage: 'tool-router' }),
+                    });
+                  },
                 });
+            const executionModeDecision = routedExecution?.decision ?? null;
+            const toolRoute = routedExecution?.toolRoute ?? null;
             const classifiedExecutionMode = executionModeDecision?.mode ?? ('generate' as const);
             // Phase 2b — typed expert workflow lane override. When the new
             // typed matcher (content-topic / ecom-daily / douyin-review)
@@ -4653,6 +4706,23 @@ export const tasksRouter = router({
             // classifier explicitly avoided routing to).
             if (executionMode === 'scrape') {
               const taskId = newExternalId('task');
+              // REBUILD-2 part 2: the router chose an interface tool; it is this lane's source.
+              const interfaceRoute = toolRoute?.lane === 'interface' ? toolRoute : null;
+              const interfaceTool = interfaceRoute
+                ? (taskToolRouter.tools.find((tool) => tool.id === interfaceRoute.toolId) ?? null)
+                : null;
+              const interfaceLane =
+                interfaceRoute && interfaceTool
+                  ? interfaceSearchLane({
+                      tool: interfaceTool,
+                      client: taskToolRouter.client,
+                      query: interfaceRoute.query,
+                      ...(interfaceRoute.args ? { args: interfaceRoute.args } : {}),
+                      // 复审 #1 item 5: the source line follows the task's language.
+                      language: replyLanguage(input.intent, userRow.modelDataRegion),
+                    })
+                  : null;
+              const scrapeSourceLane = interfaceLane ?? ctx.firecrawl;
               const scrapeRuntime = resolveScrapeRuntimeForUser(
                 ctx.userId,
                 userRow.modelDataRegion,
@@ -4721,7 +4791,7 @@ export const tasksRouter = router({
               // Defensive — if the adapter wasn't configured at boot, fail
               // loudly with the exact reason. SPA / translateError surfaces
               // a clear "Firecrawl 未配置" instead of "服务繁忙".
-              if (!ctx.firecrawl) {
+              if (!scrapeSourceLane) {
                 let missingFirecrawlPersisted = false;
                 try {
                   const persisted = await repo.persistVisionOutcome(taskId, {
@@ -4771,7 +4841,7 @@ export const tasksRouter = router({
               // Codex Pack B1 — planning chip (scrape lane).
               broadcastSubStatus(ctx.userId, taskId, 'planning');
 
-              const firecrawl = ctx.firecrawl;
+              const firecrawl = scrapeSourceLane;
               const scrapeStartedAt = Date.now();
               void runMediaTaskBackground(ctx, taskId, async (ctx) =>
                 (async () => {
@@ -4839,6 +4909,7 @@ export const tasksRouter = router({
                           ...(attachmentBlocks.length > 0 ? { attachments: attachmentBlocks } : {}),
                           ...(executionPlan ? { executionPlan } : {}),
                           firecrawl,
+                          ...(interfaceRoute ? { searchLabel: interfaceRoute.title } : {}),
                           logger: ctx.logger,
                           // FIX-36 (Deploy-36 b-n06): trading days come from the
                           // exchange calendar, not from the model's arithmetic.
@@ -4926,7 +4997,7 @@ export const tasksRouter = router({
                           scrapeBrowserRetry: {
                             taskId,
                             reason,
-                            ...(scrapeOutcome.firecrawl
+                            ...(scrapeOutcome.firecrawl && !interfaceRoute
                               ? { firecrawl: scrapeOutcome.firecrawl }
                               : {}),
                             ...(scrapeOutcome.partialAnswer
@@ -4947,6 +5018,36 @@ export const tasksRouter = router({
                       return false;
                     }
                   };
+                  // REBUILD-2 part 2 hard rule (1): an interface that failed, came back empty or
+                  // whose answer did not hold goes to the browser — never to generate.
+                  const interfaceFailed =
+                    Boolean(interfaceRoute) && scrapeOutcome.status === 'failed';
+                  if (
+                    interfaceFailed &&
+                    (await handOverToBrowser(
+                      `${interfaceRoute?.title ?? '接口'}没有拿到可用结果，已自动改用云端浏览器去页面上查`,
+                    ))
+                  ) {
+                    return;
+                  }
+                  // REBUILD-2 bench a1 ruling (live-sh): a time-sensitive answer from an interface
+                  // states the data's own time, and only data of the day (news: or the day
+                  // before; weather: today or later) is said as current — else the live page.
+                  const stale =
+                    interfaceRoute && interfaceLane && scrapeOutcome.status === 'completed'
+                      ? freshnessProblem({
+                          intent: input.intent,
+                          answer: scrapeOutcome.summary,
+                          results: interfaceLane.lastText(),
+                        })
+                      : null;
+                  if (stale) {
+                    ctx.logger.info(
+                      { taskId, problem: stale },
+                      'tool-router: interface answer not current, handing over to browser',
+                    );
+                    if (await handOverToBrowser(freshnessHandover(stale))) return;
+                  }
                   const pageUnreadable =
                     scrapeOutcome.status === 'failed' &&
                     (scrapeOutcome.failureKind === 'firecrawl' ||
@@ -4955,6 +5056,7 @@ export const tasksRouter = router({
                       scrapeOutcome.failureKind === 'facts');
                   if (
                     pageUnreadable &&
+                    !interfaceFailed &&
                     (await handOverToBrowser(
                       `${scrapeOutcome.reason}，已自动改用云端浏览器重试一次`,
                     ))
@@ -4964,11 +5066,35 @@ export const tasksRouter = router({
                   // FIX-58 P0: a live fact (price, stock, ranking…) is never answered from
                   // memory — a lookup that found nothing goes to the browser, not generate.
                   const liveFactLookup =
-                    scrapeOutcome.status === 'failed' && !!matchLiveFact(input.intent);
+                    !interfaceRoute &&
+                    scrapeOutcome.status === 'failed' &&
+                    !!matchLiveFact(input.intent);
                   if (
                     liveFactLookup &&
                     !pageUnreadable &&
                     (await handOverToBrowser('没搜到实时数据，已自动改用云端浏览器去页面上查'))
+                  ) {
+                    return;
+                  }
+                  // G2b (production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」: the write-up of
+                  // the search results failed, generate — which cannot search — wrote a
+                  // web_search call as the answer): a web lookup the scrape lane could not
+                  // answer goes to the cloud browser; if that cannot start it fails honestly.
+                  // It is never answered by generate. A search with no query is not a lookup.
+                  // 复审: a task that writes from what it searched (「搜索最新资料，帮我写一篇…报告」)
+                  // is not a lookup — it keeps the generate fallback (300 s, the writing lane).
+                  const searchLookup =
+                    scrapeOutcome.status === 'failed' &&
+                    scrapeOutcome.source === 'search' &&
+                    scrapeOutcome.failureKind !== 'input' &&
+                    !asksForWriting(input.intent);
+                  if (
+                    searchLookup &&
+                    !pageUnreadable &&
+                    !liveFactLookup &&
+                    (await handOverToBrowser(
+                      '搜索结果没能整理成回答，已自动改用云端浏览器去页面上查',
+                    ))
                   ) {
                     return;
                   }
@@ -4997,21 +5123,27 @@ export const tasksRouter = router({
                       // FIX-58 P1-2: the same 「原样 / 原文」 cleanup as a browser answer.
                       // FIX-58 P1-10: a market answer's table is said as a sentence.
                       // 复审 #1: a source link is set apart from the sentence before it.
-                      summary: withSourceLinksApart(
-                        marketTableAsText(
-                          withoutVerbatimNotes(scrapeOutcome.summary),
-                          input.intent,
+                      summary: withInterfaceSource(
+                        withSourceLinksApart(
+                          marketTableAsText(
+                            withoutVerbatimNotes(scrapeOutcome.summary),
+                            input.intent,
+                          ),
                         ),
+                        interfaceLane?.lastSource() ?? null,
+                        replyLanguage(input.intent, userRow.modelDataRegion),
                       ),
                     };
                   } else if (
                     (pageUnreadable &&
                       (scrapeOutcome.source === 'scrape' ||
                         scrapeOutcome.failureKind === 'blocked')) ||
-                    liveFactLookup
+                    liveFactLookup ||
+                    interfaceFailed ||
+                    searchLookup
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
-                    // search whose every result was a wall (FIX-32).
+                    // search whose every result was a wall (FIX-32), nor any web lookup (G2b).
                     outcome = {
                       status: 'failed',
                       reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',
@@ -5247,7 +5379,21 @@ export const tasksRouter = router({
                     ...(scrapeOutcome.failureKind
                       ? { scrapeFailureKind: scrapeOutcome.failureKind }
                       : {}),
-                    firecrawl: firecrawlUsage(scrapeOutcome.firecrawl),
+                    ...(interfaceRoute
+                      ? {
+                          toolRoute: {
+                            toolId: interfaceRoute.toolId,
+                            query: interfaceRoute.query,
+                            ...(interfaceRoute.args ? { args: interfaceRoute.args } : {}),
+                            ...(interfaceLane?.lastSource()
+                              ? { source: interfaceLane.lastSource() }
+                              : {}),
+                            ...(interfaceLane?.lastFailure()
+                              ? { failure: interfaceLane.lastFailure() }
+                              : {}),
+                          },
+                        }
+                      : { firecrawl: firecrawlUsage(scrapeOutcome.firecrawl) }),
                     elapsedMs,
                   };
                   ctx.logger.info(
@@ -6310,6 +6456,23 @@ export const tasksRouter = router({
                 let captchaNeedsRelease = false;
                 let pauseCaptchaWatchdog = () => {};
                 let resumeCaptchaWatchdog = () => {};
+                // REBUILD-2 协调方决定: a read task whose wall the public sources can answer (the
+                // router on, a search interface for the user's region, a ready answer runtime).
+                // G2a 复审: never in the person's own browser (their local Chrome or their cloud
+                // browser) — they are at the screen and can pass the check themselves.
+                const wallFallbackRun =
+                  !input.localChrome &&
+                  !input.browserHomeSession &&
+                  taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                  wallFallbackAllowed(input.intent) &&
+                  toolsForRegion(
+                    taskToolRouter.tools,
+                    userRow.modelDataRegion === 'cn' || userRow.modelDataRegion === 'intl'
+                      ? userRow.modelDataRegion
+                      : null,
+                  ).some((tool) => tool.kind === 'search') &&
+                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion, taskModelWiring)
+                    .kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
@@ -6348,6 +6511,9 @@ export const tasksRouter = router({
                       }
                     : {}),
                   isTaskCancelled: () => repo.isTaskCancelled(taskId),
+                  // REBUILD-2 协调方决定: a read task's verification wall is answered from public
+                  // sources after the run, not handed over for a 10-minute wait (TOOL_ROUTER_V2).
+                  ...(wallFallbackRun ? { wallFallback: true } : {}),
                   // Phase 1 Playbook ④ prerequisite — cost accounting for the browse
                   // loop (recorder + the external user id llm_calls.user_id needs).
                   recorder: llmCallRecorder,
@@ -7392,6 +7558,7 @@ export const tasksRouter = router({
                   )
                     .then(async (rawOutcome) => {
                       let outcome = rawOutcome;
+                      let wallFallbackMark: Record<string, unknown> | null = null;
                       // FIX-36 复审 #1 #3: the browser retry did not complete — deliver what the
                       // scrape did get, as 部分完成 naming what is missing.
                       if (
@@ -7415,6 +7582,171 @@ export const tasksRouter = router({
                           status: 'completed',
                           summary: delivered.summary,
                           partial: delivered.partial,
+                        };
+                      }
+                      // REBUILD-2 协调方决定 (2026-11-12): a read-only task whose browser run
+                      // ended on a wall (login, verification, blocked) takes the asked fields from
+                      // public sources through the search interface, says the wall plainly and
+                      // where each fact came from. Writes and personal data still go to the user;
+                      // the browser is not used again. TOOL_ROUTER_V2 only.
+                      // 复审 #2: nothing runs for a task the user cancelled.
+                      // PR #348 review: never in the person's own browser (local Chrome, cloud
+                      // browser) — they keep the chance to pass the check themselves.
+                      const wall =
+                        !input.localChrome &&
+                        !input.browserHomeSession &&
+                        taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                        !(await repo.isTaskCancelled(taskId))
+                          ? wallEnd(outcome, input.intent)
+                          : null;
+                      const wallSearchTool = wall
+                        ? (toolsForRegion(
+                            taskToolRouter.tools,
+                            userRow.modelDataRegion === 'cn' || userRow.modelDataRegion === 'intl'
+                              ? userRow.modelDataRegion
+                              : null,
+                          ).find((tool) => tool.kind === 'search') ?? null)
+                        : null;
+                      const wallRuntime = wallSearchTool
+                        ? resolveScrapeRuntimeForUser(
+                            ctx.userId,
+                            userRow.modelDataRegion,
+                            taskModelWiring,
+                          )
+                        : null;
+                      if (wall && wallSearchTool && wallRuntime?.kind === 'ready') {
+                        const language = replyLanguage(input.intent, userRow.modelDataRegion);
+                        const browserSummary =
+                          outcome.status === 'completed' ? outcome.summary : undefined;
+                        const query = fallbackQuery(input.intent, wall, browserSummary);
+                        const lane = interfaceSearchLane({
+                          tool: wallSearchTool,
+                          client: taskToolRouter.client,
+                          query,
+                          language,
+                        });
+                        try {
+                          broadcastToUser(ctx.userId, {
+                            type: 'server.task.progress',
+                            taskId,
+                            message: `${wall.site}${wall.kind === 'login' ? '要登录' : '把访问拦下了'}，改用公开来源查…`,
+                          });
+                        } catch {
+                          /* broadcast best-effort */
+                        }
+                        const fallback = await (await import('../../agent/scrape-runner.js'))
+                          .runScrapeTask({
+                            taskId,
+                            userId: ctx.userId,
+                            intent: fallbackIntent(input.intent, wall),
+                            userIntent: input.intent,
+                            responsesAdapter: wallRuntime.responses(),
+                            firecrawl: lane,
+                            searchLabel: wallSearchTool.title,
+                            logger: ctx.logger,
+                          })
+                          .catch((err: unknown) => {
+                            ctx.logger.warn(
+                              { taskId, err: err instanceof Error ? err.message : String(err) },
+                              'tool-router: wall fallback failed',
+                            );
+                            return null;
+                          });
+                        const source = lane.lastSource();
+                        // REBUILD-2 协调方 08:20 判定: whether the public-source answer gives what the
+                        // request asked is read by the small judge model (qwen3.8-flash, structured
+                        // output), not by wording rules. Not given, or the judge failed → not
+                        // completed, no wall_fallback; the wall outcome stands.
+                        // PR #348 review: the judge reads the answer as it would be delivered — after
+                        // the price / freshness checks may have removed lines — so a requested field
+                        // the filters dropped is not delivered as answered.
+                        const filtered =
+                          fallback?.status === 'completed' && fallback.summary.trim()
+                            ? composeFallback({
+                                wall,
+                                intent: input.intent,
+                                answer: fallback.summary,
+                                ...(browserSummary ? { browserSummary } : {}),
+                                rows: lane.lastRows(),
+                                resultsText: lane.lastText(),
+                                sourceLine: source ? formatSourceLine(source, language) : null,
+                              })
+                            : null;
+                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
+                        if (filtered?.deliver && filtered.summary.trim()) {
+                          const judgeRuntime = gatewayFor(taskModelWiring).resolve(
+                            'judge',
+                            personalModelContext(ctx.userId, userRow.modelDataRegion),
+                          );
+                          fieldVerdicts =
+                            judgeRuntime.kind === 'ready'
+                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
+                                  logger: ctx.logger,
+                                })({ request: input.intent, answer: filtered.summary })
+                              : null;
+                        }
+                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
+                        const composed = filtered?.deliver && answered ? filtered : null;
+                        ctx.logger.info(
+                          {
+                            taskId,
+                            code: 'WALL_PUBLIC_FALLBACK',
+                            wall,
+                            tool: wallSearchTool.id,
+                            query,
+                            status: fallback?.status ?? 'error',
+                            delivered: composed?.deliver ?? false,
+                            checks: composed?.checks ?? null,
+                            fields: fieldVerdicts ?? null,
+                            laneFailure: lane.lastFailure(),
+                          },
+                          'tool-router: read task ended on a wall, tried public sources',
+                        );
+                        if (fallback && composed?.deliver) {
+                          for (const url of fallback.sources) {
+                            recordEvidence(taskId, {
+                              fact: `web_search_url=${url}`,
+                              sourceType: 'tool_result',
+                              sourceDetail: 'wall fallback search result',
+                              confidence: 'observed',
+                            });
+                          }
+                          // 协调方判定: marked, so the bench counts 含墙成功 apart from 真成功.
+                          wallFallbackMark = {
+                            from: wall.from,
+                            kind: wall.kind,
+                            site: wall.site,
+                            tool: wallSearchTool.id,
+                            ...composed.checks,
+                          };
+                          outcome = {
+                            status: 'completed',
+                            summary: composed.summary,
+                            iterations: outcome.iterations,
+                            toolsUsed: [...(outcome.toolsUsed ?? []), wallSearchTool.id],
+                            ...(outcome.status === 'completed' && outcome.partial
+                              ? { partial: outcome.partial }
+                              : {}),
+                          };
+                        }
+                      }
+                      if (
+                        wallFallbackRun &&
+                        outcome.status === 'awaiting_user' &&
+                        wall?.from === 'awaiting' &&
+                        wall.kind === 'blocked'
+                      ) {
+                        // The verification was not handed over (the public sources were to
+                        // answer it); with nothing from them the task ends saying so.
+                        const english =
+                          replyLanguage(input.intent, userRow.modelDataRegion) === 'en';
+                        outcome = {
+                          status: 'failed',
+                          reason: english
+                            ? `${wall.site} blocked the visit with a verification check and public sources did not have the answer. Run the task again and complete the verification in the browser if you want me to read the page.`
+                            : `${wall.site}要做验证、把访问拦下了，公开来源也没查到题目要的内容。需要的话请重新发起任务，在浏览器里完成验证后让我再读。`,
+                          iterations: outcome.iterations,
+                          toolsUsed: outcome.toolsUsed ?? [],
                         };
                       }
                       if (browserRoute.limitation && outcome.status === 'completed') {
@@ -7703,6 +8035,7 @@ export const tasksRouter = router({
                         ...(browserRoute.limitation
                           ? { browserLimitation: browserRoute.limitation }
                           : {}),
+                        ...(wallFallbackMark ? { wall_fallback: wallFallbackMark } : {}),
                         ...(identityDecision ? { identityDecision } : {}),
                         browserSessionPolicy: taskSessionPolicy,
                         ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),

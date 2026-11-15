@@ -137,6 +137,9 @@ export function withQwenEndpoint(
 ): ProductionModelRuntimeWiring {
   return {
     policy: wiring.policy,
+    // G2a: the per-request wiring keeps the shared wiring's model gateway settings; without them
+    // a cloud-browser task would silently leave LLM_GATEWAY_V2 (gateway off) while it is on.
+    ...(wiring.gateway ? { gateway: wiring.gateway } : {}),
     resolveCore: (input) => wiring.resolveCore({ ...input, qwenEndpoint: endpoint }),
     resolveUnmigrated: (lane) => wiring.resolveUnmigrated(lane),
   };
