@@ -20,6 +20,10 @@ import {
 } from '@holaday/shared-types';
 import { pino } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  linkRoutingOwner,
+  markRoutingUnreliable,
+} from '../agent/search-fallback/search-results-page.js';
 import { AWAITING_REPLY, BrowserPool, PoolCapacityError } from './browser-pool.js';
 import type { BrowserInstance, BrowserSessionTarget, PoolConfig } from './types.js';
 
@@ -416,6 +420,39 @@ describe('BrowserPool — phase 24 per-task semantics', () => {
       expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner', 'anonymous')).toBeNull();
       expect(pool.peek('tsk_next')).toBe(destination);
       expect(pool.peek('tsk_parent')).not.toBeNull();
+    });
+  });
+
+  describe('G2d · a browser whose route removal stalled is not handed on', () => {
+    const breakRouting = (inst: BrowserInstance) => {
+      const context = {};
+      linkRoutingOwner(context, inst.executor);
+      markRoutingUnreliable(context);
+    };
+
+    it('is not retained for review (the caller releases it) and cannot be adopted', async () => {
+      const inst = await pool.allocate('tsk_parent', 'usr_owner');
+      pool.retain('tsk_parent', 60_000, 'terminal-review');
+      breakRouting(inst);
+
+      expect(
+        pool.adoptRetained('tsk_parent', 'tsk_follow_up', 'usr_owner', 'anonymous'),
+      ).toBeNull();
+      expect(pool.peek('tsk_follow_up')).toBeNull();
+      expect(pool.retain('tsk_parent', 60_000, 'terminal-review')).toBe(false);
+    });
+
+    it('a task waiting for a reply keeps its own browser', async () => {
+      const inst = await pool.allocate('tsk_waiting', 'usr_owner');
+      breakRouting(inst);
+      expect(pool.retain('tsk_waiting', 60_000, AWAITING_REPLY)).toBe(true);
+    });
+
+    it('a browser whose routes came down normally is still adopted', async () => {
+      const source = await pool.allocate('tsk_parent', 'usr_owner');
+      linkRoutingOwner({}, source.executor);
+      pool.retain('tsk_parent', 60_000, 'terminal-review');
+      expect(pool.adoptRetained('tsk_parent', 'tsk_next', 'usr_owner', 'anonymous')).toBe(source);
     });
   });
 

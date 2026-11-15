@@ -114,6 +114,11 @@ export function completionGap(
   requireBrowser: boolean,
   /** FIX-61B P1-6: the user's own words (the loop's intent also carries host guidance). */
   userIntent?: string,
+  /**
+   * G2g: this turn's own words, given only when they are plainly read-only — a follow-up whose
+   * parent asked to fill a form then asks no fill of its own.
+   */
+  readOnlyTurnIntent?: string,
 ): string | null {
   const successful = trace.filter((entry) => entry.ok);
   const claimed = positiveActionText(summary);
@@ -283,7 +288,10 @@ export function completionGap(
   // no request to fill — its answer 「没有填写」 was refused twice as a claim of a filled form.
   // Only the user's own words ask to fill — host guidance that mentions 填写 asks nothing (local
   // self-test: 「…输入框现在填的是什么，只读不改」 was still refused).
-  if (asksToFillForm(positiveActionText(userIntent ?? intent)) && !forms.some((f) => f.filled))
+  if (
+    asksToFillForm(positiveActionText(readOnlyTurnIntent ?? userIntent ?? intent)) &&
+    !forms.some((f) => f.filled)
+  )
     return '没有实际填表回执，不能宣告已填表。';
   if (
     /(?:不提交|不要提交|do not submit|without submitting)/i.test(intent) &&

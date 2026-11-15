@@ -10,6 +10,7 @@ import { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import { getFeatureFlags } from '../../execution/feature-flags.js';
 import { FileService } from '../../files/file-service.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
 import type { Context } from '../context.js';
@@ -131,10 +132,9 @@ export async function handleCoreTaskReply(args: {
       message: '附件已失效、无法读取或超出完整核验范围，请重新整理后提交。',
     });
   }
-  const resolve = (lane: 'generate' | 'verifier') =>
-    args.wiring.resolveCore({
+  const resolve = (role: 'generate' | 'verifier') =>
+    modelGateway({ wiring: args.wiring }).resolve(role, {
       actorExternalId: ctx.userId,
-      lane,
       ownership: { scope: 'personal', userRegion: args.modelDataRegion },
     });
   const generation = resolve('generate');
@@ -152,9 +152,9 @@ export async function handleCoreTaskReply(args: {
       actorExternalId: ctx.userId,
       logger: ctx.logger,
       repo,
-      responsesAdapter: generation.kind === 'ready' ? generation.responses('standard') : null,
+      responsesAdapter: generation.kind === 'ready' ? generation.responses() : null,
       firecrawl: ctx.firecrawl ?? null,
-      semanticAdapter: semantic.kind === 'ready' ? semantic.messages('verify_strict') : undefined,
+      semanticAdapter: semantic.kind === 'ready' ? semantic.messages() : undefined,
       publish: (event) => publishCoreExecutionEvent(ctx.userId, event),
       afterSettlement: (op) =>
         publishCoreSettledSuggestions({

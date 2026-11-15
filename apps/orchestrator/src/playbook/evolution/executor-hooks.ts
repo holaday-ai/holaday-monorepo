@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import { MemoryService } from '../../agent/supercar/memory-service.js';
 import type { DB } from '../../db/client.js';
 import { getFeatureFlags as getExecutionFeatureFlags } from '../../execution/feature-flags.js';
+import { modelGateway } from '../../llm/gateway/model-gateway.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import type { PlaybookBrowserTools } from '../replay/browser-tools.js';
@@ -47,12 +48,12 @@ export function resolveUserGenerateAdapter(input: {
   actorExternalId: string;
   modelDataRegion: unknown;
 }): MessagesAdapter | null {
-  const runtime = input.wiring.resolveCore({
+  // Model-assist and memory extraction: the generate role's small-request variant.
+  const runtime = modelGateway({ wiring: input.wiring }).resolve('generate.fast', {
     actorExternalId: input.actorExternalId,
-    lane: 'generate',
     ownership: { scope: 'personal', userRegion: input.modelDataRegion },
   });
-  return runtime.kind === 'ready' ? runtime.messages('fast') : null;
+  return runtime.kind === 'ready' ? runtime.messages() : null;
 }
 
 export async function tryPlaybookReuse(input: {

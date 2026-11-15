@@ -32,6 +32,7 @@ import {
   unvisitedChecks,
   withoutUnperformed,
 } from './action-claims.js';
+import { misplacedAdLabel } from './ad-label.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import {
@@ -311,6 +312,12 @@ export interface UnifiedBrowserLoopInput {
    * the user named is read from these (FIX-35 复审 #1); `intent` when absent.
    */
   userIntent?: string;
+  /**
+   * G2g (REBUILD-4 tsk_Rogoz5VGbEiqodiH44vat): what the user typed this turn, when `intent` also
+   * carries a follow-up's parent context. Used only by the form-fill receipt check, and only when
+   * this turn is plainly read-only (`readOnlyTurn`) — every other check keeps the full intent.
+   */
+  turnIntent?: string;
   adapter: MessagesAdapter;
   execute: (action: UnifiedBrowserAction) => Promise<UnifiedToolResult>;
   /** Qwen Responses built-in web_search, or Firecrawl when configured. */
@@ -654,6 +661,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let weatherPageAsked = false;
   /** FIX-28 (Deploy-27 core-04): one return for an answer short of the videos asked. */
   let videoCountAsked = false;
+  /** G2g (BestBuy): an ad label put on a result whose own card does not carry it, sent back once. */
+  let adLabelAsked = false;
   let bindingCorrected = false;
   /** FIX-34: one correction for listed prices no read page shows. */
   let pricesCorrected = false;
@@ -1549,6 +1558,22 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             );
             continue;
           }
+          // G2g (BestBuy 第一个结果): 「Sponsored」 read off the ad slot above the list is not the
+          // first result's label — one correction; what comes back is delivered.
+          const adLabel =
+            adLabelAsked || concludeNow ? null : misplacedAdLabel(summary, pageEvidence);
+          if (adLabel) {
+            adLabelAsked = true;
+            await rejected(summary, given, adLabel);
+            results.push(
+              toolResult(
+                call.id,
+                `${adLabel}。只写该结果自己的条目里实际显示的标识；页面别处（如列表上方的广告位）的标识不属于它。其余内容不变，重新 finish。`,
+                true,
+              ),
+            );
+            continue;
+          }
           // Integrity: claimed actions need host receipts, a page must have been
           // read, and hard facts must not contradict what was read.
           const blocking =
@@ -1558,6 +1583,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               trace,
               input.requireBrowserEvidence ?? false,
               input.userIntent,
+              input.turnIntent && readOnlyTurn(input.turnIntent) ? input.turnIntent : undefined,
             ) ??
             (!hostProof && !observedText
               ? '没有成功读取的页面内容；导航回执、标签列表或加载失败的页面都不能作为结果。请先 read_page/get_page_text 读取目标页面。'
@@ -3211,6 +3237,23 @@ const INTENT_PART_RE =
 const ACTION_RE =
   /拍下|拍一[个件单]|直接拍|去拍|拍了|就拍|帮我拍|买下|买了|(?:帮我|给我|替我|去|就|我要|我想|直接)买|买(?:一[个件台部]|两|三|它|这)|下单|购买|抢购|秒杀|领取|领券|收藏|关注|加购|加入|删除|修改|发送|发布|发帖|提交|付款|支付|结账|预约|预订|报名|投递|转发|分享|点赞|评论|回复|签到|充值|兑换|绑定|退款|退货|取消|保存到|下载|上传|开通|申请|填写|打卡|订阅|投票|登录|登陆|注册|\b(?:buy|order|purchase|pay|add|like|follow|subscribe|comment|reply|post|share|book|reserve|delete|remove|claim|redeem|download|upload|save|send|submit|checkout|sign\s*(?:in|up)|log\s*in|register)\b/iu;
 const QUOTED_RE = /「[^」]*」|“[^”]*”|"[^"]*"|『[^』]*』/gu;
+
+/** 「不要修改也不要提交」「只读不改」: actions the turn rules out, not ones it asks for. */
+const NEGATED_ACTION_RE =
+  /(?:也|并且?|而且|且)?\s*(?:不要|不用|不必|不需要|无需|无须|别|勿|不)\s*(?:再\s*)?(?:去\s*)?(?:做\s*)?(?:任何\s*)?(?:修改|提交|填写|填入|填表|改动?|删除|保存|发送|点击|动)/gu;
+
+/**
+ * G2g: this turn's own words only read — about a form too (「看一下表单各个框里填了什么，不要修改也不
+ * 要提交」). Actions it rules out are dropped first; 表单 is then only a noun (the write words that
+ * remain still make it no read-only turn). 「继续」「再试一次」 read nothing: not read-only.
+ */
+export function readOnlyTurn(text: string): boolean {
+  const kept = text
+    .replace(/只读不改/g, '只读')
+    .replace(NEGATED_ACTION_RE, ' ')
+    .trim();
+  return !!kept && isReadOnlyIntent(kept.replace(/表单/g, '表格'));
+}
 
 export function isReadOnlyIntent(intent: string): boolean {
   // Addresses first: their 「?」「.」 are not sentence breaks.

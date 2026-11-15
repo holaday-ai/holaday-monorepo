@@ -171,10 +171,18 @@ export class QwenWebSearchProvider implements SearchProvider {
   }
 }
 
+/** One search's results with the provider that answered it (G2g D16). */
+export interface AnsweredSearch {
+  results: WebSearchResult[];
+  id: string;
+  label: string;
+}
+
 /**
  * GOOGLE-WALL-2: providers tried in order; the first with results answers.
- * `id`/`label` name the provider that answered the last search, so the user
- * is told where these results came from.
+ * `id`/`label` name the provider that answered the last search on this chain — another search
+ * may change them at any await, so where these results came from is read from
+ * `searchAnswered`, which returns it with them (G2g D16).
  */
 export class ChainSearchProvider implements SearchProvider {
   private answered: SearchProvider;
@@ -188,6 +196,12 @@ export class ChainSearchProvider implements SearchProvider {
     return this.answered.label;
   }
   async search(query: string, options: { count: number; signal?: AbortSignal }) {
+    return (await this.searchAnswered(query, options)).results;
+  }
+  async searchAnswered(
+    query: string,
+    options: { count: number; signal?: AbortSignal },
+  ): Promise<AnsweredSearch> {
     let failure: unknown;
     for (const provider of this.providers) {
       options.signal?.throwIfAborted();
@@ -195,15 +209,29 @@ export class ChainSearchProvider implements SearchProvider {
         const results = await provider.search(query, options);
         if (results.length) {
           this.answered = provider;
-          return results;
+          return { results, id: provider.id, label: provider.label };
         }
       } catch (error) {
         failure = error;
       }
     }
     if (failure) throw failure;
-    return [];
+    return { results: [], id: this.answered.id, label: this.answered.label };
   }
+}
+
+/**
+ * G2g D16: a search's results and the provider that answered this very search — never read
+ * from shared state after another await (a chain's `label` is the last search's, whichever).
+ */
+export async function searchAnswered(
+  provider: SearchProvider,
+  query: string,
+  options: { count: number; signal?: AbortSignal },
+): Promise<AnsweredSearch> {
+  if (provider instanceof ChainSearchProvider) return provider.searchAnswered(query, options);
+  const results = await provider.search(query, options);
+  return { results, id: provider.id, label: provider.label };
 }
 
 function providerNamed(

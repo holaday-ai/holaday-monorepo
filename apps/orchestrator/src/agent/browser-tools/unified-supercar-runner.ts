@@ -739,7 +739,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       ...(control
         ? {
             // A search wall the fallback can answer is not the user's job.
-            captchaHandoffWanted: () => !opts.searchWallReplaceable?.(page.url()),
+            captchaHandoffWanted: () =>
+              !opts.wallFallback && !opts.searchWallReplaceable?.(page.url()),
             captchaHandoff: async (_message: string) => {
               suspendTimeout();
               // FIX-52 #8 (Deploy-52 wall-zhihu): nobody watching the panel, the pool's 5-minute idle
@@ -877,6 +878,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return interruption;
       },
       userIntent: opts.intent,
+      // G2g: the user's own words this turn, read only by the form-fill receipt check and only
+      // when this turn is plainly read-only (a follow-up's parent context keeps every other check).
+      ...(opts.userIntent ? { turnIntent: opts.userIntent } : {}),
       intent: [
         opts.intent,
         guidance ? `【结果要求】\n${guidance}` : '',
