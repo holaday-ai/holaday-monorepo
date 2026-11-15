@@ -689,12 +689,12 @@ function verificationTarget(
  * is the site's own verification step — handed over, never clicked.
  */
 const BOT_CHECK_BUTTON_RE =
-  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm|proceed|try again|start verification|continue to (?:site|website|page))\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|start verification|继续购物|继续访问|^\s*继续\s*$|我不是机器人|验证|提交/i;
+  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm|proceed|try again|start verification|continue to (?:site|website|page))\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|start verification|继续购物|继续访问|^\s*(?:继续|验证|提交|立即验证|点击验证|开始验证|按住验证)\s*$|我不是机器人/i;
 const LOGIN_CONTROL_LABEL_RE =
   /获取|发送|短信|登录|登陆|注册|授权|sign ?in|log ?in|sign ?up|send code|get code/i;
 /** 复审 P2: a search engine's results page is a list of pages, never a bot check itself. */
 const SEARCH_RESULTS_RE =
-  /^https?:\/\/(?:www\.)?(?:baidu\.com\/s\b|google\.[a-z.]+\/search\b|bing\.com\/search\b|sogou\.com\/web\b|so\.com\/s\b|duckduckgo\.com\/)/i;
+  /^https?:\/\/(?:www\.)?(?:(?:m\.)?baidu\.com\/s\b|google\.[a-z.]+\/search\b|(?:cn\.)?bing\.com\/search\b|sogou\.com\/web\b|so\.com\/s\b|duckduckgo\.com\/)/i;
 /** 复审 P2: a bot-check page says little; a readable page (an article about captchas) says more. */
 const BOT_CHECK_MAX_TEXT = 2500;
 
@@ -935,7 +935,9 @@ export async function describeUnifiedAction(
         // check itself, wherever its form posts.
         verification:
           verificationTarget(pageUrl, form) ??
-          (onBotCheckPage(
+          // 复核 P2: a login field keeps the login rule (a password on /signin/challenge is no captcha).
+          (!signals.credentialForm &&
+          onBotCheckPage(
             await withTimeout(page.evaluate(READ_PAGE_HEAD)).then((head) =>
               head ? { url: pageUrl, ...head } : null,
             ),

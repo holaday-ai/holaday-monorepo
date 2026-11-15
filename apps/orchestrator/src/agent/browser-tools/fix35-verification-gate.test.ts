@@ -391,6 +391,38 @@ describe('G7 hotfix 复审', () => {
     await page.close();
   });
 
+  it('复核 P2: a password typed on a short /signin/challenge login page keeps the login rule', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://accounts.example.com/signin/challenge/pwd',
+      // No action (FIX-35's own rule hands over a POST naming a /challenge action): only the page rule.
+      `<title>Sign in</title><form method="post" onsubmit="window.sent=(window.sent||0)+1;return false">
+        <input type="password" name="Passwd" aria-label="Enter your password"><button type="submit">Next</button></form>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate(
+      { tool: 'type', ref: await refOf(page, /Enter your password/), text: 'x', submit: true },
+      'before',
+    );
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('复核 P2: a link that merely contains 「验证」 on a short page about captchas is not the check', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://example.cn/notes',
+      `<title>验证码笔记</title><p>关于验证码的一点笔记。</p><a href="https://example.cn/more">邮箱验证的原理</a>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /邮箱验证的原理/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+
   it('P2 no false hand-over: a Baidu results page for 「图形验证码」 and a result link about it', async () => {
     const page = await browser.newPage();
     await serve(
