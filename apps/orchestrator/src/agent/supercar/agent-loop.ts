@@ -810,6 +810,12 @@ export interface RunSupercarOptions {
   /** Free-form user intent — the first user message. */
   intent: string;
   /**
+   * G2i 复审: only what the user typed — the parent task's own request plus this turn's input,
+   * never plan / expert preambles or a previous answer. Agreeing to terms and the user's own
+   * mailbox / phone values are judged from this alone. Defaults to `intent`.
+   */
+  userRequest?: string;
+  /**
    * Connected Playwright executor. Nullable: when null and no other
    * lane handles the task, runSupercarTask fails fast with a clear
    * reason rather than crashing on `executor.observe()`.

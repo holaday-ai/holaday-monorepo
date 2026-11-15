@@ -46,7 +46,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode, asksForWriting } from '../../agent/intent-classifier.js';
+import { asksForWriting, explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -6374,6 +6374,9 @@ export const tasksRouter = router({
                   // `input.intent` (what the user typed); only the model sees
                   // the prefixed version.
                   intent: effectiveIntent,
+                  // G2i 复审: consent and the user's own contact values come from what the user
+                  // typed only — never the previous answer or a preamble the model also sees.
+                  userRequest: parentUserContext + input.intent,
                   expertMode: expertModeOverride,
                   ...(memoryPreamble ? { memoryPreamble } : {}),
                   ...(playbookContext ? { playbookContext } : {}),
@@ -7328,6 +7331,7 @@ export const tasksRouter = router({
                     ...(capture ? { capture } : {}),
                     taskId,
                     intent: effectiveIntent,
+                    userRequest: parentUserContext + input.intent,
                     messagesAdapter: browserMessagesAdapter,
                     client: session.client,
                     control: session.control,

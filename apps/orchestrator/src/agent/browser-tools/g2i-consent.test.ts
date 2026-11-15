@@ -1,5 +1,6 @@
 import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import {
   consentButton,
@@ -10,6 +11,7 @@ import {
 } from './consent-guard.js';
 import { createUnifiedActionGate, describeUserBrowserAction } from './unified-action-gate.js';
 import { UNIFIED_BROWSER_SYSTEM_PROMPT } from './unified-browser-loop.js';
+import { runUnifiedSupercarTask } from './unified-supercar-runner.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 /**
@@ -50,6 +52,21 @@ const FORM = `<main>
   <label for="c-tel">Telephone</label><input type="tel" id="c-tel" name="tel">
 </form>
 <form role="search" action="/search"><input type="search" id="q" aria-label="Search"></form>
+<fieldset id="survey"><legend>The site is easy to use</legend>
+  <label><input type="radio" name="q1_agreement" id="s-strong" value="5"> Strongly agree</label>
+  <label><input type="radio" name="q1_agreement" id="s-agree" value="4"> Agree</label>
+  <label><input type="radio" name="q1_agreement" id="s-dis" value="2"> Disagree</label>
+  <label><input type="radio" name="q2" id="s-cn" value="4"> 非常同意</label>
+  <label><input type="radio" name="q3" id="s-cn2" value="3"> 同意</label>
+</fieldset>
+<fieldset id="filters"><legend>筛选</legend>
+  <label><input type="checkbox" id="f-offers"> Accepts Offers</label>
+  <label><input type="checkbox" id="f-paypal"> Accepts PayPal</label>
+  <label><input type="checkbox" id="f-screen"> Privacy Screen</label>
+  <label><input type="checkbox" id="f-film"> 防窥隐私膜</label>
+</fieldset>
+<div class="agree-row" id="custom-agree"><span class="tick"></span><span id="custom-agree-text">我已阅读并同意《用户协议》和《隐私政策》</span></div>
+<label for="news-opt">Newsletter</label><select id="news-opt" name="news"><option>No thanks</option><option>Yes, subscribe me to the newsletter</option></select>
 </main>
 <div id="cookies" style="position:fixed;bottom:0;left:0;right:0;background:#eee">
   <p>We use cookies to improve your experience.</p>
@@ -267,11 +284,166 @@ describe('G2i · core-08: consent boxes are the user’s', () => {
   });
 });
 
+describe('G2i 复审 · no false refusals; a custom box and a select still caught', () => {
+  it('survey answers (agree and disagree alike) and product filters are clicked', async () => {
+    const page = await formPage();
+    const { gate } = gateFor(page, CORE_08);
+    try {
+      for (const css of [
+        '#s-strong',
+        '#s-agree',
+        '#s-dis',
+        '#s-cn',
+        '#s-cn2',
+        '#f-offers',
+        '#f-paypal',
+        '#f-screen',
+        '#f-film',
+      ]) {
+        expect(await act(page, gate, { tool: 'click', ref: await refOf(page, css) })).toMatchObject(
+          { kind: 'proceed' },
+        );
+        expect(await checked(page, css)).toBe(true);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  it('a div / span 「我已阅读并同意《用户协议》」 and a 「subscribe me」 option are refused', async () => {
+    const page = await formPage();
+    const { gate } = gateFor(page, CORE_08);
+    try {
+      const box = (await page.locator('#custom-agree-text').boundingBox())!;
+      expect(
+        await act(page, gate, {
+          tool: 'click_at',
+          x: box.x + 20,
+          y: box.y + box.height / 2,
+        }),
+      ).toMatchObject({ kind: 'skip', message: expect.stringContaining('没有执行') });
+      expect(
+        await gate(
+          {
+            tool: 'select',
+            ref: await refOf(page, '#news-opt'),
+            value: 'Yes, subscribe me to the newsletter',
+          },
+          'before',
+        ),
+      ).toMatchObject({ kind: 'skip' });
+      expect(
+        await gate(
+          { tool: 'select', ref: await refOf(page, '#news-opt'), value: 'No thanks' },
+          'before',
+        ),
+      ).toMatchObject({ kind: 'proceed' });
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+describe('G2i 复审 · a follow-up: only what the user typed counts', () => {
+  // As tasks.create builds them for a follow-up (trpc/routers/tasks.ts): the model sees the
+  // parent's answer; consent and contact values are judged from the typed requests only.
+  const PARENT = '在 the-internet.herokuapp.com/large_form 填表单，不要提交';
+  const SUMMARY =
+    '已填写 First name、Birthday。I accept the terms 未勾选，需要您本人勾选同意条款；邮箱可用 seen@page.example（页面示例）。';
+  const FOLLOW_UP = '继续，把表单截图给我';
+  const effectiveIntent = `---\n【追问上下文】\n前一个任务："${PARENT}"\n结果：${SUMMARY}\n---\n${FOLLOW_UP}`;
+  const userRequest = `【前次用户要求】\n${PARENT}\n\n【本次用户要求】\n${FOLLOW_UP}`;
+
+  it('the summary’s 「勾选同意条款」 and a mailbox read off the page do not count', () => {
+    // What the gate would have read before the fix.
+    expect(userAskedToConsent(effectiveIntent, 'terms')).toBe(true);
+    expect(userGaveValue(effectiveIntent, 'seen@page.example')).toBe(true);
+    // What it reads now.
+    expect(userAskedToConsent(userRequest, 'terms')).toBe(false);
+    expect(userGaveValue(userRequest, 'seen@page.example')).toBe(false);
+  });
+
+  it('runUnifiedSupercarTask: the follow-up’s tick and the summary’s mailbox are never sent', async () => {
+    const page = await formPage();
+    const seen: string[] = [];
+    let turn = 0;
+    const refFrom = (text: string, pattern: RegExp) =>
+      text
+        .split('\\n')
+        .find((line) => pattern.test(line))
+        ?.match(/\[ref=(e\d+)\]/)?.[1] ?? 'e0';
+    const turns: Array<(last: string) => Record<string, unknown> & { name: string }> = [
+      () => ({ name: 'snapshot', input: {} }),
+      (last) => ({
+        name: 'click',
+        input: { ref: refFrom(last, /checkbox \\"I accept the terms/) },
+      }),
+      () => ({ name: 'snapshot', input: {} }),
+      (last) => ({
+        name: 'type',
+        input: { ref: refFrom(last, /textbox \\"Email\\" \[ref/), text: 'seen@page.example' },
+      }),
+      () => ({
+        name: 'finish',
+        input: { status: 'completed', summary: '已截图，同意条款未勾选。' },
+      }),
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'scripted' },
+      async create(request) {
+        const last = JSON.stringify(request.messages.at(-1));
+        seen.push(last);
+        const next = turns[Math.min(turn, turns.length - 1)]!(last);
+        turn += 1;
+        return {
+          id: `r${turn}`,
+          metadata: { provider: 'anthropic', model: 'scripted' },
+          content: [{ type: 'tool_use', id: `c${turn}`, name: next.name, input: next.input }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    try {
+      await runUnifiedSupercarTask({
+        taskId: 't_g2i_follow_up',
+        intent: effectiveIntent,
+        userRequest,
+        executor: { getPage: async () => page } as never,
+        messagesAdapter: adapter,
+        onBeforeAction: classifyRuntimeAction,
+      });
+      expect(await checked(page, '#terms')).toBe(false);
+      expect(await page.locator('#email').inputValue()).toBe('');
+      expect(seen.join('\n')).toContain('用户没有明确要求同意');
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+});
+
 describe('G2i · the rules themselves', () => {
   it.each([
     ['I accept the terms', 'terms'],
     ['我已阅读并同意《用户协议》', 'terms'],
-    ['Privacy policy consent', 'terms'],
+    ['I consent to the privacy policy', 'terms'],
+    ['accept_terms', 'terms'],
+    // 复审 P1: a survey scale and product filters are no agreement.
+    ['Strongly agree', null],
+    ['Agree', null],
+    ['非常同意', null],
+    ['同意', null],
+    ['Accepts Offers', null],
+    ['Accepts PayPal', null],
+    ['Privacy Screen', null],
+    ['防窥隐私膜', null],
+    ['Privacy policy', null],
     ['Subscribe to our newsletter', 'marketing'],
     ['接收营销推广短信', 'marketing'],
     ['Allow cookies', 'cookie'],
@@ -322,7 +494,15 @@ describe('G2i · the rules themselves', () => {
     expect(contactField({ label: 'First name' })).toBeNull();
     expect(contactField({ inputType: 'search', label: 'Search email' })).toBeNull();
     expect(userGaveValue('邮箱填 Tom@Example.com', 'tom@example.com')).toBe(true);
+    expect(userGaveValue('邮箱填 tom@example.com。', 'tom@example.com')).toBe(true);
     expect(userGaveValue(CORE_08, 'john@example.com')).toBe(false);
+    // 复审 P2: a fragment is no value the user gave; a phone matches by its digits.
+    expect(userGaveValue('邮箱填 tom@example.com', 't')).toBe(false);
+    expect(userGaveValue('邮箱填 tom@example.com', 'tom')).toBe(false);
+    expect(userGaveValue('手机 138-0000-0000', '13800000000', 'phone')).toBe(true);
+    expect(userGaveValue('手机 13800000000', '138 0000 0000', 'phone')).toBe(true);
+    expect(userGaveValue('手机 13800000000', '1', 'phone')).toBe(false);
+    expect(userGaveValue('手机 13800000000', '1380000', 'phone')).toBe(false);
   });
 
   it('the browser prompt tells the model the same rule', () => {

@@ -29,9 +29,17 @@ const SETTINGS_RE =
   /manage|settings|preferences|customi[sz]e|more\s+options|设置|管理|自定义|偏好/i;
 const COOKIE_RE = /cookie/i;
 const MARKETING_RE =
-  /订阅|营销|推广|优惠(?:信息|活动|资讯)|促销(?:信息|活动)|广告(?:信息|推送)|newsletter|subscri|marketing|promotional|opt[\s-]*in|(?:send|email)\s+me|keep\s+me\s+(?:updated|informed)/i;
-const TERMS_RE =
-  /同意|我已阅读|已阅读|已知悉|条款|协议|隐私|免责|agree|accept|consent|terms|\bconditions\b|privacy|eula|gdpr/i;
+  /订阅|营销|推广(?:信息|短信|邮件|消息|内容)|优惠(?:信息|活动|资讯)|促销(?:信息|活动)|广告(?:信息|推送)|newsletter|subscri|marketing|promotional|opt[\s-]*in|(?:send|email)\s+me|keep\s+me\s+(?:updated|informed)/i;
+/**
+ * 复审 P1: an agreement is an agree / accept verb WITH a terms / policy object. A lone
+ * 「同意」「Agree」 (a survey scale), 「Accepts PayPal」 or 「Privacy Screen」 is no agreement.
+ */
+const AGREE_VERB_RE =
+  /同意|接受|已阅读|已读|阅读并|已知悉|知悉并|\b(?:agree[ds]?|accept(?:ed)?|acknowledge[ds]?|i\s+have\s+read|i['’]ve\s+read)\b/i;
+const TERMS_OBJECT_RE =
+  /条款|协议|政策|须知|声明|免责|\b(?:terms|conditions|polic(?:y|ies)|eula|agreement|privacy\s+(?:notice|statement))\b/i;
+/** Consenting in so many words (「I consent to…」), with no scale or product reading. */
+const CONSENT_WORD_RE = /\bi\s+(?:hereby\s+)?consent\b|\bconsent\s+to\b/i;
 /** A button that accepts / agrees as a whole (cookie banners, privacy popups). */
 const ACCEPT_BUTTON_RE =
   /^(?:我?同意|我?接受|同意(?:全部|所有|并继续|并关闭)?|(?:全部|所有)(?:同意|接受|允许)|接受(?:全部|所有)(?:cookie)?|允许(?:全部|所有)(?:cookie)?|(?:i\s*)?(?:accept|agree)(?:\s*(?:all|and\s+(?:continue|close)|&\s*(?:continue|close)))?(?:\s*cookies?)?|allow\s*(?:all)?\s*cookies?|allow\s+all|accept\s+(?:the\s+)?(?:terms|privacy\s+policy))$/i;
@@ -46,12 +54,26 @@ function short(value: string): string {
 
 /** Kind of an agreement-like label, or null for an ordinary one (a product filter, 「Testing」). */
 export function consentKindOf(label: string): ConsentKind | null {
-  const text = clean(label);
+  // 「accept_terms」「privacy-policy」: names read as words.
+  const text = clean(label.replace(/[_-]+/g, ' '));
   if (!text || DECLINE_RE.test(text)) return null;
   if (COOKIE_RE.test(text)) return 'cookie';
   if (MARKETING_RE.test(text)) return 'marketing';
-  if (TERMS_RE.test(text)) return 'terms';
+  if ((AGREE_VERB_RE.test(text) && TERMS_OBJECT_RE.test(text)) || CONSENT_WORD_RE.test(text))
+    return 'terms';
   return null;
+}
+
+/**
+ * A plain element (div / span / li) whose own short text agrees — a custom checkbox drawn
+ * without checkbox semantics (「我已阅读并同意《用户协议》」). Cookie wording in running text
+ * (「We use cookies…」) is no control.
+ */
+export function consentSentence(text: string | null | undefined): ConsentTarget | null {
+  const value = clean(text);
+  if (!value || value.length > 120) return null;
+  const kind = consentKindOf(value);
+  return kind && kind !== 'cookie' ? { kind, label: short(value) } : null;
 }
 
 /**
@@ -148,10 +170,33 @@ function squash(value: string): string {
   return value.replace(/\s+/g, '').toLowerCase();
 }
 
-/** The typed value is one the user gave in the request (or the box is being cleared). */
-export function userGaveValue(intent: string | null | undefined, typed: string): boolean {
+const EMAIL_TOKEN_RE =
+  /[^\s@，,。；;：:<>()（）「」『』《》"'“”‘’]+@[^\s@，,。；;：:<>()（）「」『』《》"'“”‘’]+/g;
+const PHONE_TOKEN_RE = /\+?\d[\d\s\-().]{3,}\d/g;
+
+/**
+ * The typed value is one the user gave in the request (or the box is being cleared). 复审 P2:
+ * a whole value, not a fragment — an e-mail equals a mailbox the user wrote; a phone number
+ * equals one the user wrote, digits only (「138-0000-0000」 = 「13800000000」).
+ */
+export function userGaveValue(
+  intent: string | null | undefined,
+  typed: string,
+  kind: 'email' | 'phone' = 'email',
+): boolean {
   const value = squash(typed);
-  return value === '' || squash(intent ?? '').includes(value);
+  if (value === '') return true;
+  const text = intent ?? '';
+  if (kind === 'phone') {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length < 5) return false;
+    return [...text.matchAll(PHONE_TOKEN_RE)].some(
+      (match) => match[0].replace(/\D/g, '') === digits,
+    );
+  }
+  return [...text.matchAll(EMAIL_TOKEN_RE)].some(
+    (match) => squash(match[0]).replace(/[.。]+$/, '') === value,
+  );
 }
 
 export function contactRefusalMessage(kind: 'email' | 'phone'): string {

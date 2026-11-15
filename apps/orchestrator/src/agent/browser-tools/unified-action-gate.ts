@@ -15,6 +15,7 @@ import {
   type ConsentTarget,
   consentButton,
   consentRefusalMessage,
+  consentSentence,
   consentToggle,
   contactField,
   contactRefusalMessage,
@@ -181,7 +182,9 @@ const READ_ACTIONABLE = (
     // No label: the short text right around the box (「<input type=checkbox> I accept the terms」).
     const around = String((box.parentElement as HTMLElement | null)?.innerText || '').trim();
     if (!parts.join('').trim() && around.length <= 120) parts.push(around);
-    parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
+    // Its name only when nothing names it (a survey's name="agreement_q1" is not its answer).
+    if (!parts.join('').trim())
+      parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
     toggle = {
       label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
       checked:
@@ -703,15 +706,18 @@ function clickConsent(
     });
   const tag = (signals.tagName ?? '').toLowerCase();
   const type = (signals.type ?? '').toLowerCase();
+  const plain = ['div', 'span', 'li', 'p', 'label', 'i', 'em'].includes(tag);
   const buttonLike =
+    plain ||
     tag === 'button' ||
     tag === 'a' ||
-    (tag === 'input' && ['submit', 'button'].includes(type)) ||
-    tag === 'div' ||
-    tag === 'span';
-  return buttonLike
-    ? consentButton([signals.visibleText, signals.ariaLabel, signals.title, fallbackLabel])
-    : null;
+    (tag === 'input' && ['submit', 'button'].includes(type));
+  if (!buttonLike) return null;
+  return (
+    consentButton([signals.visibleText, signals.ariaLabel, signals.title, fallbackLabel]) ??
+    // 复审: a custom checkbox drawn as a div / span with the agreement sentence as its text.
+    (plain ? consentSentence(signals.visibleText ?? signals.ariaLabel) : null)
+  );
 }
 
 function clickDescription(
@@ -801,6 +807,8 @@ export async function describeUnifiedAction(
         transactional: null,
         bindings: [handle ? { kind: 'handle', handle } : null],
         objects: JSON.stringify([action.value]),
+        // 复审 P2: choosing an option that agrees (「Yes, subscribe me」) is the same tick.
+        consent: consentToggle({ label: action.value, checked: false }),
       };
     }
     case 'type': {
@@ -1071,7 +1079,7 @@ export function createDescriptionActionGate<Action>(options: DescriptionActionGa
       if (consent && !userAskedToConsent(options.userIntent, consent.kind))
         return { kind: 'skip', message: consentRefusalMessage(consent) };
       const contact = description.contact;
-      if (contact && !userGaveValue(options.userIntent, contact.value))
+      if (contact && !userGaveValue(options.userIntent, contact.value, contact.kind))
         return { kind: 'skip', message: contactRefusalMessage(contact.kind) };
     }
     if (phase === 'before' && description.verification) {
@@ -1169,14 +1177,20 @@ export function describeUserBrowserAction(
   const toggleTarget =
     /^(?:checkbox|radio)$/i.test(element.inputType ?? '') ||
     /^(?:checkbox|switch|radio)$/i.test(element.role ?? '');
-  const consent =
-    action.kind !== 'click'
+  // 复审 P2: Space on a focused box ticks it like a click.
+  const toggles =
+    action.kind === 'click' ||
+    (action.kind === 'key' && /(?:^|\+)(?:space|spacebar| )$/i.test(action.payload.key));
+  const consent = !toggles
+    ? null
+    : action.kind === 'key' && !toggleTarget
       ? null
       : toggleTarget
         ? consentToggle({
-            label: [element.visibleText, element.ariaLabel, element.title, element.name]
-              .filter(Boolean)
-              .join(' '),
+            // Its name only when nothing names it (复审: a survey's name is not its answer).
+            label:
+              [element.visibleText, element.ariaLabel, element.title].filter(Boolean).join(' ') ||
+              (element.name ?? ''),
             checked: false,
           })
         : consentButton([element.visibleText, element.ariaLabel, element.title]);
