@@ -238,3 +238,215 @@ describe('复审 #2: the submit button’s own formmethod decides the request me
     await page.close();
   });
 });
+
+/**
+ * G7 hotfix (INBOX Q-13; G7 A/B new-amazon-sg / reg-new-amazon-sg): amazon.sg serves the
+ * 「Continue shopping」 bot check at the home page's own URL; the button posts nowhere a form
+ * check can see (the page verifies through a background POST /_sec/verify). The page is judged.
+ */
+const INTERSTITIAL = `<!doctype html><title>Amazon.sg</title><body>
+  <div>Click the button below to continue shopping</div>
+  <button type="button" onclick="window.sent=(window.sent||0)+1">Continue shopping</button>
+  <div>© 1996-2025, Amazon.com, Inc. or its affiliates</div></body>`;
+
+describe('G7 hotfix: a bot-check page is handed over, whatever its button posts to', () => {
+  it('amazon.sg home-page 「Continue shopping」 (served at /, no form): handed over, not clicked', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: INTERSTITIAL }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    const decision = await gate(
+      { tool: 'click', ref: await refOf(page, /Continue shopping/) },
+      'before',
+    );
+    expect(park).toHaveBeenCalledTimes(1);
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('the type-the-characters page: its 「Continue shopping」 submit is handed over', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<title>Amazon.sg</title><h4>Enter the characters you see below</h4>
+          <p>Sorry, we just need to make sure you're not a robot.</p>
+          <form method="get" action="/s" onsubmit="window.sent=(window.sent||0)+1;return false">
+            <input name="field-keywords" aria-label="Type characters"><button type="submit">Continue shopping</button></form>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    const decision = await gate(
+      { tool: 'click', ref: await refOf(page, /Continue shopping/) },
+      'before',
+    );
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('a normal amazon page’s 「Continue shopping」 (cart, no bot-check wording) is not a verification step', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<title>Amazon.sg Shopping Cart</title><h1>Shopping Cart</h1><p>Your cart is empty.</p>
+          <button type="button" onclick="window.sent=(window.sent||0)+1">Continue shopping</button>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/gp/cart/view.html');
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Continue shopping/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+
+  it('on a bot-check page an unrelated control (a footer link) is not taken for the check', async () => {
+    const page = await browser.newPage();
+    await page.route('https://www.amazon.sg/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `${INTERSTITIAL}<a href="https://www.amazon.sg/gp/help/customer/display.html">Conditions of Use</a>`,
+      }),
+    );
+    await page.goto('https://www.amazon.sg/');
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Conditions of Use/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+});
+
+describe('G7 hotfix 复审', () => {
+  const serve = async (page: Page, url: string, body: string) => {
+    await page.route(`${new URL(url).origin}/**`, (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body }),
+    );
+    await page.goto(url);
+  };
+  const gateWithLabel = (page: Page, label: string) => {
+    const park = vi.fn(async (_question: string, _kind: string) => '已验证');
+    return {
+      park,
+      gate: createUnifiedActionGate({
+        page,
+        onBeforeAction: classifyRuntimeAction,
+        // As the runtime gives it: 「button "Continue"」.
+        labelForRef: () => label,
+        park,
+        aborted: () => false,
+      }),
+    };
+  };
+  const ROBOT_PAGE = (button: string) =>
+    `<title>Robot Check</title><p>Sorry, we just need to make sure you're not a robot.</p>
+     <button type="button" onclick="window.sent=(window.sent||0)+1">${button}</button>`;
+
+  it('P1: a one-word 「Continue」 with the runtime label 「button "Continue"」 is handed over', async () => {
+    const page = await browser.newPage();
+    await serve(page, 'https://www.amazon.sg/_sec/verify-page', ROBOT_PAGE('Continue'));
+    const { gate, park } = gateWithLabel(page, 'button "Continue"');
+    const decision = await gate({ tool: 'click', ref: await refOf(page, /Continue/) }, 'before');
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  for (const button of ['Try again', 'Proceed', 'Start verification', '继续', 'Verify']) {
+    it(`P2 wording: 「${button}」 on a bot-check page is handed over`, async () => {
+      const page = await browser.newPage();
+      await serve(page, 'https://www.amazon.sg/', ROBOT_PAGE(button));
+      const { gate, park } = gateFor(page);
+      await gate({ tool: 'click', ref: await refOf(page, new RegExp(button)) }, 'before');
+      expect(park.mock.calls[0]?.[1]).toBe('captcha');
+      expect(await sent(page)).toBe(0);
+      await page.close();
+    });
+  }
+
+  it('P2: typing the characters and pressing Enter on the type-the-characters page is handed over', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://www.amazon.sg/',
+      `<title>Amazon.sg</title><h4>Enter the characters you see below</h4>
+       <form method="get" action="/s" onsubmit="window.sent=(window.sent||0)+1;return false">
+         <input name="field-keywords" aria-label="Type characters"><button type="submit">Continue shopping</button></form>`,
+    );
+    const { gate, park } = gateFor(page);
+    const decision = await gate(
+      { tool: 'type', ref: await refOf(page, /Type characters/), text: 'abc', submit: true },
+      'before',
+    );
+    expect(park.mock.calls[0]?.[1]).toBe('captcha');
+    expect(decision).toMatchObject({ kind: 'skip' });
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('复核 P2: a password typed on a short /signin/challenge login page keeps the login rule', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://accounts.example.com/signin/challenge/pwd',
+      // No action (FIX-35's own rule hands over a POST naming a /challenge action): only the page rule.
+      `<title>Sign in</title><form method="post" onsubmit="window.sent=(window.sent||0)+1;return false">
+        <input type="password" name="Passwd" aria-label="Enter your password"><button type="submit">Next</button></form>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate(
+      { tool: 'type', ref: await refOf(page, /Enter your password/), text: 'x', submit: true },
+      'before',
+    );
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    expect(await sent(page)).toBe(0);
+    await page.close();
+  });
+
+  it('复核 P2: a link that merely contains 「验证」 on a short page about captchas is not the check', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://example.cn/notes',
+      `<title>验证码笔记</title><p>关于验证码的一点笔记。</p><a href="https://example.cn/more">邮箱验证的原理</a>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /邮箱验证的原理/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+
+  it('P2 no false hand-over: a Baidu results page for 「图形验证码」 and a result link about it', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://www.baidu.com/s?wd=%E5%9B%BE%E5%BD%A2%E9%AA%8C%E8%AF%81%E7%A0%81',
+      `<title>图形验证码_百度搜索</title><a href="https://example.com/a">图形验证码是什么</a><p>${'结果摘要。'.repeat(20)}</p>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /图形验证码是什么/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+
+  it('P2 no false hand-over: a long readable page under /challenges with a Submit button', async () => {
+    const page = await browser.newPage();
+    await serve(
+      page,
+      'https://www.hackerrank.com/challenges/solve-me-first/problem',
+      `<title>Solve Me First | HackerRank</title><article>${'Complete the function solveMeFirst to compute the sum of two integers. '.repeat(60)}</article>
+       <button type="button" onclick="window.sent=(window.sent||0)+1">Submit</button>`,
+    );
+    const { gate, park } = gateFor(page);
+    await gate({ tool: 'click', ref: await refOf(page, /Submit/) }, 'before');
+    expect(park.mock.calls.some((call) => call[1] === 'captcha')).toBe(false);
+    await page.close();
+  });
+});

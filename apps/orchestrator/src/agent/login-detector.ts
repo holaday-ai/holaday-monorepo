@@ -293,6 +293,13 @@ const CAPTCHA_BODY_NEEDLES = [
   'unusual traffic',
   'sign in to confirm you’re not a bot',
   "sign in to confirm you're not a bot",
+  // G7 hotfix (Q-13, G7 A/B new-amazon-sg): amazon's bot-check pages, served at the page's own
+  // URL (verified through POST /_sec/verify) — 「Continue shopping」 and the type-the-characters page.
+  'click the button below to continue shopping',
+  'enter the characters you see below',
+  'type the characters you see in this image',
+  "sorry, we just need to make sure you're not a robot",
+  'make sure you’re not a robot',
 ];
 
 /**
