@@ -5,6 +5,7 @@ import {
   resolveBrowserBrainSelection,
 } from '../../llm/browser-brain.js';
 import type { CoreModelRuntimeInput, QwenEndpointOverride } from '../../llm/core-model-runtime.js';
+import { defaultRoleModel } from '../../llm/gateway/role-models.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { MessagesAdapterError, createQwenMessagesAdapter } from '../../llm/messages-adapter.js';
 import type { LlmCallRecorder } from '../llm-call-recorder.js';
@@ -37,16 +38,19 @@ export async function generatePlanForUser(
   let environment = input.environment;
   let adapter = input.planningAdapter;
   let route: ReturnType<typeof resolvePlanProviderRoute> | undefined;
+  let modelPinned = false;
   try {
     if (input.browserPlanning && !adapter) {
       const selection =
         currentBrowserBrain() ?? resolveBrowserBrainSelection(environment, input.userExternalId);
+      // No explicit selection: the plan role's default model (the gateway's role table when on).
       const planning = selection.planning ?? {
         provider: 'alibaba-model-studio',
-        model: 'qwen3.8-flash',
+        model: defaultRoleModel('plan'),
       };
       if (planning.provider !== 'alibaba-model-studio') return noPlan();
       environment = { ...environment, QWEN_STANDARD_MODEL: planning.model };
+      modelPinned = selection.planning !== undefined;
     }
     route = adapter
       ? undefined
@@ -56,6 +60,7 @@ export async function generatePlanForUser(
           userModelDataRegion: input.userModelDataRegion,
           ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
           createMessages: factories.createQwenAdapter,
+          ...(modelPinned ? { modelPinned } : {}),
         });
   } catch (error) {
     input.logger.warn(
