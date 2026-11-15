@@ -367,6 +367,12 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   /**
+   * G2a: the model data regions TOOL_ROUTER_V2 applies to (comma list: cn, intl). Default empty =
+   * the router runs for nobody even with TOOL_ROUTER_V2 on; DEPLOY-R1 opens it for `cn` only.
+   * A user outside these regions is routed by the mainline keyword rules unchanged.
+   */
+  TOOL_ROUTER_V2_REGIONS: z.string().default(''),
+  /**
    * Interface tools the router may offer (comma list of registry ids); unknown ids ignored.
    * Review #1: 高德 (amap_maps, BOSS enabled it) is on by default with the web search.
    */

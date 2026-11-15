@@ -47,7 +47,7 @@ import {
   type RunImageTaskResult,
   runImageTask,
 } from '../../agent/image/qwen-only-image-runner.js';
-import { explainExecutionMode } from '../../agent/intent-classifier.js';
+import { asksForWriting, explainExecutionMode } from '../../agent/intent-classifier.js';
 import { matchLiveFact } from '../../agent/live-fact.js';
 import { DrizzleLlmCallRecorder, type LlmCallRecord } from '../../agent/llm-call-recorder.js';
 import { marketTableAsText, withSourceLinksApart } from '../../agent/market-answer.js';
@@ -687,7 +687,10 @@ function resolveScrapeRuntimeForUser(
   modelDataRegion: unknown,
   wiring: ProductionModelRuntimeWiring = modelRuntimeWiring,
 ) {
-  return gatewayFor(wiring).resolve('scrape', personalModelContext(actorExternalId, modelDataRegion));
+  return gatewayFor(wiring).resolve(
+    'scrape',
+    personalModelContext(actorExternalId, modelDataRegion),
+  );
 }
 
 function resolveVerifierRuntimeForUser(
@@ -1947,7 +1950,10 @@ export const tasksRouter = router({
             const routedExecution = retryCore
               ? null
               : await decideExecutionRoute({
-                  enabled: taskToolRouter.enabled && !ctx.scrapeBrowserRetry && !input.localChrome,
+                  enabled:
+                    taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                    !ctx.scrapeBrowserRetry &&
+                    !input.localChrome,
                   legacy: () =>
                     explainExecutionMode({
                       intent: input.intent,
@@ -1958,7 +1964,7 @@ export const tasksRouter = router({
                       logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
                     }),
                   route: async () => {
-                    const judge = tasksModelGateway.resolve(
+                    const judge = gatewayFor(taskModelWiring).resolve(
                       'judge',
                       personalModelContext(ctx.userId, userRow.modelDataRegion),
                     );
@@ -5070,6 +5076,28 @@ export const tasksRouter = router({
                   ) {
                     return;
                   }
+                  // G2b (production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」: the write-up of
+                  // the search results failed, generate — which cannot search — wrote a
+                  // web_search call as the answer): a web lookup the scrape lane could not
+                  // answer goes to the cloud browser; if that cannot start it fails honestly.
+                  // It is never answered by generate. A search with no query is not a lookup.
+                  // 复审: a task that writes from what it searched (「搜索最新资料，帮我写一篇…报告」)
+                  // is not a lookup — it keeps the generate fallback (300 s, the writing lane).
+                  const searchLookup =
+                    scrapeOutcome.status === 'failed' &&
+                    scrapeOutcome.source === 'search' &&
+                    scrapeOutcome.failureKind !== 'input' &&
+                    !asksForWriting(input.intent);
+                  if (
+                    searchLookup &&
+                    !pageUnreadable &&
+                    !liveFactLookup &&
+                    (await handOverToBrowser(
+                      '搜索结果没能整理成回答，已自动改用云端浏览器去页面上查',
+                    ))
+                  ) {
+                    return;
+                  }
 
                   // A1 — scrape failed → fall back to generate. Generate has
                   // zero infra dependencies (no Brave, no Firecrawl) so it's
@@ -5111,10 +5139,11 @@ export const tasksRouter = router({
                       (scrapeOutcome.source === 'scrape' ||
                         scrapeOutcome.failureKind === 'blocked')) ||
                     liveFactLookup ||
-                    interfaceFailed
+                    interfaceFailed ||
+                    searchLookup
                   ) {
                     // A named page nobody could read is not answered from memory; nor is a
-                    // search whose every result was a wall (FIX-32).
+                    // search whose every result was a wall (FIX-32), nor any web lookup (G2b).
                     outcome = {
                       status: 'failed',
                       reason: browserRetryFailure ?? scrapeOutcome.reason ?? '网页抓取失败',
@@ -6429,8 +6458,12 @@ export const tasksRouter = router({
                 let resumeCaptchaWatchdog = () => {};
                 // REBUILD-2 协调方决定: a read task whose wall the public sources can answer (the
                 // router on, a search interface for the user's region, a ready answer runtime).
+                // G2a 复审: never in the person's own browser (their local Chrome or their cloud
+                // browser) — they are at the screen and can pass the check themselves.
                 const wallFallbackRun =
-                  taskToolRouter.enabled &&
+                  !input.localChrome &&
+                  !input.browserHomeSession &&
+                  taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                   wallFallbackAllowed(input.intent) &&
                   toolsForRegion(
                     taskToolRouter.tools,
@@ -6438,7 +6471,8 @@ export const tasksRouter = router({
                       ? userRow.modelDataRegion
                       : null,
                   ).some((tool) => tool.kind === 'search') &&
-                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion).kind === 'ready';
+                  resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion, taskModelWiring)
+                    .kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
@@ -7556,8 +7590,13 @@ export const tasksRouter = router({
                       // where each fact came from. Writes and personal data still go to the user;
                       // the browser is not used again. TOOL_ROUTER_V2 only.
                       // 复审 #2: nothing runs for a task the user cancelled.
+                      // PR #348 review: never in the person's own browser (local Chrome, cloud
+                      // browser) — they keep the chance to pass the check themselves.
                       const wall =
-                        taskToolRouter.enabled && !(await repo.isTaskCancelled(taskId))
+                        !input.localChrome &&
+                        !input.browserHomeSession &&
+                        taskToolRouter.enabledFor(userRow.modelDataRegion) &&
+                        !(await repo.isTaskCancelled(taskId))
                           ? wallEnd(outcome, input.intent)
                           : null;
                       const wallSearchTool = wall
@@ -7569,7 +7608,11 @@ export const tasksRouter = router({
                           ).find((tool) => tool.kind === 'search') ?? null)
                         : null;
                       const wallRuntime = wallSearchTool
-                        ? resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion)
+                        ? resolveScrapeRuntimeForUser(
+                            ctx.userId,
+                            userRow.modelDataRegion,
+                            taskModelWiring,
+                          )
                         : null;
                       if (wall && wallSearchTool && wallRuntime?.kind === 'ready') {
                         const language = replyLanguage(input.intent, userRow.modelDataRegion);
@@ -7614,22 +7657,11 @@ export const tasksRouter = router({
                         // request asked is read by the small judge model (qwen3.8-flash, structured
                         // output), not by wording rules. Not given, or the judge failed → not
                         // completed, no wall_fallback; the wall outcome stands.
-                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
-                        if (fallback?.status === 'completed' && fallback.summary.trim()) {
-                          const judgeRuntime = tasksModelGateway.resolve(
-                            'judge',
-                            personalModelContext(ctx.userId, userRow.modelDataRegion),
-                          );
-                          fieldVerdicts =
-                            judgeRuntime.kind === 'ready'
-                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
-                                  logger: ctx.logger,
-                                })({ request: input.intent, answer: fallback.summary })
-                              : null;
-                        }
-                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
-                        const composed =
-                          fallback?.status === 'completed' && fallback.summary.trim() && answered
+                        // PR #348 review: the judge reads the answer as it would be delivered — after
+                        // the price / freshness checks may have removed lines — so a requested field
+                        // the filters dropped is not delivered as answered.
+                        const filtered =
+                          fallback?.status === 'completed' && fallback.summary.trim()
                             ? composeFallback({
                                 wall,
                                 intent: input.intent,
@@ -7640,6 +7672,21 @@ export const tasksRouter = router({
                                 sourceLine: source ? formatSourceLine(source, language) : null,
                               })
                             : null;
+                        let fieldVerdicts: Awaited<ReturnType<AskedFieldJudge>> | undefined;
+                        if (filtered?.deliver && filtered.summary.trim()) {
+                          const judgeRuntime = gatewayFor(taskModelWiring).resolve(
+                            'judge',
+                            personalModelContext(ctx.userId, userRow.modelDataRegion),
+                          );
+                          fieldVerdicts =
+                            judgeRuntime.kind === 'ready'
+                              ? await createAskedFieldJudge(judgeRuntime.messages(), {
+                                  logger: ctx.logger,
+                                })({ request: input.intent, answer: filtered.summary })
+                              : null;
+                        }
+                        const answered = fallbackGaveFields(fieldVerdicts ?? null);
+                        const composed = filtered?.deliver && answered ? filtered : null;
                         ctx.logger.info(
                           {
                             taskId,
