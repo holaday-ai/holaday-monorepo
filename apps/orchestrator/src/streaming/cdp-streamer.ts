@@ -147,6 +147,7 @@ export class CdpStreamer {
   private readonly pageIds = new WeakMap<Page, string>();
 
   invalidateObservation(): void {
+    this.dropWaitingFrame();
     this.invalidateCaptureRequests();
     this.viewportRevision++;
     this.observationSequence++;
@@ -555,11 +556,86 @@ export class CdpStreamer {
       void this.publishGeometryFrame(frame, ++this.observationSequence);
       return;
     }
+    this.sendFrame(frame, undefined, this.cdpSession, this.viewportRevision);
+  }
+
+  /**
+   * STREAM-1 step 1 (G2h): never queue frames behind a slow viewer link. While the socket still
+   * holds bytes it could not hand to the network, the newest frame waits here (one slot) and an
+   * older waiting frame is dropped; it goes out once the socket has drained. Chromium keeps being
+   * acked as each frame arrives, as before, so the page's final state is never skipped.
+   * A frame's geometry travels with it and is reported (onFrame) only when that frame is sent.
+   */
+  private static readonly frameSendMaxBuffered = 16 * 1024;
+  private static readonly frameDrainPollMs = 10;
+  private waitingFrame: {
+    message: ScreencastFrameMessage;
+    geometry?: BrowserFrameGeometry;
+    session: CDPSession | null;
+    revision: number;
+  } | null = null;
+  private waitingFrameTimer: NodeJS.Timeout | null = null;
+  private framesSent = 0;
+  private framesDropped = 0;
+  /** Frames handed to the socket vs. frames dropped because a newer one replaced them. */
+  frameStats(): { sent: number; dropped: number } {
+    return { sent: this.framesSent, dropped: this.framesDropped };
+  }
+
+  private socketBusy(): boolean {
+    return (this.opts.ws.bufferedAmount ?? 0) > CdpStreamer.frameSendMaxBuffered;
+  }
+
+  private sendFrame(
+    message: ScreencastFrameMessage,
+    geometry: BrowserFrameGeometry | undefined,
+    session: CDPSession | null,
+    revision: number,
+  ): void {
+    if (this.waitingFrame) this.framesDropped += 1;
+    this.waitingFrame = { message, geometry, session, revision };
+    this.flushWaitingFrame();
+  }
+
+  private flushWaitingFrame(): void {
+    const waiting = this.waitingFrame;
+    if (!waiting) return;
+    if (this.socketBusy()) {
+      if (!this.waitingFrameTimer) {
+        this.waitingFrameTimer = setTimeout(() => {
+          this.waitingFrameTimer = null;
+          this.flushWaitingFrame();
+        }, CdpStreamer.frameDrainPollMs);
+        this.waitingFrameTimer.unref?.();
+      }
+      return;
+    }
+    this.waitingFrame = null;
+    // A frame of a stream that stopped, rebound or moved to another document is never shown.
+    if (
+      !this.streaming ||
+      this.cdpSession !== waiting.session ||
+      this.viewportRevision !== waiting.revision
+    ) {
+      this.framesDropped += 1;
+      return;
+    }
     try {
-      this.opts.ws.send(JSON.stringify(frame));
+      if (waiting.geometry) {
+        this.opts.onFrame?.(waiting.geometry);
+        this.opts.ws.send(JSON.stringify({ ...waiting.message, geometry: waiting.geometry }));
+      } else this.opts.ws.send(JSON.stringify(waiting.message));
+      this.framesSent += 1;
     } catch (err) {
       this.opts.logger.debug({ err: errMsg(err) }, 'cdp-streamer: frame send failed (ws closed?)');
     }
+  }
+
+  private dropWaitingFrame(): void {
+    if (this.waitingFrame) this.framesDropped += 1;
+    this.waitingFrame = null;
+    if (this.waitingFrameTimer) clearTimeout(this.waitingFrameTimer);
+    this.waitingFrameTimer = null;
   }
 
   private async publishGeometryFrame(
@@ -602,8 +678,7 @@ export class CdpStreamer {
         },
         capturedAt,
       };
-      this.opts.onFrame?.(geometry);
-      this.opts.ws.send(JSON.stringify({ ...frame, geometry }));
+      this.sendFrame(frame, geometry, session, revision);
     } catch {
       this.opts.logger.debug('cdp-streamer: V2 frame dimensions unavailable');
     }
