@@ -14,6 +14,8 @@ describe('avatarSrc (G7 / Q-8: no avatar request to another site)', () => {
     expect(avatarSrc('https://thirdwx.qlogo.cn/mmopen/x/132')).toBeNull();
     expect(avatarSrc('https://lh3.googleusercontent.com/a/x?sz=50')).toBeNull();
     expect(avatarSrc('//evil.example/a.png')).toBeNull();
+    expect(avatarSrc('/\\evil.example/a.png')).toBeNull();
+    expect(avatarSrc('/\t/evil.example/a.png')).toBeNull();
     expect(avatarSrc(null)).toBeNull();
     expect(avatarSrc('')).toBeNull();
   });

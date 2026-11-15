@@ -7,6 +7,12 @@ const GOOGLE_AVATAR = /^https:\/\/lh[3-6]\.googleusercontent\.com\/a-?\/[A-Za-z0
 export function avatarSrc(url: string | null | undefined): string | null {
   if (!url) return null;
   const value = url.trim();
+  // 复审 P2-3: a backslash or control character can turn 「/…」 into another host (「/\\evil」).
+  if (
+    value.includes('\\') ||
+    [...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)
+  )
+    return null;
   if (GOOGLE_AVATAR.test(value)) return `/api/avatar?url=${encodeURIComponent(value)}`;
   if (value.startsWith('/') && !value.startsWith('//')) return value;
   if (/^(?:data:image\/|blob:)/.test(value)) return value;

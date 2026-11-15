@@ -52,6 +52,7 @@ describe('G7 / Q-8: avatar proxy only for Google profile photos', () => {
       ok: false,
       error: 'image_too_large',
     });
+    __avatarTest.clear();
     expect(await fetchAvatar(GOOGLE, async () => new Response('', { status: 404 }))).toMatchObject({
       ok: false,
       error: 'avatar_response_error',
@@ -66,11 +67,52 @@ describe('G7 / Q-8: avatar proxy only for Google profile photos', () => {
   });
 
   it('keeps the cache bounded', async () => {
-    for (let i = 0; i < __avatarTest.AVATAR_CACHE_MAX + 20; i += 1)
+    let t = 0;
+    for (let i = 0; i < __avatarTest.AVATAR_CACHE_MAX + 20; i += 1) {
+      // A new minute every 50 fetches, so the rate cap does not stop the fill.
+      if (i % 50 === 0) t += 61_000;
       await fetchAvatar(
         `https://lh3.googleusercontent.com/a/ACg8oc${String(i).padStart(8, '0')}`,
         async () => png(),
+        () => t,
       );
+    }
     expect(__avatarTest.size()).toBe(__avatarTest.AVATAR_CACHE_MAX);
+  });
+
+  it('复审 P2: bytes cap, failures cached, concurrent requests merged, upstream fetches capped per minute', async () => {
+    const big = Math.floor(__avatarTest.AVATAR_MAX_BYTES * 0.9);
+    let t = 0;
+    for (let i = 0; i < 60; i += 1) {
+      if (i % 50 === 0) t += 61_000;
+      await fetchAvatar(
+        `https://lh3.googleusercontent.com/a/ACg8big${String(i).padStart(6, '0')}`,
+        async () => png(big),
+        () => t,
+      );
+    }
+    expect(__avatarTest.bytes()).toBeLessThanOrEqual(__avatarTest.AVATAR_CACHE_MAX_BYTES);
+    __avatarTest.clear();
+    const failing = vi.fn(async () => new Response('', { status: 404 }));
+    await fetchAvatar(GOOGLE, failing, () => 1);
+    await fetchAvatar(GOOGLE, failing, () => 2);
+    expect(failing).toHaveBeenCalledTimes(1);
+    __avatarTest.clear();
+    const slow = vi.fn(async () => png());
+    await Promise.all([fetchAvatar(GOOGLE, slow, () => 1), fetchAvatar(GOOGLE, slow, () => 1)]);
+    expect(slow).toHaveBeenCalledTimes(1);
+    __avatarTest.clear();
+    const many = vi.fn(async () => png());
+    const results = [];
+    for (let i = 0; i <= __avatarTest.AVATAR_FETCHES_PER_MINUTE; i += 1)
+      results.push(
+        await fetchAvatar(
+          `https://lh3.googleusercontent.com/a/ACg8rate${String(i).padStart(6, '0')}`,
+          many,
+          () => 5,
+        ),
+      );
+    expect(many).toHaveBeenCalledTimes(__avatarTest.AVATAR_FETCHES_PER_MINUTE);
+    expect(results.at(-1)).toMatchObject({ ok: false, status: 503, error: 'avatar_busy' });
   });
 });
