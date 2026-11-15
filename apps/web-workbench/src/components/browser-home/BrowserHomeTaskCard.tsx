@@ -65,6 +65,7 @@ export function BrowserHomeTaskCard({
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           aria-label={expanded ? '收起任务卡片' : '展开任务卡片'}
+          title={expanded ? '收起任务卡片' : '展开任务卡片'}
           className="rounded-[8px] p-1 text-muted-foreground hover:bg-muted"
         >
           {expanded ? (
@@ -78,6 +79,7 @@ export function BrowserHomeTaskCard({
             type="button"
             onClick={onDismiss}
             aria-label="关闭任务卡片"
+            title="关闭任务卡片"
             className="rounded-[8px] p-1 text-muted-foreground hover:bg-muted"
           >
             <X className="h-4 w-4" aria-hidden />
