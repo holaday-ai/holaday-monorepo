@@ -15,6 +15,7 @@ export function createSelectedChromeBridge() {
       new PlaywrightCrxAdapter({
         attachToTabId: tabId,
         userBrowserRoutingV2: options?.v2,
+        collaborationV2: options?.collaborationV2,
         allowedOrigins: options?.origins,
       }),
     newTab: async (url) => {
@@ -51,6 +52,7 @@ export function createSelectedChromeBridge() {
       });
     },
     observe: session.observe.bind(session),
+    activity: session.activity.bind(session),
     describe: session.describe.bind(session),
     tabs: session.tabs.bind(session),
     execute: session.execute.bind(session),

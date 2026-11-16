@@ -127,7 +127,7 @@ test(
     await connect;
     assert.deepEqual(
       server.received.find((m) => m.type === 'client.hello').userBrowserProtocol,
-      protocol,
+      { ...protocol, capabilities: [...protocol.capabilities, 'human_activity_v1'] },
     );
     const open = async (p) => {
       await p.bringToFront();
@@ -471,6 +471,103 @@ test(
         assert.equal(await page.locator('#query').inputValue(), 'private native edit');
       } finally {
         await page.locator('#query').fill('');
+      }
+    });
+    await t.test('native held keys, drag and trusted IME yield naturally with exact task/document binding', async () => {
+      await call({ op: 'close', sessionId });
+      const { BrowserControl } = await loadServerModule('agent/supercar/browser-control.ts');
+      const { SelectedChromeClient } = await loadServerModule('agent/supercar/selected-chrome-client.ts');
+      const control = new BrowserControl(Date.now, { collaborationV2: true });
+      const operations = [];
+      const client = new SelectedChromeClient({
+        userId: 'fixture', taskId: TASK_ID, extensionClientId: 'fixture', control,
+        routingV2: true, collaborationV2: true,
+        send: async (_, input) => {
+          operations.push(input.args.session.op);
+          return server.call(TASK_ID, 'session', input.args);
+        },
+      });
+      let other;
+      let ime;
+      try {
+        const list = await server.call(TASK_ID, 'tabs');
+        const tab = list.result.tabs.find((t) => t.tabId === selected.tabId);
+        assert.ok(tab);
+        const opened = await client.open({ tabId: tab.tabId, expectedUrl: server.origin, selectionId: tab.selectionId });
+        assert.equal(opened.ok, true, JSON.stringify(opened));
+        await page.locator('#query').focus();
+        await client.observe();
+        assert.equal((await client.checkpoint()).resumed, false);
+
+        await page.keyboard.down('Shift');
+        const sinceHeld = operations.filter((op) => op === 'observe').length;
+        assert.equal((await client.checkpoint({ maxWaitMs: 2100 })).blocked, true);
+        assert.equal(operations.filter((op) => op === 'observe').length, sinceHeld);
+        assert.equal(operations.includes('act'), false);
+        await page.keyboard.up('Shift');
+        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+
+        const box = await page.locator('#query').boundingBox();
+        assert.ok(box);
+        await page.mouse.move(box.x + 5, box.y + 5);
+        await page.mouse.down();
+        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
+        await page.mouse.move(box.x + 20, box.y + 5);
+        await page.mouse.up();
+        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+
+        other = await context.newPage();
+        await other.goto(`${server.origin}/page.html`);
+        await other.locator('#query').fill('unrelated user input');
+        assert.equal((await client.checkpoint()).resumed, false);
+        const active = await serviceWorker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id);
+        assert.notEqual(active, selected.tabId, 'activity queries must not activate the task tab');
+        assert.equal(await other.locator('#query').inputValue(), 'unrelated user input');
+        await other.close(); other = null;
+        await page.bringToFront();
+        await page.locator('#query').focus();
+        await client.observe();
+        ime = await context.newCDPSession(page);
+        // Trusted browser IME events, not a page-created CompositionEvent (see CDP Input).
+        await ime.send('Input.imeSetComposition', { text: '中', selectionStart: 1, selectionEnd: 1 });
+        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
+        await ime.send('Input.insertText', { text: '中文' });
+        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true, 'an untrusted end is not a release receipt');
+        await page.keyboard.press('ArrowRight');
+        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+        assert.equal(await page.locator('#query').inputValue(), '中文');
+
+        const action = { kind: 'click', selector: css('#search') };
+        assert.equal((await client.describe(action, client.revision)).ok, true);
+        assert.equal((await client.execute(action, client.revision)).ok, true);
+        assert.equal((await client.checkpoint()).resumed, false, 'our own observed click is not a human takeover');
+        assert.equal((await client.execute({ kind: 'goto', payload: { url: `${server.origin}/v2.html?own=native` } }, client.revision)).ok, true);
+        assert.equal((await client.checkpoint()).resumed, false, 'our own observed navigation is not a human takeover');
+        await page.keyboard.down('Shift');
+        await page.reload();
+        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).blocked, true, 'a lost held document between polls is not a release receipt');
+      } finally {
+        await page.keyboard.up('Shift').catch(() => {});
+        await page.mouse.up().catch(() => {});
+        await ime?.detach().catch(() => {});
+        await other?.close().catch(() => {});
+        await client.close();
+        await page.locator('#query').fill('');
+        await page.evaluate(() => { document.querySelector('#effects').textContent = '1'; });
+        try {
+          const discovery = await server.call(TASK_ID, 'tabs');
+          const selectedAgain = discovery.result.tabs.find((tab) => tab.tabId === selected.tabId);
+          assert.ok(selectedAgain);
+          const resumed = new SelectedChromeClient({
+            userId: 'fixture', taskId: TASK_ID, extensionClientId: 'fixture',
+            control: new BrowserControl(Date.now, { collaborationV2: true }), routingV2: true, collaborationV2: true,
+            send: async (_, input) => server.call(TASK_ID, 'session', input.args),
+          });
+          try {
+            assert.equal((await resumed.open({ tabId: selectedAgain.tabId, expectedUrl: server.origin, selectionId: selectedAgain.selectionId })).ok, true, 'a released seat must support another advanced task');
+            assert.equal((await resumed.checkpoint()).resumed, false);
+          } finally { await resumed.close(); }
+        } finally { await open(page); }
       }
     });
     await t.test('iframe, shadow, ambiguity, missing target and stale DOM revision', async () => {

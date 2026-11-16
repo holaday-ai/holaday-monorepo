@@ -1,4 +1,4 @@
-import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
+import { USER_BROWSER_ACTIVITY_CAPABILITY, USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { importSelectedSession } from './session-import.js';
 /**
  * Phase 25 — extension-side tool executor (Mode B v0.1).
@@ -914,7 +914,11 @@ async function computeExtensionToolResult(
             ? {
                 userBrowserProtocol: {
                   ...USER_BROWSER_PROTOCOL,
-                  capabilities: [...USER_BROWSER_PROTOCOL.capabilities, 'task_tab_start'],
+                  capabilities: [
+                    ...USER_BROWSER_PROTOCOL.capabilities,
+                    'task_tab_start',
+                    USER_BROWSER_ACTIVITY_CAPABILITY,
+                  ],
                 },
               }
             : {}),

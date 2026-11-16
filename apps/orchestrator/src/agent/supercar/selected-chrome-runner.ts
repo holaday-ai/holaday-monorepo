@@ -588,7 +588,8 @@ async function runLoop(input: {
     if (preModelCheckpoint.blocked)
       return {
         status: 'awaiting_user',
-        question: '你的浏览器操作还没有结束，旧动作没有执行。请完成输入或松开按键、鼠标后再继续。',
+        question:
+          '暂时无法确认 Chrome 输入已结束，旧动作没有执行。请完成输入、松开按键和鼠标后继续；连接中断时先重新连接插件。',
         iterations,
         toolsUsed: [...toolsUsed],
       };
@@ -665,7 +666,8 @@ async function runLoop(input: {
     if (postModelCheckpoint.blocked)
       return {
         status: 'awaiting_user',
-        question: '你的浏览器操作还没有结束，旧动作没有执行。请完成输入或松开按键、鼠标后再继续。',
+        question:
+          '暂时无法确认 Chrome 输入已结束，旧动作没有执行。请完成输入、松开按键和鼠标后继续；连接中断时先重新连接插件。',
         iterations,
         toolsUsed: [...toolsUsed],
       };

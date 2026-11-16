@@ -11,7 +11,7 @@
  * task; tab multiplexing comes with the Skill's own plan.
  */
 
-import type { UserBrowserBinding } from '@holaday/shared-types';
+import type { UserBrowserActivity, UserBrowserBinding } from '@holaday/shared-types';
 import { type CrxApplication, type Locator, type Page, crx } from 'playwright-crx';
 import {
   DRIVER_ERRORS,
@@ -102,6 +102,7 @@ function readNativeSelectState(
 }
 
 export interface CurrentPageObservation {
+  activity?: UserBrowserActivity;
   tabId: number;
   origin: string;
   title: string;
@@ -119,6 +120,7 @@ export interface PlaywrightCrxAdapterOptions {
   /** Origin allowlist from the active Skill's `allowedOrigins`. */
   allowedOrigins?: readonly string[];
   userBrowserRoutingV2?: boolean;
+  collaborationV2?: boolean;
   /** Per-strategy waitFor budget in ms (total plan timeout is honored separately). */
   perStrategyTimeoutMs?: number;
   /** If set, attach to this chrome.tabs tabId instead of opening a new tab on first goto. */
@@ -146,6 +148,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     this.opts = {
       allowedOrigins: opts.allowedOrigins ?? [],
       userBrowserRoutingV2: opts.userBrowserRoutingV2 ?? false,
+      collaborationV2: opts.collaborationV2 ?? false,
       perStrategyTimeoutMs: opts.perStrategyTimeoutMs ?? 2_000,
       attachToTabId: opts.attachToTabId ?? null,
     };
@@ -196,6 +199,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
               method,
               params,
             ) as Promise<unknown>,
+          this.opts.collaborationV2,
         );
       return { status: 'ok', data: { tabId: requestedTabId } };
     } catch (err) {
@@ -304,6 +308,9 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
               capturedAt: Date.now(),
               frameId: this.targets.frameContexts()[0]?.frameId,
               frames,
+              ...(this.opts.collaborationV2
+                ? { activity: await this.targets.observedActivity() }
+                : {}),
             }
           : {}),
         title: title.slice(0, OBSERVATION_TITLE_CAP),
@@ -324,6 +331,16 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   async execute(action: DriverAction): Promise<DriverResult> {
+    if (this.opts.collaborationV2) {
+      try {
+        await this.targets?.assertNativeIdle();
+      } catch (error) {
+        return {
+          status: 'error',
+          error: { code: safeTargetError(error), message: 'Native input is still active' },
+        };
+      }
+    }
     if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
@@ -423,6 +440,22 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       return {
         status: 'error',
         error: { code: safeTargetError(error), message: 'Bound input was rejected or unconfirmed' },
+      };
+    }
+  }
+
+  async readActivity(): Promise<DriverResult> {
+    if (!this.targets || !this.opts.collaborationV2)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Native activity unavailable' },
+      };
+    try {
+      return { status: 'ok', data: await this.targets.activity() };
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'activity_unavailable', message: 'Native activity cannot be verified' },
       };
     }
   }
@@ -1372,6 +1405,7 @@ function safeTargetError(error: unknown): string {
     'target_unreadable',
     'origin_grant_required',
     'unsupported_action',
+    'human_input_active',
   ];
   return error instanceof Error && known.includes(error.message)
     ? error.message

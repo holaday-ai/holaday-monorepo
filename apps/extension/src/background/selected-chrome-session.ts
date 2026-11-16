@@ -1,9 +1,12 @@
 import type { DriverAction, DriverResult } from '@holaday/browser-driver';
 import {
+  USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  type UserBrowserActivity,
   type UserBrowserBinding,
   type UserBrowserProtocol,
   type UserBrowserTargetDescription,
+  userBrowserActivitySchema,
 } from '@holaday/shared-types';
 
 export interface SelectedChromeDriver {
@@ -12,6 +15,7 @@ export interface SelectedChromeDriver {
   execute(action: DriverAction): Promise<DriverResult>;
   describeTarget?(action: DriverAction, revision: number): Promise<DriverResult>;
   executeBound?(action: DriverAction, binding: UserBrowserBinding): Promise<DriverResult>;
+  readActivity?(): Promise<DriverResult>;
   dispose(): Promise<void>;
 }
 
@@ -20,6 +24,7 @@ export type SessionReply =
       ok: true;
       sessionId: string;
       observation?: unknown;
+      activity?: UserBrowserActivity;
       target?: UserBrowserTargetDescription;
       protocol?: UserBrowserProtocol;
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
@@ -41,6 +46,8 @@ interface Entry {
   /** The session's tab was closed (chrome.tabs.onRemoved). */
   tabClosed: boolean;
   v2: boolean;
+  collaborationV2: boolean;
+  activityBaseline?: string;
   origins: readonly string[];
   tabs: Map<
     number,
@@ -64,6 +71,8 @@ const NOT_APPLIED = new Set([
   'target_unreadable',
   'origin_grant_required',
   'capability_missing',
+  'human_input_active',
+  'activity_unavailable',
 ]);
 
 /** One local Chrome execution seat; the native CRX driver owns selectors. */
@@ -73,7 +82,7 @@ export class SelectedChromeSession {
     private readonly deps: {
       makeDriver: (
         tabId: number,
-        options?: { v2: boolean; origins: readonly string[] },
+        options?: { v2: boolean; origins: readonly string[]; collaborationV2?: true },
       ) => SelectedChromeDriver;
       newTab?: (url: string) => Promise<number>;
       owner: () => string | null;
@@ -103,6 +112,9 @@ export class SelectedChromeSession {
       pending: null,
       tabClosed: false,
       v2: Boolean(input.protocol),
+      collaborationV2: Boolean(
+        input.protocol?.capabilities.includes(USER_BROWSER_ACTIVITY_CAPABILITY),
+      ),
       origins: input.grantedOrigins ?? [],
       tabs: new Map(),
     };
@@ -117,9 +129,15 @@ export class SelectedChromeSession {
       if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
       if (entry.v2 && !entry.origins.length) return { ok: false, error: 'origin_grant_required' };
       entry.driver = entry.v2
-        ? this.deps.makeDriver(input.tabId, { v2: true, origins: entry.origins })
+        ? this.deps.makeDriver(input.tabId, {
+            v2: true,
+            origins: entry.origins,
+            ...(entry.collaborationV2 ? { collaborationV2: true as const } : {}),
+          })
         : this.deps.makeDriver(input.tabId);
       if (entry.v2 && (!entry.driver.describeTarget || !entry.driver.executeBound))
+        return { ok: false, error: 'capability_missing' };
+      if (entry.collaborationV2 && !entry.driver.readActivity)
         return { ok: false, error: 'capability_missing' };
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
@@ -165,6 +183,48 @@ export class SelectedChromeSession {
     return this.track(entry, () => this.observeEntry(entry));
   }
 
+  async activity(taskId: string, sessionId: string): Promise<SessionReply> {
+    const entry = this.find(taskId, sessionId);
+    if (!entry) return { ok: false, error: 'session_unavailable' };
+    if (!entry.collaborationV2) return { ok: false, error: 'capability_missing' };
+    if (entry.pending) return { ok: false, error: 'browser_busy' };
+    return this.track(entry, async () => {
+      const activity = await this.readActivity(entry);
+      return activity
+        ? { ok: true, sessionId: entry.id, activity }
+        : { ok: false, error: entry.tabClosed ? 'tab_closed' : 'activity_unavailable' };
+    });
+  }
+
+  private async readActivity(entry: Entry): Promise<UserBrowserActivity | null> {
+    if (!this.current(entry) || entry.tabClosed || entry.quarantined) return null;
+    let result: DriverResult | undefined;
+    try {
+      result = await entry.driver?.readActivity?.();
+    } catch {
+      return null;
+    }
+    const parsed = userBrowserActivitySchema.safeParse(result?.data);
+    return this.current(entry) &&
+      !entry.tabClosed &&
+      result?.status === 'ok' &&
+      parsed.success &&
+      parsed.data.tabId === entry.tabId
+      ? parsed.data
+      : null;
+  }
+  private async nativeGate(entry: Entry): Promise<SessionReply | null> {
+    if (!entry.collaborationV2) return null;
+    const activity = await this.readActivity(entry);
+    if (!activity)
+      return { ok: false, error: 'activity_unavailable', actionOutcome: 'not_applied' };
+    if (activity.keys || activity.pointers || activity.composing || activity.interrupted)
+      return { ok: false, error: 'human_input_active', actionOutcome: 'not_applied' };
+    if (activity.stamp !== entry.activityBaseline)
+      return { ok: false, error: 'stale_observation', actionOutcome: 'not_applied' };
+    return null;
+  }
+
   async execute(
     taskId: string,
     sessionId: string,
@@ -195,6 +255,8 @@ export class SelectedChromeSession {
       async () => {
         if (!this.current(entry) || !entry.driver)
           return { ok: false, error: 'session_unavailable', actionOutcome: 'not_applied' };
+        const native = await this.nativeGate(entry);
+        if (native) return native;
         let result: DriverResult;
         try {
           result =
@@ -223,7 +285,19 @@ export class SelectedChromeSession {
         const actionOutcome =
           action.kind === 'wait' ? ('not_applied' as const) : ('applied' as const);
         if (!this.current(entry)) return { ok: false, error: 'session_stopped', actionOutcome };
-        return { ...(await this.observeEntry(entry)), actionOutcome };
+        let observed = await this.observeEntry(entry);
+        if (
+          entry.v2 &&
+          !observed.ok &&
+          observed.error === 'observation_failed' &&
+          this.current(entry) &&
+          !entry.tabClosed
+        ) {
+          // Wheel/input delivery can precede its DOM update. Retry only the read, once;
+          // the actual action is already settled and must never be replayed.
+          observed = await this.observeEntry(entry);
+        }
+        return { ...observed, actionOutcome };
       },
       true,
     );
@@ -271,6 +345,8 @@ export class SelectedChromeSession {
             ownership: tab.ownership,
           })),
         };
+      const native = await this.nativeGate(entry);
+      if (native) return native;
       let tabId = command.tabId;
       if (command.operation === 'new') {
         if (!command.url || !entry.origins.includes(webOrigin(command.url)))
@@ -286,7 +362,11 @@ export class SelectedChromeSession {
       if (!tab) return { ok: false, error: 'task_tab_required' };
       await entry.driver?.dispose();
       if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
-      tab.driver = this.deps.makeDriver(tabId, { v2: true, origins: entry.origins });
+      tab.driver = this.deps.makeDriver(tabId, {
+        v2: true,
+        origins: entry.origins,
+        ...(entry.collaborationV2 ? { collaborationV2: true as const } : {}),
+      });
       entry.driver = tab.driver;
       entry.tabId = tabId;
       entry.tabClosed = false;
@@ -356,6 +436,14 @@ export class SelectedChromeSession {
     if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
     if (result.status === 'ok' && !identifiesTab(result.data, entry.tabId))
       return { ok: false, error: 'target_changed' };
+    if (entry.collaborationV2 && result.status === 'ok') {
+      const parsed = userBrowserActivitySchema.safeParse(
+        (result.data as { activity?: unknown })?.activity,
+      );
+      if (!parsed.success || parsed.data.tabId !== entry.tabId)
+        return { ok: false, error: 'activity_unavailable' };
+      entry.activityBaseline = parsed.data.stamp;
+    }
     entry.ready = result.status === 'ok' && result.data !== undefined;
     return result.status === 'ok' && result.data !== undefined
       ? {
@@ -375,7 +463,10 @@ export class SelectedChromeSession {
             ? {
                 protocol: {
                   ...USER_BROWSER_PROTOCOL,
-                  capabilities: [...USER_BROWSER_PROTOCOL.capabilities],
+                  capabilities: [
+                    ...USER_BROWSER_PROTOCOL.capabilities,
+                    ...(entry.collaborationV2 ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
+                  ],
                 },
               }
             : {}),

@@ -100,6 +100,7 @@ export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
     })
     .strict(),
   z.object({ op: z.literal('observe'), sessionId: z.string().uuid() }).strict(),
+  z.object({ op: z.literal('activity'), sessionId: z.string().uuid() }).strict(),
   z
     .object({
       op: z.literal('describe'),

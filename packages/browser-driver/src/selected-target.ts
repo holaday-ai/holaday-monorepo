@@ -1,19 +1,41 @@
 import {
   type LoginContext,
+  type UserBrowserActivity,
   type UserBrowserBinding,
   type UserBrowserElementSignals,
   type UserBrowserTargetDescription,
+  nativeDocumentActivitySchema,
   readLoginContext,
 } from '@holaday/shared-types';
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
 import { type LocatorSpec, buildSelectorPlan } from './selector-plan.js';
 
-type DocumentVersion = { document: string; epoch: number };
+type DocumentVersion = {
+  document: string;
+  epoch: number;
+  input: number;
+  keys: number;
+  pointers: number;
+  composing: boolean;
+  interrupted: boolean;
+};
 // Executed in the document. No values, cookies, storage or network data leave it.
-const readVersion = (): DocumentVersion => {
+const readVersion = (collaborationV2 = false): DocumentVersion => {
   const win = window as typeof window & {
-    __holadayV2Document?: DocumentVersion & { inputTracking?: true };
+    __holadayV2Document?: {
+      document: string;
+      epoch: number;
+      inputTracking?: true;
+      activity?: {
+        sequence: number;
+        keys: Set<string>;
+        pointers: Set<string>;
+        composing: boolean;
+        interrupted: boolean;
+        active: boolean;
+      };
+    };
   };
   if (!win.__holadayV2Document) {
     const state = { document: crypto.randomUUID(), epoch: 0 };
@@ -52,7 +74,118 @@ const readVersion = (): DocumentVersion => {
     );
     state.inputTracking = true;
   }
-  return { document: state.document, epoch: state.epoch };
+  if (!collaborationV2)
+    return {
+      document: state.document,
+      epoch: state.epoch,
+      input: 0,
+      keys: 0,
+      pointers: 0,
+      composing: false,
+      interrupted: false,
+    };
+  if (!state.activity) {
+    const activity = {
+      sequence: 0,
+      keys: new Set<string>(),
+      pointers: new Set<string>(),
+      composing: false,
+      interrupted: false,
+      active: true,
+    };
+    state.activity = activity;
+    let lastReport: string | null = null;
+    const report = () => {
+      if (!activity.active) return;
+      const signature = JSON.stringify([
+        activity.keys.size,
+        activity.pointers.size,
+        activity.composing,
+        activity.interrupted,
+      ]);
+      if (signature === lastReport) return;
+      lastReport = signature;
+      const binding = (window as unknown as Record<string, unknown>).__holadayNativeActivity;
+      if (typeof binding !== 'function') return;
+      try {
+        void Promise.resolve(
+          binding({
+            document: state.document,
+            input: activity.sequence,
+            keys: activity.keys.size,
+            pointers: activity.pointers.size,
+            composing: activity.composing,
+            interrupted: activity.interrupted,
+          }),
+        ).catch(() => {});
+      } catch {
+        /* The owning extension may have detached. */
+      }
+    };
+    const changed = (event: Event) => {
+      if (!event.isTrusted) return;
+      activity.sequence++;
+      // A real browser input reports its compositor state. A page-created compositionend
+      // cannot release the hold (Chromium's CDP insertText also emits an untrusted end).
+      if ((event instanceof KeyboardEvent || event instanceof InputEvent) && !event.isComposing)
+        activity.composing = false;
+      if (event instanceof KeyboardEvent) {
+        const key = event.code || event.key;
+        if (event.type === 'keydown' && key && key !== 'Process' && key !== 'Unidentified')
+          activity.keys.add(key);
+        if (event.type === 'keyup') activity.keys.delete(key);
+      }
+      if (event instanceof PointerEvent) {
+        const key = `${event.pointerId}:${event.button}`;
+        if (event.type === 'pointerdown') activity.pointers.add(key);
+        if (event.type === 'pointerup') activity.pointers.delete(key);
+        if (event.type === 'pointercancel' && activity.pointers.size) activity.interrupted = true;
+      }
+      if (event.type === 'compositionstart') activity.composing = true;
+      if (event.type === 'compositionend') activity.composing = false;
+      if (!activity.keys.size && !activity.pointers.size && !activity.composing)
+        activity.interrupted = false;
+      report();
+    };
+    for (const kind of [
+      'keydown',
+      'keyup',
+      'pointerdown',
+      'pointerup',
+      'pointercancel',
+      'input',
+      'change',
+      'compositionstart',
+      'compositionend',
+      'wheel',
+      'scroll',
+    ])
+      document.addEventListener(kind, changed, { capture: true, passive: true });
+    document.addEventListener(
+      'pointermove',
+      (event) => {
+        if (event.buttons) changed(event);
+      },
+      { capture: true, passive: true },
+    );
+    window.addEventListener('blur', () => {
+      if (activity.keys.size || activity.pointers.size || activity.composing) {
+        activity.interrupted = true;
+        activity.sequence++;
+        report();
+      }
+    });
+  }
+  state.activity.active = true;
+  return {
+    document: state.document,
+    epoch: state.epoch,
+    input: state.activity.sequence,
+    keys: state.activity.keys.size,
+    pointers: state.activity.pointers.size,
+    composing: state.activity.composing,
+    interrupted: state.activity.interrupted,
+  };
 };
 const readElement = async (
   node: Element,
@@ -320,6 +453,11 @@ interface Ticket {
   /** Clicks: the exact point described and later clicked, and the selected node. */
   point?: { x: number; y: number; selectedId: string };
 }
+type NativeRelay = {
+  receiver: ((frame: Frame, value: unknown) => void) | null;
+  ready: Promise<void>;
+};
+const nativeRelays = new WeakMap<Page, NativeRelay>();
 
 /** One selected page; no selector healing or first-match execution in v2. */
 export class SelectedTargetResolver {
@@ -327,11 +465,52 @@ export class SelectedTargetResolver {
   private documents = new Map<Frame, DocumentVersion>();
   private frames = new WeakMap<Frame, string>();
   private ticket: Ticket | null = null;
+  private nativeFrames = new Map<string, DocumentVersion>();
+  private nativeInterrupted = false;
+  private nativeEvents = new Map<string, Omit<DocumentVersion, 'epoch'>>();
+  private nativeRelay: NativeRelay | null = null;
+  private readonly receiveNativeActivity = (frame: Frame, value: unknown): void => {
+    try {
+      this.origin(frame);
+    } catch {
+      return;
+    }
+    const parsed = nativeDocumentActivitySchema.safeParse(value);
+    if (!parsed.success) return;
+    const event = parsed.data;
+    if (
+      (this.nativeFrames.get(event.document)?.input ?? -1) >= event.input ||
+      (this.nativeEvents.get(event.document)?.input ?? -1) >= event.input
+    )
+      return;
+    this.nativeEvents.set(event.document, event);
+    if (this.nativeEvents.size > 40) {
+      this.nativeInterrupted = true;
+      this.nativeEvents.delete(this.nativeEvents.keys().next().value ?? '');
+    }
+  };
+  private async ensureNativeRelay(): Promise<void> {
+    if (!this.collaborationV2 || this.nativeRelay) return;
+    let relay = nativeRelays.get(this.page);
+    if (!relay) {
+      relay = { receiver: null, ready: Promise.resolve() };
+      nativeRelays.set(this.page, relay);
+      const current = relay;
+      const page = this.page;
+      relay.ready = this.page.exposeBinding('__holadayNativeActivity', (source, value: unknown) => {
+        if (source.page === page) current.receiver?.(source.frame, value);
+      });
+    }
+    await relay.ready;
+    relay.receiver = this.receiveNativeActivity;
+    this.nativeRelay = relay;
+  }
   constructor(
     private readonly page: Page,
     private readonly tabId: number,
     private readonly origins: readonly string[],
     private readonly cdp: SelectedTabCdp,
+    private readonly collaborationV2 = false,
   ) {}
   get observationRevision(): number {
     return this.revision;
@@ -356,6 +535,8 @@ export class SelectedTargetResolver {
   }
   async observe(): Promise<void> {
     this.origin(this.page.mainFrame());
+    await this.ensureNativeRelay();
+    if (this.collaborationV2) await this.activity();
     await this.clearTicket();
     this.documents.clear();
     // Never evaluate an ungranted cross-origin frame.
@@ -365,18 +546,87 @@ export class SelectedTargetResolver {
       } catch {
         continue;
       }
-      this.documents.set(frame, await frame.evaluate(readVersion));
+      this.documents.set(frame, await frame.evaluate(readVersion, this.collaborationV2));
       if (!this.frames.has(frame)) this.frames.set(frame, crypto.randomUUID());
     }
     this.revision++;
   }
   async dispose(): Promise<void> {
+    if (this.nativeRelay?.receiver === this.receiveNativeActivity) this.nativeRelay.receiver = null;
+    this.nativeRelay = null;
+    this.nativeEvents.clear();
+    if (this.collaborationV2) {
+      for (const frame of this.documents.keys()) {
+        try {
+          this.origin(frame);
+          await frame.evaluate(() => {
+            const activity = (
+              window as typeof window & { __holadayV2Document?: { activity?: { active: boolean } } }
+            ).__holadayV2Document?.activity;
+            if (activity) activity.active = false;
+          });
+        } catch {
+          /* A replaced/closed document has no relay left to deactivate. */
+        }
+      }
+    }
+    this.nativeFrames.clear();
     await this.clearTicket();
     this.documents.clear();
     this.frames = new WeakMap();
   }
   async assertObservationFresh(): Promise<void> {
     for (const frame of this.documents.keys()) await this.assertFresh(frame, this.revision);
+  }
+  async activity(): Promise<UserBrowserActivity> {
+    this.origin(this.page.mainFrame());
+    const versions: DocumentVersion[] = [];
+    for (const frame of this.page.frames().slice(0, 20)) {
+      try {
+        this.origin(frame);
+      } catch {
+        continue;
+      }
+      versions.push(await frame.evaluate(readVersion, this.collaborationV2));
+    }
+    for (const previous of [...this.nativeFrames.values(), ...this.nativeEvents.values()]) {
+      if (
+        (previous.keys || previous.pointers || previous.composing) &&
+        !versions.some((v) => v.document === previous.document)
+      )
+        this.nativeInterrupted = true;
+    }
+    this.nativeFrames = new Map(versions.map((v) => [v.document, v]));
+    for (const version of versions) {
+      if ((this.nativeEvents.get(version.document)?.input ?? -1) <= version.input)
+        this.nativeEvents.delete(version.document);
+    }
+    return this.encodeActivity(versions);
+  }
+  async observedActivity(): Promise<UserBrowserActivity> {
+    return this.encodeActivity([...this.documents.values()]);
+  }
+  async assertNativeIdle(): Promise<void> {
+    if (!this.collaborationV2) return;
+    const activity = await this.activity();
+    if (activity.keys || activity.pointers || activity.composing || activity.interrupted)
+      throw new Error('human_input_active');
+  }
+  private async encodeActivity(versions: DocumentVersion[]): Promise<UserBrowserActivity> {
+    const stamp = JSON.stringify(
+      versions
+        .map((v) => [v.document, v.input])
+        .sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stamp));
+    return {
+      tabId: this.tabId,
+      stamp: Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join(''),
+      keys: versions.reduce((sum, v) => sum + v.keys, 0),
+      pointers: versions.reduce((sum, v) => sum + v.pointers, 0),
+      composing: versions.some((v) => v.composing),
+      interrupted: this.nativeInterrupted || versions.some((v) => v.interrupted),
+    };
   }
   frameContexts(): Array<{ frame: Frame; frameId: string; origin: string }> {
     return [...this.documents.keys()].map((frame) => ({
@@ -395,7 +645,19 @@ export class SelectedTargetResolver {
     this.origin(frame);
     if (expected !== this.revision || !this.documents.has(frame))
       throw new Error('stale_observation');
-    const current = await frame.evaluate(readVersion);
+    const current = await frame.evaluate<DocumentVersion, boolean>(
+      readVersion,
+      this.collaborationV2,
+    );
+    if (
+      this.collaborationV2 &&
+      (current.keys ||
+        current.pointers ||
+        current.composing ||
+        current.interrupted ||
+        this.nativeInterrupted)
+    )
+      throw new Error('human_input_active');
     if (JSON.stringify(current) !== JSON.stringify(this.documents.get(frame)))
       throw new Error('stale_observation');
   }

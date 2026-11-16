@@ -35,6 +35,7 @@ export interface SelectedChromeBridge {
     command: Extract<SelectedChromeSessionCommand, { op: 'tabs' }>,
   ): Promise<SessionReply>;
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
+  activity?(taskId: string, sessionId: string): Promise<SessionReply>;
   execute(
     taskId: string,
     sessionId: string,
@@ -262,6 +263,13 @@ export function createSelectedChromeTransport(deps: {
       );
     }
 
+    if (command.op === 'activity')
+      return run(
+        entry,
+        () =>
+          deps.bridge.activity?.(taskId, command.sessionId) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
     if (command.op === 'describe')
       return run(
         entry,

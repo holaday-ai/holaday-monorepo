@@ -1,7 +1,10 @@
 import {
   type SelectedChromeSessionCommand,
+  USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  type UserBrowserActivity,
   type UserBrowserTargetDescription,
+  userBrowserActivitySchema,
   userBrowserProtocolSchema,
   userBrowserTargetDescriptionSchema,
 } from '@holaday/shared-types';
@@ -17,6 +20,7 @@ type Options = {
   extensionClientId: string;
   control: BrowserControl;
   routingV2?: boolean;
+  collaborationV2?: boolean;
   send: (userId: string, options: ExtensionToolCallOptions) => Promise<ExtensionToolCallOutcome>;
 };
 
@@ -31,6 +35,7 @@ const observationSchema = z.object({
   bodyText: z.string().max(8000),
   ariaSnapshot: z.string().max(16000),
   truncated: z.boolean(),
+  activity: userBrowserActivitySchema.optional(),
   observationRevision: z.number().int().positive().optional(),
   sourceURL: z.string().url().max(2048).optional(),
   capturedAt: z.number().int().positive().optional(),
@@ -85,6 +90,12 @@ export class SelectedChromeClient {
     action: string;
     revision: number;
   } | null = null;
+  private nativeBaseline: string | null = null;
+  private nativeSeen: string | null = null;
+  private readonly nativeSource = {};
+  private get nativeActivityEnabled(): boolean {
+    return this.routingV2 && this.options.collaborationV2 === true;
+  }
   private taskTabs = new Set<number>();
   get routingV2(): boolean {
     return this.options.routingV2 === true;
@@ -122,7 +133,10 @@ export class SelectedChromeClient {
             ? {
                 protocol: {
                   ...USER_BROWSER_PROTOCOL,
-                  capabilities: [...USER_BROWSER_PROTOCOL.capabilities],
+                  capabilities: [
+                    ...USER_BROWSER_PROTOCOL.capabilities,
+                    ...(this.nativeActivityEnabled ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
+                  ],
                 },
                 grantedOrigins: [...this.origins],
               }
@@ -281,12 +295,78 @@ export class SelectedChromeClient {
     return this.track(() => this.refresh());
   }
 
-  async checkpoint(): Promise<BrowserCheckpoint> {
+  async checkpoint(options: { maxWaitMs?: number } = {}): Promise<BrowserCheckpoint> {
     await this.pending;
+    if (this.nativeActivityEnabled) return this.nativeCheckpoint(options.maxWaitMs ?? 120_000);
     return this.options.control.checkpoint(async () => {
       const result = await this.refresh();
       if (!result.ok) throw new Error('observation_failed');
     });
+  }
+
+  private async nativeActivity(): Promise<UserBrowserActivity | null> {
+    if (!this.sessionId || this.closing || !this.options.control.canAgentAct()) return null;
+    const outcome = await this.send({ op: 'activity', sessionId: this.sessionId });
+    const parsed = z
+      .object({
+        ok: z.literal(true),
+        sessionId: z.string().uuid(),
+        activity: userBrowserActivitySchema,
+      })
+      .strict()
+      .safeParse(outcome.result);
+    if (
+      !outcome.ok ||
+      !parsed.success ||
+      parsed.data.sessionId !== this.sessionId ||
+      parsed.data.activity.tabId !== this.tabId ||
+      this.closing
+    )
+      return null;
+    const activity = parsed.data.activity;
+    if (activity.stamp !== this.nativeBaseline && activity.stamp !== this.nativeSeen)
+      this.options.control.noteHumanInput('pending');
+    this.nativeSeen = activity.stamp;
+    this.options.control.setHeldInput(this.nativeSource, activity);
+    return activity;
+  }
+
+  private async nativeCheckpoint(maxWaitMs: number): Promise<BrowserCheckpoint> {
+    const started = Date.now();
+    const deadline = started + Math.max(0, maxWaitMs);
+    const control = this.options.control;
+    let refreshed = false;
+    const blocked = (): BrowserCheckpoint => {
+      this.ready = false;
+      this.prepared = null;
+      return { resumed: false, blocked: true, waitedMs: Date.now() - started };
+    };
+    while (!this.closing && control.canAgentAct()) {
+      const activity = await this.nativeActivity();
+      if (!activity || activity.interrupted) return blocked();
+      if (control.humanBusy()) {
+        if (Date.now() >= deadline) return blocked();
+        await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+        continue;
+      }
+      if (activity.stamp !== this.nativeBaseline || control.hasUnobservedHumanInput()) {
+        if (Date.now() >= deadline) return blocked();
+        const fresh = await this.refresh();
+        const after = await this.nativeActivity();
+        if (!after || after.interrupted) return blocked();
+        if (!fresh.ok) {
+          // Native input can invalidate the strict DOM capture. Keep yielding and reread;
+          // an unchanged, unreadable page is a real observation failure.
+          if (after.stamp !== activity.stamp || control.humanBusy()) continue;
+          return blocked();
+        }
+        refreshed = true;
+        if (after.stamp !== this.nativeBaseline || control.humanBusy()) continue;
+      }
+      const receipt = await control.checkpoint(async () => {});
+      return { ...receipt, resumed: receipt.resumed || refreshed, waitedMs: Date.now() - started };
+    }
+    return { resumed: false, waitedMs: Date.now() - started };
   }
 
   async close(): Promise<SelectedChromeClientReply> {
@@ -407,7 +487,13 @@ export class SelectedChromeClient {
       const protocol = userBrowserProtocolSchema.safeParse(
         (outcome.result as Record<string, unknown>).protocol,
       );
-      if (!protocol.success || !reply.observation.observationRevision) {
+      if (
+        !protocol.success ||
+        !reply.observation.observationRevision ||
+        (this.nativeActivityEnabled &&
+          (!protocol.data.capabilities.includes(USER_BROWSER_ACTIVITY_CAPABILITY) ||
+            !reply.observation.activity))
+      ) {
         this.ready = false;
         return fail('capability_missing');
       }
@@ -416,6 +502,13 @@ export class SelectedChromeClient {
         return fail('origin_grant_required');
       }
       this.extensionRevision = reply.observation.observationRevision;
+      if (this.nativeActivityEnabled && reply.observation.activity) {
+        if (reply.observation.activity.tabId !== this.tabId)
+          return this.uncertain('invalid_receipt', op);
+        this.nativeBaseline = reply.observation.activity.stamp;
+        this.nativeSeen = this.nativeBaseline;
+        this.options.control.setHeldInput(this.nativeSource, reply.observation.activity);
+      }
     }
     this.ready = true;
     this.prepared = null;

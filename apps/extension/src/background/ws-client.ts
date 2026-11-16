@@ -1,4 +1,4 @@
-import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
+import { USER_BROWSER_ACTIVITY_CAPABILITY, USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
@@ -528,7 +528,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
       extensionVersion: chrome.runtime.getManifest().version,
       userBrowserProtocol: {
         ...USER_BROWSER_PROTOCOL,
-        capabilities: [...USER_BROWSER_PROTOCOL.capabilities],
+        capabilities: [...USER_BROWSER_PROTOCOL.capabilities, USER_BROWSER_ACTIVITY_CAPABILITY],
       },
     });
 

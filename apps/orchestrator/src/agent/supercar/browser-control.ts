@@ -144,9 +144,9 @@ export class BrowserControl {
     if (!this.collaborationV2) return;
     const previous = this.humanActivity.held.get(source);
     if (
-      previous?.keys === input.keys &&
-      previous.pointers === input.pointers &&
-      previous.composing === input.composing
+      (previous?.keys ?? 0) === input.keys &&
+      (previous?.pointers ?? 0) === input.pointers &&
+      (previous?.composing ?? false) === input.composing
     )
       return;
     if (input.keys || input.pointers || input.composing)

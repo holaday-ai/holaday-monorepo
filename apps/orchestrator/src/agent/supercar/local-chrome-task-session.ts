@@ -74,6 +74,7 @@ export class LocalChromeTaskSessions {
       extensionClientId: selection.extensionClientId,
       control,
       routingV2: capabilities.routingV2,
+      collaborationV2: capabilities.collaborationV2,
       send,
     });
     const session = {
