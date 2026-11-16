@@ -7,6 +7,7 @@ import { BrowserHomeAddressBar } from '@/components/browser-home/BrowserHomeAddr
 import { BrowserHomeFiles } from '@/components/browser-home/BrowserHomeFiles';
 import { BrowserHomeProfiles } from '@/components/browser-home/BrowserHomeProfiles';
 import { BrowserHomeTaskCard } from '@/components/browser-home/BrowserHomeTaskCard';
+import { BrowserHomeUpload } from '@/components/browser-home/BrowserHomeUpload';
 import { BrowserHomeView, recentBrowserHomeTasks } from '@/components/browser-home/BrowserHomeView';
 import {
   type ComposerSubmitResult,
@@ -45,6 +46,7 @@ type SessionState =
       collaborationV2: boolean;
       filesAvailable: boolean;
       filesEnabled: boolean;
+      uploadInstanceId: string | null;
     }
   | { status: 'error'; message: string };
 
@@ -119,6 +121,7 @@ export function BrowserHomePage({
           collaborationV2: res.capabilities?.collaborationV2 === true,
           filesAvailable: res.filesAvailable === true,
           filesEnabled: res.filesEnabled === true,
+          uploadInstanceId: res.uploadsEnabled === true ? res.uploadInstanceId : null,
         });
         // An open browser (or the last address, restored) goes on showing its page.
         if (isWebPageUrl(res.url) && !navigatedRef.current) {
@@ -341,6 +344,9 @@ export function BrowserHomePage({
           ) : null
         }
       />
+      {ownerId && session.status === 'ready' && session.uploadInstanceId && (
+        <BrowserHomeUpload ownerId={ownerId} instanceId={session.uploadInstanceId} />
+      )}
       <div className="relative min-h-0 flex-1">
         {view === 'home' ? (
           <div className="h-full overflow-y-auto">

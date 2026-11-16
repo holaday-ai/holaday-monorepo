@@ -390,6 +390,8 @@ export interface UnifiedBrowserLoopInput {
     action: UnifiedBrowserAction,
     phase: 'before' | 'after',
   ) => Promise<ActionGateDecision>;
+  /** The host rechecks human/browser state before accepting a model's terminal answer. */
+  beforeFinish?: () => Promise<ActionGateDecision>;
   /**
    * Pre-delivery review of a completed answer (FIX-BATCH-A). Returns what the
    * answer is missing (e.g. per-item links, prices), or null when it is fine.
@@ -1312,6 +1314,14 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           steps: step + 1,
         };
       if (call.name === 'finish' && !hostNavigate) {
+        const boundary = await input.beforeFinish?.();
+        if (boundary?.kind === 'stop') return { ...boundary.outcome, steps: step + 1 };
+        if (input.signal?.aborted) return cancelled(step + 1);
+        if (boundary?.kind === 'skip') {
+          results.push(toolResult(call.id, boundary.message));
+          staleTurn = true;
+          continue;
+        }
         const written = typeof args.summary === 'string' ? unescapeLiteralBreaks(args.summary) : '';
         // FIX-34 review #2: an unasked ```json tool-call block is not part of the answer
         // (its keys are not page quotes either).

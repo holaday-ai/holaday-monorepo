@@ -85,7 +85,9 @@ export class BrowserHomeFiles {
     const instanceId = randomUUID();
     const pages = new Map<Page, (download: Download) => void>();
     this.bindings.set(instance, binding);
-    instance.homeFileTransfers = { pending: () => binding.pending > 0 };
+    instance.homeFileTransfers = {
+      pending: () => binding.pending > 0 || instance.homeFileUploads?.pending() === true,
+    };
     const watch = (candidate: Page) => {
       if (binding.closed || pages.has(candidate) || candidate.context() !== context) return;
       const listener = (download: Download) => {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Dialog, FileChooser, Frame, Locator, Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
+import { receiveActionFileChoosers } from './browser-file-chooser-receiver.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
 import {
@@ -343,16 +344,16 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
       if (chooser.page() !== owner) return;
       captured.push(PreparedBrowserUpload.captureChooser(chooser, sourceCurrent).catch(() => null));
     };
-    owner.on('filechooser', onChooser);
+    const stopReceiving = receiveActionFileChoosers(owner, onChooser);
     let result: UnifiedToolResult;
     try {
       result = await work();
     } catch (error) {
-      owner.off('filechooser', onChooser);
+      stopReceiving();
       await Promise.all(captured.map(async (item) => (await item)?.dispose()));
       throw error;
     } finally {
-      owner.off('filechooser', onChooser);
+      stopReceiving();
     }
     if (!captured.length) return result;
     clearChooser();

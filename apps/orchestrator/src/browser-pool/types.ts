@@ -51,6 +51,8 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   cloudProfileId?: string;
   /** Server-installed transfer lifetime; not client capability or persisted identity. */
   homeFileTransfers?: { pending(): boolean };
+  /** The original Home page is waiting for a person to select/cancel files. */
+  homeFileUploads?: { pending(): boolean };
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;

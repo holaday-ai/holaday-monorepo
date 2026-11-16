@@ -35,6 +35,7 @@ import {
   saveBrowserHomeProfile,
 } from '../../browser-home/browser-home-profile.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
+import { browserHomeUploads } from '../../browser-home/browser-home-uploads.js';
 import { PoolCapacityError } from '../../browser-pool/browser-pool.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { VaultError } from '../../browser-session-vault/vault.js';
@@ -57,6 +58,37 @@ function requirePool(ctx: Context) {
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '云浏览器暂时不可用' });
   }
   return ctx.browserPool;
+}
+
+async function activeHomeFileUser(ctx: Context & { userId: string }) {
+  const [user] = await ctx.db
+    .select({ id: users.id, status: users.status })
+    .from(users)
+    .where(eq(users.externalId, ctx.userId))
+    .limit(1);
+  if (!user || user.status !== 'active')
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: '账号暂不可用' });
+  return user;
+}
+const uploadRequestInput = z
+  .object({ instanceId: z.string().uuid(), requestId: z.string().uuid() })
+  .strict();
+function uploadLocation(ctx: Context & { userId: string }) {
+  if (!appEnv.BROWSER_HOME_FILES_V1)
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '云浏览器文件选择暂不可用。' });
+  const location = browserHomeSessions.locate(requirePool(ctx), ctx.userId);
+  if (!location)
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: '原浏览器已关闭，请重新打开页面。',
+    });
+  return location.instance;
+}
+function uploadFailure(): never {
+  throw new TRPCError({
+    code: 'PRECONDITION_FAILED',
+    message: '文件请求已变化或暂不可用，请核对网页后重新选择。',
+  });
 }
 
 async function regionFor(ctx: Context & { userId: string }): Promise<BrowserHomeRegion> {
@@ -120,6 +152,45 @@ function profileFailure(error: unknown): never {
 }
 
 export const browserHomeRouter = router({
+  fileRequest: browserHomeProcedure
+    .input(z.object({ instanceId: z.string().uuid() }).strict())
+    .query(async ({ ctx, input }) => {
+      if (!appEnv.BROWSER_HOME_FILES_V1) return { enabled: false, changed: false, session: null };
+      await activeHomeFileUser(ctx);
+      const location = browserHomeSessions.locate(requirePool(ctx), ctx.userId);
+      const session = location ? await browserHomeUploads.current(location.instance) : null;
+      return session?.instanceId === input.instanceId
+        ? { enabled: true, changed: false, session }
+        : { enabled: true, changed: true, session: null };
+    }),
+  chooseFiles: browserHomeProcedure
+    .input(
+      uploadRequestInput.extend({
+        fileIds: z
+          .array(z.string().regex(/^[A-Za-z0-9_-]{1,160}$/))
+          .min(1)
+          .max(5)
+          .refine((ids) => new Set(ids).size === ids.length),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await activeHomeFileUser(ctx);
+      const instance = uploadLocation(ctx);
+      try {
+        return await browserHomeUploads.choose(instance, input);
+      } catch {
+        uploadFailure();
+      }
+    }),
+  cancelFiles: browserHomeProcedure.input(uploadRequestInput).mutation(async ({ ctx, input }) => {
+    await activeHomeFileUser(ctx);
+    const instance = uploadLocation(ctx);
+    try {
+      return await browserHomeUploads.cancel(instance, input);
+    } catch {
+      uploadFailure();
+    }
+  }),
   files: browserHomeProcedure.query(async ({ ctx }) => {
     if (!appEnv.BROWSER_HOME_FILES_V1) return { enabled: false, files: [], transfers: [] };
     const [user] = await ctx.db
@@ -274,14 +345,33 @@ export const browserHomeRouter = router({
               .where(eq(users.externalId, ctx.userId))
               .limit(1);
             if (!user || user.status !== 'active') throw new Error('home_file_owner_unavailable');
+            const files = new FileService(ctx.db, ctx.logger);
+            const enabled = () =>
+              appEnv.BROWSER_HOME_FILES_V1 && isBrowserHomeEnabledFor(ctx.userId);
+            const onIdle = (original: import('../../browser-pool/types.js').BrowserInstance) =>
+              browserHomeSessions.backgroundOperationEnded(pool, ctx.userId, original);
             await browserHomeFiles.attach({
               instance,
               pool,
               userIdInternal: user.id,
-              fileService: new FileService(ctx.db, ctx.logger),
-              enabled: () => appEnv.BROWSER_HOME_FILES_V1 && isBrowserHomeEnabledFor(ctx.userId),
-              onIdle: (original) =>
-                browserHomeSessions.backgroundOperationEnded(pool, ctx.userId, original),
+              fileService: files,
+              enabled,
+              onIdle,
+            });
+            await browserHomeUploads.attach({
+              instance,
+              pool,
+              files,
+              userIdInternal: user.id,
+              enabled,
+              onIdle,
+              activeOwner: async () => {
+                try {
+                  return (await activeHomeFileUser(ctx)).id === user.id;
+                } catch {
+                  return false;
+                }
+              },
             });
           },
         }
@@ -319,6 +409,10 @@ export const browserHomeRouter = router({
         capabilities: instanceBrowserCapabilities(location.instance),
         filesAvailable: appEnv.BROWSER_HOME_FILES_V1,
         filesEnabled: appEnv.BROWSER_HOME_FILES_V1 && browserHomeFiles.has(location.instance),
+        uploadsEnabled: appEnv.BROWSER_HOME_FILES_V1 && browserHomeUploads.has(location.instance),
+        uploadInstanceId: appEnv.BROWSER_HOME_FILES_V1
+          ? browserHomeUploads.sourceId(location.instance)
+          : null,
       };
     } catch (error) {
       if (error instanceof Error && error.message === 'home_session_interrupted')

@@ -61,7 +61,12 @@ const readInput = (node: HTMLInputElement): InputSnapshot | null => {
 /** Only a real Playwright FileChooser event creates this server-held capability. */
 export interface CapturedBrowserFileChooser {
   readonly frame: Frame;
-  readonly description: Readonly<{ origin: string; accept: string; multiple: boolean }>;
+  readonly description: Readonly<{
+    origin: string;
+    formOrigin: string;
+    accept: string;
+    multiple: boolean;
+  }>;
   isCurrent(): Promise<boolean>;
   prepare(
     ids: readonly string[],
@@ -124,7 +129,16 @@ export class PreparedBrowserUpload {
     try {
       const frame = await element.ownerFrame();
       const snapshot = await element.evaluate(readInput);
-      if (!frame || !snapshot || frame.page() !== chooser.page() || frame.isDetached())
+      if (
+        !frame ||
+        !snapshot ||
+        frame.page() !== chooser.page() ||
+        frame.isDetached() ||
+        snapshot.disabled ||
+        snapshot.directory ||
+        !/^https?:/.test(snapshot.documentUrl) ||
+        !/^https?:/.test(snapshot.formAction)
+      )
         throw new Error('文件选择器已失效。');
       let consumed = false;
       let disposed = false;
@@ -150,6 +164,7 @@ export class PreparedBrowserUpload {
         frame,
         description: Object.freeze({
           origin: new URL(snapshot.documentUrl).origin,
+          formOrigin: new URL(snapshot.formAction).origin,
           accept: snapshot.accept,
           multiple: snapshot.multiple,
         }),

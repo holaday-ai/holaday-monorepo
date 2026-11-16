@@ -434,11 +434,11 @@ export class BrowserControl {
   }
 
   isSettled(): boolean {
-    return this.pendingInputs === 0;
+    return this.pendingInputs === 0 && this.pendingInteractions.size === 0;
   }
 
   async settled(): Promise<void> {
-    while (this.pendingInputs > 0) await this.changed();
+    while (!this.isSettled()) await this.changed();
   }
 
   private isClosed(): boolean {

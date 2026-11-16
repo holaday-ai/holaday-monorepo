@@ -1214,6 +1214,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return result;
       },
       gateAction,
+      beforeFinish: async () => {
+        if (control && !control.canAgentAct()) return controlClosedStop();
+        if (control && (control.humanBusy() || control.hasUnobservedHumanInput())) {
+          await control.yieldToHuman();
+          if (!control.canAgentAct()) return controlClosedStop();
+          return humanActedSkip();
+        }
+        return { kind: 'proceed' };
+      },
       requestHuman: async ({ reason, message }) =>
         (await parkForReply(message, awaitingKindFor(reason))) ?? false,
     });
