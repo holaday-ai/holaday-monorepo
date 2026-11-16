@@ -949,24 +949,32 @@ describe('ws-client send', () => {
   });
 
   it('exposes only the authenticated identity of the current socket', async () => {
-    const { connect, disconnect, getAuthenticatedExtensionClientId } = await import(
-      './ws-client.js'
-    );
+    const {
+      connect,
+      disconnect,
+      getAuthenticatedExtensionClientId,
+      getAuthenticatedExtensionUserId,
+    } = await import('./ws-client.js');
     connect('owner-a');
     const socket = sockets[0]!;
     expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
     socket.dispatch('message', {
       data: JSON.stringify({
         type: 'server.welcome',
         clientId: 'connection-a',
+        userId: 'user-a',
         heartbeatMs: 30_000,
       }),
     });
     expect(getAuthenticatedExtensionClientId()).toBe('connection-a');
+    expect(getAuthenticatedExtensionUserId()).toBe('user-a');
     disconnect();
     expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
     connect('owner-b');
     expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
     socket.dispatch('message', {
       data: JSON.stringify({ type: 'server.welcome', clientId: 'stale', heartbeatMs: 30_000 }),
     });

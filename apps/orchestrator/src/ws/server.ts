@@ -1043,6 +1043,7 @@ async function handleConnection(
       send(socket, {
         type: 'server.welcome',
         clientId: state.id,
+        userId,
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
       });
     }
@@ -1159,6 +1160,7 @@ async function handleClientMessage(
     send(state.socket, {
       type: 'server.welcome',
       clientId: state.id,
+      userId,
       heartbeatMs: HEARTBEAT_INTERVAL_MS,
     });
     await applyRehydrationForUser(state);

@@ -47,10 +47,22 @@ function supportsTaskTabStart(raw: unknown): boolean {
   const protocol = userBrowserProtocolSchema.safeParse(raw);
   return protocol.success && protocol.data.capabilities.includes('task_tab_start');
 }
+function launchRecoveryEnabled(userId: string): boolean {
+  const configured = process.env.BROWSER_LAUNCH_RECOVERY_ENABLED;
+  return (
+    backgroundTaskTabsEnabled(userId) &&
+    (configured === undefined ? env.BROWSER_LAUNCH_RECOVERY_ENABLED : configured === 'true')
+  );
+}
+function supportsRecovery(raw: unknown): boolean {
+  const parsed = userBrowserProtocolSchema.safeParse(raw);
+  return parsed.success && parsed.data.capabilities.includes('task_tab_recovery_v1');
+}
 
 /** UI rollout hint only: opening the sidepanel never enumerates other pages. */
 export const localChromeLaunchOptionsProcedure = protectedProcedure.query(({ ctx }) => ({
   backgroundTaskTabs: backgroundTaskTabsEnabled(ctx.userId),
+  ...(launchRecoveryEnabled(ctx.userId) ? { launchRecovery: true } : {}),
 }));
 
 export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx }) => {
@@ -88,9 +100,14 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
           ...(backgroundTaskTabsEnabled(ctx.userId)
             ? {
                 backgroundTaskTabs: true,
-                taskTabStart: supportsTaskTabStart(
-                  (reply.result as Record<string, unknown>)?.userBrowserProtocol,
-                ),
+                taskTabStart:
+                  supportsTaskTabStart(
+                    (reply.result as Record<string, unknown>)?.userBrowserProtocol,
+                  ) &&
+                  (!launchRecoveryEnabled(ctx.userId) ||
+                    supportsRecovery(
+                      (reply.result as Record<string, unknown>)?.userBrowserProtocol,
+                    )),
               }
             : {}),
         })),
@@ -192,7 +209,9 @@ export const localChromeTaskTabProcedure = protectedProcedure
     if (
       !handshake.ok ||
       handshake.extensionClientId !== extensionClientId ||
-      !supportsTaskTabStart((handshake.result as Record<string, unknown>)?.userBrowserProtocol)
+      !supportsTaskTabStart((handshake.result as Record<string, unknown>)?.userBrowserProtocol) ||
+      (launchRecoveryEnabled(ctx.userId) &&
+        !supportsRecovery((handshake.result as Record<string, unknown>)?.userBrowserProtocol))
     )
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
@@ -202,7 +221,11 @@ export const localChromeTaskTabProcedure = protectedProcedure
       taskId: `prepare-${input.preparationId}`,
       kind: 'task_tab',
       extensionClientId,
-      args: { target, preparationId: input.preparationId },
+      args: {
+        target,
+        preparationId: input.preparationId,
+        ...(launchRecoveryEnabled(ctx.userId) ? { recoverable: true } : {}),
+      },
       timeoutMs: 15000,
     });
     const parsed = z

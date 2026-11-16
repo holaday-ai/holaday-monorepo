@@ -160,6 +160,79 @@ test(
         action,
         binding: { token: target.token, observationRevision: target.observationRevision },
       });
+    await t.test('task-tab preparation survives a worker crash before the marker receipt and after navigation', async () => {
+      const source = await context.newPage();
+      const sourceUrl = `${server.origin}/v2.html?recovery=source-private-signed-value`;
+      await source.goto(sourceUrl);
+      const user = await context.newPage();
+      await user.goto(`${server.origin}/page.html`);
+      await user.locator('#query').fill('normal user browsing');
+      const discovered = await server.call(TASK_ID, 'tabs');
+      const original = discovered.result.tabs.find((tab) => tab.title === 'V2 fixture');
+      const userTab = discovered.result.tabs.find((tab) => tab.active);
+      assert.ok(original && userTab);
+      const args = { target: { tabId: original.tabId, expectedUrl: server.origin, selectionId: original.selectionId }, preparationId: '5e40e175-95f2-4251-b86e-463dc41cb9f6', recoverable: true };
+      const extensionId = new URL(serviceWorker.url()).host;
+      let preparedId;
+      const restart = async () => {
+        const before = server.connections.filter((c) => c.helloAt).length;
+        const cdp = await context.newCDPSession(user);
+        await cdp.send('ServiceWorker.enable');
+        await cdp.send('ServiceWorker.stopAllWorkers');
+        await cdp.detach();
+        const popup = await context.newPage();
+        try {
+          await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
+          await server.waitForConnection(before + 1, 30_000);
+          serviceWorker = context.serviceWorkers().at(-1);
+          assert.ok(serviceWorker);
+        } finally { await popup.close(); }
+        await user.bringToFront();
+      };
+      try {
+        const fresh = await server.call(TASK_ID, 'task_tab', { ...args, preparationId: 'a168eae6-e63f-4ae4-aea8-f6ea2a8d5d54' });
+        assert.equal(fresh.ok, true, JSON.stringify(fresh));
+        await serviceWorker.evaluate((id) => chrome.tabs.remove(id), fresh.result.tabId);
+        assert.equal(await serviceWorker.evaluate(() => {
+          const write = chrome.storage.session.set.bind(chrome.storage.session);
+          const blocked = (items) => Object.values(items).some((entry) => entry?.phase === 'created') ? new Promise(() => {}) : write(items);
+          chrome.storage.session.set = blocked;
+          return chrome.storage.session.set === blocked;
+        }), true);
+        const markerCreated = context.waitForEvent('page');
+        const interrupted = server.call(TASK_ID, 'task_tab', args, 2500).catch(() => ({ ok: false }));
+        const marker = await markerCreated;
+        await marker.waitForURL(/task-launch\.html#/);
+        const saved = await serviceWorker.evaluate(() => chrome.storage.session.get(null));
+        assert.equal(Object.values(saved).filter((entry) => entry?.phase === 'creating').length, 1);
+        assert.equal(JSON.stringify(saved).includes('source-private-signed-value'), false);
+        await restart();
+        await interrupted;
+        const recovered = await server.call(TASK_ID, 'task_tab', args);
+        assert.equal(recovered.ok, true, JSON.stringify(recovered));
+        preparedId = recovered.result.tabId;
+        assert.notEqual(preparedId, original.tabId);
+        const firstSelection = recovered.result.selectionId;
+        await restart();
+        const again = await server.call(TASK_ID, 'task_tab', args);
+        assert.equal(again.ok, true, JSON.stringify(again));
+        assert.equal(again.result.tabId, preparedId);
+        assert.notEqual(again.result.selectionId, firstSelection, 'new worker issues a fresh owned selection');
+        const state = await serviceWorker.evaluate(async (sourceUrl) => {
+          const tabs = await chrome.tabs.query({ windowType: 'normal' });
+          return { matching: tabs.filter((tab) => tab.url === sourceUrl).length, markers: tabs.filter((tab) => tab.url?.includes('/task-launch.html#')).length, active: tabs.find((tab) => tab.active)?.id, stored: JSON.stringify(await chrome.storage.session.get(null)) };
+        }, sourceUrl);
+        assert.equal(state.matching, 2, 'one source and exactly one prepared task tab');
+        assert.equal(state.markers, 0);
+        assert.equal(state.active, userTab.tabId);
+        assert.equal(state.stored.includes('source-private-signed-value'), false);
+        assert.equal(state.stored.includes(TOKEN), false);
+        assert.equal(await user.locator('#query').inputValue(), 'normal user browsing');
+      } finally {
+        if (preparedId !== undefined) await serviceWorker.evaluate((id) => chrome.tabs.remove(id), preparedId).catch(() => {});
+        await source.close(); await user.close();
+      }
+    });
     await t.test('background task tab keeps normal browsing and input untouched', async () => {
       const sourcePage = await context.newPage();
       await sourcePage.goto(`${server.origin}/v2.html?start=background`);

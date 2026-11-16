@@ -1,3 +1,4 @@
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as capabilities from '../../config/browser-capabilities.js';
 import * as ws from '../../ws/server.js';
@@ -11,6 +12,63 @@ const selection = {
   expectedUrl: 'https://work.example',
   selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
 };
+it('requires recovery capability and explicitly opts in only behind its rollout flag', async () => {
+  vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
+  vi.stubEnv('BROWSER_LAUNCH_RECOVERY_ENABLED', 'true');
+  vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+    viewportV2: true,
+    observationV2: true,
+    replayV1: false,
+    routingV2: true,
+  });
+  vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+  const send = vi.spyOn(ws, 'sendExtensionToolCall').mockResolvedValueOnce({
+    ok: true,
+    extensionClientId: 'connection',
+    result: {
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [...USER_BROWSER_PROTOCOL.capabilities, 'task_tab_start'],
+      },
+    },
+  });
+  const caller = router({ prepare: selectionRoutes.localChromeTaskTabProcedure }).createCaller({
+    userId: 'alice',
+  } as Context);
+  const input = { selection, preparationId: '61c56349-421b-4a44-b946-507476393185' };
+  await expect(caller.prepare(input)).rejects.toThrow('更新');
+  expect(send).toHaveBeenCalledTimes(1);
+  send.mockResolvedValueOnce({
+    ok: true,
+    extensionClientId: 'connection',
+    result: {
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [
+          ...USER_BROWSER_PROTOCOL.capabilities,
+          'task_tab_start',
+          'task_tab_recovery_v1',
+        ],
+      },
+    },
+  });
+  send.mockResolvedValueOnce({
+    ok: true,
+    extensionClientId: 'connection',
+    result: {
+      taskTabCreated: true,
+      tabId: 73,
+      selectionId: '4488c303-9880-44d9-885e-51e13755933b',
+      url: 'https://work.example',
+      title: '',
+    },
+  });
+  expect(await caller.prepare(input)).toMatchObject({ tabId: 73 });
+  expect(send).toHaveBeenLastCalledWith(
+    'alice',
+    expect.objectContaining({ args: expect.objectContaining({ recoverable: true }) }),
+  );
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();

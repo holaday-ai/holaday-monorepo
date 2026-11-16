@@ -27,6 +27,7 @@ interface State {
   socket: WebSocket | null;
   token: string | null;
   authenticatedClientId: string | null;
+  authenticatedUserId: string | null;
   openingToken: string | null;
   socketGeneration: number;
   reconnectAttempt: number;
@@ -56,6 +57,7 @@ const state: State = {
   socket: null,
   token: null,
   authenticatedClientId: null,
+  authenticatedUserId: null,
   openingToken: null,
   socketGeneration: 0,
   reconnectAttempt: 0,
@@ -136,6 +138,7 @@ function recoverFromCurrentSocketSendFailure(socket: WebSocket): void {
 
 export function disconnect(): void {
   state.authenticatedClientId = null;
+  state.authenticatedUserId = null;
   state.closedByUser = true;
   state.socketGeneration += 1;
   state.openingToken = null;
@@ -263,6 +266,9 @@ export function getCurrentWsToken(): string | null {
 export function getAuthenticatedExtensionClientId(): string | null {
   return isConnected() ? state.authenticatedClientId : null;
 }
+export function getAuthenticatedExtensionUserId(): string | null {
+  return isConnected() ? state.authenticatedUserId : null;
+}
 
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
@@ -283,6 +289,7 @@ export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
 
 function openSocket(token: string): void {
   state.authenticatedClientId = null;
+  state.authenticatedUserId = null;
   clearReconnectTimer();
   state.socketGeneration += 1;
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
@@ -549,9 +556,13 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // the SW clears the stale token instead of looping with bad creds.
     if (result.data.type === 'server.error' && result.data.code === 'UNAUTHORIZED') {
       state.authenticatedClientId = null;
+      state.authenticatedUserId = null;
       fireUnauthorized();
     }
-    if (result.data.type === 'server.welcome') state.authenticatedClientId = result.data.clientId;
+    if (result.data.type === 'server.welcome') {
+      state.authenticatedClientId = result.data.clientId;
+      state.authenticatedUserId = result.data.userId ?? null;
+    }
     for (const fn of state.listeners) {
       try {
         fn(result.data);

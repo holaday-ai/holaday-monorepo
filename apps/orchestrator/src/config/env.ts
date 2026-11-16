@@ -455,6 +455,11 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /** Durable task-launch recovery is staged separately from task-tab creation. */
+  BROWSER_LAUNCH_RECOVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * BROWSER-HOME-1 — the「云浏览器」entry: one task-less cloud browser per user

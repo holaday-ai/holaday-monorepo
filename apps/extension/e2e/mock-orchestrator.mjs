@@ -206,6 +206,7 @@ export class MockOrchestrator {
         ws.send(
           JSON.stringify({
             type: 'server.welcome',
+            userId: 'fixture-owner',
             clientId: connection.clientId,
             heartbeatMs: 30_000,
           }),

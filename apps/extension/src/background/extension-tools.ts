@@ -891,7 +891,7 @@ async function computeExtensionToolResult(
       if (!extensionToolRuntime.transport) throw new Error('capability_missing');
       const result = await withDeadline(
         extensionToolRuntime.runLegacy(() =>
-          prepareIndependentTaskTab(args?.target, args?.preparationId),
+          prepareIndependentTaskTab(args?.target, args?.preparationId, args?.recoverable),
         ),
         operationBudgetMs,
         'extension_tool_timeout',
@@ -918,6 +918,7 @@ async function computeExtensionToolResult(
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     'task_tab_start',
                     USER_BROWSER_ACTIVITY_CAPABILITY,
+                    'task_tab_recovery_v1',
                   ],
                 },
               }

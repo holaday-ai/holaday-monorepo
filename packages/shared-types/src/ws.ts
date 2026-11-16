@@ -377,6 +377,7 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export const serverWelcomeSchema = z.object({
   type: z.literal('server.welcome'),
   clientId: z.string(),
+  userId: z.string().min(1).max(128).optional(),
   heartbeatMs: z.number().int().positive(),
 });
 
@@ -1011,6 +1012,7 @@ export const serverExtensionToolCallSchema = z.object({
       url: httpUrlSchema.optional(),
       /** Idempotent background task-tab preparation, scoped to the selected connection. */
       preparationId: z.string().uuid().optional(),
+      recoverable: z.boolean().optional(),
       /** Explicit local tab for read. Never infer it from the active tab. */
       target: selectedChromeTargetSchema.optional(),
       /** Selected-tab mutation/observation command. Required by the session handler. */
