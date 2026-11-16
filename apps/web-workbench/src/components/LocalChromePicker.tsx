@@ -147,7 +147,8 @@ export function LocalChromePicker({
                 key={`${tab.extensionClientId}:${tab.tabId}`}
                 className="block w-full rounded-lg px-2 py-2 text-left hover:bg-foreground/5 focus:bg-foreground/5"
                 disabled={
-                  tab.backgroundTaskTabs === true && taskMode !== 'current' && !tab.taskTabStart
+                  (tab.launchRecovery === true && !tab.launchRecoveryReady) ||
+                  (tab.backgroundTaskTabs === true && taskMode !== 'current' && !tab.taskTabStart)
                 }
                 onSelect={() => {
                   useTaskStore.setState({

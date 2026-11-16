@@ -150,3 +150,41 @@ it('does not overwrite a navigation started by the user on the recovered marker 
   expect(h.dependencies.navigate).not.toHaveBeenCalled();
   expect(h.dependencies.create).toHaveBeenCalledOnce();
 });
+it('rebinds an explicitly selected current page without creating or navigating a tab', async () => {
+  const h = fixture();
+  const prepare = () =>
+    new TaskTabJournal(h.dependencies).prepare(
+      { tabId: 42, origin: 'https://work.example' },
+      id,
+      false,
+      'current',
+    );
+  expect(await prepare()).toMatchObject({ id: 42 });
+  expect(await prepare()).toMatchObject({ id: 42 });
+  expect(h.dependencies.create).not.toHaveBeenCalled();
+  expect(h.dependencies.navigate).not.toHaveBeenCalled();
+  h.tabs.set(42, { id: 42, url: 'https://work.example/another-account', status: 'complete' });
+  await expect(prepare()).rejects.toThrow('target_changed');
+});
+it('never creates a replacement when recovery was requested but the original journal is missing', async () => {
+  const h = fixture();
+  await expect(
+    new TaskTabJournal(h.dependencies).prepare(
+      { tabId: 42, origin: 'https://work.example' },
+      id,
+      true,
+    ),
+  ).rejects.toThrow('preparation_unknown');
+  expect(h.tabs.size).toBe(1);
+  expect(h.dependencies.navigate).not.toHaveBeenCalled();
+});
+it('releases bookkeeping without closing the result page or allowing an old retry to recreate it', async () => {
+  const h = fixture();
+  await h.start();
+  const journal = new TaskTabJournal(h.dependencies);
+  await journal.release(id);
+  await journal.release(id);
+  expect(h.tabs.get(100)?.url).toBe('https://work.example/private/path?token=source-secret');
+  await expect(h.start()).rejects.toThrow('preparation_released');
+  expect(h.dependencies.create).toHaveBeenCalledOnce();
+});

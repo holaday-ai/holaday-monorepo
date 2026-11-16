@@ -1,4 +1,5 @@
 import { useTaskStore } from '@/stores/task-store';
+import { BROWSER_LAUNCH_RECOVERED_EVENT } from '@holaday/shared-types';
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -56,4 +57,62 @@ it('asks for a page instead of guessing one for a new current-page task', async 
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
   expect(submit).not.toHaveBeenCalled();
   expect(await screen.findByText(/请先选择.*Chrome.*页面/)).toBeTruthy();
+});
+
+const recoveredSource = {
+  browserSessionId: '82cf0bca-b78c-4f12-af23-035421ab959c',
+  tabId: 42,
+  origin: 'https://work.example',
+  selectionId: '4888c303-9880-44d9-885e-51e13755933b',
+  mode: 'independent' as const,
+};
+const recoveredOperation = '6488c303-9880-44d9-885e-51e13755933b';
+async function submitUnknownDraft() {
+  useTaskStore.setState({
+    localChromeSelection: {
+      extensionClientId: 'connection',
+      tabId: 42,
+      expectedUrl: recoveredSource.origin,
+      selectionId: recoveredSource.selectionId,
+      title: 'Work',
+      launchRecovery: true,
+      launchRecoveryReady: true,
+      launchBrowserSessionId: recoveredSource.browserSessionId,
+    },
+  });
+  const submit = mount();
+  submit.mockResolvedValue({ ok: false, browserOperationId: recoveredOperation });
+  const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '整理后台报表' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(input.disabled).toBe(false));
+  return { input, submit };
+}
+function recoverDraft() {
+  fireEvent(
+    window,
+    new CustomEvent(BROWSER_LAUNCH_RECOVERED_EVENT, {
+      detail: {
+        operationId: recoveredOperation,
+        intent: '整理后台报表',
+        source: recoveredSource,
+        taskId: 'tsk_recovered',
+      },
+    }),
+  );
+}
+it('clears only the unchanged failed draft after its original task is recovered, preventing another send', async () => {
+  const { input, submit } = await submitUnknownDraft();
+  recoverDraft();
+  await vi.waitFor(() => expect(input.value).toBe(''));
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(submit).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('已找回刚才创建的 Chrome 任务。')).toBeTruthy();
+});
+it('preserves a new user draft when an older submission is recovered', async () => {
+  const { input } = await submitUnknownDraft();
+  fireEvent.change(input, { target: { value: '整理另一份报表' } });
+  recoverDraft();
+  expect(input.value).toBe('整理另一份报表');
 });

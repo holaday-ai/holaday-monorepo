@@ -6,7 +6,8 @@ interface RecordEntry {
   origin: string;
   sourceHash: string;
   nonce: string;
-  phase: 'creating' | 'created' | 'navigating' | 'ready';
+  phase: 'creating' | 'created' | 'navigating' | 'ready' | 'released';
+  mode?: 'current' | 'independent';
   tabId?: number;
   tabHash?: string;
 }
@@ -27,7 +28,7 @@ interface Dependencies {
 }
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const digest = /^[a-f0-9]{64}$/;
-const phases = new Set(['creating', 'created', 'navigating', 'ready']);
+const phases = new Set(['creating', 'created', 'navigating', 'ready', 'released']);
 export const TASK_TAB_JOURNAL_PREFIX = 'holaday.task-tab.v1.';
 async function hash(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -48,6 +49,7 @@ function record(value: unknown): RecordEntry {
           'phase',
           'tabId',
           'tabHash',
+          'mode',
         ].includes(key),
     ) ||
     v.version !== 1 ||
@@ -60,6 +62,7 @@ function record(value: unknown): RecordEntry {
     !uuid.test(v.nonce) ||
     typeof v.phase !== 'string' ||
     !phases.has(v.phase) ||
+    (v.mode !== undefined && v.mode !== 'current' && v.mode !== 'independent') ||
     (v.tabId !== undefined && (!Number.isSafeInteger(v.tabId) || Number(v.tabId) < 0)) ||
     (v.tabHash !== undefined && (typeof v.tabHash !== 'string' || !digest.test(v.tabHash))) ||
     (v.phase !== 'creating' && (!Number.isSafeInteger(v.tabId) || Number(v.tabId) < 0)) ||
@@ -78,7 +81,12 @@ function record(value: unknown): RecordEntry {
 /** Write-ahead effect journal. URLs stay in Chrome; persistence holds only origins/digests/IDs. */
 export class TaskTabJournal {
   constructor(private readonly deps: Dependencies) {}
-  async prepare(source: Source, preparationId: string): Promise<Tab> {
+  async prepare(
+    source: Source,
+    preparationId: string,
+    resumeOnly = false,
+    mode: 'current' | 'independent' = 'independent',
+  ): Promise<Tab> {
     const owner = this.deps.owner();
     this.assertCurrent();
     if (!owner || !uuid.test(preparationId)) throw new Error('target_required');
@@ -87,6 +95,7 @@ export class TaskTabJournal {
     this.assertCurrent();
     let entry: RecordEntry;
     if (saved === undefined) {
+      if (resumeOnly) throw new Error('preparation_unknown');
       if ((await this.deps.count()) >= 64) throw new Error('browser_busy');
       const original = await this.deps.source();
       this.assertCurrent();
@@ -106,7 +115,13 @@ export class TaskTabJournal {
         sourceHash: await hash(original.url ?? ''),
         nonce: crypto.randomUUID(),
         phase: 'creating',
+        mode,
       };
+      if (mode === 'current') {
+        entry = { ...entry, phase: 'ready', tabId: source.tabId, tabHash: entry.sourceHash };
+        await this.save(key, entry);
+        return original;
+      }
       await this.save(key, entry);
       // A crash after this write but before the browser receipt must never issue another create.
       const created = await this.deps.create(this.deps.marker(entry.nonce));
@@ -117,6 +132,8 @@ export class TaskTabJournal {
       await this.save(key, entry);
     } else {
       entry = record(saved);
+      if (entry.phase === 'released') throw new Error('preparation_released');
+      if ((entry.mode ?? 'independent') !== mode) throw new Error('target_changed');
       if (entry.sourceTabId !== source.tabId || entry.origin !== source.origin)
         throw new Error('target_changed');
     }
@@ -131,7 +148,7 @@ export class TaskTabJournal {
       entry = { ...entry, phase: 'created', tabId: found.id };
       await this.save(key, entry);
     }
-    if (entry.tabId === undefined || entry.tabId === source.tabId)
+    if (entry.tabId === undefined || (mode !== 'current' && entry.tabId === source.tabId))
       throw new Error('target_changed');
     const tabId = entry.tabId;
     if (entry.phase === 'ready') {
@@ -183,6 +200,20 @@ export class TaskTabJournal {
     entry = { ...entry, phase: 'ready', tabHash: await hash(ready.url ?? '') };
     await this.save(key, entry);
     return ready;
+  }
+  async release(preparationId: string): Promise<void> {
+    const owner = this.deps.owner();
+    this.assertCurrent();
+    if (!owner || !uuid.test(preparationId)) throw new Error('target_required');
+    const key = `${TASK_TAB_JOURNAL_PREFIX}${await hash(owner)}.${preparationId}`;
+    const saved = await this.deps.read(key);
+    this.assertCurrent();
+    if (saved === undefined) throw new Error('preparation_unknown');
+    const entry = record(saved);
+    if (entry.phase === 'released') return;
+    if (entry.phase !== 'ready') throw new Error('task_tab_not_ready');
+    // Retain a tombstone so an old retry cannot create another page.
+    await this.save(key, { ...entry, phase: 'released' });
   }
   private assertCurrent(): void {
     if (!this.deps.current()) throw new Error('target_changed');

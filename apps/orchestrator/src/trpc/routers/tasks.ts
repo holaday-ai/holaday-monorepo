@@ -377,6 +377,7 @@ import {
 import {
   assertLocalChromeSelection,
   launchRecoveryEnabled,
+  localChromeLaunchAcknowledgeProcedure,
   localChromeLaunchOptionsProcedure,
   localChromeLaunchReceiptProcedure,
   localChromeSelectionSchema,
@@ -1243,6 +1244,15 @@ export const tasksRouter = router({
   create: protectedProcedure
     .input(pureTaskInput(createInput))
     .use(async ({ ctx, input, next }) => {
+      if (
+        input.localChrome &&
+        launchRecoveryEnabled(ctx.userId) &&
+        !input.localChrome.launchBrowserSessionId
+      )
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '请更新 Chrome 扩展后安全续接任务。未创建任务或扣除额度。',
+        });
       let localChromeReservation: ReturnType<typeof localChromeTaskSessions.reserve> | undefined;
       try {
         localChromeReservation = input.localChrome
@@ -12429,6 +12439,7 @@ export const tasksRouter = router({
   localChromeTabs: localChromeTabsProcedure,
   localChromeLaunchOptions: localChromeLaunchOptionsProcedure,
   localChromeLaunchReceipt: localChromeLaunchReceiptProcedure,
+  localChromeLaunchAcknowledge: localChromeLaunchAcknowledgeProcedure,
   localChromeTaskTab: localChromeTaskTabProcedure,
   browserNav: browserNavProcedure,
 

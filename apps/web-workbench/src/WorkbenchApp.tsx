@@ -405,9 +405,12 @@ export function WorkbenchApp(): JSX.Element {
         } else {
           toast.show(taskActionError('发送失败', res.error), 'error');
         }
-        return keepComposerOnSubmitFailure;
+        return {
+          ...keepComposerOnSubmitFailure,
+          ...(res.browserOperationId ? { browserOperationId: res.browserOperationId } : {}),
+        };
       }
-      return clearComposerOnSubmitSuccess;
+      return { ...clearComposerOnSubmitSuccess, ...(res.notice ? { notice: res.notice } : {}) };
     },
     [createTask, toast],
   );

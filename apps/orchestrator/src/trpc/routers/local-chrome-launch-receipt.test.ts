@@ -1,7 +1,9 @@
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { type SQL, getTableName } from 'drizzle-orm';
 import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as capabilities from '../../config/browser-capabilities.js';
+import * as ws from '../../ws/server.js';
 import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
@@ -101,6 +103,22 @@ it('keeps receipt recovery unavailable behind the default-off rollout gate', asy
   });
   expect(h.queries).toEqual([]);
 });
+it('rejects old current-page clients before admission or database work when recovery is required', async () => {
+  const h = fixture();
+  await expect(
+    h.caller.create({
+      intent: '处理当前页',
+      clientRequestId,
+      localChrome: {
+        extensionClientId: 'connection',
+        tabId: 42,
+        expectedUrl: 'https://work.example',
+        selectionId: clientRequestId,
+      },
+    }),
+  ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  expect(h.queries).toEqual([]);
+});
 
 it('refuses arbitrary task IDs or injected lookup scopes in the receipt request', async () => {
   const h = fixture();
@@ -111,4 +129,76 @@ it('refuses arbitrary task IDs or injected lookup scopes in the receipt request'
     h.caller.localChromeLaunchReceipt({ clientRequestId, userId: 'bob' } as never),
   ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   expect(h.queries).toEqual([]);
+});
+
+it('acknowledges only an owned task in the exact original Chrome session', async () => {
+  const h = fixture(undefined, { id: 19 });
+  const launchBrowserSessionId = '82cf0bca-b78c-4f12-af23-035421ab959c';
+  vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+  const send = vi.spyOn(ws, 'sendExtensionToolCall').mockResolvedValueOnce({
+    ok: true,
+    extensionClientId: 'connection',
+    result: {
+      launchBrowserSessionId,
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [...USER_BROWSER_PROTOCOL.capabilities, 'task_launch_recovery_v1'],
+      },
+    },
+  });
+  send.mockResolvedValueOnce({
+    ok: true,
+    extensionClientId: 'connection',
+    result: { released: true },
+  });
+  expect(
+    await h.caller.localChromeLaunchAcknowledge({
+      taskId: 'tsk_recovered',
+      preparationId: clientRequestId,
+      extensionClientId: 'connection',
+      launchBrowserSessionId,
+    }),
+  ).toEqual({ acknowledged: true });
+  expect(h.queries.find((q) => q.table === 'tasks')?.params).toEqual(['tsk_recovered', 7, 'eval']);
+  expect(send).toHaveBeenLastCalledWith(
+    'alice',
+    expect.objectContaining({
+      kind: 'task_tab_release',
+      args: { preparationId: clientRequestId, launchBrowserSessionId },
+    }),
+  );
+});
+it('never releases preparation records from a different browser session or a missing task', async () => {
+  const h = fixture(undefined, { id: 19 });
+  vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+  const send = vi.spyOn(ws, 'sendExtensionToolCall').mockResolvedValue({
+    ok: true,
+    extensionClientId: 'connection',
+    result: {
+      launchBrowserSessionId: 'a924f85c-8070-4020-a30c-7226bd95b415',
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [...USER_BROWSER_PROTOCOL.capabilities, 'task_launch_recovery_v1'],
+      },
+    },
+  });
+  await expect(
+    h.caller.localChromeLaunchAcknowledge({
+      taskId: 'tsk_recovered',
+      preparationId: clientRequestId,
+      extensionClientId: 'connection',
+      launchBrowserSessionId: '82cf0bca-b78c-4f12-af23-035421ab959c',
+    }),
+  ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  expect(send).toHaveBeenCalledTimes(1);
+  const missing = fixture();
+  await expect(
+    missing.caller.localChromeLaunchAcknowledge({
+      taskId: 'tsk_other',
+      preparationId: clientRequestId,
+      extensionClientId: 'connection',
+      launchBrowserSessionId: '82cf0bca-b78c-4f12-af23-035421ab959c',
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(send).toHaveBeenCalledTimes(1);
 });

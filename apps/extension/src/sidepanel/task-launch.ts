@@ -10,10 +10,12 @@ export interface ChromeLaunchTarget {
   tabId: number;
   expectedUrl: string;
   selectionId: string;
+  launchBrowserSessionId?: string;
 }
 export interface ChromeDiscovery {
   backgroundTaskTabs?: boolean;
-  tabs: Array<ChromeLaunchTarget & { taskTabStart?: boolean }>;
+  launchRecovery?: boolean;
+  tabs: Array<ChromeLaunchTarget & { taskTabStart?: boolean; launchRecoveryReady?: boolean }>;
 }
 export interface SidePanelLaunchDependencies {
   discover(): Promise<ChromeDiscovery>;
@@ -29,6 +31,7 @@ export function chromeLaunchTarget(tab: ChromeLaunchTarget): ChromeLaunchTarget 
     tabId: tab.tabId,
     expectedUrl: tab.expectedUrl,
     selectionId: tab.selectionId,
+    ...(tab.launchBrowserSessionId ? { launchBrowserSessionId: tab.launchBrowserSessionId } : {}),
   };
 }
 

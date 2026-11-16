@@ -85,6 +85,37 @@ afterEach(() => {
 });
 
 describe('selected Chrome tab read transport', () => {
+  it('advertises a stable opaque browser-session identity without persisting source URL or token', async () => {
+    const browser = await installBrowser();
+    const stored: Record<string, unknown> = {};
+    Object.assign(browser, {
+      storage: {
+        session: {
+          get: async (key: string) => ({ [key]: stored[key] }),
+          set: async (values: Record<string, unknown>) => {
+            Object.assign(stored, values);
+          },
+        },
+      },
+    });
+    configureExtensionToolRuntime({
+      transport: { handle: async () => ({ ok: false, error: 'unused' }), stopTask: async () => {} },
+      runLegacy: (run) => run(),
+    });
+    const first = await call('tabs');
+    const second = await call('tabs');
+    expect(first).toMatchObject({
+      result: {
+        launchBrowserSessionId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        userBrowserProtocol: { capabilities: expect.arrayContaining(['task_launch_recovery_v1']) },
+      },
+    });
+    expect(
+      (second as { result: { launchBrowserSessionId: string } }).result.launchBrowserSessionId,
+    ).toBe((first as { result: { launchBrowserSessionId: string } }).result.launchBrowserSessionId);
+    expect(JSON.stringify(stored)).not.toContain('work.example');
+    expect(JSON.stringify(stored)).not.toContain('token');
+  });
   it('advertises session execution only when the transport is wired', async () => {
     await installBrowser();
     expect(await call('tabs')).toMatchObject({ result: { selectedSessionVersion: 0 } });

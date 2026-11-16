@@ -45,6 +45,7 @@ import {
   shouldClearAuthAfterCreateUnauthorized,
   shouldClearAuthAfterUnauthorized,
 } from './create-task-response.js';
+import { sidePanelLaunchDependencies, sidePanelLaunchJournal } from './durable-launch.js';
 import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
 import {
   type ChromeDiscovery,
@@ -90,13 +91,14 @@ async function browserRequest<T>(
   authToken: string,
   procedure: string,
   input?: unknown,
+  query = false,
 ): Promise<T> {
   const res = await fetchWithDeadline(
-    `${ORCHESTRATOR_HTTP}/trpc/tasks.${procedure}`,
+    `${ORCHESTRATOR_HTTP}/trpc/tasks.${procedure}${query && input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ''}`,
     {
-      method: input === undefined ? 'GET' : 'POST',
+      method: input === undefined || query ? 'GET' : 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${authToken}` },
-      ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+      ...(input === undefined || query ? {} : { body: JSON.stringify(input) }),
     },
     20_000,
     'sidepanel_browser_prepare_timeout',
@@ -118,10 +120,20 @@ export function App() {
   const authSyncSeq = useRef(0);
   const launches = useRef(new BrowserTaskLaunches<ChromeLaunchTarget>());
   const [backgroundTabs, setBackgroundTabs] = useState(false);
+  const [launchRecovery, setLaunchRecovery] = useState(false);
+  const [pendingLaunchId, setPendingLaunchId] = useState<string | null>(null);
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  const [recoveryRetry, setRecoveryRetry] = useState(0);
+  const recoveryInFlight = useRef(false);
+  const recoveryAttempts = useRef(0);
+  const recoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [taskMode, setTaskMode] = useState<BrowserTaskModeChoice>('auto');
 
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [intent, setIntent] = useState('');
+  const pendingLaunchDraft = useRef<{ intent: string; snapshot: string } | null>(null);
+  const latestLaunchDraft = useRef('');
+  latestLaunchDraft.current = JSON.stringify([intent, taskMode]);
   const [submitting, setSubmitting] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
@@ -134,6 +146,10 @@ export function App() {
   function clearLocalSessionState(): void {
     launches.current.clear();
     setBackgroundTabs(false);
+    recoveryAttempts.current = 0;
+    setLaunchRecovery(false);
+    setPendingLaunchId(null);
+    setLaunchNotice(null);
     setTaskMode('auto');
     setUser(null);
     setToken(null);
@@ -329,16 +345,103 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     setBackgroundTabs(false);
+    setLaunchRecovery(false);
+    recoveryAttempts.current = 0;
     if (token)
-      void browserRequest<{ backgroundTaskTabs: boolean }>(token, 'localChromeLaunchOptions')
+      void browserRequest<{ backgroundTaskTabs: boolean; launchRecovery?: boolean }>(
+        token,
+        'localChromeLaunchOptions',
+      )
         .then((result) => {
-          if (!cancelled) setBackgroundTabs(result.backgroundTaskTabs === true);
+          if (!cancelled) {
+            setBackgroundTabs(result.backgroundTaskTabs === true);
+            setLaunchRecovery(result.launchRecovery === true);
+          }
         })
         .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !launchRecovery || taskSubmitInFlight.current) return;
+    let cancelled = false;
+    const seq = authSyncSeq.current;
+    recoveryInFlight.current = true;
+    setSubmitting(true);
+    void (async () => {
+      try {
+        const verified = await fetchMe(token);
+        await assertLaunchSession(token, seq);
+        if (cancelled) return;
+        if (verified.kind !== 'ok') throw new Error('暂时无法核对原任务账号，请重新连接后继续。');
+        setUser(verified.user);
+        const deps = durableDependencies(token, seq);
+        await sidePanelLaunchJournal.cleanup(verified.user.externalId, deps);
+        const pending = await sidePanelLaunchJournal.pending(verified.user.externalId);
+        if (pending.length === 0) setPendingLaunchId(null);
+        for (const entry of pending) {
+          if (cancelled) return;
+          setPendingLaunchId(entry.clientRequestId);
+          const result = await sidePanelLaunchJournal.resume(
+            verified.user.externalId,
+            entry.clientRequestId,
+            deps,
+          );
+          await assertLaunchSession(token, seq);
+          if (cancelled) return;
+          setActiveTaskId(result.taskId);
+          const draft = pendingLaunchDraft.current;
+          if (
+            draft &&
+            draft.intent === entry.request.intent &&
+            draft.snapshot === latestLaunchDraft.current
+          ) {
+            setIntent('');
+            setTaskMode('auto');
+            pendingLaunchDraft.current = null;
+          }
+          setLaunchNotice('已找回此前提交的任务，未重复发送。');
+          setPendingLaunchId(null);
+          setError(null);
+          await sidePanelLaunchJournal.acknowledge(
+            verified.user.externalId,
+            result.operationId,
+            deps,
+          );
+        }
+        if (!cancelled) {
+          recoveryAttempts.current = 0;
+          await refreshTasksSnapshot();
+        }
+      } catch (err) {
+        if (!cancelled && seq === authSyncSeq.current) {
+          setError(humanizeExtensionError(err));
+          if (recoveryAttempts.current++ < 12) {
+            recoveryTimer.current = setTimeout(
+              () => {
+                recoveryTimer.current = null;
+                if (!cancelled) setRecoveryRetry((n) => n + 1);
+              },
+              Math.min(5000, 1000 * recoveryAttempts.current),
+            );
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          recoveryInFlight.current = false;
+          setSubmitting(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      recoveryInFlight.current = false;
+      if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+    };
+  }, [token, launchRecovery, recoveryRetry]);
 
   // Subscribe to SW snapshots so the result section reflects the
   // task's progress in real time without polling.
@@ -389,6 +492,19 @@ export function App() {
     } catch {
       return { kind: 'network' };
     }
+  }
+
+  async function assertLaunchSession(authToken: string, seq: number): Promise<void> {
+    const current = normalizeAccessToken(await getAccessToken());
+    if (!mountedRef.current || seq !== authSyncSeq.current || current !== authToken)
+      throw new Error('登录态刚刚切换，请重新发送任务。');
+  }
+  function durableDependencies(authToken: string, seq: number) {
+    return sidePanelLaunchDependencies(
+      <T,>(procedure: string, input?: unknown, query?: boolean) =>
+        browserRequest<T>(authToken, procedure, input, query),
+      () => assertLaunchSession(authToken, seq),
+    );
   }
 
   /**
@@ -464,11 +580,14 @@ export function App() {
   async function createTask(): Promise<void> {
     const submittedIntent = normalizeSidePanelIntent(intent);
     if (!submittedIntent || !token) return;
-    if (taskSubmitInFlight.current) return;
+    if (taskSubmitInFlight.current || recoveryInFlight.current) return;
     taskSubmitInFlight.current = true;
     setSubmitting(true);
     setError(null);
     const seq = authSyncSeq.current;
+    let reconcileAfterFailure = false;
+    setLaunchNotice(null);
+    pendingLaunchDraft.current = { intent: submittedIntent, snapshot: latestLaunchDraft.current };
     try {
       const assertSession = async () => {
         const current = normalizeAccessToken(await getAccessToken());
@@ -477,10 +596,67 @@ export function App() {
       };
       const capturedPage = await getActivePageContext({ metadataOnly: true });
       await assertSession();
+      const discovery = await browserRequest<ChromeDiscovery>(token, 'localChromeTabs');
+      await assertSession();
+      const connection = async () => {
+        const state = await sendRuntimeMessageWithRetry<{
+          extensionClientId?: string;
+          ws?: { connected?: boolean };
+        }>({ type: 'holaday.status' });
+        return state?.ws?.connected === true ? (state.extensionClientId ?? null) : null;
+      };
+      if (discovery.launchRecovery) {
+        if (!capturedPage) throw new Error('请先选择要处理的网页。');
+        const extensionClientId = await connection();
+        await assertSession();
+        const source = discovery.tabs.find(
+          (t) =>
+            t.extensionClientId === extensionClientId &&
+            t.tabId === capturedPage?.tabId &&
+            t.expectedUrl === new URL(capturedPage.url).origin,
+        );
+        if (!source?.launchBrowserSessionId || !source.launchRecoveryReady)
+          throw new Error('请更新并连接原 Chrome 扩展后继续任务。');
+        const verified = await fetchMe(token);
+        await assertSession();
+        if (verified.kind !== 'ok') throw new Error('暂时无法核对任务账号，请重新连接后继续。');
+        setUser(verified.user);
+        if (user && user.externalId !== verified.user.externalId)
+          throw new Error('当前登录账号已更新，请核对侧栏账号后再次发送。');
+        const deps = durableDependencies(token, seq);
+        const result = await sidePanelLaunchJournal.run(
+          verified.user.externalId,
+          { intent: submittedIntent },
+          {
+            browserSessionId: source.launchBrowserSessionId,
+            tabId: source.tabId,
+            origin: source.expectedUrl,
+            selectionId: source.selectionId,
+            mode: resolveBrowserTaskMode(submittedIntent, taskMode),
+          },
+          deps,
+        );
+        await assertSession();
+        setActiveTaskId(result.taskId);
+        if (result.recovered) setLaunchNotice('已找回此前创建的任务，未重复发送。');
+        setPendingLaunchId(null);
+        if (pendingLaunchDraft.current?.snapshot === latestLaunchDraft.current) {
+          setIntent('');
+          setTaskMode('auto');
+          pendingLaunchDraft.current = null;
+        }
+        await sidePanelLaunchJournal.acknowledge(
+          verified.user.externalId,
+          result.operationId,
+          deps,
+        );
+        await refreshTasksSnapshot();
+        return;
+      }
       const launch = await prepareSidePanelLaunch(
         { intent: submittedIntent, page: capturedPage, session: seq, choice: taskMode },
         {
-          discover: () => browserRequest<ChromeDiscovery>(token, 'localChromeTabs'),
+          discover: async () => discovery,
           connection: async () => {
             const status = await sendRuntimeMessageWithRetry<{
               extensionClientId?: string;
@@ -560,10 +736,15 @@ export function App() {
       await refreshTasksSnapshot();
     } catch (err) {
       if (!mountedRef.current) return;
+      if (launchRecovery) {
+        setPendingLaunchId('unconfirmed');
+        reconcileAfterFailure = true;
+      }
       setError(humanizeExtensionError(err));
     } finally {
       taskSubmitInFlight.current = false;
       if (mountedRef.current) setSubmitting(false);
+      if (reconcileAfterFailure && mountedRef.current) setRecoveryRetry((n) => n + 1);
     }
   }
 
@@ -659,6 +840,22 @@ export function App() {
             {error}
           </div>
         ) : null}
+        {pendingLaunchId ? (
+          <button
+            type="button"
+            style={miniBtn}
+            disabled={submitting}
+            onClick={() => {
+              recoveryAttempts.current = 0;
+              setRecoveryRetry((n) => n + 1);
+            }}
+          >
+            重新核对此前提交
+          </button>
+        ) : null}
+        {launchNotice ? (
+          <output style={{ ...metaSubStyle, display: 'block' }}>{launchNotice}</output>
+        ) : null}
       </div>
 
       <ActiveTaskCard task={activeTask} />
@@ -691,7 +888,9 @@ function ContextPreview({ context }: { context: PageContext | null }) {
 
 function ActiveTaskCard({ task }: { task: TaskView | null }) {
   if (!task) return null;
-  const phaseLabel = task.visionProgress ? renderVisionPhase(task.visionProgress) : null;
+  const phaseLabel = task.visionProgress
+    ? renderVisionPhase(task.visionProgress, task.status)
+    : null;
   return (
     <div style={taskCardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -734,7 +933,17 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
-function renderVisionPhase(p: VisionProgressView): string {
+function renderVisionPhase(p: VisionProgressView, status: TaskStatus): string {
+  switch (status) {
+    case 'cancelled':
+      return '任务已取消';
+    case 'partial_success':
+      return '任务部分完成';
+    case 'completed':
+      return '任务完成';
+    case 'failed':
+      return '任务失败';
+  }
   switch (p.phase) {
     case 'observing':
       return `截图观察${typeof p.tickIndex === 'number' ? ` · 第 ${p.tickIndex + 1} 轮` : ''}`;

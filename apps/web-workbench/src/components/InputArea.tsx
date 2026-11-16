@@ -26,6 +26,7 @@ import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { isEnglishTask } from '@/lib/assistant-turn';
 import { getAccessToken } from '@/lib/auth';
 import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
+import { getSelectedBrainId } from '@/lib/brain-preference';
 import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
 import {
@@ -44,7 +45,11 @@ import { cn } from '@/lib/utils';
 import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiSkill, UiSkillSelection } from '@/types/task';
-import { resolveBrowserTaskMode } from '@holaday/shared-types';
+import {
+  BROWSER_LAUNCH_RECOVERED_EVENT,
+  type BrowserLaunchSource,
+  resolveBrowserTaskMode,
+} from '@holaday/shared-types';
 import {
   ArrowUp,
   ChevronDown,
@@ -323,6 +328,7 @@ export function InputArea({
   // reset (a second click on the same chip then re-pulses cleanly).
   React.useEffect(() => {
     if (prefillIntent == null) return;
+    pendingBrowserSubmission.current = null;
     setValue(prefillIntent);
     setSelectedSkill(null);
     // requestAnimationFrame ensures the value commit has flushed
@@ -380,6 +386,74 @@ export function InputArea({
   // on tasks.create as `expertMode`; the backend honours it when
   // not null.
   const [expertMode, setExpertMode] = React.useState<'normal' | 'expert' | 'auto'>('auto');
+  const pendingBrowserSubmission = React.useRef<{
+    intent: string;
+    snapshot: string;
+    operationId?: string;
+    source?: BrowserLaunchSource;
+    consumed: boolean;
+  } | null>(null);
+  const latestDraft = React.useRef({
+    value,
+    attachmentIds: attachments.map((a) => [a.clientId, a.fileId, a.status]),
+    taskMode,
+    expertMode,
+    selectedSkill,
+  });
+  latestDraft.current = {
+    value,
+    attachmentIds: attachments.map((a) => [a.clientId, a.fileId, a.status]),
+    taskMode,
+    expertMode,
+    selectedSkill,
+  };
+  const draftSnapshot = React.useCallback(
+    () =>
+      JSON.stringify([
+        latestDraft.current,
+        getSelectedBrainId(),
+        useTaskStore.getState().browserPreference,
+      ]),
+    [],
+  );
+  React.useEffect(() => {
+    const recovered = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ operationId: string; intent: string; source: BrowserLaunchSource }>
+      ).detail;
+      const pending = pendingBrowserSubmission.current;
+      if (
+        !detail?.source ||
+        typeof detail.operationId !== 'string' ||
+        !pending ||
+        pending.intent !== detail.intent ||
+        pending.snapshot !== draftSnapshot()
+      )
+        return;
+      const sameScope =
+        pending.source?.browserSessionId === detail.source.browserSessionId &&
+        pending.source?.tabId === detail.source.tabId &&
+        pending.source?.mode === detail.source.mode;
+      if (pending.operationId ? pending.operationId !== detail.operationId : !sameScope) return;
+      const selection = useTaskStore.getState().localChromeSelection;
+      if (
+        selection &&
+        (selection.launchBrowserSessionId !== detail.source.browserSessionId ||
+          selection.tabId !== detail.source.tabId ||
+          resolveBrowserTaskMode(detail.intent, selection.taskTabMode) !== detail.source.mode)
+      )
+        return;
+      pending.consumed = true;
+      setValue('');
+      setAttachments([]);
+      setTaskMode('auto');
+      setExpertMode('auto');
+      setSelectedSkill(null);
+      toast.show('已找回刚才创建的 Chrome 任务。');
+    };
+    window.addEventListener(BROWSER_LAUNCH_RECOVERED_EVENT, recovered);
+    return () => window.removeEventListener(BROWSER_LAUNCH_RECOVERED_EVENT, recovered);
+  }, [toast, draftSnapshot]);
   const brain = useBrainOptions();
   // New-task handoffs are consumed together so a task selected in the
   // Skill Center can arrive with several pre-uploaded attachments without
@@ -655,6 +729,13 @@ export function InputArea({
   }
 
   async function handleSubmit(): Promise<void> {
+    if (
+      pendingBrowserSubmission.current?.consumed &&
+      pendingBrowserSubmission.current.snapshot === draftSnapshot()
+    ) {
+      setValue('');
+      return;
+    }
     const trimmed = value.trim();
     if (!trimmed || submitting || busy) return;
     const intentForSubmit = selectedSkill
@@ -683,6 +764,23 @@ export function InputArea({
     const fileIds = attachments
       .filter((a) => a.status === 'ready' && a.fileId)
       .map((a) => a.fileId);
+    const browserSelection = useTaskStore.getState().localChromeSelection;
+    pendingBrowserSubmission.current = {
+      intent: intentForSubmit,
+      snapshot: draftSnapshot(),
+      consumed: false,
+      ...(browserSelection?.launchBrowserSessionId
+        ? {
+            source: {
+              browserSessionId: browserSelection.launchBrowserSessionId,
+              tabId: browserSelection.tabId,
+              origin: browserSelection.expectedUrl,
+              selectionId: browserSelection.selectionId,
+              mode: resolveBrowserTaskMode(intentForSubmit, browserSelection.taskTabMode),
+            },
+          }
+        : {}),
+    };
     // F6 — clear the composer ONLY on success. Previous flow cleared
     // immediately ("optimistic dispatch") which felt instant but lost
     // user input on any submit failure (quota error, role-overflow,
@@ -703,10 +801,15 @@ export function InputArea({
       // signal failure). If a structured `{ error }` came back, surface
       // it and keep the input.
       if (typeof result === 'object' && result != null) {
-        const r = result as { error?: string };
-        if (r.error) toast.show(composerSubmitErrorMessage(r.error), 'error');
+        const r = result as { error?: string; notice?: string; browserOperationId?: string };
+        if (r.browserOperationId && pendingBrowserSubmission.current)
+          pendingBrowserSubmission.current.operationId = r.browserOperationId;
+        if (r.error && !pendingBrowserSubmission.current?.consumed)
+          toast.show(composerSubmitErrorMessage(r.error), 'error');
+        if (r.notice) toast.show(r.notice);
       }
       submitOk = shouldClearComposerAfterSubmit(result);
+      if (pendingBrowserSubmission.current?.consumed) submitOk = true;
     } catch (err) {
       const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
       toast.show(composerSubmitErrorMessage(raw), 'error');
@@ -908,7 +1011,10 @@ export function InputArea({
         <Textarea
           ref={setTextareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            pendingBrowserSubmission.current = null;
+            setValue(e.target.value);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={
             replyMode

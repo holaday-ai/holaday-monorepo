@@ -35,19 +35,25 @@ it('requires recovery capability and explicitly opts in only behind its rollout 
   const caller = router({ prepare: selectionRoutes.localChromeTaskTabProcedure }).createCaller({
     userId: 'alice',
   } as Context);
-  const input = { selection, preparationId: '61c56349-421b-4a44-b946-507476393185' };
+  const launchBrowserSessionId = '82cf0bca-b78c-4f12-af23-035421ab959c';
+  const input = {
+    selection: { ...selection, launchBrowserSessionId },
+    preparationId: '61c56349-421b-4a44-b946-507476393185',
+  };
   await expect(caller.prepare(input)).rejects.toThrow('更新');
   expect(send).toHaveBeenCalledTimes(1);
   send.mockResolvedValueOnce({
     ok: true,
     extensionClientId: 'connection',
     result: {
+      launchBrowserSessionId,
       userBrowserProtocol: {
         ...USER_BROWSER_PROTOCOL,
         capabilities: [
           ...USER_BROWSER_PROTOCOL.capabilities,
           'task_tab_start',
           'task_tab_recovery_v1',
+          'task_launch_recovery_v1',
         ],
       },
     },
