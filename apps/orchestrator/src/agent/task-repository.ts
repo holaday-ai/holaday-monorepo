@@ -5,7 +5,7 @@ import {
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
@@ -28,6 +28,7 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
 import {
   TASK_ACTIVE_STATUSES,
   TASK_RUNNER_OUTCOME_SOURCE_STATUSES,
@@ -116,6 +117,8 @@ export interface InsertTaskContext {
    * transaction as the insert: if the claim is gone, the insert rolls back.
    */
   publicCloudContinuation?: { originalTaskId: string; claimToken: string };
+  /** Server-owned pending claim; committed with the task, never after dispatch. */
+  creationReceipt?: { idempotencyKey: string; requestHash: string };
 }
 
 /** The original's continuation claim was lost before the replacement was linked. */
@@ -252,6 +255,25 @@ export class TaskRepository {
             ),
           );
         if (extractMysqlAffectedRows(linked) !== 1) throw new PublicCloudContinuationLinkError();
+      }
+      const receipt = ctx.creationReceipt;
+      if (receipt) {
+        const linked = await tx
+          .update(webhookIdempotency)
+          .set({
+            taskId: state.taskId,
+            responseJson: { taskId: state.taskId, status: state.status },
+          })
+          .where(
+            and(
+              eq(webhookIdempotency.userId, ctx.userId),
+              eq(webhookIdempotency.idempotencyKey, receipt.idempotencyKey),
+              eq(webhookIdempotency.requestHash, receipt.requestHash),
+              eq(webhookIdempotency.taskId, ''),
+              gt(webhookIdempotency.expiresAt, new Date()),
+            ),
+          );
+        if (extractMysqlAffectedRows(linked) !== 1) throw new Error('task_creation_receipt_lost');
       }
     });
   }

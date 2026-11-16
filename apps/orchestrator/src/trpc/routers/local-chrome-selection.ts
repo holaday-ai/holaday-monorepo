@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { userBrowserProtocolSchema } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
 import { env } from '../../config/env.js';
+import { tasks } from '../../db/schema/tasks.js';
+import { users } from '../../db/schema/users.js';
+import { webhookIdempotency } from '../../db/schema/webhook-idempotency.js';
 import { getConnectedExtensionClientIds, sendExtensionToolCall } from '../../ws/server.js';
 import { protectedProcedure } from '../trpc.js';
 
@@ -47,7 +51,7 @@ function supportsTaskTabStart(raw: unknown): boolean {
   const protocol = userBrowserProtocolSchema.safeParse(raw);
   return protocol.success && protocol.data.capabilities.includes('task_tab_start');
 }
-function launchRecoveryEnabled(userId: string): boolean {
+export function launchRecoveryEnabled(userId: string): boolean {
   const configured = process.env.BROWSER_LAUNCH_RECOVERY_ENABLED;
   return (
     backgroundTaskTabsEnabled(userId) &&
@@ -64,6 +68,46 @@ export const localChromeLaunchOptionsProcedure = protectedProcedure.query(({ ctx
   backgroundTaskTabs: backgroundTaskTabsEnabled(ctx.userId),
   ...(launchRecoveryEnabled(ctx.userId) ? { launchRecovery: true } : {}),
 }));
+
+/** A receipt lookup does not require the old socket/selection and never starts work. */
+export const localChromeLaunchReceiptProcedure = protectedProcedure
+  .input(z.object({ clientRequestId: z.string().uuid() }).strict())
+  .query(async ({ ctx, input }) => {
+    if (!launchRecoveryEnabled(ctx.userId))
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '任务续接尚未启用。' });
+    const [owner] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!owner) throw new TRPCError({ code: 'UNAUTHORIZED' });
+    const [receipt] = await ctx.db
+      .select({ taskId: webhookIdempotency.taskId, expiresAt: webhookIdempotency.expiresAt })
+      .from(webhookIdempotency)
+      .where(
+        and(
+          eq(webhookIdempotency.userId, owner.id),
+          eq(webhookIdempotency.idempotencyKey, `spa_task:${input.clientRequestId}`),
+        ),
+      )
+      .limit(1);
+    if (!receipt) return { state: 'absent' as const };
+    if (receipt.expiresAt.getTime() <= Date.now()) return { state: 'unknown' as const };
+    if (!receipt.taskId) return { state: 'pending' as const };
+    const [task] = await ctx.db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.externalId, receipt.taskId),
+          eq(tasks.userId, owner.id),
+          eq(tasks.origin, ctx.taskOrigin),
+        ),
+      )
+      .limit(1);
+    if (!task) return { state: 'unknown' as const };
+    return { state: 'created' as const, taskId: receipt.taskId, status: task.status };
+  });
 
 export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx }) => {
   const connections = getConnectedExtensionClientIds(ctx.userId);

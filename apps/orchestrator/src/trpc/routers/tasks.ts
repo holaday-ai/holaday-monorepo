@@ -215,6 +215,7 @@ import {
   type ClaimResult as TaskCreateClaimResult,
   recordClaim as claimTaskCreate,
   finalizeClaim as finalizeTaskCreateClaim,
+  hashBody as hashTaskCreateRequest,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
 import {
@@ -375,7 +376,9 @@ import {
 } from './browser-control.js';
 import {
   assertLocalChromeSelection,
+  launchRecoveryEnabled,
   localChromeLaunchOptionsProcedure,
+  localChromeLaunchReceiptProcedure,
   localChromeSelectionSchema,
   localChromeTabsProcedure,
   localChromeTaskTabProcedure,
@@ -1361,6 +1364,10 @@ export const tasksRouter = router({
       const taskCreateIdempotencyKey = input.clientRequestId
         ? `spa_task:${input.clientRequestId}`
         : null;
+      const creationReceipt =
+        input.localChrome && taskCreateIdempotencyKey && launchRecoveryEnabled(ctx.userId)
+          ? { idempotencyKey: taskCreateIdempotencyKey, requestHash: hashTaskCreateRequest(input) }
+          : undefined;
       // Inside the idempotency claim: a continuation claims its original row,
       // and the first task insert of this request links the replacement in the
       // same transaction (see insertWithContinuationLink below).
@@ -1444,6 +1451,7 @@ export const tasksRouter = router({
             taskCreateIdempotencyKey!,
             taskId,
             response,
+            creationReceipt ? { requestHash: creationReceipt.requestHash } : undefined,
           ),
         release: () =>
           releaseTaskCreateClaim(
@@ -1474,6 +1482,7 @@ export const tasksRouter = router({
               // Best-effort: a failed audit row never blocks task creation.
               const insertTask = repo.insertTask.bind(repo);
               repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
+                if (creationReceipt) args[1] = { ...args[1], creationReceipt };
                 const link = continuationLink;
                 let result: Awaited<ReturnType<typeof insertTask>> = undefined;
                 if (link) {
@@ -12419,6 +12428,7 @@ export const tasksRouter = router({
   browserProfileClear: browserProfileClearProcedure,
   localChromeTabs: localChromeTabsProcedure,
   localChromeLaunchOptions: localChromeLaunchOptionsProcedure,
+  localChromeLaunchReceipt: localChromeLaunchReceiptProcedure,
   localChromeTaskTab: localChromeTaskTabProcedure,
   browserNav: browserNavProcedure,
 
