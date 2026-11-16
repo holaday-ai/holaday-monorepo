@@ -444,6 +444,35 @@ test(
         }
       },
     );
+    await t.test('native typing invalidates the old target, preserves the edit and permits a fresh decision', async () => {
+      await page.locator('#query').focus();
+      await page.evaluate(() => {
+        window.manualRaceClicks = 0;
+        document.querySelector('#search').addEventListener('click', () => window.manualRaceClicks++);
+      });
+      await observe();
+      const action = { kind: 'click', selector: css('#search') };
+      const ticket = (await describe(action)).result.target;
+      try {
+        await page.keyboard.type('private native edit');
+        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+        const stale = await bound(action, ticket);
+        assert.equal(stale.ok, false, 'the model’s pre-edit target must not execute');
+        assert.equal(stale.result.error, 'stale_observation');
+        assert.equal(stale.result.actionOutcome, 'not_applied');
+        assert.equal(await page.evaluate(() => window.manualRaceClicks), 0);
+        assert.equal(JSON.stringify(stale).includes('private native edit'), false);
+        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+        await observe();
+        const fresh = await describe(action);
+        assert.equal(fresh.ok, true);
+        assert.equal((await bound(action, fresh.result.target)).ok, true);
+        assert.equal(await page.evaluate(() => window.manualRaceClicks), 1);
+        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+      } finally {
+        await page.locator('#query').fill('');
+      }
+    });
     await t.test('iframe, shadow, ambiguity, missing target and stale DOM revision', async () => {
       await observe();
       for (const [selector, text] of [

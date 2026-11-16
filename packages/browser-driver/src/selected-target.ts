@@ -12,7 +12,9 @@ import { type LocatorSpec, buildSelectorPlan } from './selector-plan.js';
 type DocumentVersion = { document: string; epoch: number };
 // Executed in the document. No values, cookies, storage or network data leave it.
 const readVersion = (): DocumentVersion => {
-  const win = window as typeof window & { __holadayV2Document?: DocumentVersion };
+  const win = window as typeof window & {
+    __holadayV2Document?: DocumentVersion & { inputTracking?: true };
+  };
   if (!win.__holadayV2Document) {
     const state = { document: crypto.randomUUID(), epoch: 0 };
     new MutationObserver(() => {
@@ -20,7 +22,37 @@ const readVersion = (): DocumentVersion => {
     }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
     win.__holadayV2Document = state;
   }
-  return { ...win.__holadayV2Document };
+  const state = win.__holadayV2Document;
+  if (!state.inputTracking) {
+    // Typing changes input.value without a DOM mutation. Native input (including a gesture
+    // begun while the model thinks) invalidates the old target without reading its contents.
+    const changed = (event: Event) => {
+      if (event.isTrusted) state.epoch++;
+    };
+    for (const kind of [
+      'keydown',
+      'keyup',
+      'pointerdown',
+      'pointerup',
+      'pointercancel',
+      'input',
+      'change',
+      'compositionstart',
+      'compositionend',
+      'wheel',
+      'scroll',
+    ])
+      document.addEventListener(kind, changed, { capture: true, passive: true });
+    document.addEventListener(
+      'pointermove',
+      (event) => {
+        if (event.buttons) changed(event);
+      },
+      { capture: true, passive: true },
+    );
+    state.inputTracking = true;
+  }
+  return { document: state.document, epoch: state.epoch };
 };
 const readElement = async (
   node: Element,
@@ -669,6 +701,7 @@ export class SelectedTargetResolver {
           if (!(await handle.isVisible()) || canonical(fresh) !== expected)
             throw new Error('target_changed');
           if (action.kind === 'type') {
+            await this.assertFresh(ticket.frame, binding.observationRevision);
             await handle.fill(String(action.payload?.text ?? ''), { timeout });
             break;
           }
@@ -682,6 +715,7 @@ export class SelectedTargetResolver {
             (option) => option.label === text || option.value === text,
           );
           if (matching.length !== 1 || !matching[0]) throw new Error('target_ambiguous');
+          await this.assertFresh(ticket.frame, binding.observationRevision);
           await handle.selectOption(matching[0], { timeout });
           break;
         }
