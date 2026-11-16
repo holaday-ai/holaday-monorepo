@@ -64,7 +64,7 @@ import {
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
-import { type EngagementKind, settleUnpairedCounts } from './engagement-counts.js';
+import { type EngagementKind, MANY_ITEMS_RE, settleUnpairedCounts } from './engagement-counts.js';
 import { fullPageRead } from './full-page-read.js';
 import {
   answerCount,
@@ -529,8 +529,9 @@ export async function runUnifiedBrowserLoop(
           plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
           outcome.summary,
         ),
-        readTexts,
-        isEnglishIntent(intentText),
+        // 复审 P0: the pages as the checks read them (a tool result is JSON).
+        readTexts.map((text) => observedPageText(text) || text),
+        { english: isEnglishIntent(intentText), manyItems: MANY_ITEMS_RE.test(intentText) },
       );
       return {
         ...outcome,
@@ -1771,17 +1772,40 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               blocking.startsWith('答案与已读页面矛盾') &&
               facts.contradictions.length > 0 &&
               facts.contradictions.every((c) => facts.pairing?.includes(c))
-            )
-              return {
-                status: 'completed',
-                summary: withLimitations(summary),
-                evidence:
-                  hostProof ||
-                  given ||
-                  deriveEvidence(summary, observedText) ||
-                  observedText.slice(0, 500),
-                steps: step + 1,
-              };
+            ) {
+              // 复审 P0: settled here on the pages the checks read, and checked again — anything
+              // still contradicted fails as before.
+              const settled = settledAnswer(
+                summary,
+                pageEvidence.map((page) => page.text),
+                {
+                  english: isEnglishIntent(input.userIntent ?? input.intent),
+                  manyItems: MANY_ITEMS_RE.test(input.userIntent ?? input.intent),
+                },
+              );
+              const again = assessCompletionFacts({
+                summary: settled,
+                fields: args.fields,
+                pages: [
+                  ...pageEvidence,
+                  ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
+                ],
+                receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
+                toolTexts: toolTexts.join('\n'),
+                intent: input.intent,
+              });
+              if (again.contradictions.length === 0)
+                return {
+                  status: 'completed',
+                  summary: withLimitations(settled),
+                  evidence:
+                    hostProof ||
+                    given ||
+                    deriveEvidence(summary, observedText) ||
+                    observedText.slice(0, 500),
+                  steps: step + 1,
+                };
+            }
             if (concludeNow || rejectionsLeft <= 0)
               // FIX-27 (va core-08): a later answer failing does not undo the held
               // honest 部分完成 that passed every check.
@@ -3427,22 +3451,28 @@ const WALL_TRY_TOOLS = new Set(['click', 'click_at', 'press_key', 'type', 'selec
  * label or tab is written 「未能核实」 (never another number), with one line saying so. The G7
  * 「页面上有，但没能确认」 note goes: its numbers are the ones settled here.
  */
-export function settledAnswer(summary: string, readTexts: readonly string[], en = false): string {
+export function settledAnswer(
+  summary: string,
+  pageTexts: readonly string[],
+  options: { english?: boolean; manyItems?: boolean } = {},
+): string {
+  const en = options.english ?? false;
   const lines = summary
     .split('\n')
     .filter((line) => !line.startsWith(COUNTER_LEAD) && !line.startsWith(COUNTER_LEAD_EN));
-  const counts = settleUnpairedCounts(lines.join('\n'), readTexts);
-  const prices = settleMisattributedPrices(counts.answer, readTexts);
+  const counts = settleUnpairedCounts(lines.join('\n'), pageTexts, options);
+  const prices = settleMisattributedPrices(counts.answer, pageTexts);
   const notes = [
     counts.settled.length
       ? en
         ? `Not verified: ${counts.settled.map((kind) => ENGAGEMENT_EN[kind]).join(', ')} — no number next to its own icon or label on the page could be confirmed as it, so none is given.`
         : `未能核实：${counts.settled.map((kind) => `${kind}数`).join('、')}——页面上没有找到和这一项的图标 / 标签直接相邻、能确认属于它的数字，所以没写数字。`
       : '',
+    // The note names no amount: a price written again here would be one more misplaced price.
     prices.settled.length
       ? en
-        ? `Not verified: ${prices.settled.join(', ')} — on the page it belongs to another tab or section.`
-        : `未能核实：${prices.settled.map((price) => `「${price}」`).join('、')}——页面上它属于另一栏，没能确认是这一项的价格，所以没写。`
+        ? `Not verified: ${prices.settled.length === 1 ? 'one price' : `${prices.settled.length} prices`} — on the page it belongs to another tab or section, so it is not given.`
+        : `未能核实：${prices.settled.length} 处票价——页面上它属于另一个标签页或小节，没能确认是这一项的价格，所以没写。`
       : '',
   ].filter(Boolean);
   const body = prices.summary.replace(/\n{3,}/g, '\n\n').trimEnd();

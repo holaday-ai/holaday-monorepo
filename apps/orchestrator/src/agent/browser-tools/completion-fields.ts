@@ -1,7 +1,7 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
 import { stripInternalRefs } from '../internal-refs.js';
 import { staleForRecentIntent, uncoveredTargets } from './completion-coverage.js';
-import { engagementFindings, engagementKindsIn } from './engagement-counts.js';
+import { MANY_ITEMS_RE, engagementFindings, engagementKindsIn } from './engagement-counts.js';
 import { misattributedPrices } from './section-attribution.js';
 import { unsupportedSpecPricePairings } from './spec-price-pairing.js';
 import {
@@ -1443,6 +1443,7 @@ export function assessCompletionFacts(input: {
   const engagement = engagementFindings(
     input.summary,
     input.pages.map((page) => page.text),
+    { manyItems: MANY_ITEMS_RE.test(intent) },
   );
   contradictions.push(...engagement.contradictions);
   pairing.push(...engagement.contradictions);

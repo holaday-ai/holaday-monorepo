@@ -131,10 +131,41 @@ describe('H1 · delivery: an unpaired count is written 未能核实, never anoth
   it('「1584 个赞」 reads 「点赞数未能核实」 when unpaired', () => {
     expect(settleUnpairedCounts('这篇有 2000 个赞', pages).answer).toBe('这篇有 点赞数未能核实');
   });
-  it('a page marking no counters keeps a number it shows with words (「1,234 ratings」)', () => {
+  it('a page marking no counters keeps a number the check leaves alone (「1,234 ratings」)', () => {
     const page = ['4.5 out of 5 stars\n1,234 ratings'];
     expect(settleUnpairedCounts('评论数：1234', page).answer).toBe('评论数：1234');
-    expect(settleUnpairedCounts('评论数：5678', page).answer).toBe('评论数：未能核实');
+    // Only what the loop's check flags is settled (复审 #7): a bare icon number is.
+    expect(settleUnpairedCounts('评论数：88', ['评论\n88']).answer).toBe('评论数：未能核实');
+  });
+  it('复审 #2–#4, #8, #9: every writing, bold values, whole numbers only, ids are no numbers', () => {
+    const pages = ['- 计数 [互动=点赞]: "1584"', '- link "笔记" [ref=e217]'];
+    expect(settleUnpairedCounts('点赞数：217。总结：这篇笔记收获了 217 个赞', pages).answer).toBe(
+      '点赞数：未能核实。总结：这篇笔记收获了 点赞数未能核实',
+    );
+    expect(settleUnpairedCounts('点赞数：**217**', pages).answer).toBe('点赞数：**未能核实**');
+    expect(settleUnpairedCounts('| 点赞数 | **217** |', pages).answer).toBe(
+      '| 点赞数 | **未能核实** |',
+    );
+    expect(settleUnpairedCounts('点赞数：1584；评论点赞数：1', pages).answer).toBe(
+      '点赞数：1584；评论点赞数：未能核实',
+    );
+    expect(settleUnpairedCounts('The note has 217 likes.', pages, { english: true }).answer).toBe(
+      'The note has like count not verified.',
+    );
+    expect(engagementClaims('以下是点赞最高的 3 个评论；前 5 条评论')).toEqual([]);
+  });
+  it('复审 #5: a request about several items pairs their own counters', () => {
+    const pages = ['- generic [ref=e9] [互动=点赞·其他条目]: "1.2万"\n- 计数 [互动=点赞]: "1584"'];
+    expect(settleUnpairedCounts('1. 笔记A：点赞 1.2万', pages).answer).toBe(
+      '1. 笔记A：点赞 未能核实',
+    );
+    expect(settleUnpairedCounts('1. 笔记A：点赞 1.2万', pages, { manyItems: true }).answer).toBe(
+      '1. 笔记A：点赞 1.2万',
+    );
+    // A search list with no counter of its own pairs its cards' counters.
+    expect(settleUnpairedCounts('点赞 1.2万', [pages[0]!.split('\n')[0]!]).answer).toBe(
+      '点赞 1.2万',
+    );
   });
   it('settledAnswer drops the G7 未核实 counter line and says what it settled', () => {
     const out = settledAnswer(
@@ -204,7 +235,21 @@ describe('H1 · a ticket price belongs to the tab it is shown under', () => {
       { names: ['大门票优惠政策', '钟表馆、珍宝馆票价优惠政策'], selected: '大门票优惠政策' },
     ]);
     expect(marked).toContain(
-      '钟表馆、珍宝馆票价优惠政策\n              - text: 当前选中的标签：大门票优惠政策\n',
+      '钟表馆、珍宝馆票价优惠政策\n              - text: 当前选中的标签：大门票优惠政策（大门票优惠政策｜钟表馆、珍宝馆票价优惠政策）\n',
+    );
+    // 复审 #6: the heading above the names is not a tab; the main ticket's 20 元 is the main ticket's.
+    const hidden = withSelectedTabs(
+      [
+        '- generic [ref=e1]: 票价及优惠政策',
+        '- generic [ref=e2] [cursor=pointer]: 大门票优惠政策',
+        '- generic [ref=e3] [cursor=pointer]: 钟表馆、珍宝馆票价优惠政策',
+        list(10, '20元', '即旺季30元/人；淡季20元/人'),
+      ].join('\n'),
+      [{ names: ['大门票优惠政策', '钟表馆、珍宝馆票价优惠政策'], selected: '大门票优惠政策' }],
+    );
+    expect(misattributedPrices('故宫学生票 20 元/人；老年人旺季 30 元/人', [hidden])).toEqual([]);
+    expect(misattributedPrices('钟表馆学生票 20元/人', [hidden])[0]).toContain(
+      '属于「大门票优惠政策」',
     );
     for (const read of [tree, marked]) {
       const [why] = misattributedPrices('大门票：学生票淡旺季均为5元/人', [read]);
@@ -218,7 +263,7 @@ describe('H1 · a ticket price belongs to the tab it is shown under', () => {
   it('withSelectedTabs only marks a line that is exactly the group’s names', () => {
     const groups = [{ names: ['甲栏', '乙栏'], selected: '乙栏' }];
     expect(withSelectedTabs('- text: 甲栏 乙栏\n- text: 甲栏 乙栏 丙', groups)).toBe(
-      '- text: 甲栏 乙栏\n- text: 当前选中的标签：乙栏\n- text: 甲栏 乙栏 丙',
+      '- text: 甲栏 乙栏\n- text: 当前选中的标签：乙栏（甲栏｜乙栏）\n- text: 甲栏 乙栏 丙',
     );
   });
 });

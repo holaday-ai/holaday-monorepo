@@ -9,6 +9,9 @@ import type { Frame } from 'playwright';
  * under the names (a role=tab already carries `[selected]` and is left alone).
  */
 export const SELECTED_TAB_LEAD = '当前选中的标签：';
+/** 复审 #6: the marker names the whole group (「（大门票优惠政策｜钟表馆、珍宝馆票价优惠政策）」). */
+const marker = (indent: string, group: { names: string[]; selected: string }) =>
+  `${indent}- text: ${SELECTED_TAB_LEAD}${group.selected}（${group.names.join('｜')}）`;
 
 /** In-page: groups of 2–6 short sibling labels with exactly one marked as the current one. */
 function selectedTabGroups(): Array<{ names: string[]; selected: string }> {
@@ -16,9 +19,11 @@ function selectedTabGroups(): Array<{ names: string[]; selected: string }> {
   const active =
     /(?:^|\s)(?:now|active|current|cur|on|selected|is-active|is-selected|tab-active|actived|checked)(?:$|\s)/i;
   const boxes = document.querySelectorAll('ul,ol,div,nav,p');
-  for (let at = 0; at < boxes.length && at < 6000 && out.length < 6; at += 1) {
+  for (let at = 0; at < boxes.length && at < 6000 && out.length < 12; at += 1) {
     const kids = Array.from(boxes[at]!.children);
     if (kids.length < 2 || kids.length > 6) continue;
+    // 复审 #10: a menu of links (the site's own navigation) is no tab group.
+    if (kids.every((kid) => kid.tagName === 'A' || kid.querySelector(':scope > a[href]'))) continue;
     const names = kids.map((kid) => (kid.textContent ?? '').trim().replace(/\s+/g, ' '));
     if (names.some((name) => name.length < 2 || name.length > 20)) continue;
     if (new Set(names).size !== names.length) continue;
@@ -59,7 +64,7 @@ export function withSelectedTabs(
     if (run) {
       out.push(...lines.slice(at, at + run.names.length));
       const indent = line.match(/^\s*/)?.[0] ?? '';
-      out.push(`${indent}- text: ${SELECTED_TAB_LEAD}${run.selected}`);
+      out.push(marker(indent, run));
       at += run.names.length - 1;
       continue;
     }
@@ -73,14 +78,16 @@ export function withSelectedTabs(
     // Names the page sets apart only by markup (no space between the spans) read apart.
     out.push(text && line.includes(text) ? line.replace(text, group.names.join(' ')) : line);
     const indent = line.match(/^\s*/)?.[0] ?? '';
-    out.push(`${indent}- text: ${SELECTED_TAB_LEAD}${group.selected}`);
+    out.push(marker(indent, group));
   }
   return out.join('\n');
 }
 
 export async function markSelectedTabs(frame: Frame, tree: string): Promise<string> {
-  const groups = await frame
-    .evaluate(selectedTabGroups)
-    .catch(() => [] as Array<{ names: string[]; selected: string }>);
+  // 复审 #10: a heavy page does not hold up the read.
+  const groups = await Promise.race([
+    frame.evaluate(selectedTabGroups),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500)),
+  ]).catch(() => [] as Array<{ names: string[]; selected: string }>);
   return withSelectedTabs(tree, groups);
 }

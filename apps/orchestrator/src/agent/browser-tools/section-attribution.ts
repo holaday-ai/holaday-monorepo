@@ -25,7 +25,7 @@ export interface TabSection {
   text: string;
 }
 
-const SELECTED_RE = new RegExp(`^${SELECTED_TAB_LEAD}(.+)$`, 'u');
+const SELECTED_RE = new RegExp(`^${SELECTED_TAB_LEAD}(.+?)（(.+)）$`, 'u');
 const NUMBERED_RE = /^(\d{1,2})\s*[.、．]\s*\S/u;
 const TAB_NAME_RE = /^[^\s\d。，,；;：:！？!?]{2,20}$/u;
 const GENERIC_TAIL_RE =
@@ -98,12 +98,19 @@ export function tabSections(pageText: string): TabSection[][] {
     .filter(Boolean);
   const groups: TabSection[][] = [];
   for (let at = 0; at < lines.length; at += 1) {
-    const tabs = tabNamesAt(lines, at);
-    if (!tabs) continue;
-    // GOAL2 H1: the snapshot says which tab is selected (selected-tabs.ts); it shows only that
-    // tab's list, which is that tab's — the other tabs' are not on this read.
-    const chosen = lines[tabs.next]?.match(SELECTED_RE)?.[1];
-    const picked = chosen ? tabs.names.indexOf(chosen) : -1;
+    const found = tabNamesAt(lines, at);
+    if (!found) continue;
+    // GOAL2 H1: the snapshot says which tab is selected and which names the group has
+    // (selected-tabs.ts); it shows only that tab's list, which is that tab's. 复审 #6: a heading
+    // read as a name before the group (「票价及优惠政策」) is not one of them.
+    const mark = lines[found.next]?.match(SELECTED_RE);
+    const named = mark?.[2]?.split('｜');
+    const tabs =
+      named && named.every((name) => found.names.includes(name))
+        ? { names: named, next: found.next }
+        : found;
+    const chosen = mark?.[1];
+    const picked = chosen && named ? tabs.names.indexOf(chosen) : -1;
     const lists = numberedLists(lines, picked >= 0 ? tabs.next + 1 : tabs.next);
     const k = tabs.names.length;
     if (picked >= 0 && lists.length >= 1 && lists.length < k) {
