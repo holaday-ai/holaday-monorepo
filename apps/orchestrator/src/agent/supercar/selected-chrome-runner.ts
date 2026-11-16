@@ -585,6 +585,13 @@ async function runLoop(input: {
     if (before) return before;
 
     const preModelCheckpoint = await options.client.checkpoint();
+    if (preModelCheckpoint.blocked)
+      return {
+        status: 'awaiting_user',
+        question: '你的浏览器操作还没有结束，旧动作没有执行。请完成输入或松开按键、鼠标后再继续。',
+        iterations,
+        toolsUsed: [...toolsUsed],
+      };
     const afterCheckpoint = await boundaryState(input, iterations);
     if (afterCheckpoint) return afterCheckpoint;
     if (preModelCheckpoint.resumed) {
@@ -655,6 +662,13 @@ async function runLoop(input: {
     await safelyCall(options.onThinking, textPreamble);
 
     const postModelCheckpoint = await options.client.checkpoint();
+    if (postModelCheckpoint.blocked)
+      return {
+        status: 'awaiting_user',
+        question: '你的浏览器操作还没有结束，旧动作没有执行。请完成输入或松开按键、鼠标后再继续。',
+        iterations,
+        toolsUsed: [...toolsUsed],
+      };
     const afterModel = await boundaryState(input, iterations);
     if (afterModel) return afterModel;
     messages.push({ role: 'assistant', content: response.content });

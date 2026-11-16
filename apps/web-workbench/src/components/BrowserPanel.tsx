@@ -502,16 +502,21 @@ function CloudBrowserPanel({
   const streamTransport = React.useMemo(() => readStreamTransport(), []);
   const usingCdp = streamTransport === 'cdp';
   const [viewportV2, setViewportV2] = React.useState(false);
+  const [collaborationV2, setCollaborationV2] = React.useState(false);
   // FIX-33: the live page is fitted into the panel whole by default (BOSS: a page cut
   // off on the right, reachable only by scrollbars); 100% is an explicit choice.
   const [displayMode, setDisplayMode] = React.useState<'fit' | 'actual'>('fit');
   React.useEffect(() => {
     let live = true;
     setViewportV2(false);
+    setCollaborationV2(false);
     void trpc.browserReplay.capabilities
       .query(activeTaskId ? { taskId: activeTaskId } : undefined)
       .then((capabilities) => {
-        if (live) setViewportV2(capabilities.viewportV2);
+        if (live) {
+          setViewportV2(capabilities.viewportV2);
+          setCollaborationV2(capabilities.collaborationV2 === true);
+        }
       })
       .catch(() => {});
     return () => {
@@ -1609,6 +1614,7 @@ function CloudBrowserPanel({
                     onUserInput={handleUserInput}
                     textChannel={cdpTextChannel}
                     viewportV2={viewportV2}
+                    collaborationV2={collaborationV2}
                     fitMode="contain"
                     displayMode={displayMode}
                     onStatusChange={(s: CdpScreencastStatus) =>

@@ -591,7 +591,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
       if (said)
         await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
-      if (waited.yielded && control.canAgentAct()) return humanActedSkip();
+      if ((waited.yielded || control.hasUnobservedHumanInput()) && control.canAgentAct())
+        return humanActedSkip();
     }
     if (phase === 'before' && control && !control.canAgentAct()) return controlClosedStop();
     if (phase === 'before' && tools.observation) {
@@ -643,7 +644,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     // before the action is sent — nothing awaits between here and execute (unified-browser-loop).
     if (phase === 'before' && result.kind === 'proceed' && control) {
       if (!control.canAgentAct()) return controlClosedStop();
-      if (control.humanBusy()) {
+      if (control.humanBusy() || control.hasUnobservedHumanInput()) {
         await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
         await control.yieldToHuman();
         if (!control.canAgentAct()) return controlClosedStop();
@@ -661,9 +662,27 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     return result;
   };
   /** The person used the page: the planned action is void; re-read and decide again. */
-  const humanActedSkip = async (): Promise<{ kind: 'skip'; message: string }> => {
+  const humanActedSkip = async (): Promise<
+    Extract<Awaited<ReturnType<typeof gateAction>>, { kind: 'skip' | 'stop' }>
+  > => {
     lastSnapshot = '';
-    const fresh = await tools.recoverObservation().catch(() => null);
+    let fresh: Awaited<ReturnType<typeof tools.recoverObservation>> | null = null;
+    if (control?.hasUnobservedHumanInput()) {
+      const receipt = await control.checkpoint(async () => {
+        fresh = await tools.recoverObservation();
+      });
+      if (receipt.blocked)
+        return {
+          kind: 'stop',
+          outcome: {
+            status: 'awaiting_user',
+            reason: 'human_input_active',
+            message: '你的输入或拖拽尚未结束，旧动作没有执行。完成操作后再继续。',
+            steps: 0,
+          },
+        };
+      if (!control.canAgentAct()) return controlClosedStop();
+    } else fresh = await tools.recoverObservation().catch(() => null);
     return {
       kind: 'skip',
       message: `用户刚在画面上操作过（点击、打字或滚动），原计划的动作没有执行。按页面现在的样子重新判断：把用户的操作当线索（例如用户打开的页面、填过的框），不要撤回用户的操作，也不要重放旧动作；用户填过的输入框不要读、不要改。\nfresh_observation (未执行原动作):\n${fresh?.text ?? '无法重新观察当前页，请先 snapshot'}`,

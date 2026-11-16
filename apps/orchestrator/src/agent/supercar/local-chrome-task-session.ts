@@ -67,7 +67,7 @@ export class LocalChromeTaskSessions {
     )
       throw new Error('chrome_reservation_invalid');
     slot.claimed = true;
-    const control = new BrowserControl();
+    const control = new BrowserControl(Date.now, { collaborationV2: capabilities.collaborationV2 });
     const client = new SelectedChromeClient({
       userId,
       taskId,

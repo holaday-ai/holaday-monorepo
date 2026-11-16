@@ -302,6 +302,10 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('unified'),
+  BROWSER_COLLABORATION_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   BROWSER_SESSION_IMPORT_V2: z
     .enum(['true', 'false'])
     .default('false')

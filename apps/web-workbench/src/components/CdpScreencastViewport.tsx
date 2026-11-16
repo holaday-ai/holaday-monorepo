@@ -110,6 +110,7 @@ interface Props {
    */
   displayMode?: 'fit' | 'actual';
   viewportV2?: boolean;
+  collaborationV2?: boolean;
   className?: string;
 }
 
@@ -145,6 +146,7 @@ export function CdpScreencastViewport({
   fitMode = 'contain',
   displayMode = 'fit',
   viewportV2 = false,
+  collaborationV2 = false,
   className,
 }: Props): JSX.Element {
   // Latest onUrlChange ref so the WS onmessage closure stays stable
@@ -165,6 +167,47 @@ export function CdpScreencastViewport({
   /** The server is ready for input: `viewport-v2-ready` arrived, or a frame with geometry did. */
   const writeReadyRef = React.useRef(false);
   const geometryRef = React.useRef<BrowserFrameGeometry | null>(null);
+  const heldKeysRef = React.useRef(new Map<string, InputPayload>());
+  const heldPointersRef = React.useRef(new Set<number>());
+  const composingActivityRef = React.useRef(false);
+  const compositionContextRef = React.useRef<{
+    connection: number;
+    documentEpoch: number;
+    tabId: string | undefined;
+    revision: number | undefined;
+  } | null>(null);
+  const documentEpochRef = React.useRef(0);
+  const reportActivity = React.useCallback(() => {
+    if (!collaborationV2 || viewOnlyRef.current) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    onUserInputRef.current?.();
+    try {
+      ws.send(
+        JSON.stringify({
+          type: 'activity',
+          keys: heldKeysRef.current.size,
+          pointers: heldPointersRef.current.size,
+          composing: composingActivityRef.current,
+        }),
+      );
+    } catch {
+      /* A closed stream cannot acknowledge a released input. */
+    }
+  }, [collaborationV2]);
+  React.useEffect(() => {
+    if (!collaborationV2) return;
+    // Keep the visible "you are operating" state alive without sending network heartbeats.
+    const timer = window.setInterval(() => {
+      if (
+        !viewOnlyRef.current &&
+        wsRef.current?.readyState === WebSocket.OPEN &&
+        (heldKeysRef.current.size || heldPointersRef.current.size || composingActivityRef.current)
+      )
+        onUserInputRef.current?.();
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [collaborationV2]);
   const observationEpochRef = React.useRef(0);
   // FIX-61: freshness is judged by when THIS client painted the frame. The
   // frame's own capturedAt is the server's clock; a user clock a few seconds
@@ -234,9 +277,14 @@ export function CdpScreencastViewport({
   React.useEffect(() => {
     readableAutoScrollKeyRef.current = null;
     hostRef.current?.scrollTo({ left: 0, top: 0 });
-    inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
-    if (hiddenInputRef.current) hiddenInputRef.current.value = '';
-  }, [fitMode, displayMode, wsUrl]);
+    if (!collaborationV2) {
+      inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
+      heldKeysRef.current.clear();
+      heldPointersRef.current.clear();
+      composingActivityRef.current = false;
+      if (hiddenInputRef.current) hiddenInputRef.current.value = '';
+    }
+  }, [fitMode, displayMode, wsUrl, collaborationV2]);
 
   const [status, setStatus] = React.useState<CdpScreencastStatus>('idle');
   const onStatusChangeRef = React.useRef(onStatusChange);
@@ -476,8 +524,10 @@ export function CdpScreencastViewport({
 
     function connect(): void {
       if (disposed) return;
-      const negotiatedUrl =
+      let negotiatedUrl =
         viewportV2 && wsUrl ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}viewportV2=1` : wsUrl;
+      if (collaborationV2 && negotiatedUrl)
+        negotiatedUrl += `${negotiatedUrl.includes('?') ? '&' : '?'}collaborationV2=1`;
       const socketUrl = appendBrowserStreamToken(negotiatedUrl, streamTokenRef.current);
       if (!socketUrl) {
         setStatus('idle');
@@ -485,6 +535,16 @@ export function CdpScreencastViewport({
       }
       writeReadyRef.current = false;
       invalidateGeometry();
+      // The old server connection owns its unsettled inputs. Do not move those holds (or an
+      // unfinished IME commit) into a new connection, even when the task URL is unchanged.
+      if (collaborationV2) {
+        heldKeysRef.current.clear();
+        heldPointersRef.current.clear();
+        composingActivityRef.current = false;
+        if (!inputBridgeStateRef.current.composing)
+          inputBridgeStateRef.current = INITIAL_CDP_INPUT_BRIDGE_STATE;
+        if (hiddenInputRef.current) hiddenInputRef.current.value = '';
+      }
       const connectionSeq = ++connectionSeqRef.current;
       setStatus('connecting');
       const ws = new WebSocket(socketUrl);
@@ -556,7 +616,10 @@ export function CdpScreencastViewport({
         // HOTFIX-R4A（复审 P1-1）: the page changed (a navigation, a replaceState). The picture
         // on screen still maps the person's input until the next one arrives — like a remote
         // desktop; nothing is dropped meanwhile.
-        if (viewportV2 && msg.type === 'observation-invalidated') return;
+        if ((viewportV2 || collaborationV2) && msg.type === 'observation-invalidated') {
+          if (collaborationV2) documentEpochRef.current++;
+          return;
+        }
         // Older servers confirm a size this screen no longer sends; nothing to do.
         if (msg.type === 'viewport-applied') return;
         // Optimization #3 R2 — `Page.frameNavigated` events from
@@ -642,7 +705,15 @@ export function CdpScreencastViewport({
       decodingImgRef.current = null;
       pendingFrameRef.current = null;
     };
-  }, [hasStreamToken, reconnectSignal, wsUrl, viewportV2, invalidateGeometry, notifyRefused]);
+  }, [
+    hasStreamToken,
+    reconnectSignal,
+    wsUrl,
+    viewportV2,
+    collaborationV2,
+    invalidateGeometry,
+    notifyRefused,
+  ]);
 
   // Decode a base64 JPEG and paint into the reused canvas. Each frame gets a
   // fresh Image so a delayed decode cannot inherit another frame's handlers.
@@ -835,17 +906,31 @@ export function CdpScreencastViewport({
       event: e,
       input: hiddenInputRef.current,
     });
-    deliverInput(
+    const wasHeld = heldPointersRef.current.has(e.button);
+    if (collaborationV2) {
+      heldPointersRef.current.add(e.button);
+      reportActivity();
+    }
+    const sent = deliverInput(
       pointerPayload('mouseDown', { clientX: e.clientX, clientY: e.clientY }, e.button, e.detail),
       true,
     );
+    if (collaborationV2 && !sent && !wasHeld) {
+      heldPointersRef.current.delete(e.button);
+      reportActivity();
+    }
   };
   const onMouseUp = (e: React.MouseEvent) => {
     if (viewOnly) return;
-    deliverInput(
+    if (collaborationV2 && !heldPointersRef.current.has(e.button)) return;
+    const sent = deliverInput(
       pointerPayload('mouseUp', { clientX: e.clientX, clientY: e.clientY }, e.button, e.detail),
       true,
     );
+    if (collaborationV2 && sent) {
+      heldPointersRef.current.delete(e.button);
+      reportActivity();
+    }
   };
   const onWheel = (e: React.WheelEvent) => {
     if (viewOnly) return;
@@ -880,7 +965,17 @@ export function CdpScreencastViewport({
     // capture if focus gets stuck.
     if (e.key !== 'Tab') e.preventDefault();
     const payload = transition.payload;
-    deliverInput(() => payload, false);
+    const id = e.code || e.key;
+    const wasHeld = heldKeysRef.current.has(id);
+    if (collaborationV2) {
+      heldKeysRef.current.set(id, payload);
+      reportActivity();
+    }
+    const sent = deliverInput(() => payload, false);
+    if (collaborationV2 && !sent && !wasHeld) {
+      heldKeysRef.current.delete(id);
+      reportActivity();
+    }
   };
   const onKeyUp = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (viewOnly) return;
@@ -896,20 +991,47 @@ export function CdpScreencastViewport({
       isComposing: e.nativeEvent.isComposing,
     });
     inputBridgeStateRef.current = transition.state;
-    if (!transition.payload) return;
+    const held = heldKeysRef.current.get(e.code || e.key);
+    if (collaborationV2 && !held) return;
+    if (!transition.payload && !(collaborationV2 && held)) return;
     if (e.key !== 'Tab') e.preventDefault();
-    const payload = transition.payload;
-    deliverInput(() => payload, false);
+    const payload = transition.payload ?? { ...held, type: 'keyUp' as const };
+    const sent = deliverInput(() => payload, false);
+    if (collaborationV2 && sent) {
+      heldKeysRef.current.delete(e.code || e.key);
+      reportActivity();
+    }
   };
   // CJK / IME — composition end carries the composed string.
   // We send insertText, NOT a sequence of keys, so the IME's
   // candidate selection lands verbatim in Brave's focused element.
   const onCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
     if (viewOnly) return;
+    const context = compositionContextRef.current;
+    compositionContextRef.current = null;
     const transition = cdpCompositionEndTransition(inputBridgeStateRef.current, e.data);
     inputBridgeStateRef.current = transition.state;
+    if (
+      collaborationV2 &&
+      (!context ||
+        context.connection !== connectionSeqRef.current ||
+        context.documentEpoch !== documentEpochRef.current ||
+        (viewportV2 &&
+          (context.tabId !== geometryRef.current?.tabId ||
+            context.revision !== geometryRef.current?.viewportRevision)))
+    ) {
+      composingActivityRef.current = false;
+      reportActivity();
+      notifyRefused('key');
+      if (hiddenInputRef.current) hiddenInputRef.current.value = '';
+      return;
+    }
     const payload = transition.payload;
-    if (payload) deliverInput(() => payload, false);
+    const sent = payload ? deliverInput(() => payload, false) : true;
+    if (collaborationV2 && sent) {
+      composingActivityRef.current = false;
+      reportActivity();
+    }
     // Clear the hidden input so the next composition starts fresh.
     if (hiddenInputRef.current) hiddenInputRef.current.value = '';
   };
@@ -1103,6 +1225,17 @@ export function CdpScreencastViewport({
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
           onCompositionStart={() => {
+            compositionContextRef.current = {
+              connection:
+                !viewOnly && socketOpen() && frameUsable() ? connectionSeqRef.current : -1,
+              documentEpoch: documentEpochRef.current,
+              tabId: geometryRef.current?.tabId,
+              revision: geometryRef.current?.viewportRevision,
+            };
+            if (collaborationV2 && !viewOnly) {
+              composingActivityRef.current = true;
+              reportActivity();
+            }
             inputBridgeStateRef.current = cdpCompositionStartTransition(
               inputBridgeStateRef.current,
             );

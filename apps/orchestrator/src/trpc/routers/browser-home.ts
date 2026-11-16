@@ -29,6 +29,7 @@ import {
 import { navigateBrowserHome } from '../../browser-home/browser-home-nav.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import { PoolCapacityError } from '../../browser-pool/browser-pool.js';
+import { instanceBrowserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
 import type { Context } from '../context.js';
@@ -65,7 +66,10 @@ export const browserHomeRouter = router({
   open: browserHomeProcedure.input(viewerInput).mutation(async ({ ctx, input }) => {
     const pool = requirePool(ctx);
     try {
-      return await browserHomeSessions.open(pool, ctx.userId, ctx.logger, input?.viewerId);
+      const opened = await browserHomeSessions.open(pool, ctx.userId, ctx.logger, input?.viewerId);
+      const location = browserHomeSessions.locate(pool, ctx.userId);
+      if (!location) throw new Error('Browser is not ready for reuse');
+      return { ...opened, capabilities: instanceBrowserCapabilities(location.instance) };
     } catch (error) {
       if (error instanceof PoolCapacityError) {
         throw new TRPCError({

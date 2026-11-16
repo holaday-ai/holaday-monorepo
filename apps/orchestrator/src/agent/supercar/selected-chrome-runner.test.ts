@@ -1198,6 +1198,37 @@ describe('runSelectedChromeTask', () => {
     expect(h.modelCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('discards a plan after a completed human edit even when the idle window elapsed during model thinking', async () => {
+    let now = 10_000;
+    const control = new BrowserControl(() => now, { collaborationV2: true });
+    const h = createHarness([], { control });
+    h.modelCreate
+      .mockImplementationOnce(async () => {
+        await control.runHuman(async () => {}, 'insertText');
+        now += 3_000;
+        return response('stale-after-idle', [
+          {
+            type: 'tool_use',
+            id: 'stale-goto',
+            name: 'browser_act',
+            input: { action: { kind: 'goto', payload: { url: 'https://work.example/old-plan' } } },
+          },
+        ]);
+      })
+      .mockResolvedValueOnce(finish('Draft', 'fresh-finish'));
+    const outcome = await runSelectedChromeTask({
+      taskId: 'idle-replan',
+      intent: 'Inspect the draft',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control,
+      target,
+    });
+    expect(outcome.status).toBe('completed');
+    expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
+    expect(h.modelCreate).toHaveBeenCalledTimes(2);
+  });
+
   it('discards a model action planned while the person used the browser and re-reads the page', async () => {
     const shared = sharedControl();
     const h = createHarness([], { control: shared.control });

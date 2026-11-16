@@ -74,7 +74,11 @@ import type {
 } from '../vision-loop/playwright-executor.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
-import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from './browser-control.js';
+import {
+  type BrowserControl,
+  BrowserHumanInputBusyError,
+  HUMAN_ALSO_ACTED_NOTE,
+} from './browser-control.js';
 import { toBrowserPixels } from './browser-coordinates.js';
 import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
@@ -2011,6 +2015,7 @@ async function runSupercarTaskInternal(
       observation = await observeBrowser();
     });
     deadline += receipt.waitedMs;
+    if (receipt.blocked) throw new BrowserHumanInputBusyError();
     return receipt.resumed ? observation : null;
   };
 
@@ -4515,6 +4520,16 @@ async function runSupercarTaskInternal(
       iterations: iteration,
       toolsUsed: Array.from(toolsUsed),
     };
+  } catch (error) {
+    if (!(error instanceof BrowserHumanInputBusyError)) throw error;
+    const question =
+      '你的输入、拖拽或输入法组合还没有结束，旧动作没有执行。请完成操作、松开按键和鼠标后再继续。';
+    await safeCall(opts.onAwaitingUser, {
+      question,
+      at: new Date(),
+      awaitingKind: 'clarification',
+    });
+    return { status: 'awaiting_user', question, iterations: iteration, toolsUsed: [...toolsUsed] };
   } finally {
     if (handles.get(opts.taskId) === handle) handles.delete(opts.taskId);
   }

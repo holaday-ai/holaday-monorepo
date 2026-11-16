@@ -25,6 +25,13 @@ export class BrowserInputOutcomeUnknownError extends Error {
   }
 }
 
+export class BrowserHumanInputBusyError extends Error {
+  constructor() {
+    super('browser_human_input_active');
+    this.name = 'BrowserHumanInputBusyError';
+  }
+}
+
 type BrowserAction<T = void> = (signal: AbortSignal) => Promise<T>;
 
 export interface HumanInputLog {
@@ -70,6 +77,29 @@ export const HUMAN_ALSO_ACTED_NOTE =
 /** A person who never stops (holding a key, scrolling a long page) does not hold the task forever. */
 const MAX_YIELD_MS = 120_000;
 
+/** Counts only: the controller never keeps keys, text, coordinates or field values. */
+export interface HeldBrowserInput {
+  keys: number;
+  pointers: number;
+  composing: boolean;
+}
+export class BrowserHumanActivity {
+  lastBusyAt = 0;
+  revision = 0;
+  readonly held = new Map<object, HeldBrowserInput>();
+  hasHeld(): boolean {
+    return [...this.held.values()].some(
+      (input) => input.keys > 0 || input.pointers > 0 || input.composing,
+    );
+  }
+}
+
+export interface BrowserCheckpoint {
+  resumed: boolean;
+  waitedMs: number;
+  blocked?: true;
+}
+
 export class BrowserControl {
   private phase: BrowserControlPhase = 'agent';
   private error: BrowserControlSnapshot['error'] = null;
@@ -84,9 +114,52 @@ export class BrowserControl {
   /** FIX-53 #1: when the person acted — evidence, never contents. */
   private readonly humanInputTimes: number[] = [];
   /** When the person was last busy (acting or scrolling); 0 before any input. */
-  private lastBusyAt = 0;
+  readonly humanActivity: BrowserHumanActivity;
+  private readonly collaborationV2: boolean;
+  private observedHumanRevision = 0;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    options: { collaborationV2?: boolean; activity?: BrowserHumanActivity } = {},
+  ) {
+    this.collaborationV2 = options.collaborationV2 === true;
+    this.humanActivity = options.activity ?? new BrowserHumanActivity();
+  }
+
+  hasUnobservedHumanInput(): boolean {
+    return this.collaborationV2 && this.humanActivity.revision > this.observedHumanRevision;
+  }
+
+  get tracksHeldInput(): boolean {
+    return this.collaborationV2;
+  }
+
+  hasHeldInput(source: object): boolean {
+    const input = this.humanActivity.held.get(source);
+    return Boolean(input && (input.keys || input.pointers || input.composing));
+  }
+
+  /** Only a trusted input transport's actual delivery/release receipts update this state. */
+  setHeldInput(source: object, input: HeldBrowserInput): void {
+    if (!this.collaborationV2) return;
+    const previous = this.humanActivity.held.get(source);
+    if (
+      previous?.keys === input.keys &&
+      previous.pointers === input.pointers &&
+      previous.composing === input.composing
+    )
+      return;
+    if (input.keys || input.pointers || input.composing)
+      this.humanActivity.held.set(source, { ...input });
+    else this.humanActivity.held.delete(source);
+    this.noteBusy();
+  }
+
+  private noteBusy(): void {
+    this.humanActivity.lastBusyAt = this.now();
+    this.humanActivity.revision++;
+    this.notify();
+  }
 
   snapshot(): BrowserControlSnapshot {
     return { phase: this.phase, lease: null, error: this.error };
@@ -104,17 +177,22 @@ export class BrowserControl {
   async runHuman<T>(action: BrowserAction<T>, kind?: HumanInputKind): Promise<T> {
     if (this.phase === 'closed') throw new Error('browser_control_closed');
     this.noteHumanInput(kind);
-    return this.enqueue(action);
+    try {
+      return await this.enqueue(action);
+    } finally {
+      if (this.collaborationV2 && kind && BUSY_INPUTS.has(kind)) this.noteBusy();
+    }
   }
 
   /** Records the person's input time (an input that did not go through runHuman, e.g. navigation). */
   noteHumanInput(kind?: HumanInputKind): void {
     if (!kind) return;
     const at = this.now();
-    if (BUSY_INPUTS.has(kind)) {
-      this.lastBusyAt = at;
-      this.notify();
-    }
+    if (
+      BUSY_INPUTS.has(kind) ||
+      (this.collaborationV2 && kind === 'mouseMove' && this.humanActivity.hasHeld())
+    )
+      this.noteBusy();
     if (ACTING_INPUTS.has(kind)) {
       this.humanInputTimes.push(at);
       if (this.humanInputTimes.length > INPUT_TIMES_KEPT) this.humanInputTimes.shift();
@@ -129,7 +207,11 @@ export class BrowserControl {
 
   /** Whether the person was busy within the last `idleMs`. */
   humanBusy(idleMs = HUMAN_IDLE_MS): boolean {
-    return this.pendingInputs > 0 || (this.lastBusyAt > 0 && this.now() - this.lastBusyAt < idleMs);
+    return (
+      this.pendingInputs > 0 ||
+      (this.collaborationV2 && this.humanActivity.hasHeld()) ||
+      (this.humanActivity.lastBusyAt > 0 && this.now() - this.humanActivity.lastBusyAt < idleMs)
+    );
   }
 
   /**
@@ -137,7 +219,11 @@ export class BrowserControl {
    * at any time since `since` (epoch ms) — e.g. while the assistant's own action ran.
    */
   humanBusySince(since: number): boolean {
-    return this.pendingInputs > 0 || this.lastBusyAt >= since;
+    return (
+      this.pendingInputs > 0 ||
+      (this.collaborationV2 && this.humanActivity.hasHeld()) ||
+      this.humanActivity.lastBusyAt >= since
+    );
   }
 
   /**
@@ -155,11 +241,12 @@ export class BrowserControl {
     opts.onWait?.();
     const deadline = started + (opts.maxWaitMs ?? MAX_YIELD_MS);
     while (!this.isClosed() && this.humanBusy(idleMs) && this.now() < deadline) {
-      if (this.pendingInputs > 0) {
-        await this.changed();
+      if (this.pendingInputs > 0 || (this.collaborationV2 && this.humanActivity.hasHeld())) {
+        if (this.collaborationV2) await this.changedOrAfter(deadline - this.now());
+        else await this.changed();
         continue;
       }
-      const left = Math.max(1, idleMs - (this.now() - this.lastBusyAt));
+      const left = Math.max(1, idleMs - (this.now() - this.humanActivity.lastBusyAt));
       await this.changedOrAfter(Math.min(left, deadline - this.now()));
     }
     return { yielded: true, waitedMs: Math.max(0, this.now() - started) };
@@ -210,7 +297,12 @@ export class BrowserControl {
       await this.changedOrAfter(left);
     }
     let resumed = false;
-    if (reason !== 'closed' && this.humanInputLog(started).count > 0) {
+    if (reason !== 'closed' && this.collaborationV2 && this.hasUnobservedHumanInput()) {
+      const receipt = await this.checkpoint(observe);
+      resumed = receipt.resumed;
+      if (receipt.blocked) reason = 'timeout';
+      if (this.isClosed()) reason = 'closed';
+    } else if (reason !== 'closed' && this.humanInputLog(started).count > 0) {
       await this.yieldToHuman();
       if (!this.isClosed()) {
         try {
@@ -229,16 +321,40 @@ export class BrowserControl {
    * At a settled boundary of the assistant's own work: yields to a busy person, then re-reads the
    * page (`observe`). `resumed` is true when it waited — the caller's plan is stale.
    */
-  async checkpoint(observe: () => Promise<void>): Promise<{ resumed: boolean; waitedMs: number }> {
-    const waited = await this.yieldToHuman();
-    if (!waited.yielded || this.isClosed()) return { resumed: false, waitedMs: waited.waitedMs };
-    try {
-      await observe();
-    } catch {
-      this.close('observation_failed');
-      return { resumed: false, waitedMs: waited.waitedMs };
+  async checkpoint(
+    observe: () => Promise<void>,
+    options: { maxWaitMs?: number } = {},
+  ): Promise<BrowserCheckpoint> {
+    const deadline = this.now() + (options.maxWaitMs ?? MAX_YIELD_MS);
+    let waitedMs = 0;
+    let yielded = false;
+    while (true) {
+      const waited = await this.yieldToHuman(
+        this.collaborationV2 ? { maxWaitMs: Math.max(0, deadline - this.now()) } : options,
+      );
+      waitedMs += waited.waitedMs;
+      yielded ||= waited.yielded;
+      if (this.isClosed()) return { resumed: false, waitedMs };
+      if (this.collaborationV2 && this.humanBusy())
+        return { resumed: false, blocked: true, waitedMs };
+      if (!yielded && !this.hasUnobservedHumanInput()) return { resumed: false, waitedMs };
+      const revision = this.humanActivity.revision;
+      try {
+        await observe();
+      } catch {
+        this.close('observation_failed');
+        return { resumed: false, waitedMs };
+      }
+      if (this.collaborationV2 && this.isClosed()) return { resumed: false, waitedMs };
+      if (this.collaborationV2 && (this.humanActivity.revision !== revision || this.humanBusy(0))) {
+        if (this.now() >= deadline) return { resumed: false, blocked: true, waitedMs };
+        // Input during a screenshot is ordinary collaboration, not a handback request.
+        // Wait and read again; only the bounded deadline may ask the person to continue.
+        continue;
+      }
+      this.observedHumanRevision = revision;
+      return { resumed: true, waitedMs };
     }
-    return { resumed: true, waitedMs: waited.waitedMs };
   }
 
   private async enqueue<T>(action: BrowserAction<T>): Promise<T> {
@@ -282,6 +398,8 @@ export class BrowserControl {
   confirmBrowserStopped(): void {
     if (!this.isClosed()) throw new Error('browser_stop_not_requested');
     this.confirmStop();
+    this.humanActivity.held.clear();
+    this.notify();
   }
 
   isSettled(): boolean {

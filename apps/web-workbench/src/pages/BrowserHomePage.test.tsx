@@ -48,12 +48,26 @@ vi.mock('@/components/CdpScreencastViewport', () => ({
   CdpScreencastViewport: ({
     wsUrl,
     onStatusChange,
+    viewOnly,
+    viewportV2,
+    collaborationV2,
   }: {
     wsUrl: string | null;
     onStatusChange?: (status: string) => void;
+    viewOnly?: boolean;
+    viewportV2?: boolean;
+    collaborationV2?: boolean;
   }) => {
     stream.onStatusChange = onStatusChange ?? null;
-    return <div data-testid="screen" data-ws-url={wsUrl ?? ''} />;
+    return (
+      <div
+        data-testid="screen"
+        data-ws-url={wsUrl ?? ''}
+        data-view-only={String(viewOnly)}
+        data-viewport={String(viewportV2)}
+        data-collaboration={String(collaborationV2)}
+      />
+    );
   },
 }));
 
@@ -172,10 +186,25 @@ describe('BROWSER-HOME-1 BrowserHomePage', () => {
     expect(addressBar().value).toBe('HOLA DAY 主页');
   });
 
+  it('uses the personal browser snapshot to enable direct interaction and collaboration', async () => {
+    api.open.mockResolvedValueOnce({
+      sessionId: 'bhs_usr_1',
+      url: 'https://news.example/',
+      capabilities: { viewportV2: true, collaborationV2: true },
+    });
+    mount();
+    const screenView = await screen.findByTestId('screen');
+    expect(screenView.getAttribute('data-view-only')).toBe('false');
+    expect(screenView.getAttribute('data-viewport')).toBe('true');
+    expect(screenView.getAttribute('data-collaboration')).toBe('true');
+  });
+
   it('an already open browser goes on showing its page', async () => {
     api.open.mockResolvedValueOnce({ sessionId: 'bhs_usr_1', url: 'https://news.example/' });
     mount();
-    expect(await screen.findByTestId('screen')).toBeTruthy();
+    const screenView = await screen.findByTestId('screen');
+    expect(screenView.getAttribute('data-view-only')).toBe('true');
+    expect(screenView.getAttribute('data-collaboration')).toBe('false');
     expect(addressBar().value).toBe('https://news.example/');
   });
 

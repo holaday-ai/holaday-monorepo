@@ -19,7 +19,7 @@ const original = {
   region: appEnv.MODEL_DATA_REGION_DEFAULT,
 };
 
-function fakePool() {
+function fakePool(capabilities?: BrowserInstance['capabilities']) {
   const instances = new Map<string, BrowserInstance>();
   const gotos: string[] = [];
   /** Test hook: how the next goto behaves (sets the landed URL, may throw). */
@@ -44,6 +44,7 @@ function fakePool() {
         taskId,
         userId,
         status: 'ready',
+        capabilities,
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
         index: 0,
@@ -128,7 +129,7 @@ describe('browserHome router — gate', () => {
     appEnv.BROWSER_HOME_ALLOWLIST = 'usr_listed';
     const { pool } = fakePool();
     await expect(caller('usr_unlisted', pool).open()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(caller('usr_listed', pool).open()).resolves.toEqual({
+    await expect(caller('usr_listed', pool).open()).resolves.toMatchObject({
       sessionId: 'bhs_usr_listed',
       url: null,
     });
@@ -143,11 +144,28 @@ describe('browserHome router — gate', () => {
 });
 
 describe('browserHome router — open / close', () => {
+  it('returns the owned instance capability snapshot before and during a task loan', async () => {
+    const capabilities = Object.freeze({
+      viewportV2: true,
+      observationV2: false,
+      replayV1: false,
+      routingV2: false,
+      collaborationV2: true as const,
+    });
+    const { pool } = fakePool(capabilities);
+    const c = caller('usr_snapshot', pool);
+    expect(await c.open()).toMatchObject({ capabilities });
+    pool.lend('usr_snapshot', 'tsk_snapshot');
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_snapshot', capabilities });
+    expect(pool.allocate).toHaveBeenCalledTimes(1);
+    await c.close();
+  });
+
   it('open creates once, then reuses; close releases', async () => {
     const { pool } = fakePool();
     const c = caller('usr_life', pool);
-    expect(await c.open()).toEqual({ sessionId: 'bhs_usr_life', url: null });
-    expect(await c.open()).toEqual({ sessionId: 'bhs_usr_life', url: null });
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_life', url: null });
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_life', url: null });
     expect(pool.allocate).toHaveBeenCalledTimes(1);
     expect(pool.allocate).toHaveBeenCalledWith('bhs_usr_life', 'usr_life', undefined, {
       targetUrl: null,
@@ -268,7 +286,7 @@ describe('browserHome router — while a task holds the browser (step 4)', () =>
     const inst = pool.lend('usr_lent', 'tsk_running');
     const run = browserControlSessions.start(inst);
     try {
-      expect(await c.open()).toEqual({ sessionId: 'bhs_usr_lent', url: null });
+      expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_lent', url: null });
       expect(pool.allocate).toHaveBeenCalledTimes(1);
       expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/x' })).toEqual({
         ok: true,

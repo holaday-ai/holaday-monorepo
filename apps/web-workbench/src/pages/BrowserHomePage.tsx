@@ -35,7 +35,7 @@ import { useNavigate } from 'react-router-dom';
 
 type SessionState =
   | { status: 'opening' }
-  | { status: 'ready'; sessionId: string }
+  | { status: 'ready'; sessionId: string; viewportV2: boolean; collaborationV2: boolean }
   | { status: 'error'; message: string };
 
 /** One id per page mount: the server counts open /browser pages (P2-4, see browserHome.close). */
@@ -98,7 +98,12 @@ export function BrowserHomePage({
     const promise = trpc.browserHome.open.mutate(viewerId ? { viewerId } : undefined).then(
       (res) => {
         if (!aliveRef.current) return null;
-        setSession({ status: 'ready', sessionId: res.sessionId });
+        setSession({
+          status: 'ready',
+          sessionId: res.sessionId,
+          viewportV2: res.capabilities?.viewportV2 === true,
+          collaborationV2: res.capabilities?.collaborationV2 === true,
+        });
         // An open browser (or the last address, restored) goes on showing its page.
         if (isWebPageUrl(res.url) && !navigatedRef.current) {
           setUrl(res.url);
@@ -304,9 +309,13 @@ export function BrowserHomePage({
                 <CdpScreencastViewport
                   wsUrl={wsUrl}
                   streamToken={streamToken}
+                  viewOnly={session.status !== 'ready' || !session.collaborationV2}
+                  viewportV2={session.status === 'ready' && session.viewportV2}
+                  collaborationV2={session.status === 'ready' && session.collaborationV2}
                   fitMode="contain"
                   onUrlChange={handleUrlChange}
                   onStatusChange={handleStreamStatus}
+                  onInputRefused={() => toast.show('页面或连接已变化，请等画面更新后重试', 'info')}
                 />
               )}
               {session.status === 'error' ? (

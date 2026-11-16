@@ -7,7 +7,7 @@ import {
 } from '@holaday/shared-types';
 import { z } from 'zod';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
-import type { BrowserControl } from './browser-control.js';
+import type { BrowserCheckpoint, BrowserControl } from './browser-control.js';
 
 type Action = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
 type Target = Extract<SelectedChromeSessionCommand, { op: 'open' }>['target'];
@@ -281,7 +281,7 @@ export class SelectedChromeClient {
     return this.track(() => this.refresh());
   }
 
-  async checkpoint(): Promise<{ resumed: boolean; waitedMs: number }> {
+  async checkpoint(): Promise<BrowserCheckpoint> {
     await this.pending;
     return this.options.control.checkpoint(async () => {
       const result = await this.refresh();

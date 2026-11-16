@@ -6,6 +6,7 @@ import type {
   NeutralMessagesRequest,
   NeutralOutputContentBlock,
 } from '../../llm/messages-adapter.js';
+import { BrowserControl } from '../supercar/browser-control.js';
 
 const legacy = vi.hoisted(() => ({
   run: vi.fn(async () => ({
@@ -29,7 +30,11 @@ const PAGE = `<!doctype html><title>合成商城</title><label>关键词 <input 
 <button onclick="document.getElementById('r').textContent='结果：'+document.querySelector('input').value">搜索</button><p id="r"></p>`;
 
 function scripted(
-  turns: Array<(request: NeutralMessagesRequest) => NeutralOutputContentBlock[]>,
+  turns: Array<
+    (
+      request: NeutralMessagesRequest,
+    ) => NeutralOutputContentBlock[] | Promise<NeutralOutputContentBlock[]>
+  >,
 ): MessagesAdapter {
   let index = 0;
   return {
@@ -40,7 +45,7 @@ function scripted(
       return {
         id: `r${index}`,
         metadata: this.metadata,
-        content: turn(request),
+        content: await turn(request),
         stopReason: 'tool_use',
         usage: {
           inputTokens: 1,
@@ -93,6 +98,48 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     expect(outcome.summary).toBe('legacy');
     expect(legacy.run).toHaveBeenCalledTimes(1);
   });
+
+  it('does not execute a stale real-page click after a human edit became idle during model thinking', async () => {
+    let now = 10_000;
+    const control = new BrowserControl(() => now, { collaborationV2: true });
+    const page = await browser.newPage();
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }),
+    );
+    await page.goto('https://fixture.browser.test/');
+    const onAction = vi.fn();
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_human_idle_replan',
+        intent: '检查页面上的搜索按钮',
+        executor: { getPage: async () => page } as never,
+        browserControl: control,
+        onAction,
+        messagesAdapter: scripted([
+          () => [call('snapshot', {})],
+          async (request) => {
+            const ref = refIn(request, /button/);
+            await control.runHuman(() => page.locator('input').fill('user kept'), 'insertText');
+            now += 3_000;
+            return [call('click', { ref })];
+          },
+          () => [
+            call('finish', {
+              status: 'completed',
+              summary: '已检查搜索按钮，保留用户输入。',
+              evidence: '搜索',
+            }),
+          ],
+        ]),
+      });
+      expect(outcome.status).toBe('completed');
+      expect(onAction).not.toHaveBeenCalled();
+      expect(await page.locator('input').inputValue()).toBe('user kept');
+      expect(await page.locator('#r').textContent()).toBe('');
+    } finally {
+      await page.close();
+    }
+  }, 15_000);
 
   it('runs the unified tools with the shared tick, capture and evidence hooks', async () => {
     Object.assign(env, { BROWSER_EXECUTOR: 'unified' });
