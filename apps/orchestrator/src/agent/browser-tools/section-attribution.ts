@@ -105,10 +105,9 @@ export function tabSections(pageText: string): TabSection[][] {
     // read as a name before the group (「票价及优惠政策」) is not one of them.
     const mark = lines[found.next]?.match(SELECTED_RE);
     const named = mark?.[2]?.split('｜');
-    const tabs =
-      named && named.every((name) => found.names.includes(name))
-        ? { names: named, next: found.next }
-        : found;
+    const tabs = named?.every((name) => found.names.includes(name))
+      ? { names: named, next: found.next }
+      : found;
     const chosen = mark?.[1];
     const picked = chosen && named ? tabs.names.indexOf(chosen) : -1;
     const lists = numberedLists(lines, picked >= 0 ? tabs.next + 1 : tabs.next);
