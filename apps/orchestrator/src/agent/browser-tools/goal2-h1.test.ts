@@ -4,9 +4,9 @@ import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { COUNTER_LEAD } from './completion-fields.js';
 import {
-  MANY_ITEMS_RE,
   engagementClaims,
   engagementFindings,
+  manyItemsRequest,
   settleUnpairedCounts,
 } from './engagement-counts.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
@@ -285,8 +285,14 @@ describe('H1 复审 #2', () => {
       '在小红书搜索露营，打开第一篇笔记，告诉我它的点赞数',
       '把结果告诉我',
       'tell me the likes and comments',
+      // 复审 #4-2
+      '在小红书搜索露营，打开搜索结果里的第一篇笔记，告诉我它的点赞数',
+      '列出这篇笔记的点赞、收藏和评论数',
+      '打开第 3 篇笔记，告诉我点赞数',
+      '打开第十二个视频看点赞数',
+      '这条视频点赞多少，评论区大家怎么说',
     ])
-      expect(MANY_ITEMS_RE.test(one)).toBe(false);
+      expect(manyItemsRequest(one)).toBe(false);
     for (const many of [
       '列出前 5 条笔记的点赞数',
       '每条评论的点赞数',
@@ -302,7 +308,7 @@ describe('H1 复审 #2', () => {
       'the first three videos',
       'top-liked comments',
     ])
-      expect(MANY_ITEMS_RE.test(many)).toBe(true);
+      expect(manyItemsRequest(many)).toBe(true);
   });
   it('#2-5: 「目前 3052 个赞」 is a claim; 「前 5 条评论」 is not', () => {
     expect(engagementClaims('目前 3052 个赞')).toMatchObject([{ kind: '点赞', value: '3052' }]);

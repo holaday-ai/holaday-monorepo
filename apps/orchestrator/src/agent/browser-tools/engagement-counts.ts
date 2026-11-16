@@ -419,26 +419,33 @@ export interface EngagementOptions {
  * A request about several items or a note's comments, said in so many words (「前 5 条笔记」「每条」
  * 「热门评论」). 复审 #2-4: 「点赞、评论、收藏」「搜索…打开第一篇」「结果」 are about one item.
  */
-const N = '(?:\\d+|[一二三四五六七八九十两几])';
+const N = '(?:\\d+|[一二三四五六七八九十两几百]+)';
 export const MANY_ITEMS_RE = new RegExp(
   [
     `前\\s*${N}\\s*(?:条|个|篇|名|位|项)`,
-    // 复审 #3-3: 「5 条笔记」「三篇笔记」「几个视频」, 「列出…」, 「点赞最高的 3 条评论」, 「评论区…」.
-    // Two or more: not 「第一篇笔记」「一条评论」.
-    `(?<![第\\d])(?:[2-9]|\\d{2,}|[二三四五六七八九十两几])\\s*(?:条|篇|个)\\s*(?:笔记|视频|评论|帖子|结果|内容|回答)`,
-    '列出',
+    // 复审 #3-3: 「5 条笔记」「三篇笔记」「几个视频」; two or more, never 「一条」.
+    `(?<![\\d])(?:[2-9]|\\d{2,}|[二三四五六七八九十两几])\\s*(?:条|篇|个)\\s*(?:笔记|视频|评论|帖子|结果|内容|回答)`,
+    // 复审 #4-2: 「列出」「搜索结果」「评论区」 only with a number or a many-word after them.
+    `列出\\s*(?:前\\s*)?(?:${N}|所有|全部|各|每|这些)`,
+    `搜索结果(?:里|中|的)?[^，。,；;]{0,6}(?:最多|最高|每|各|前|所有|全部|几)`,
+    `评论区(?:里|中|的)?[^，。,；;]{0,6}(?:点赞|赞数|最多|最高|热门|每|各|前)`,
     `最[高多]的?\\s*${N}?\\s*(?:条|个)?\\s*(?:评论|笔记|视频)`,
-    '评论区',
     '每(?:条|个|篇|一条|一个|一篇)|各(?:条|个|篇)',
     '(?:热门|精选|最新|高赞)评论',
     '(?:这些|多条|几条)(?:笔记|评论|视频|结果)',
-    '搜索结果(?:里|中|的)',
     '\\btop[-\\s]?(?:\\d+|liked|rated)\\b',
     '\\bfirst\\s+(?:\\d+|two|three|four|five|six|seven|eight|nine|ten)\\b',
     '\\b(?:each|every)\\s+(?:note|post|video|comment|result)\\b',
   ].join('|'),
   'i',
 );
+
+/** 复审 #4-2: 「第 3 篇」「第十二个」 name one item; they are taken out before the request is read. */
+export function manyItemsRequest(intent: string): boolean {
+  return MANY_ITEMS_RE.test(
+    intent.replace(new RegExp(`第\\s*${N}\\s*(?:条|篇|个|名|位|项)`, 'g'), ''),
+  );
+}
 
 type Verdict =
   | { claim: EngagementClaim; kind: 'paired' | 'unchecked' }

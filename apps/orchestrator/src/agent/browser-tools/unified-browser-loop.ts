@@ -64,7 +64,11 @@ import {
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
-import { type EngagementKind, MANY_ITEMS_RE, settleUnpairedCounts } from './engagement-counts.js';
+import {
+  type EngagementKind,
+  manyItemsRequest,
+  settleUnpairedCounts,
+} from './engagement-counts.js';
 import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
 import {
   answerCount,
@@ -535,7 +539,7 @@ export async function runUnifiedBrowserLoop(
         ),
         // 复审 P0 / #2-9: the pages and the request exactly as the checks read them.
         evidenceSink.texts(),
-        { english: isEnglishIntent(intentText), manyItems: MANY_ITEMS_RE.test(input.intent) },
+        { english: isEnglishIntent(intentText), manyItems: manyItemsRequest(input.intent) },
       );
       return {
         ...outcome,
@@ -583,6 +587,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     },
   ];
   const pageEvidence: ObservedEvidence[] = [];
+  /** GOAL2 H2: reads kept so far (pageEvidence is a window; this only counts). */
+  let readsDone = 0;
   if (input.evidenceSink) input.evidenceSink.texts = () => pageEvidence.map((page) => page.text);
   // Tabs read successfully and their latest listed titles. Kept apart from
   // pageEvidence, which evicts old reads of long pages.
@@ -614,6 +620,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     )
       return '';
     pageEvidence.push(item);
+    readsDone += 1;
     if (item.tabId) {
       readTabs.add(item.tabId);
       // FIX-27: a read's first level-1 heading is the document title.
@@ -873,7 +880,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    */
   let continuedWall: string | undefined;
   /** The page the popup was last seen on after a try, and how many tries in a row it stayed. */
-  let wallTries: { page: string; tries: number; reads: Set<string>; step: number } | null = null;
+  let wallTries: { page: string; tries: number; reads: Set<string>; readsAt: number } | null = null;
   let wallStalled: string | undefined;
   // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
   // answer that already tells of the login prompt gets no second one.
@@ -1788,7 +1795,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 pageEvidence.map((page) => page.text),
                 {
                   english: isEnglishIntent(input.userIntent ?? input.intent),
-                  manyItems: MANY_ITEMS_RE.test(input.intent),
+                  manyItems: manyItemsRequest(input.intent),
                 },
               );
               const again = assessCompletionFacts({
@@ -2778,15 +2785,28 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         // is the same popup. A new page or a read showing something new starts again.
         if (!blocker && continuedWall && WALL_TRY_TOOLS.has(action.tool)) {
           const read = (pageEvidence.at(-1)?.text ?? '').replace(/\[ref=[^\]]*\]/g, '');
-          const before: { page: string; tries: number; reads: Set<string>; step: number } | null =
-            wallTries;
-          // A read seen before on this page (the popup open, then closed, then open again) is
-          // nothing new.
-          const same: boolean = !!before && before.page === continuedWall && before.reads.has(read);
-          const tries: number = same && before ? before.tries + (before.step === step ? 0 : 1) : 1;
-          const reads: Set<string> = new Set(before?.page === continuedWall ? before.reads : []);
+          const before: {
+            page: string;
+            tries: number;
+            reads: Set<string>;
+            readsAt: number;
+          } | null = wallTries;
+          // 复审 #4-3: a try counts again only after a read in between, and only when that read
+          // is one already seen on this page (the popup closed and back is no progress). Typing
+          // the start, typing the end and clicking search, a turn each, is one try.
+          const onPage = !!before && before.page === continuedWall;
+          const newRead = !onPage || before.readsAt !== readsDone;
+          const seenBefore = onPage && before.reads.has(read);
+          const tries: number = !onPage
+            ? 1
+            : !newRead
+              ? before.tries
+              : seenBefore
+                ? before.tries + 1
+                : 1;
+          const reads: Set<string> = new Set(onPage ? before.reads : []);
           reads.add(read);
-          wallTries = { page: continuedWall, tries, reads, step };
+          wallTries = { page: continuedWall, tries, reads, readsAt: readsDone };
           if (tries >= 3 && !wallStalled && !concludeNow) {
             const host = hostOf(input.currentPageUrl?.());
             wallStalled = host ? rescueSiteName(input.currentPageUrl?.()) : '网站';

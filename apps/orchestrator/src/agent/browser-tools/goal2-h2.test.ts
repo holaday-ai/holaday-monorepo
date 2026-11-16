@@ -46,11 +46,17 @@ const tree = [
 
 function run(
   calls: Array<{ name: string; input: Record<string, unknown> }>,
-  wall: (url: string) => boolean = () => true,
+  wall: (url: string, last: string) => boolean = () => true,
 ) {
   let url = 'about:blank';
-  const execute = async (action: { tool: string; url?: string }): Promise<UnifiedToolResult> => {
+  let last = '';
+  const execute = async (action: {
+    tool: string;
+    url?: string;
+    ref?: string;
+  }): Promise<UnifiedToolResult> => {
     if (action.tool === 'navigate') url = action.url!;
+    if (action.tool === 'click') last = action.ref ?? '';
     return action.tool === 'snapshot'
       ? ({ ok: true, text: JSON.stringify({ tree, sourceURL: url }), url } as UnifiedToolResult)
       : ({ ok: true, text: '已执行', url } as UnifiedToolResult);
@@ -63,7 +69,9 @@ function run(
     execute: execute as never,
     currentPageUrl: () => url,
     probeBlocker: async () =>
-      wall(url) ? { reason: 'login', message: PROMPT, disposition: 'continue' as const } : null,
+      wall(url, last)
+        ? { reason: 'login', message: PROMPT, disposition: 'continue' as const }
+        : null,
   }).then((outcome) => ({ outcome, seen: seen.join('\n') }));
 }
 
@@ -72,23 +80,27 @@ const open = [
   { name: 'snapshot', input: {} },
 ];
 const click = { name: 'click', input: { ref: 'e5' } };
+const snap = { name: 'snapshot', input: {} };
 
 describe('H2 · the same login prompt after three tries ends the run, not 53 steps', () => {
   it('a fourth action after the note hands the page over (awaiting_user, login)', async () => {
-    const { outcome, seen } = await run([...open, click, click, click, click, click]);
+    // 复审 #4-3: a read between tries, each one already seen on this page.
+    const { outcome, seen } = await run([...open, click, snap, click, snap, click, snap, click]);
     expect(seen).toContain('同一个登录提示已经第 3 次挡在页面上');
     expect(outcome).toMatchObject({ status: 'awaiting_user', reason: 'login' });
     expect(outcome.status === 'awaiting_user' && outcome.message).toContain(
       '高德地图反复弹出登录提示',
     );
-    expect(outcome.steps).toBeLessThan(8);
+    expect(outcome.steps).toBeLessThan(10);
   });
 
   it('a 部分完成 finish after the note is delivered', async () => {
     const { outcome } = await run([
       ...open,
       click,
+      snap,
       click,
+      snap,
       click,
       {
         name: 'finish',
@@ -99,7 +111,7 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
       },
     ]);
     expect(outcome.status).not.toBe('failed');
-    expect(outcome.steps).toBeLessThan(8);
+    expect(outcome.steps).toBeLessThan(10);
   });
 
   it('reads and scrolls are not tries; a prompt that goes away does not count', async () => {
@@ -139,7 +151,9 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
     const { outcome, seen } = await run([
       ...open,
       click,
+      snap,
       click,
+      snap,
       click,
       {
         name: 'finish',
@@ -155,10 +169,28 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
 
   it('复审 #3-1: closing the popup, then trying again, over and over, still ends', async () => {
     const close = { name: 'click', input: { ref: 'e3' } };
-    let n = 0;
     const { seen, outcome } = await run(
-      [...open, close, click, close, click, close, click, close, click, close, click],
-      () => ++n % 2 === 0,
+      // A read between tries (复审 #4-3): each one already seen on this page.
+      [
+        ...open,
+        close,
+        snap,
+        click,
+        snap,
+        close,
+        snap,
+        click,
+        snap,
+        close,
+        snap,
+        click,
+        snap,
+        close,
+        snap,
+        click,
+      ],
+      // The popup is gone right after its × is clicked, back after anything else.
+      (_url, last) => last !== 'e3',
     );
     expect(seen).toContain('同一个登录提示已经第 3 次');
     expect(outcome.steps).toBeLessThan(16);
@@ -227,5 +259,18 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
       }),
     });
     expect(seen.join('\n')).not.toContain('同一个登录提示已经');
+  });
+
+  it('复审 #4-3: typing the start, the end and clicking search, a turn each, is no stall', async () => {
+    const done = { name: 'finish', input: { status: 'failed', summary: '没有查到。' } };
+    const { seen } = await run([
+      ...open,
+      { name: 'type', input: { ref: 'e3', text: '杭州东站' } },
+      { name: 'type', input: { ref: 'e4', text: '西湖断桥' } },
+      click,
+      snap,
+      done,
+    ]);
+    expect(seen).not.toContain('同一个登录提示已经');
   });
 });

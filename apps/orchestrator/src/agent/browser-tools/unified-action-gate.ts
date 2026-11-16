@@ -176,8 +176,10 @@ const READ_ACTIONABLE = (
   if (
     !box &&
     /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
-    // 复审 #3-6: a drawn box has no text, or only a tick mark; 「同意」 with text is a button.
-    /^[✓√✔☑☐□]?$/.test(text) &&
+    // 复审 #3-6: a drawn box has no text, or only a mark; 「同意」 with text is a button.
+    // 复审 #4-1: an icon-font glyph (`&#xe60f;`), a symbol or a zero-width space is no text.
+    !text.replace(/[\p{Co}\p{So}\u200b-\u200f\ufeff\s]/gu, '') &&
+    !/[×✕╳]/.test(text) &&
     words.some((word) =>
       // 复审 #3-5: 「icon-unchecked」「checked」「ticked」「agreed」 too.
       /^(?:un)?(?:check(?:ed|box|mark)?|tick(?:ed)?)$|^(?:agree(?:d|ment)?|consent|radio|switch|box)$/i.test(

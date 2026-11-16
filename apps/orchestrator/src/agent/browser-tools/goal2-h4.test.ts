@@ -22,7 +22,9 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>Sign up</title>
 <div class="login-panel active"><div class="agree-row"><i id="panelactive" class="agree-check"></i><span>我已阅读并同意《用户协议》</span></div></div>
 <div class="agree-row"><i id="unchecked" class="icon-unchecked"></i><span>我已阅读并同意《隐私政策》</span></div>
 <div class="cookie-bar">We use cookies <span id="cookieagree" class="cookie-consent-btn">同意</span></div>
-<div class="terms"><span id="agreebtn" class="agree-btn">同意</span><span>不同意</span><span>《用户协议》</span></div>`;
+<div class="terms"><span id="agreebtn" class="agree-btn">同意</span><span>不同意</span><span>《用户协议》</span></div>
+<div class="agree-row"><i id="glyph" class="iconfont agree-check">&#xe60f;</i><span>我已阅读并同意《用户协议》</span></div>
+<div class="agree-row"><i id="zw" class="agree-check">&#x200b;</i><span>我已阅读并同意《隐私政策》</span></div>`;
 
 let browser: Browser;
 beforeAll(async () => {
@@ -59,6 +61,9 @@ describe('H4 · a consent box drawn without checkbox semantics is the user’s',
         '#unchecked',
         '#cookieagree',
         '#agreebtn',
+        // 复审 #4-1: an icon-font glyph or a zero-width space is no text.
+        '#glyph',
+        '#zw',
       ])
         expect(await clickAt(page, css, intent)).toMatchObject({
           kind: 'skip',
