@@ -166,7 +166,7 @@ export class BrowserHomeSessions {
     if (existing && now - existing.at < CLAIM_STALE_MS) return { kind: 'busy' };
     if (pool.browserHomeHolder(userId)) return { kind: 'busy' };
     const instance = this.instanceFor(pool, userId);
-    if (!instance) return { kind: 'closed' };
+    if (!instance || instance.executor.sessionInterruption) return { kind: 'closed' };
     const token = {};
     this.taskClaims.set(userId, { token, at: now });
     let handedOver = false;
@@ -180,6 +180,7 @@ export class BrowserHomeSessions {
         isCurrent: () =>
           this.taskClaims.get(userId)?.token === token &&
           this.instanceFor(pool, userId) === instance &&
+          !instance.executor.sessionInterruption &&
           !pool.browserHomeHolder(userId),
         handOver: () => {
           handedOver = true;
@@ -260,7 +261,7 @@ export class BrowserHomeSessions {
       pool.touch(existing.instance.taskId);
       // While a task holds it, the person's input already goes through the task's control.
       if (!existing.heldBy) openPersonControl(existing.instance);
-      const url = await currentUrl(existing.instance);
+      const url = await currentUrl(existing.instance, true);
       this.rememberUrl(userId, url);
       return {
         sessionId,
@@ -285,6 +286,8 @@ export class BrowserHomeSessions {
     await this.watchNavigations(instance, userId);
     let url: string | null = null;
     if (restoreTo) url = await this.restore(instance, restoreTo, userId, logger);
+    // Best-effort URL restoration may fail, but a stopped context is never a ready Home.
+    await currentUrl(instance, true);
     openPersonControl(instance);
     return { sessionId, url, ...(profile ? { cloudProfileId: profile.id } : {}) };
   }
@@ -418,7 +421,11 @@ export class BrowserHomeSessions {
     // Located again after the await: the task may have given it back meanwhile.
     const location = this.locate(pool, userId);
     if (!location || reused()) return false;
-    if (location.heldBy) return pool.endBrowserHomeLoan(userId) !== null;
+    if (location.heldBy) {
+      // Leaving the viewer is not an instruction to end the ongoing task's workspace.
+      if (options.onlyIfUnused) return false;
+      return pool.endBrowserHomeLoan(userId) !== null;
+    }
     return pool.release(location.instance.taskId, 'browser-home-close');
   }
 }
@@ -436,10 +443,16 @@ function openPersonControl(instance: BrowserInstance): void {
   }
 }
 
-async function currentUrl(instance: BrowserInstance): Promise<string | null> {
+async function currentUrl(instance: BrowserInstance, requireLive = false): Promise<string | null> {
   try {
-    return (await instance.executor.getPage()).url();
-  } catch {
+    if (requireLive && instance.executor.sessionInterruption)
+      throw new Error('home_session_interrupted');
+    const page = await instance.executor.getPage();
+    if (requireLive && instance.executor.sessionInterruption)
+      throw new Error('home_session_interrupted');
+    return page.url();
+  } catch (error) {
+    if (requireLive) throw error;
     return null;
   }
 }

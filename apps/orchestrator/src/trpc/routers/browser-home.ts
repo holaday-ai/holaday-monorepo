@@ -272,6 +272,11 @@ export const browserHomeRouter = router({
       if (!location) throw new Error('Browser is not ready for reuse');
       return { ...opened, capabilities: instanceBrowserCapabilities(location.instance) };
     } catch (error) {
+      if (error instanceof Error && error.message === 'home_session_interrupted')
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '当前个人浏览器已停止使用保存状态，请离开此页后重新打开；活动任务需先结束。',
+        });
       if (error instanceof Error && error.message === 'home_profile_switch_required')
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
