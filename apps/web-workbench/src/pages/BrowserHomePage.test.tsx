@@ -150,6 +150,21 @@ const addressBar = () =>
   screen.getByRole('textbox', { name: /云浏览器地址栏/ }) as HTMLInputElement;
 
 describe('BROWSER-HOME-1 BrowserHomePage', () => {
+  it('keeps the file panel hidden when its service is disabled', async () => {
+    mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: '浏览器文件' })).toBeNull();
+  });
+  it('offers saved files when the file index is enabled even on a legacy live browser', async () => {
+    api.open.mockResolvedValue({
+      sessionId: 'bhs_usr_1',
+      url: null,
+      filesAvailable: true,
+      filesEnabled: false,
+    });
+    mount();
+    expect(await screen.findByRole('button', { name: '浏览器文件' })).toBeTruthy();
+  });
   it.each([false, true])(
     'rejoins a back-forward-cache page only for the same actor (changed=%s)',
     async (changed) => {

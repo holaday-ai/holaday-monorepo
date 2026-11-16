@@ -451,9 +451,18 @@ describe('Actual Home download events', () => {
       });
 
       expect(before.filesEnabled).toBe(false);
+      expect(before.filesAvailable).toBe(false);
       const refused = await downloadSeen;
       expect(await refused?.failure()).not.toBeNull();
       expect(f.records).toEqual([]);
+      env.BROWSER_HOME_FILES_V1 = true;
+      const legacy = await caller('usr_alice').open({
+        viewerId: 'entry-viewer-legacy',
+        profileId: grant.id,
+      });
+      expect(legacy.filesAvailable).toBe(true);
+      expect(legacy.filesEnabled).toBe(false);
+      expect(downloadOptions).toEqual([false]);
       await caller('usr_alice').close();
       env.BROWSER_HOME_FILES_V1 = true;
       const opened = await caller('usr_alice').open({
@@ -461,6 +470,7 @@ describe('Actual Home download events', () => {
         profileId: grant.id,
       });
       expect(opened.filesEnabled).toBe(true);
+      expect(opened.filesAvailable).toBe(true);
       expect(downloadOptions).toEqual([false, true]);
       const download = await downloadSeen;
       const receipt = await sharedBrowserDownload(download!, executor)!;

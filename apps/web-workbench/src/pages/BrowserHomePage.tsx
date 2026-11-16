@@ -4,6 +4,7 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { InputArea } from '@/components/InputArea';
 import { BrowserHomeAddressBar } from '@/components/browser-home/BrowserHomeAddressBar';
+import { BrowserHomeFiles } from '@/components/browser-home/BrowserHomeFiles';
 import { BrowserHomeProfiles } from '@/components/browser-home/BrowserHomeProfiles';
 import { BrowserHomeTaskCard } from '@/components/browser-home/BrowserHomeTaskCard';
 import { BrowserHomeView, recentBrowserHomeTasks } from '@/components/browser-home/BrowserHomeView';
@@ -37,7 +38,14 @@ import { useNavigate } from 'react-router-dom';
 
 type SessionState =
   | { status: 'opening' }
-  | { status: 'ready'; sessionId: string; viewportV2: boolean; collaborationV2: boolean }
+  | {
+      status: 'ready';
+      sessionId: string;
+      viewportV2: boolean;
+      collaborationV2: boolean;
+      filesAvailable: boolean;
+      filesEnabled: boolean;
+    }
   | { status: 'error'; message: string };
 
 /** One id per page mount: the server counts open /browser pages (P2-4, see browserHome.close). */
@@ -109,6 +117,8 @@ export function BrowserHomePage({
           sessionId: res.sessionId,
           viewportV2: res.capabilities?.viewportV2 === true,
           collaborationV2: res.capabilities?.collaborationV2 === true,
+          filesAvailable: res.filesAvailable === true,
+          filesEnabled: res.filesEnabled === true,
         });
         // An open browser (or the last address, restored) goes on showing its page.
         if (isWebPageUrl(res.url) && !navigatedRef.current) {
@@ -319,8 +329,15 @@ export function BrowserHomePage({
         onNavigate={navigateBrowser}
         onHome={() => setView('home')}
         endContent={
-          profilesEnabled && ownerId ? (
-            <BrowserHomeProfiles key={ownerId} ownerId={ownerId} />
+          ownerId ? (
+            <>
+              {profilesEnabled && (
+                <BrowserHomeProfiles key={`profiles-${ownerId}`} ownerId={ownerId} />
+              )}
+              {session.status === 'ready' && session.filesAvailable && (
+                <BrowserHomeFiles ownerId={ownerId} receiving={session.filesEnabled} />
+              )}
+            </>
           ) : null
         }
       />

@@ -317,6 +317,7 @@ export const browserHomeRouter = router({
       return {
         ...opened,
         capabilities: instanceBrowserCapabilities(location.instance),
+        filesAvailable: appEnv.BROWSER_HOME_FILES_V1,
         filesEnabled: appEnv.BROWSER_HOME_FILES_V1 && browserHomeFiles.has(location.instance),
       };
     } catch (error) {

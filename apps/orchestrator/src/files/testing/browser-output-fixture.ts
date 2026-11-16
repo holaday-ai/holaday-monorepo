@@ -62,8 +62,13 @@ export async function browserOutputFixture() {
                   ? records
                   : table === users
                     ? [
-                        { id: 7, externalId: 'usr_alice', status: faults.ownerStatus },
-                        { id: 8, externalId: 'usr_bob', status: 'active' },
+                        {
+                          id: 7,
+                          externalId: 'usr_alice',
+                          status: faults.ownerStatus,
+                          modelDataRegion: 'intl',
+                        },
+                        { id: 8, externalId: 'usr_bob', status: 'active', modelDataRegion: 'intl' },
                       ]
                     : table === tasks
                       ? [
