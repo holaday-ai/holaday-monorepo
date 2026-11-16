@@ -44,9 +44,27 @@ export interface GrantRecord extends BrowserGrantMetadata {
   snapshot?: Snapshot;
   writer?: { token: string; expiresAt: number };
   profileCreatedAt?: number;
+  /** Private receipt binding, never returned with grant metadata. */
+  captureRequestHash?: string;
 }
 export interface VaultDocument {
   grants: GrantRecord[];
+  homeProfileId?: string | null;
+  /** Fences a capture prepared before clear or a later profile-selection intent. */
+  clearEpoch?: number;
+}
+export interface CloudProfileSaveOperation {
+  requestId: string;
+  requestHash: string;
+  requestedAt: number;
+  clearEpoch: number;
+  makeDefault: boolean;
+}
+function profileEpoch(doc: VaultDocument): number {
+  const epoch = doc.clearEpoch ?? 0;
+  if (!Number.isSafeInteger(epoch) || epoch < 0 || epoch >= Number.MAX_SAFE_INTEGER)
+    fail('vault_corrupt');
+  return epoch;
 }
 /** Earliest moment a live grant in `doc` can expire (drives the indexed sweep). */
 export function nextExpiryAt(doc: VaultDocument): number | null {
@@ -163,7 +181,14 @@ export class SessionVault {
     };
   }
   private metadata(grant: GrantRecord): BrowserGrantMetadata {
-    const { snapshot: _s, writer: _w, consumed: _c, profileCreatedAt: _p, ...metadata } = grant;
+    const {
+      snapshot: _s,
+      writer: _w,
+      consumed: _c,
+      profileCreatedAt: _p,
+      captureRequestHash: _h,
+      ...metadata
+    } = grant;
     return structuredClone({ ...metadata, cookieDomains: this.scope(grant) });
   }
   private audit(userId: string, grant: GrantRecord, kind: string) {
@@ -267,10 +292,22 @@ export class SessionVault {
     userId: string,
     raw: unknown,
     capture: () => Promise<{ origin: string; state: unknown }>,
+    operation?: CloudProfileSaveOperation,
   ): Promise<BrowserGrantMetadata> {
     if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
     const parsed = browserCloudProfileConsentSchema.safeParse(raw);
     if (!parsed.success) fail('invalid_grant');
+    if (
+      operation &&
+      (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+        operation.requestId,
+      ) ||
+        !/^[a-f0-9]{64}$/.test(operation.requestHash) ||
+        !Number.isSafeInteger(operation.requestedAt) ||
+        !Number.isSafeInteger(operation.clearEpoch) ||
+        operation.clearEpoch < 0)
+    )
+      fail('invalid_grant');
     const input = parsed.data;
     if (
       !input.origin.startsWith('https:') &&
@@ -290,9 +327,29 @@ export class SessionVault {
       fail('invalid_grant');
     }
     // Commit consent before reading browser state: clear/revoke during capture must win.
-    const initial = await this.options.store.update(userId, async (doc) => {
+    const prepared = await this.options.store.update(userId, async (doc) => {
+      const existing = operation && doc.grants.find((g) => g.id === operation.requestId);
+      if (existing) {
+        if (
+          existing.captureRequestHash !== operation.requestHash ||
+          existing.sessionAccess !== 'cloud-home-v1'
+        )
+          fail('profile_request_conflict');
+        this.requireLive(existing);
+        if (existing.status === 'awaiting_import') fail('profile_capture_pending');
+        if (existing.status !== 'connected' || !existing.snapshot) fail('grant_unavailable');
+        return { grant: this.metadata(existing), reused: true, epoch: profileEpoch(doc) };
+      }
+      if (operation) {
+        if (
+          this.now() - operation.requestedAt >= CLOUD_CAPTURE_WINDOW_MS ||
+          operation.requestedAt > this.now() + 30_000
+        )
+          fail('profile_request_expired');
+        if (profileEpoch(doc) !== operation.clearEpoch) fail('profile_settings_changed');
+      }
       const grant: GrantRecord = {
-        id: randomUUID(),
+        id: operation?.requestId ?? randomUUID(),
         origin: input.origin,
         originSet: [input.origin],
         cookieDomains,
@@ -313,9 +370,14 @@ export class SessionVault {
         reason: null,
         consumed: true,
         sessionAccess: 'cloud-home-v1',
+        ...(operation ? { captureRequestHash: operation.requestHash } : {}),
       };
-      return this.addGrant(userId, doc, grant, 'cloud_consent');
+      const metadata = this.addGrant(userId, doc, grant, 'cloud_consent');
+      if (operation) doc.clearEpoch = profileEpoch(doc) + 1;
+      return { grant: metadata, reused: false, epoch: profileEpoch(doc) };
     });
+    const initial = prepared.grant;
+    if (prepared.reused) return initial;
     try {
       const actual = await capture();
       if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
@@ -323,6 +385,7 @@ export class SessionVault {
       return await this.options.store.update(userId, async (doc) => {
         const g = this.find(doc, initial.id);
         this.requireLive(g);
+        if (operation && profileEpoch(doc) !== prepared.epoch) fail('profile_settings_changed');
         if (
           g.version !== initial.version ||
           g.status !== 'awaiting_import' ||
@@ -347,6 +410,7 @@ export class SessionVault {
         g.status = 'connected';
         g.cookieCount = state.cookies.length;
         g.lastUsedAt = this.now();
+        if (operation?.makeDefault) doc.homeProfileId = g.id;
         this.audit(userId, g, 'cloud_capture');
         return this.metadata(g);
       });
@@ -360,6 +424,64 @@ export class SessionVault {
         .catch(() => undefined);
       throw error instanceof VaultError ? error : new VaultError('profile_capture_failed');
     }
+  }
+  /** Receipt reconciliation reads only the original owner/intent; it never touches a browser. */
+  async cloudProfileReceipt(
+    userId: string,
+    id: string,
+    requestHash: string,
+  ): Promise<BrowserGrantMetadata | null> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    return this.options.store.read(userId, (doc) => {
+      const g = doc.grants.find((grant) => grant.id === id);
+      if (!g) return null;
+      if (g.sessionAccess !== 'cloud-home-v1' || g.captureRequestHash !== requestHash)
+        fail('profile_request_conflict');
+      return this.metadata(g);
+    });
+  }
+  async cloudHomeSettings(
+    userId: string,
+  ): Promise<{ selectedProfileId: string | null; clearEpoch: number }> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    return this.options.store.read(userId, (doc) => ({
+      selectedProfileId: doc.homeProfileId ?? null,
+      clearEpoch: profileEpoch(doc),
+    }));
+  }
+  /** Fence a delayed/unknown save; a known saved result is acknowledged, never erased. */
+  async cancelCloudProfileSave(
+    userId: string,
+    id: string,
+    requestHash: string,
+    expectedEpoch: number,
+  ): Promise<BrowserGrantMetadata | null> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    if (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0) fail('invalid_grant');
+    return this.options.store.update(userId, async (doc) => {
+      const g = doc.grants.find((grant) => grant.id === id);
+      if (g && (g.sessionAccess !== 'cloud-home-v1' || g.captureRequestHash !== requestHash))
+        fail('profile_request_conflict');
+      if (g?.status === 'connected' && this.usable(g)) return this.metadata(g);
+      // A later intent already advanced this epoch: do not interrupt that unrelated capture.
+      if (profileEpoch(doc) === expectedEpoch + (g ? 1 : 0)) doc.clearEpoch = profileEpoch(doc) + 1;
+      if (g?.status === 'awaiting_import') this.tombstone(g, 'capture_cancelled');
+      return g ? this.metadata(g) : null;
+    });
+  }
+  /** Select the next fresh Home only. A live browser is never silently replaced. */
+  async selectCloudHomeProfile(userId: string, id: string | null): Promise<void> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    await this.options.store.update(userId, async (doc) => {
+      if (id !== null) {
+        const g = this.find(doc, id);
+        this.requireLive(g);
+        if (g.sessionAccess !== 'cloud-home-v1' || g.status !== 'connected' || !g.snapshot)
+          fail('grant_unavailable');
+      }
+      doc.homeProfileId = id;
+      doc.clearEpoch = profileEpoch(doc) + 1;
+    });
   }
   async grant(userId: string, raw: unknown): Promise<BrowserGrantMetadata> {
     this.ensureEnabled();
@@ -791,6 +913,8 @@ export class SessionVault {
   async clear(userId: string) {
     this.ensureEnabled();
     const ids = await this.options.store.update(userId, async (doc) => {
+      doc.clearEpoch = profileEpoch(doc) + 1;
+      doc.homeProfileId = null;
       for (const g of doc.grants) {
         this.tombstone(g, 'clear');
         this.audit(userId, g, 'clear');

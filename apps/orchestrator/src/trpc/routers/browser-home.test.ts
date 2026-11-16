@@ -7,10 +7,15 @@ import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { browserHomeProfileSaveHash } from '../../browser-home/browser-home-profile.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import type { BrowserInstance, BrowserSessionTarget } from '../../browser-pool/types.js';
 import { TestKeyProvider } from '../../browser-session-vault/crypto.js';
-import { createVaultRuntime, installVaultRuntime } from '../../browser-session-vault/runtime.js';
+import {
+  createVaultRuntime,
+  getVaultRuntime,
+  installVaultRuntime,
+} from '../../browser-session-vault/runtime.js';
 import { MemoryVaultStore } from '../../browser-session-vault/vault.js';
 import { env as appEnv } from '../../config/env.js';
 import type { Context } from '../context.js';
@@ -210,6 +215,91 @@ describe('explicit personal Home profile selection', () => {
       cloudProfileId: grant.id,
     });
     await c.close();
+  });
+  it('persists selection for the next fresh Home and preserves the current live workspace', async () => {
+    const grant = await profile();
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    await c.open();
+    const live = pool.peek('bhs_usr_profile');
+    await expect(c.selectProfile({ profileId: grant.id })).resolves.toEqual({ ok: true });
+    expect(await c.profileOptions()).toMatchObject({ selectedProfileId: grant.id });
+    await c.open();
+    expect(pool.peek('bhs_usr_profile')).toBe(live);
+    expect(pool.release).not.toHaveBeenCalled();
+    await c.close();
+    expect(await c.open()).toMatchObject({ cloudProfileId: grant.id, url: grant.origin });
+    await c.close();
+    await c.forgetProfile({ profileId: grant.id });
+    await expect(c.open()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(pool.peek('bhs_usr_profile')).toBeNull();
+    await c.selectProfile({ profileId: null });
+    expect(await c.open()).not.toHaveProperty('cloudProfileId');
+    await c.close();
+  });
+  it('reconciles a saved operation without an open browser and never accepts raw browser-state input', async () => {
+    await profile();
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const runtime = getVaultRuntime()!;
+    const request = {
+      consent: 'cloud-browser-profile-v1' as const,
+      origin: 'https://fixture.test',
+      sourceId: 'ae52fe57-1dd1-4562-828d-afcb84b0c96f',
+      includeStorage: false,
+      requestId: 'ee52fe57-1dd1-4562-828d-afcb84b0c96f',
+      requestedAt: Date.now(),
+      clearEpoch: 0,
+    };
+    await runtime.vault.captureCloudProfile(
+      'usr_profile',
+      {
+        consent: request.consent,
+        origin: request.origin,
+        storageKeys: ['pref'],
+      },
+      async () => ({
+        origin: request.origin,
+        state: { cookies: [], storage: [{ name: 'pref', value: 'SYNTHETIC_SECRET' }] },
+      }),
+      {
+        requestId: request.requestId,
+        requestHash: browserHomeProfileSaveHash(request),
+        requestedAt: request.requestedAt,
+        clearEpoch: 0,
+        makeDefault: true,
+      },
+    );
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    expect(await c.profileSaveReceipt(request)).toMatchObject({
+      state: 'saved',
+      id: request.requestId,
+    });
+    expect(await c.saveProfile(request)).toMatchObject({
+      status: 'connected',
+      id: request.requestId,
+    });
+    expect(pool.allocate).not.toHaveBeenCalled();
+    expect(await c.cancelProfileSave(request)).toMatchObject({
+      state: 'saved',
+      id: request.requestId,
+    });
+    expect(JSON.stringify(await c.profileSaveReceipt(request))).not.toContain('SYNTHETIC_SECRET');
+    expect(await caller('usr_other_profile', pool).profileSaveReceipt(request)).toEqual({
+      state: 'missing',
+    });
+    await expect(
+      c.saveProfile({ ...request, state: { cookies: [] } } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller('usr_other_profile', pool).forgetProfile({ profileId: request.requestId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    appEnv.BROWSER_HOME_PROFILE_V1 = false;
+    await expect(c.saveProfile(request)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await expect(c.profileSaveReceipt(request)).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
   });
 });
 

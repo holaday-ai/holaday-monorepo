@@ -145,6 +145,43 @@ async function until(check: () => Promise<boolean>, label: string) {
 }
 
 describe('real interactive cloud-profile context', () => {
+  it('does not let an unrelated site partition cookie prevent saving the selected site', async () => {
+    const f = await fixture();
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await page.goto(origin);
+      await context.addCookies([
+        {
+          name: 'partitioned-foreign',
+          value: 'SYNTHETIC_FOREIGN',
+          domain: 'other.test',
+          path: '/',
+          secure: true,
+          sameSite: 'None',
+          partitionKey: 'https://other-top.test',
+        },
+      ]);
+      expect((await context.cookies()).some((c) => c.name === 'partitioned-foreign')).toBe(true);
+      expect((await f.worker.captureSite(context, page, f.grant)).state.cookies).toEqual([]);
+      await context.addCookies([
+        {
+          name: 'partitioned-scoped',
+          value: 'SYNTHETIC_SCOPED',
+          domain: '127.0.0.1',
+          path: '/',
+          secure: true,
+          sameSite: 'None',
+          partitionKey: 'https://other-top.test',
+        },
+      ]);
+      await expect(f.worker.captureSite(context, page, f.grant)).rejects.toThrow(
+        'partition_unsupported',
+      );
+    } finally {
+      await context.close();
+    }
+  });
   it('lets a personal workspace use another public site without transferring the saved site identity', async () => {
     const f = await fixture();
     const home = await f.worker.open('alice', f.grant.id, undefined, {

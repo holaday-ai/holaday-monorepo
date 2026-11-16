@@ -297,7 +297,11 @@ export class VaultBrowserWorker {
     return { stop, interrupt, interrupted: () => !live };
   }
   /** Current context state restricted to the grant's scope (cookies + selected storage keys). */
-  private async capture(context: BrowserContext, page: Page, grant: BrowserGrantMetadata) {
+  async captureSite(
+    context: BrowserContext,
+    page: Page,
+    grant: Pick<BrowserGrantMetadata, 'cookieDomains' | 'storageKeys' | 'origin'>,
+  ) {
     const captured = await context.storageState();
     const cdp = await context.newCDPSession(page);
     try {
@@ -305,8 +309,9 @@ export class VaultBrowserWorker {
       if (
         raw.cookies.some(
           (c) =>
-            ('partitionKey' in c && c.partitionKey) ||
-            ('partitionKeyOpaque' in c && c.partitionKeyOpaque),
+            cookieDomainInScope(c.domain, grant.cookieDomains) &&
+            (('partitionKey' in c && c.partitionKey) ||
+              ('partitionKeyOpaque' in c && c.partitionKeyOpaque)),
         )
       )
         throw new VaultError('partition_unsupported');
@@ -417,7 +422,8 @@ export class VaultBrowserWorker {
       const writer = task.mode === 'writer';
       let ended = false;
       let lastDigest = writer
-        ? ((await this.capture(ownedContext, page, task.grant).catch(() => null))?.digest ?? null)
+        ? ((await this.captureSite(ownedContext, page, task.grant).catch(() => null))?.digest ??
+          null)
         : null;
       if (guard.interrupted()) throw new VaultError(interrupted ?? 'browser_unavailable');
       let lastWrite = Date.now();
@@ -426,7 +432,7 @@ export class VaultBrowserWorker {
         if (reason === 'interval' && Date.now() - lastWrite < this.checkpointMs) return;
         flushing = (async () => {
           try {
-            const { state, digest } = await this.capture(ownedContext, page, task.grant);
+            const { state, digest } = await this.captureSite(ownedContext, page, task.grant);
             if (digest === lastDigest) {
               if (interactive) {
                 await this.vault.renewCloudLease(userId, id, task);
@@ -484,7 +490,7 @@ export class VaultBrowserWorker {
           try {
             // An interrupted context (revoked or unverifiable) never writes back.
             if (save && writer && !interrupted) {
-              const captured = await this.capture(ownedContext, page, task.grant).catch(
+              const captured = await this.captureSite(ownedContext, page, task.grant).catch(
                 (error: unknown) => {
                   // Already stopped (revoked/expired/closed): nothing to write back.
                   if (error instanceof VaultError) throw error;

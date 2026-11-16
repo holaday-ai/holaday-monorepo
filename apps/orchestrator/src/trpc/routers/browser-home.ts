@@ -27,9 +27,16 @@ import {
   resolveBrowserHomeAddress,
 } from '../../browser-home/browser-home-address.js';
 import { navigateBrowserHome } from '../../browser-home/browser-home-nav.js';
+import {
+  browserHomeProfileSaveHash,
+  browserHomeSaveProfileSchema,
+  prepareBrowserHomeProfileSave,
+  saveBrowserHomeProfile,
+} from '../../browser-home/browser-home-profile.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import { PoolCapacityError } from '../../browser-pool/browser-pool.js';
 import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
+import { VaultError } from '../../browser-session-vault/vault.js';
 import { instanceBrowserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
@@ -76,14 +83,52 @@ function homeProfiles() {
   const runtime = getVaultRuntime();
   return appEnv.BROWSER_HOME_PROFILE_V1 && runtime?.cloudHomeEnabled ? runtime : null;
 }
+function requireHomeProfiles() {
+  const runtime = homeProfiles();
+  if (!runtime)
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '保存的云端状态暂不可用。' });
+  return runtime;
+}
+function profileFailure(error: unknown): never {
+  const messages: Record<string, string> = {
+    home_profile_busy: '当前浏览器正在处理任务或输入，请结束后再保存。',
+    home_profile_closed: '个人浏览器已关闭，请先重新打开。',
+    home_profile_page_changed: '保存期间页面或输入发生了变化，请确认页面后重新保存。',
+    home_profile_storage_unsupported:
+      '这个站点的浏览设置暂不支持保存，可取消“同时保存浏览设置”后再试。',
+    profile_capture_pending: '上一次保存仍待核对，请稍后查看保存列表。',
+    profile_settings_changed: '保存设置已变化，请核对保存列表后再试。',
+    profile_request_conflict: '这次保存的请求信息不一致，请先核对保存列表。',
+    profile_request_expired: '这次保存请求已经过期，请先核对保存列表再重新保存。',
+    grant_unavailable: '保存的站点状态已失效或不属于当前账号。',
+    empty_session: '当前站点没有可保存的状态。',
+    partition_unsupported: '当前站点的状态格式暂不支持保存。',
+    invalid_session: '当前站点的状态格式或大小暂不支持保存。',
+  };
+  throw new TRPCError({
+    code:
+      error instanceof VaultError && error.code === 'grant_unavailable'
+        ? 'NOT_FOUND'
+        : 'PRECONDITION_FAILED',
+    message:
+      error instanceof VaultError && messages[error.code]
+        ? messages[error.code]
+        : '无法确认保存结果，请先核对保存列表。',
+  });
+}
 
 export const browserHomeRouter = router({
   profileOptions: browserHomeProcedure.query(async ({ ctx }) => {
     const runtime = homeProfiles();
-    if (!runtime) return { enabled: false, profiles: [] };
+    if (!runtime) return { enabled: false as const, profiles: [] };
     const grants = await runtime.vault.list(ctx.userId);
     return {
-      enabled: true,
+      enabled: true as const,
+      ...(await runtime.vault.cloudHomeSettings(ctx.userId)),
+      serverNow: Date.now(),
+      source: ctx.browserPool
+        ? await prepareBrowserHomeProfileSave({ userId: ctx.userId, pool: ctx.browserPool })
+        : null,
       profiles: grants
         .filter((g) => g.sessionAccess === 'cloud-home-v1')
         .map((g) => ({
@@ -91,21 +136,122 @@ export const browserHomeRouter = router({
           origin: g.origin,
           status: g.status,
           expiresAt: g.expiresAt,
+          issuedAt: g.issuedAt,
         })),
     };
   }),
+  saveProfile: browserHomeProcedure
+    .input(browserHomeSaveProfileSchema)
+    .mutation(async ({ ctx, input }) => {
+      const runtime = requireHomeProfiles();
+      try {
+        const grant = await saveBrowserHomeProfile({
+          userId: ctx.userId,
+          pool: requirePool(ctx),
+          vault: runtime.vault,
+          worker: runtime.worker,
+          request: input,
+        });
+        return {
+          id: grant.id,
+          origin: grant.origin,
+          status: grant.status,
+          expiresAt: grant.expiresAt,
+        };
+      } catch (error) {
+        profileFailure(error);
+      }
+    }),
+  profileSaveReceipt: browserHomeProcedure
+    .input(browserHomeSaveProfileSchema)
+    .query(async ({ ctx, input }) => {
+      const runtime = requireHomeProfiles();
+      try {
+        await runtime.vault.list(ctx.userId);
+        const grant = await runtime.vault.cloudProfileReceipt(
+          ctx.userId,
+          input.requestId,
+          browserHomeProfileSaveHash(input),
+        );
+        return grant
+          ? {
+              state:
+                grant.status === 'connected'
+                  ? ('saved' as const)
+                  : grant.status === 'awaiting_import'
+                    ? ('pending' as const)
+                    : ('unavailable' as const),
+              id: grant.id,
+              origin: grant.origin,
+              expiresAt: grant.expiresAt,
+            }
+          : { state: 'missing' as const };
+      } catch (error) {
+        profileFailure(error);
+      }
+    }),
+  cancelProfileSave: browserHomeProcedure
+    .input(browserHomeSaveProfileSchema)
+    .mutation(async ({ ctx, input }) => {
+      const runtime = requireHomeProfiles();
+      try {
+        await runtime.vault.list(ctx.userId);
+        const grant = await runtime.vault.cancelCloudProfileSave(
+          ctx.userId,
+          input.requestId,
+          browserHomeProfileSaveHash(input),
+          input.clearEpoch,
+        );
+        return {
+          state: grant?.status === 'connected' ? ('saved' as const) : ('cancelled' as const),
+          ...(grant?.status === 'connected'
+            ? { id: grant.id, origin: grant.origin, expiresAt: grant.expiresAt }
+            : {}),
+        };
+      } catch (error) {
+        profileFailure(error);
+      }
+    }),
+  selectProfile: browserHomeProcedure
+    .input(z.object({ profileId: z.string().uuid().nullable() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const runtime = requireHomeProfiles();
+      try {
+        await runtime.vault.selectCloudHomeProfile(ctx.userId, input.profileId);
+        return { ok: true as const };
+      } catch (error) {
+        profileFailure(error);
+      }
+    }),
+  forgetProfile: browserHomeProcedure
+    .input(z.object({ profileId: z.string().uuid() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const runtime = requireHomeProfiles();
+      try {
+        const grant = (await runtime.vault.list(ctx.userId)).find(
+          (g) => g.id === input.profileId && g.sessionAccess === 'cloud-home-v1',
+        );
+        if (!grant) throw new VaultError('grant_unavailable');
+        await runtime.vault.revoke(ctx.userId, grant.id);
+        return { ok: true as const };
+      } catch (error) {
+        profileFailure(error);
+      }
+    }),
   open: browserHomeProcedure.input(openInput).mutation(async ({ ctx, input }) => {
     const pool = requirePool(ctx);
     let profile: { id: string; origin: string } | undefined;
-    if (input?.profileId) {
-      const runtime = homeProfiles();
-      if (!runtime)
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '保存的云端状态暂不可用。' });
+    let profileId = input?.profileId;
+    const availableProfiles = homeProfiles();
+    if (!profileId && availableProfiles && !browserHomeSessions.locate(pool, ctx.userId))
+      profileId =
+        (await availableProfiles.vault.cloudHomeSettings(ctx.userId)).selectedProfileId ??
+        undefined;
+    if (profileId) {
+      const runtime = requireHomeProfiles();
       const grant = (await runtime.vault.list(ctx.userId)).find(
         (g) =>
-          g.id === input.profileId &&
-          g.sessionAccess === 'cloud-home-v1' &&
-          g.status === 'connected',
+          g.id === profileId && g.sessionAccess === 'cloud-home-v1' && g.status === 'connected',
       );
       if (!grant)
         throw new TRPCError({
