@@ -10,6 +10,7 @@ import type {
   NeutralOutputContentBlock,
 } from '../../llm/messages-adapter.js';
 import { BrowserControl } from '../supercar/browser-control.js';
+import { BrowserTaskFiles } from './browser-task-files.js';
 
 const legacy = vi.hoisted(() => ({
   run: vi.fn(async () => ({
@@ -241,6 +242,379 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       }
     },
   );
+
+  it('uses admitted file IDs and the existing gate to deliver a requested file at the real task entry', async () => {
+    const page = await browser.newPage();
+    const f = await browserOutputFixture();
+    const before = (env as unknown as Record<string, unknown>).BROWSER_TASK_FILES_V1;
+    Object.assign(env, { BROWSER_TASK_FILES_V1: true });
+    try {
+      const row = await f.service.storeUpload({
+        userIdInternal: 7,
+        userExternalId: 'usr_alice',
+        filename: 'report.csv',
+        mimetype: 'text/csv',
+        buffer: Buffer.from('sku,qty\nA-731,31\n'),
+      });
+      const scope = new BrowserTaskFiles({
+        taskId: 't_upload_entry',
+        userId: 7,
+        files: f.service,
+        active: async () => true,
+      });
+      scope.admitValidated(await f.service.loadMany([row.externalId], 7));
+      await page.route('https://fixture.browser.test/', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: '<label>Report <input type="file" id="file" accept=".csv"></label><p id="received"></p><script>document.querySelector("input").onchange=async function(){document.querySelector("p").textContent="页面读到："+await this.files[0].text();}</script>',
+        }),
+      );
+      await page.goto('https://fixture.browser.test/');
+      const requests: NeutralMessagesRequest[] = [];
+      const onAwaitingUser = vi.fn();
+      const outcome = await runSupercarTask({
+        taskId: 't_upload_entry',
+        userExternalId: 'usr_alice',
+        intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件，核对页面读到的内容',
+        executor: { getPage: async () => page } as never,
+        browserTaskFiles: scope,
+        onAwaitingUser,
+        messagesAdapter: scripted([
+          (request) => {
+            requests.push(request);
+            return [call('snapshot', {})];
+          },
+          (request) => [
+            call('upload', {
+              ref: refIn(request, /button \\"Report\\"/),
+              fileIds: [row.externalId],
+            }),
+          ],
+          () => [call('wait_for', { text: '页面读到：sku,qty' })],
+          () => [call('snapshot', {}, 'received')],
+          () => [
+            call('finish', {
+              status: 'completed',
+              summary: '已交给文件控件，页面读到 A-731,31',
+              evidence: 'A-731,31',
+            }),
+          ],
+        ]),
+      });
+      expect(JSON.stringify(requests[0]?.messages)).toContain(row.externalId);
+      expect(outcome.status).toBe('completed');
+      expect(await page.locator('#received').textContent()).toContain('A-731,31');
+      expect(onAwaitingUser).not.toHaveBeenCalled();
+    } finally {
+      Object.assign(env, { BROWSER_TASK_FILES_V1: before });
+      await page.close();
+      await rm(f.root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  async function uploadFixture(taskId: string, initial = true, credential = false) {
+    const f = await browserOutputFixture();
+    const page = await browser.newPage();
+    const before = env.BROWSER_TASK_FILES_V1;
+    env.BROWSER_TASK_FILES_V1 = true;
+    const row = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'report.csv',
+      mimetype: 'text/csv',
+      buffer: Buffer.from('sku,qty\nA-731,31\n'),
+    });
+    const loaded = await f.service.loadMany([row.externalId], 7);
+    const scope = new BrowserTaskFiles({
+      taskId,
+      userId: 7,
+      files: f.service,
+      active: async () => true,
+    });
+    if (initial) scope.admitValidated(loaded);
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<form action="/upload"><label>Report <input type="file" id="file" accept=".csv"></label>${credential ? '<input type="password">' : ''}</form><label>Note <input id="note"></label><p id="received"></p><script>document.querySelector("#file").onchange=async function(){document.querySelector("#received").textContent="页面读到："+await this.files[0].text();}</script>`,
+      }),
+    );
+    await page.goto('https://fixture.browser.test/');
+    return {
+      f,
+      page,
+      row,
+      loaded,
+      scope,
+      cleanup: async () => {
+        env.BROWSER_TASK_FILES_V1 = before;
+        await page.close();
+        await rm(f.root, { recursive: true, force: true });
+      },
+    };
+  }
+  it('asks with concrete files and destination; file text cannot confirm disclosure', async () => {
+    const taskId = 't_upload_proposal';
+    const c = await uploadFixture(taskId);
+    const onAwaitingUser = vi.fn();
+    const running = runSupercarTask({
+      taskId,
+      intent: '请处理此附件和网页',
+      browserTaskFiles: c.scope,
+      executor: { getPage: async () => c.page } as never,
+      onAwaitingUser,
+      messagesAdapter: scripted([
+        () => [call('snapshot', {})],
+        (request) => [
+          call('upload', {
+            ref: refIn(request, /button \\"Report\\"/),
+            fileIds: [c.row.externalId],
+          }),
+        ],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      expect(onAwaitingUser).toHaveBeenCalledWith(
+        expect.objectContaining({ question: expect.stringContaining('report.csv') }),
+      );
+      expect(onAwaitingUser.mock.calls[0]![0].question).toContain('https://fixture.browser.test');
+      expect(supercarReply(taskId, '不要上传', [{ type: 'text', text: '确认执行' }])).toBe(true);
+      expect((await running).status).toBe('cancelled');
+      expect(await c.page.locator('#received').textContent()).toBe('');
+    } finally {
+      supercarAbort(taskId);
+      await running.catch(() => undefined);
+      await c.cleanup();
+    }
+  }, 20_000);
+  it('does not deliver to a replaced input after the user confirms the original proposal', async () => {
+    const taskId = 't_upload_replaced';
+    const c = await uploadFixture(taskId);
+    const running = runSupercarTask({
+      taskId,
+      intent: '请处理此附件和网页',
+      browserTaskFiles: c.scope,
+      executor: { getPage: async () => c.page } as never,
+      messagesAdapter: scripted([
+        () => [call('snapshot', {})],
+        (request) => [
+          call('upload', {
+            ref: refIn(request, /button \\"Report\\"/),
+            fileIds: [c.row.externalId],
+          }),
+        ],
+        () => [call('snapshot', {}, 'after-replacement')],
+        () => [call('finish', { status: 'failed', summary: '目标已变化，停止交付' })],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      await c.page.locator('#file').evaluate((node) => node.replaceWith(node.cloneNode(true)));
+      expect(supercarReply(taskId, '确认执行')).toBe(true);
+      expect((await running).status).toBe('failed');
+      expect(await c.page.locator('#received').textContent()).toBe('');
+      expect(
+        await c.page.locator('#file').evaluate((node) => (node as HTMLInputElement).files?.length),
+      ).toBe(0);
+    } finally {
+      supercarAbort(taskId);
+      await running.catch(() => undefined);
+      await c.cleanup();
+    }
+  }, 20_000);
+  it('admits actual reply file references into the same parked task without granting other files', async () => {
+    const taskId = 't_upload_reply';
+    const c = await uploadFixture(taskId, false);
+    const onAwaitingUser = vi.fn();
+    const requests: NeutralMessagesRequest[] = [];
+    const running = runSupercarTask({
+      taskId,
+      intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+      browserTaskFiles: c.scope,
+      executor: { getPage: async () => c.page } as never,
+      onAwaitingUser,
+      messagesAdapter: scripted([
+        () => [call('request_human', { reason: 'clarification', message: '请提供文件' })],
+        (request) => {
+          requests.push(request);
+          return [call('snapshot', {})];
+        },
+        (request) => [
+          call('upload', {
+            ref: refIn(request, /button \\"Report\\"/),
+            fileIds: [c.row.externalId],
+          }),
+        ],
+        () => [call('snapshot', {}, 'after-upload')],
+        () => [call('finish', { status: 'failed', summary: '只验证材料交付，不宣称完成其他工作' })],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      const parsed = await parseFileForPrompt(c.loaded[0]!.buffer, c.row.filename, c.row.mimetype);
+      expect(
+        supercarReply(
+          taskId,
+          '文件已提供，请继续',
+          parsed.blocks,
+          BrowserTaskFiles.validatedReferences(c.loaded, 7),
+        ),
+      ).toBe(true);
+      await running;
+      expect(JSON.stringify(requests[0]?.messages)).toContain(c.row.externalId);
+      expect(await c.page.locator('#received').textContent()).toContain('A-731,31');
+      expect(onAwaitingUser).toHaveBeenCalledTimes(1);
+    } finally {
+      supercarAbort(taskId);
+      await running.catch(() => undefined);
+      await c.cleanup();
+    }
+  }, 20_000);
+  it.each([false, true])(
+    'yields if real human input arrives during the second file read (collaboration=%s)',
+    async (collaborationV2) => {
+      const taskId = `t_upload_human_${collaborationV2}`;
+      const c = await uploadFixture(taskId);
+      let now = 10_000;
+      const control = new BrowserControl(() => now, { collaborationV2 });
+      let human: Promise<unknown> | undefined;
+      let reads = 0;
+      const load = c.f.service.loadMany.bind(c.f.service);
+      const spy = vi.spyOn(c.f.service, 'loadMany').mockImplementation(async (...args) => {
+        const result = await load(...args);
+        if (++reads === 2)
+          human = control
+            .runHuman(() => c.page.locator('#note').fill('user kept'), 'insertText')
+            .then(() => {
+              now += 3_000;
+            });
+        return result;
+      });
+      try {
+        const outcome = await runSupercarTask({
+          taskId,
+          intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+          browserTaskFiles: c.scope,
+          browserControl: control,
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted([
+            () => [call('snapshot', {})],
+            (request) => [
+              call('upload', {
+                ref: refIn(request, /button \\"Report\\"/),
+                fileIds: [c.row.externalId],
+              }),
+            ],
+            () => [call('snapshot', {}, 'after-human')],
+            () => [call('finish', { status: 'failed', summary: '人工介入，停止本次交付' })],
+          ]),
+        });
+        await human;
+        expect(outcome.status).toBe('failed');
+        expect(await c.page.locator('#note').inputValue()).toBe('user kept');
+        expect(await c.page.locator('#received').textContent()).toBe('');
+      } finally {
+        spy.mockRestore();
+        await human?.catch(() => undefined);
+        await c.cleanup();
+      }
+    },
+    30_000,
+  );
+  it('retains the existing refusal for an authentication form even with an explicit upload request', async () => {
+    const taskId = 't_upload_credential';
+    const c = await uploadFixture(taskId, true, true);
+    try {
+      const outcome = await runSupercarTask({
+        taskId,
+        intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        messagesAdapter: scripted([
+          () => [call('snapshot', {})],
+          (request) => [
+            call('upload', {
+              ref: refIn(request, /button \\"Report\\"/),
+              fileIds: [c.row.externalId],
+            }),
+          ],
+          () => [call('finish', { status: 'failed', summary: '登录验证文件控件不代操作' })],
+        ]),
+      });
+      expect(outcome.status).toBe('failed');
+      expect(await c.page.locator('#received').textContent()).toBe('');
+    } finally {
+      await c.cleanup();
+    }
+  }, 20_000);
+
+  it.each([false, true])(
+    'checks task scope before material exposure and honors the disabled flag (enabled=%s)',
+    async (enabled) => {
+      const taskId = `t_upload_flag_${enabled}`;
+      const c = await uploadFixture(taskId);
+      env.BROWSER_TASK_FILES_V1 = enabled;
+      const requests: NeutralMessagesRequest[] = [];
+      const active = vi.spyOn(c.scope, 'isActive').mockResolvedValue(false);
+      try {
+        const outcome = await runSupercarTask({
+          taskId,
+          intent: '读取页面',
+          browserTaskFiles: c.scope,
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted([
+            (request) => {
+              requests.push(request);
+              return [call('finish', { status: 'failed', summary: '只核对文件能力状态' })];
+            },
+          ]),
+        });
+        expect(outcome.status).toBe('failed');
+        if (enabled) expect(requests).toHaveLength(0);
+        else {
+          expect(requests).toHaveLength(1);
+          expect(requests[0]!.tools?.some((tool) => tool.name === 'upload')).toBe(false);
+          expect(JSON.stringify(requests[0]!.messages)).not.toContain(c.row.externalId);
+          expect(active).not.toHaveBeenCalled();
+        }
+      } finally {
+        active.mockRestore();
+        await c.cleanup();
+      }
+    },
+  );
+  it('stops disclosure when the feature is disabled while waiting for confirmation', async () => {
+    const taskId = 't_upload_disabled_wait';
+    const c = await uploadFixture(taskId);
+    const running = runSupercarTask({
+      taskId,
+      intent: '请处理此附件和网页',
+      browserTaskFiles: c.scope,
+      executor: { getPage: async () => c.page } as never,
+      messagesAdapter: scripted([
+        () => [call('snapshot', {})],
+        (request) => [
+          call('upload', {
+            ref: refIn(request, /button \\"Report\\"/),
+            fileIds: [c.row.externalId],
+          }),
+        ],
+        () => [call('snapshot', {}, 'disabled')],
+        () => [call('finish', { status: 'failed', summary: '功能已停用，未交付文件' })],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      env.BROWSER_TASK_FILES_V1 = false;
+      expect(supercarReply(taskId, '确认执行')).toBe(true);
+      expect((await running).status).toBe('failed');
+      expect(await c.page.locator('#received').textContent()).toBe('');
+    } finally {
+      supercarAbort(taskId);
+      await running.catch(() => undefined);
+      await c.cleanup();
+    }
+  }, 20_000);
 
   it('does not execute a stale real-page click after a human edit became idle during model thinking', async () => {
     let now = 10_000;

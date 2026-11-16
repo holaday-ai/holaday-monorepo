@@ -1,3 +1,4 @@
+import type { ValidatedBrowserTaskFile } from '../browser-tools/browser-task-files.js';
 import type { RunSupercarOptions, SupercarOutcome } from './agent-loop.js';
 import { runSupercarTask as runBrowserTask } from './agent-loop.js';
 
@@ -38,9 +39,10 @@ export function supercarReply(
   taskId: string,
   message: string,
   attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
   return (
-    unifiedSupercarReply(taskId, message, attachmentBlocks) ||
+    unifiedSupercarReply(taskId, message, attachmentBlocks, files) ||
     legacyReply(taskId, message, attachmentBlocks)
   );
 }

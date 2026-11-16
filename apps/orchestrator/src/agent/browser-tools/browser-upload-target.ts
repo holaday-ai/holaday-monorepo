@@ -21,6 +21,7 @@ interface InputSnapshot {
   directory: boolean;
   formAction: string;
   formMethod: string;
+  credentialForm: boolean;
 }
 export const MAX_BROWSER_UPLOAD_BYTES = 50 * 1024 * 1024;
 function acceptsFile(accept: string, file: BrowserUploadFile): boolean {
@@ -49,6 +50,9 @@ const readInput = (node: HTMLInputElement): InputSnapshot | null => {
     directory: node.webkitdirectory,
     formAction: node.form?.action || node.ownerDocument.URL,
     formMethod: node.form?.method || 'get',
+    credentialForm: Boolean(
+      node.form?.querySelector('input[type="password"],input[autocomplete="one-time-code"]'),
+    ),
   };
 };
 
@@ -56,6 +60,7 @@ const readInput = (node: HTMLInputElement): InputSnapshot | null => {
 export class PreparedBrowserUpload {
   private state: 'prepared' | 'approved' | 'delivering' | 'delivered' | 'disposed' = 'prepared';
   private receipt?: BrowserUploadReceipt;
+  private dispatchCheck?: () => void;
   readonly description: Readonly<{
     origin: string;
     formOrigin: string;
@@ -157,9 +162,30 @@ export class PreparedBrowserUpload {
       throw new Error('文件控件或接收页面已变化，请重新观察并确认。');
   }
   /** Called only by the host authorization path; never returned by a model tool. */
-  approve(): void {
+  approve(dispatchCheck?: () => void): void {
     if (this.state !== 'prepared') throw new Error('文件交付准备已失效。');
     this.state = 'approved';
+    this.dispatchCheck = dispatchCheck;
+  }
+  async isCurrent(): Promise<boolean> {
+    try {
+      await this.assertCurrent();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  hostBinding() {
+    return { kind: 'handle' as const, handle: this.element };
+  }
+  runtimeAction() {
+    return {
+      kind: 'type' as const,
+      inputType: 'file',
+      label: this.description.name,
+      pageUrl: this.snapshot.documentUrl,
+      credentialForm: this.snapshot.credentialForm,
+    };
   }
   async deliver(): Promise<BrowserUploadReceipt> {
     if (this.receipt) return this.receipt;
@@ -184,6 +210,7 @@ export class PreparedBrowserUpload {
       throw new Error('附件已失效或内容发生变化，请重新提供。');
     await this.assertCurrent();
     if (this.state !== 'delivering') throw new Error('文件交付准备已失效。');
+    this.dispatchCheck?.();
     this.state = 'delivered';
     const files = this.description.files.map((file) => ({ ...file }));
     try {

@@ -1,12 +1,22 @@
+import { rm } from 'node:fs/promises';
 import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as classifier from '../../agent/intent-classifier.js';
+import {
+  hasParkedSupercarHandle,
+  supercarAbort,
+} from '../../agent/supercar/qwen-only-agent-loop.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
+import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
+import { tasks } from '../../db/schema/tasks.js';
+import { users } from '../../db/schema/users.js';
 import { ExecutionDrain } from '../../execution/execution-drain.js';
 import { reloadFeatureFlagsForTest } from '../../execution/feature-flags.js';
+import { _resetSharedStorageProviderForTesting } from '../../files/storage-provider.js';
+import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import * as messages from '../../llm/messages-adapter.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import * as extensionWs from '../../ws/server.js';
@@ -75,14 +85,47 @@ it.each([
   'scrape-retry',
   'scrape-retry-partial',
   'tool-block',
+  'file-upload',
+  'file-upload-reply',
 ] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
+    const uploadFixture = scenario.startsWith('file-upload')
+      ? await browserOutputFixture()
+      : undefined;
+    let replying = false;
+    const fixtureUserId = uploadFixture ? 7 : 41;
+    const fixtureExternalId = uploadFixture ? 'usr_alice' : 'usr_browser_unified';
+    const inputFile = uploadFixture
+      ? await uploadFixture.service.storeUpload({
+          userIdInternal: 7,
+          userExternalId: 'usr_alice',
+          filename: scenario === 'file-upload-reply' ? 'notes.csv' : 'report.csv',
+          mimetype: 'text/csv',
+          buffer: Buffer.from('sku,qty\nA-731,31\n'),
+        })
+      : undefined;
+    const replyFile =
+      scenario === 'file-upload-reply'
+        ? await uploadFixture!.service.storeUpload({
+            userIdInternal: 7,
+            userExternalId: 'usr_alice',
+            filename: 'report.csv',
+            mimetype: 'text/csv',
+            buffer: Buffer.from('sku,qty\nA-731,31\n'),
+          })
+        : undefined;
+    if (uploadFixture) {
+      vi.stubEnv('STORAGE_PROVIDER', 'local');
+      vi.stubEnv('HOLADAY_FILES_ROOT', uploadFixture.root);
+      _resetSharedStorageProviderForTesting();
+    }
     expect(original.BROWSER_EXECUTOR).toBe('unified');
     Object.assign(env, {
       ANTHROPIC_API_KEY: '',
       AGENT_MODE: 'legacy',
-      QWEN_CORE_ALLOWLIST: 'usr_browser_unified',
+      QWEN_CORE_ALLOWLIST: fixtureExternalId,
+      BROWSER_TASK_FILES_V1: Boolean(uploadFixture),
       QWEN_CORE_ROLLOUT_MODE: 'synthetic',
       QWEN_CORE_ENABLED_LANES: 'browser',
       QWEN_MESSAGES_ADAPTER_ENABLED: true,
@@ -96,6 +139,41 @@ it.each([
     const consume = vi.spyOn(QuotaService.prototype, 'tryConsume').mockResolvedValue({ ok: true });
     vi.spyOn(QuotaService.prototype, 'getActiveTaskCount').mockResolvedValue(0);
     const insert = vi.spyOn(TaskRepository.prototype, 'insertTask').mockResolvedValue();
+    if (uploadFixture)
+      insert.mockImplementation(async (state) => {
+        uploadFixture.taskRecords.push({
+          id: 91,
+          externalId: state.taskId,
+          userId: 7,
+          status: state.status,
+          origin: 'user',
+          executionId: null,
+          executionRevision: 0,
+          coreRecordVersion: 0,
+          intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+          result: { executionMode: 'browser' },
+        });
+      });
+    if (scenario === 'file-upload-reply') {
+      vi.spyOn(TaskRepository.prototype, 'persistAwaitingUser').mockImplementation(
+        async (input) => {
+          const row = uploadFixture!.taskRecords.find(
+            (row) => row.externalId === input.taskExternalId,
+          )!;
+          row.status = 'awaiting_user';
+          row.awaitingKind = input.awaitingKind;
+          row.awaitingQuestion = input.question;
+          return { persisted: true };
+        },
+      );
+      vi.spyOn(TaskRepository.prototype, 'markAwaitingReplyResumed').mockImplementation(
+        async (id) => {
+          const row = uploadFixture!.taskRecords.find((row) => row.externalId === id)!;
+          row.status = 'executing';
+          return { persisted: true };
+        },
+      );
+    }
     const adopt = vi
       .spyOn(TaskRepository.prototype, 'adoptTaskForBrowserRetry')
       .mockResolvedValue({ persisted: true });
@@ -134,22 +212,73 @@ it.each([
         );
         expect(request.toolChoice).toEqual({ type: 'any' });
         const content: Block[] =
-          turn === 1
-            ? [toolUse('s1', 'snapshot', {})]
-            : turn === 2
-              ? [toolUse('c1', 'click', { ref: saveRef(request) })]
-              : turn === 3
-                ? [toolUse('s2', 'snapshot', {})]
-                : [
-                    toolUse('f1', 'finish', {
-                      status: scenario === 'scrape-retry-partial' ? 'failed' : 'completed',
-                      summary:
-                        scenario === 'tool-block'
-                          ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
-                          : '订单已保存。',
-                      evidence: '已保存',
+          scenario === 'file-upload-reply'
+            ? turn === 1
+              ? [toolUse('s1', 'snapshot', {})]
+              : turn === 2
+                ? [
+                    toolUse('h1', 'request_human', {
+                      reason: 'clarification',
+                      message: '请提供 report.csv',
                     }),
-                  ];
+                  ]
+                : turn === 3
+                  ? [toolUse('s2', 'snapshot', {})]
+                  : turn === 4
+                    ? [
+                        toolUse('u1', 'upload', {
+                          ref: JSON.stringify(request.messages.at(-1)).match(
+                            /button \\"Report\\" \[ref=(e\d+)\]/,
+                          )![1],
+                          fileIds: [replyFile!.externalId],
+                        }),
+                      ]
+                    : turn === 5
+                      ? [toolUse('s3', 'snapshot', {})]
+                      : [
+                          toolUse('f1', 'finish', {
+                            status: 'completed',
+                            summary: '回复文件已交给页面，页面读到 A-731,31',
+                            evidence: 'A-731,31',
+                          }),
+                        ]
+            : scenario === 'file-upload'
+              ? turn === 1
+                ? [toolUse('s1', 'snapshot', {})]
+                : turn === 2
+                  ? [
+                      toolUse('u1', 'upload', {
+                        ref: JSON.stringify(request.messages.at(-1)).match(
+                          /button \\"Report\\" \[ref=(e\d+)\]/,
+                        )![1],
+                        fileIds: [inputFile!.externalId],
+                      }),
+                    ]
+                  : turn === 3
+                    ? [toolUse('s2', 'snapshot', {})]
+                    : [
+                        toolUse('f1', 'finish', {
+                          status: 'completed',
+                          summary: '文件已交给页面控件，页面读到 A-731,31',
+                          evidence: 'A-731,31',
+                        }),
+                      ]
+              : turn === 1
+                ? [toolUse('s1', 'snapshot', {})]
+                : turn === 2
+                  ? [toolUse('c1', 'click', { ref: saveRef(request) })]
+                  : turn === 3
+                    ? [toolUse('s2', 'snapshot', {})]
+                    : [
+                        toolUse('f1', 'finish', {
+                          status: scenario === 'scrape-retry-partial' ? 'failed' : 'completed',
+                          summary:
+                            scenario === 'tool-block'
+                              ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
+                              : '订单已保存。',
+                          evidence: '已保存',
+                        }),
+                      ];
         return {
           id: `response-${turn}`,
           metadata,
@@ -168,7 +297,12 @@ it.each([
 
     const page: Page = await browser.newPage();
     await page.route('https://fixture.browser.test/', (route) =>
-      route.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }),
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: uploadFixture
+          ? `${PAGE}<label>Report <input type="file" id="file" accept=".csv"></label><script>document.querySelector("#file").onchange=async function(){document.querySelector("#status").textContent="页面读到："+await this.files[0].text();}</script>`
+          : PAGE,
+      }),
     );
     await page.goto('https://fixture.browser.test/');
     const executor = {
@@ -195,7 +329,7 @@ it.each([
           'plan' in projection
             ? [
                 {
-                  id: 41,
+                  id: fixtureUserId,
                   plan: 'pro',
                   selectedRoles: [],
                   selectedSkills: [],
@@ -211,10 +345,17 @@ it.each([
           where: () => query,
           orderBy: () => query,
           limit: async () => rows,
-          // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable; this is the database boundary fixture.
           then: (resolve: (rows: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
         };
-        return { from: () => query };
+        return {
+          from: (table: unknown) =>
+            uploadFixture &&
+            (table === taskFiles ||
+              (table === users && !('plan' in projection)) ||
+              (table === tasks && ('origin' in projection || replying)))
+              ? uploadFixture.db.select().from(table as typeof taskFiles)
+              : query,
+        };
       },
       insert: (table: unknown) => ({
         values: async (row: Record<string, unknown>) => {
@@ -228,7 +369,8 @@ it.each([
     const ctx = {
       db,
       logger,
-      userId: 'usr_browser_unified',
+      userId: fixtureExternalId,
+      taskOrigin: 'user',
       req: {},
       res: {},
       planner: {},
@@ -259,11 +401,27 @@ it.each([
     try {
       const result = await tasksRouter.createCaller(ctx).create({
         // Executor path under test; an explicit order/login need would route to the user's Chrome.
-        intent: '打开详情页并点击保存',
+        intent: uploadFixture
+          ? '把附件 report.csv 上传到 fixture.browser.test 的文件控件'
+          : '打开详情页并点击保存',
+        ...(inputFile ? { fileIds: [inputFile.externalId] } : {}),
         mode: 'auto',
         expertMode: 'normal',
       });
       expect(result.status).toBe('executing');
+      if (replyFile) {
+        await vi.waitFor(() => expect(hasParkedSupercarHandle(result.taskId)).toBe(true), {
+          timeout: 15_000,
+        });
+        expect(JSON.stringify(requests[0]?.messages)).not.toContain(replyFile.externalId);
+        replying = true;
+        const reply = await tasksRouter.createCaller(ctx).reply({
+          taskId: result.taskId,
+          message: '这是要上传的 report.csv，请继续',
+          fileIds: [replyFile.externalId],
+        });
+        expect(reply).toMatchObject({ ok: true, state: 'resumed' });
+      }
       await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 20_000 });
       const outcome = terminal.mock.calls.at(-1)?.[1];
       const diagnostics = JSON.stringify({
@@ -271,6 +429,15 @@ it.each([
         outcome,
         requests: requests.length,
       });
+      if (uploadFixture) {
+        expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
+        expect(await page.locator('#status').textContent()).toContain('A-731,31');
+        expect(JSON.stringify(requests[0]?.messages)).toContain(inputFile!.externalId);
+        if (replyFile)
+          expect(JSON.stringify(requests.at(-1)?.messages)).toContain(replyFile.externalId);
+        expect(consume).toHaveBeenCalledTimes(1);
+        return;
+      }
 
       if (scenario === 'scrape-retry-partial') {
         expect(outcome, diagnostics).toMatchObject({
@@ -354,7 +521,13 @@ it.each([
         );
       }
     } finally {
+      if (replyFile)
+        for (const row of uploadFixture!.taskRecords) supercarAbort(String(row.externalId));
       await page.close();
+      if (uploadFixture) {
+        _resetSharedStorageProviderForTesting();
+        await rm(uploadFixture.root, { recursive: true, force: true });
+      }
     }
   },
   60_000,

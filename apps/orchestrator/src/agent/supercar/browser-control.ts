@@ -133,6 +133,10 @@ export class BrowserControl {
   get tracksHeldInput(): boolean {
     return this.collaborationV2;
   }
+  /** Shared input revision, including transports running with collaboration v2 off. */
+  get inputRevision(): number {
+    return this.humanActivity.revision;
+  }
 
   hasHeldInput(source: object): boolean {
     const input = this.humanActivity.held.get(source);

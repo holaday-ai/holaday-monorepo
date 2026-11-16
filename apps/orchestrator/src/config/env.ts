@@ -322,6 +322,10 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  BROWSER_TASK_FILES_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   BROWSER_VIEWPORT_V2: z
     .enum(['true', 'false'])
     .default('false')

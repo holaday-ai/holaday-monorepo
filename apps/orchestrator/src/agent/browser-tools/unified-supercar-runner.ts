@@ -6,6 +6,7 @@ import {
   saveBrowserProfile,
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
@@ -26,7 +27,9 @@ import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { persistTaskBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
+import type { ValidatedBrowserTaskFile } from './browser-task-files.js';
 import { browserToolError } from './browser-tool-error.js';
+import { createBrowserUploadGate } from './browser-upload-gate.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { UNPLACED_POST_MESSAGE } from './cloud-observation.js';
 import { installDomainEgress } from './domain-egress.js';
@@ -64,7 +67,11 @@ const CANCEL_POLL_MS = 2_000;
 
 interface ParkedTask {
   resolve: (reply: UnifiedHumanReply | null) => void;
-  acceptAttachments: (blocks: ReturnType<typeof browserAttachmentBlocks>) => boolean;
+  acceptAttachments: (
+    blocks: ReturnType<typeof browserAttachmentBlocks>,
+    files?: readonly ValidatedBrowserTaskFile[],
+  ) => boolean;
+  fileIndex: () => ReturnType<typeof browserAttachmentBlocks>;
   rejectInput: () => void;
   abort: () => void;
   intent: string;
@@ -77,19 +84,20 @@ export function unifiedSupercarReply(
   taskId: string,
   message: string,
   attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
   const task = parked.get(taskId);
   if (!task) return false;
   let blocks: ReturnType<typeof browserAttachmentBlocks>;
   try {
     blocks = browserAttachmentBlocks(attachments ?? []);
-    if (!task.acceptAttachments(blocks)) throw new Error('attachment budget exceeded');
+    if (!task.acceptAttachments(blocks, files)) throw new Error('attachment budget exceeded');
   } catch {
     task.rejectInput();
     return true;
   }
   parked.delete(taskId);
-  task.resolve({ message, attachments: blocks });
+  task.resolve({ message, attachments: [...blocks, ...task.fileIndex()] });
   return true;
 }
 
@@ -209,6 +217,19 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   let attachments: ReturnType<typeof browserAttachmentBlocks>;
+  if (
+    env.BROWSER_TASK_FILES_V1 &&
+    opts.browserTaskFiles &&
+    (opts.browserTaskFiles.taskId !== opts.taskId ||
+      !(await opts.browserTaskFiles.isActive().catch(() => false)))
+  )
+    return {
+      status: 'failed',
+      reason: '材料所属的任务或账号已不可用。',
+      failureSource: 'tool',
+      iterations: 0,
+      toolsUsed: [],
+    };
   try {
     attachments = browserAttachmentBlocks(opts.attachments ?? []);
   } catch {
@@ -256,6 +277,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
+    ...(env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+      ? {
+          resolveUploads: (ids: readonly string[]) => {
+            if (!env.BROWSER_TASK_FILES_V1) throw new Error('文件交付功能已停用。');
+            return opts.browserTaskFiles!.resolve(opts.taskId, ids);
+          },
+        }
+      : {}),
     ...(opts.onBrowserDownload
       ? {
           saveDownload: (download) =>
@@ -539,15 +568,30 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           resolve(null);
         }, HANDOFF_WAIT_MS);
         const entry: ParkedTask = {
-          acceptAttachments: (blocks) => {
+          acceptAttachments: (blocks, files) => {
             const chars = blocks.reduce(
               (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
               0,
             );
             if (attachmentImageChars + chars > MAX_BROWSER_IMAGE_CHARS) return false;
+            if (
+              files?.length &&
+              env.BROWSER_TASK_FILES_V1 &&
+              opts.browserTaskFiles?.taskId === opts.taskId
+            )
+              opts.browserTaskFiles.admitReferences(files);
             attachmentImageChars += chars;
             return true;
           },
+          fileIndex: () =>
+            env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+              ? [
+                  {
+                    type: 'text',
+                    text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+                  },
+                ]
+              : [],
           rejectInput: () => {
             void safe(() =>
               opts.onAwaitingUser?.({
@@ -609,28 +653,29 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // each live write. tasks.create passes classifyRuntimeAction; a caller that
   // passes nothing still gets it — the gate is never silently off.
   const pendingReplies: UnifiedHumanReply[] = [];
+  const actionGateOptions = (targetPage: typeof page) => ({
+    page: targetPage,
+    locatorForAction: (action: UnifiedBrowserAction, ref: string) =>
+      tools.observation?.locator(tools.observation.resolve(action).frame, ref) ??
+      targetPage.locator(`aria-ref=${ref}`),
+    frameForAction: (action: UnifiedBrowserAction) =>
+      tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
+    onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
+    labelForRef: (ref: string) => labelForRef(lastSnapshot, ref),
+    park: async (question: string, kind: SupercarAwaitingKind) => {
+      const reply = await parkForReply(question, kind);
+      if (reply) pendingReplies.push(reply);
+      return reply?.message ?? null;
+    },
+    readOnly: isReadOnlyIntent(opts.intent),
+    userIntent: opts.userRequest ?? opts.intent,
+    aborted: () => controller.signal.aborted,
+    stillLive: async () =>
+      !controller.signal.aborted &&
+      !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
+  });
   const baseGateAction = (targetPage: typeof page) =>
-    createUnifiedActionGate({
-      page: targetPage,
-      locatorForAction: (action, ref) =>
-        tools.observation?.locator(tools.observation.resolve(action).frame, ref) ??
-        targetPage.locator(`aria-ref=${ref}`),
-      frameForAction: (action) =>
-        tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
-      onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
-      labelForRef: (ref) => labelForRef(lastSnapshot, ref),
-      park: async (question, kind) => {
-        const reply = await parkForReply(question, kind);
-        if (reply) pendingReplies.push(reply);
-        return reply?.message ?? null;
-      },
-      readOnly: isReadOnlyIntent(opts.intent),
-      userIntent: opts.userRequest ?? opts.intent,
-      aborted: () => controller.signal.aborted,
-      stillLive: async () =>
-        !controller.signal.aborted &&
-        !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
-    });
+    createUnifiedActionGate(actionGateOptions(targetPage));
 
   const gateAction: ReturnType<typeof createUnifiedActionGate> = async (action, phase) => {
     const stopped = sessionStopped();
@@ -705,7 +750,21 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       }
     };
     const targetPage = changedTab ? tools.page : (resolvedPage() ?? tools.page);
-    const result = await baseGateAction(targetPage)(action, phase);
+    let upload: Awaited<ReturnType<typeof tools.prepareUpload>> | undefined;
+    const result =
+      action.tool === 'upload' && phase === 'before'
+        ? await (async () => {
+            try {
+              upload = await tools.prepareUpload(action);
+              return await createBrowserUploadGate(upload, {
+                ...actionGateOptions(targetPage),
+                materials: opts.browserTaskFiles?.references(),
+              })(action, phase);
+            } catch (error) {
+              return { kind: 'skip' as const, message: browserToolError(error).errorMessage };
+            }
+          })()
+        : await baseGateAction(targetPage)(action, phase);
     // 复审 #1 #2: the checks above awaited (the page read, the policy, maybe the person's
     // confirmation of a sensitive step). The person may have acted meanwhile: check again right
     // before the action is sent — nothing awaits between here and execute (unified-browser-loop).
@@ -725,6 +784,21 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           action.tool === 'navigate' && phase === 'before' ? action.url : targetPage.url();
         if (/^https?:/.test(url)) replay.authorize(new URL(url).origin);
       } catch {}
+    }
+    if (upload) {
+      if (result.kind === 'proceed') {
+        const revision = control?.inputRevision;
+        upload.approve(() => {
+          if (
+            !env.BROWSER_TASK_FILES_V1 ||
+            controller.signal.aborted ||
+            sessionStopped() ||
+            (control &&
+              (!control.canAgentAct() || control.humanBusy() || control.inputRevision !== revision))
+          )
+            throw new Error('stale_context');
+        });
+      } else await upload.dispose();
     }
     return result;
   };
@@ -821,7 +895,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     };
     const outcome = await runUnifiedBrowserLoop({
-      attachments,
+      attachments: [
+        ...attachments,
+        ...(env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+          ? [
+              {
+                type: 'text' as const,
+                text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+              },
+            ]
+          : []),
+      ],
       takeUserReplies: () => pendingReplies.splice(0),
       wrapUp,
       ...(control

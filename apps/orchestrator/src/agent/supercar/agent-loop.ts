@@ -740,6 +740,8 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
+  /** Server-owned material scope for this exact task; disabled unless the task-files flag is on. */
+  browserTaskFiles?: import('../browser-tools/browser-task-files.js').BrowserTaskFiles;
   onBrowserDownload?: (input: {
     filename: string;
     buffer: Buffer;

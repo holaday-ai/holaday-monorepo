@@ -14,6 +14,10 @@ const logger = pino({ level: 'silent' });
 export async function browserOutputFixture() {
   const root = await mkdtemp(join(tmpdir(), 'ba-browser-files-'));
   const records: Array<Record<string, unknown>> = [];
+  const taskRecords: Array<Record<string, unknown>> = [
+    { id: 9, externalId: 'tsk_alice', userId: 7, status: 'executing', origin: 'user' },
+    { id: 10, externalId: 'tsk_bob', userId: 8, status: 'executing', origin: 'user' },
+  ];
   const faults = {
     insert: 'none' as 'none' | 'before' | 'after' | 'unknown',
     read: false,
@@ -71,10 +75,7 @@ export async function browserOutputFixture() {
                         { id: 8, externalId: 'usr_bob', status: 'active', modelDataRegion: 'intl' },
                       ]
                     : table === tasks
-                      ? [
-                          { id: 9, externalId: 'tsk_alice', userId: 7 },
-                          { id: 10, externalId: 'tsk_bob', userId: 8 },
-                        ]
+                      ? taskRecords
                       : (() => {
                           throw new Error('Unexpected select table');
                         })();
@@ -106,5 +107,13 @@ export async function browserOutputFixture() {
     },
   } as unknown as DB;
   const storage = new LocalStorageProvider(root, logger);
-  return { service: new FileService(db, logger, storage), db, records, faults, storage, root };
+  return {
+    service: new FileService(db, logger, storage),
+    db,
+    records,
+    taskRecords,
+    faults,
+    storage,
+    root,
+  };
 }

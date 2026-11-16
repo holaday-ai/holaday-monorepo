@@ -20,6 +20,10 @@ import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import {
+  BrowserTaskFiles,
+  type ValidatedBrowserTaskFile,
+} from '../../agent/browser-tools/browser-task-files.js';
+import {
   createResponsesWebSearch,
   withoutVerbatimNotes,
 } from '../../agent/browser-tools/unified-browser-loop.js';
@@ -289,6 +293,7 @@ import {
   appendSearchSourceReferences,
   collectSearchSourceReferences,
 } from '../../execution/search-source-references.js';
+import { createBrowserTaskFileScope } from '../../files/browser-task-file-scope.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import {
@@ -1629,6 +1634,7 @@ export const tasksRouter = router({
             // anchor must return BAD_REQUEST without charging the task.
             const fileService = new FileService(ctx.db, ctx.logger);
             const inputFileMetadata: { fileId: string; filename: string; mimetype: string }[] = [];
+            const browserInputReferences: ValidatedBrowserTaskFile[] = [];
             const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
             let orderedFileIds: string[];
             try {
@@ -1649,6 +1655,10 @@ export const tasksRouter = router({
             const parseCreateAttachments = async (completeText: boolean) => {
               if (orderedFileIds.length === 0) return;
               const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+              if (appEnv.BROWSER_TASK_FILES_V1)
+                browserInputReferences.push(
+                  ...BrowserTaskFiles.validatedReferences(loaded, userRow.id),
+                );
               const requestedFileIds = [...new Set(orderedFileIds)];
               inputFileMetadata.push(
                 ...loaded.map(({ row }) => ({
@@ -6508,6 +6518,18 @@ export const tasksRouter = router({
                   resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion, taskModelWiring)
                     .kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+                  ...(appEnv.BROWSER_TASK_FILES_V1
+                    ? {
+                        browserTaskFiles: createBrowserTaskFileScope({
+                          db: ctx.db,
+                          files: fileService,
+                          taskId,
+                          userId: userRow.id,
+                          origin: ctx.taskOrigin,
+                          inputs: browserInputReferences,
+                        }),
+                      }
+                    : {}),
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
@@ -11224,9 +11246,15 @@ export const tasksRouter = router({
         // Core replies require every referenced file and complete text before
         // releasing the wait. Other lanes retain their existing parsing policy.
         const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+        const replyFileReferences: ValidatedBrowserTaskFile[] = [];
         if (input.fileIds && input.fileIds.length > 0) {
           const fileService = new FileService(ctx.db, ctx.logger);
           const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+          if (appEnv.BROWSER_TASK_FILES_V1) {
+            if (input.fileIds.some((id) => !loaded.some((file) => file.row.externalId === id)))
+              throw new TRPCError({ code: 'BAD_REQUEST', message: '有附件已失效，请重新提供。' });
+            replyFileReferences.push(...BrowserTaskFiles.validatedReferences(loaded, userRow.id));
+          }
           if (
             coreTextReply &&
             input.fileIds.some((id) => !loaded.some((file) => file.row.externalId === id))
@@ -11374,6 +11402,7 @@ export const tasksRouter = router({
                 input.taskId,
                 input.message,
                 replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
+                replyFileReferences,
               );
         if (delivered) {
           return { ok: true, state: 'resumed' as const };
