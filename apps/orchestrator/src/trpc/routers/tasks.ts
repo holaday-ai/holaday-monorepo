@@ -375,6 +375,7 @@ import {
 } from './browser-control.js';
 import {
   assertLocalChromeSelection,
+  localChromeLaunchOptionsProcedure,
   localChromeSelectionSchema,
   localChromeTabsProcedure,
   localChromeTaskTabProcedure,
@@ -12417,6 +12418,7 @@ export const tasksRouter = router({
   browserProfileStatus: browserProfileStatusProcedure,
   browserProfileClear: browserProfileClearProcedure,
   localChromeTabs: localChromeTabsProcedure,
+  localChromeLaunchOptions: localChromeLaunchOptionsProcedure,
   localChromeTaskTab: localChromeTaskTabProcedure,
   browserNav: browserNavProcedure,
 

@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,7 @@ function buildExtension(outDir) {
       encoding: 'utf8',
       env: {
         ...process.env,
+        NODE_ENV: process.env.HOLADAY_E2E_REACT_DEV === '1' ? 'development' : 'production',
         VITE_LOCAL_CHROME_QA: '1',
         // Different origin from the fixture pages: the auth-bridge content
         // script mirrors the workbench's localStorage token (null there would
@@ -237,6 +238,133 @@ test(
       await sourcePage.close();
       await userPage.close();
     });
+    await t.test(
+      'bundled sidepanel sends an independent target while the user switches pages',
+      async () => {
+        const sourcePage = await context.newPage();
+        await sourcePage.goto(`${server.origin}/v2.html?from=sidepanel`);
+        await sourcePage.locator('#query').fill('original input');
+        const userPage = await context.newPage();
+        await userPage.goto(`${server.origin}/page.html`);
+        await userPage.locator('#query').fill('normal browsing');
+        await serviceWorker.evaluate(async () =>
+          chrome.storage.local.set({
+            'holaday.user': {
+              externalId: 'fixture-user',
+              email: 'fixture@example.test',
+              plan: 'free',
+            },
+          }),
+        );
+        const sidepanel = await context.newPage();
+        const trace = [];
+        sidepanel.on('pageerror', (error) => trace.push(`pageerror:${error.message}`));
+        let created;
+        let preparedPage;
+        await sidepanel.route(`${server.origin}/trpc/**`, async (route) => {
+          const procedure = new URL(route.request().url()).pathname.split('/').at(-1);
+          trace.push(procedure);
+          const clientId = server.connections.at(-1).clientId;
+          let data;
+          if (procedure === 'tasks.localChromeLaunchOptions') {
+            data = { backgroundTaskTabs: true };
+          } else if (procedure === 'tasks.localChromeTabs') {
+            const discovery = await server.call(TASK_ID, 'tabs');
+            data = {
+              backgroundTaskTabs: true,
+              tabs: discovery.result.tabs.map(({ url, ...tab }) => ({
+                ...tab,
+                expectedUrl: url,
+                extensionClientId: clientId,
+                taskTabStart: true,
+              })),
+            };
+          } else if (procedure === 'tasks.localChromeTaskTab') {
+            const { selection, preparationId } = route.request().postDataJSON();
+            assert.equal(selection.extensionClientId, clientId);
+            const nextPage = context.waitForEvent('page');
+            const { extensionClientId: _connection, ...target } = selection;
+            const result = await server.call(TASK_ID, 'task_tab', { target, preparationId });
+            assert.equal(result.ok, true, JSON.stringify(result.error));
+            preparedPage = await nextPage;
+            data = {
+              extensionClientId: clientId,
+              tabId: result.result.tabId,
+              expectedUrl: result.result.url,
+              selectionId: result.result.selectionId,
+              title: result.result.title,
+            };
+            // The user switches tabs while preparation is in flight. The task
+            // must stay on its captured source, rather than follow the active tab.
+            await userPage.bringToFront();
+          } else if (procedure === 'tasks.create') {
+            created = route.request().postDataJSON();
+            data = { taskId: 'tsk_sidepanel_fixture', status: 'executing' };
+          } else {
+            throw new Error(`unexpected sidepanel request ${procedure}`);
+          }
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ result: { data } }),
+          });
+        });
+        try {
+          const panelUrl = await serviceWorker.evaluate(() =>
+            chrome.runtime.getURL(chrome.runtime.getManifest().side_panel.default_path),
+          );
+          await sidepanel.goto(panelUrl);
+          await sourcePage.bringToFront();
+          await sidepanel.getByLabel('任务页面').waitFor();
+          if (process.env.HOLADAY_E2E_ARTIFACT_DIR) {
+            mkdirSync(process.env.HOLADAY_E2E_ARTIFACT_DIR, { recursive: true });
+            await sidepanel.setViewportSize({ width: 390, height: 844 });
+            await sidepanel.screenshot({
+              path: join(process.env.HOLADAY_E2E_ARTIFACT_DIR, 'ba1-sidepanel-390.png'),
+              fullPage: true,
+            });
+          }
+          await sidepanel.locator('textarea').fill('整理报表');
+          await sidepanel.getByRole('button', { name: '发送任务' }).click();
+          try {
+            await sidepanel.waitForFunction(
+              () =>
+                document.querySelector('textarea')?.value === '' ||
+                document.querySelector('[role="alert"]'),
+            );
+          } catch (error) {
+            throw new Error(
+              `${error.message}\ntrace=${JSON.stringify(trace)}\npanel=${await sidepanel.locator('body').innerText()}`,
+            );
+          }
+          assert.equal(
+            await sidepanel.locator('textarea').inputValue(),
+            '',
+            await sidepanel.locator('body').innerText(),
+          );
+          assert.equal(created.intent, '整理报表');
+          assert.match(created.clientRequestId, /^[0-9a-f-]{36}$/);
+          assert.equal(new URL(preparedPage.url()).search, '?from=sidepanel');
+          const discovery = await server.call(TASK_ID, 'tabs');
+          const original = discovery.result.tabs.find(
+            (tab) => tab.title === 'V2 fixture' && tab.tabId !== created.localChrome.tabId,
+          );
+          assert.notEqual(created.localChrome.tabId, original.tabId);
+          assert.equal(await sourcePage.locator('#query').inputValue(), 'original input');
+          assert.equal(await userPage.locator('#query').inputValue(), 'normal browsing');
+          const active = discovery.result.tabs.find((tab) => tab.active);
+          assert.equal(active.title, 'E2E 页面一');
+          await userPage.locator('#query').press('End');
+          await userPage.keyboard.type(' continues');
+          assert.equal(await userPage.locator('#query').inputValue(), 'normal browsing continues');
+        } finally {
+          await sidepanel.close();
+          await preparedPage?.close();
+          await sourcePage.close();
+          await userPage.close();
+        }
+      },
+    );
     await t.test(
       'open v2 handshake and ordinary button auto click through unified gate',
       async () => {

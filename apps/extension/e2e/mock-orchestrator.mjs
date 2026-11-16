@@ -202,8 +202,13 @@ export class MockOrchestrator {
       this.received.push(msg);
       if (msg.type === 'client.hello') {
         connection.helloAt = Date.now();
+        connection.clientId = randomUUID();
         ws.send(
-          JSON.stringify({ type: 'server.welcome', clientId: randomUUID(), heartbeatMs: 30_000 }),
+          JSON.stringify({
+            type: 'server.welcome',
+            clientId: connection.clientId,
+            heartbeatMs: 30_000,
+          }),
         );
         const authed = this.connections.filter((c) => c.helloAt).length;
         this.connectionWaiters = this.connectionWaiters.filter((w) => {

@@ -25,9 +25,12 @@ import type {
 import { isTerminalStatus } from '@/types/task';
 import type { VideoCreationOptions } from '@/types/video';
 import {
+  BrowserTaskLaunches,
+  type BrowserTaskModeChoice,
   type BrowserViewportProfile,
   type ServerMessage,
   browserConnectionWaitSchema,
+  resolveBrowserTaskMode,
 } from '@holaday/shared-types';
 import { create } from 'zustand';
 import {
@@ -86,6 +89,9 @@ export interface TaskStore {
     expectedUrl: string;
     selectionId: string;
     title: string;
+    backgroundTaskTabs?: boolean;
+    taskTabStart?: boolean;
+    taskTabMode?: BrowserTaskModeChoice;
   } | null;
   tasks: UiTask[];
   selectedTaskId: string | null;
@@ -676,6 +682,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   const uncertainReplies = new Map<string, ExecutionIdentity | 'invalid'>();
   const observedExecutions = new Map<string, ExecutionIdentity>();
   const uncertainCreations = new Map<string, string>();
+  const browserLaunches = new BrowserTaskLaunches<NonNullable<TaskStore['localChromeSelection']>>();
   // One continuation attempt per original task at a time, across every button.
   const publicCloudFlights = new Map<string, Promise<{ taskId: string } | { error: string }>>();
   const publicCloudEligible = new Set<string>();
@@ -1830,13 +1837,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       ]);
       // A caller-supplied server idempotency key makes a resend safe: the server
       // replays the first task instead of creating another.
-      const idempotentResend = Boolean(overrides?.clientRequestId);
+      const backgroundLaunch = chromeSelection?.backgroundTaskTabs === true;
+      const launch = backgroundLaunch ? browserLaunches.attempt(creationKey) : undefined;
+      const idempotentResend = Boolean(overrides?.clientRequestId || launch);
       if (!idempotentResend && uncertainCreations.has(creationKey))
         return { error: uncertainWriteMessage };
       const pickedViewportProfile =
         viewportProfile ?? get().defaultViewportProfile ?? pickDefaultBrowserViewportProfile();
-      const localTaskId = overrides?.clientRequestId
-        ? `${LOCAL_PENDING_TASK_PREFIX}${overrides.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
+      const stableRequestId = overrides?.clientRequestId ?? launch?.clientRequestId;
+      const localTaskId = stableRequestId
+        ? `${LOCAL_PENDING_TASK_PREFIX}${stableRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
         : `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
             .toString(36)
             .slice(2, 8)}`;
@@ -1867,15 +1877,36 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         browserInteractive: false,
         error: null,
       }));
+      let createDispatched = false;
       try {
+        let executionSelection = chromeSelection;
+        if (backgroundLaunch && chromeSelection) {
+          const taskMode = resolveBrowserTaskMode(intent, chromeSelection.taskTabMode);
+          if (taskMode === 'independent' && !chromeSelection.taskTabStart)
+            throw new Error('请更新并重新连接 HOLADAY Chrome 扩展后使用独立任务页。');
+          executionSelection = await browserLaunches.prepare(creationKey, async (preparationId) => {
+            if (taskMode === 'current') return chromeSelection;
+            return trpc.tasks.localChromeTaskTab.mutate({
+              selection: {
+                extensionClientId: chromeSelection.extensionClientId,
+                tabId: chromeSelection.tabId,
+                expectedUrl: chromeSelection.expectedUrl,
+                selectionId: chromeSelection.selectionId,
+              },
+              preparationId,
+            });
+          });
+          if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+        }
+        createDispatched = true;
         const res = await trpc.tasks.create.mutate({
-          ...(chromeSelection
+          ...(executionSelection
             ? {
                 localChrome: {
-                  extensionClientId: chromeSelection.extensionClientId,
-                  tabId: chromeSelection.tabId,
-                  expectedUrl: chromeSelection.expectedUrl,
-                  selectionId: chromeSelection.selectionId,
+                  extensionClientId: executionSelection.extensionClientId,
+                  tabId: executionSelection.tabId,
+                  expectedUrl: executionSelection.expectedUrl,
+                  selectionId: executionSelection.selectionId,
                 },
               }
             : {}),
@@ -1887,7 +1918,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                   overrides?.browserPreference ?? get().browserPreference ?? undefined,
               }
             : {}),
-          clientRequestId: overrides?.clientRequestId ?? localTaskId,
+          clientRequestId: stableRequestId ?? localTaskId,
           ...(overrides?.publicCloudContinuationOf
             ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
             : {}),
@@ -2003,7 +2034,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               }
             : {}),
           selectedTaskId: res.taskId,
-          ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
+          ...(!creationUnconfirmed && prev.localChromeSelection === chromeSelection
+            ? { localChromeSelection: null }
+            : {}),
           composerMode: 'task' as const,
           browserInteractive: false,
           ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
@@ -2016,12 +2049,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // Fire-and-forget refresh so the row's server-authored fields
         // (createdAt, status) replace the optimistic stub once available.
         if (creationUnconfirmed) return { error: uncertainWriteMessage };
+        browserLaunches.complete(creationKey);
         if (createOrder === 'reconcile') void hydrateDetail(res.taskId);
         void get().refreshTasks();
         return { taskId: res.taskId };
       } catch (err) {
         if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
-        const unknownWrite = !isDefiniteWriteRejection(err);
+        const unknownWrite = createDispatched && !isDefiniteWriteRejection(err);
         const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
         if (unknownWrite && !idempotentResend) uncertainCreations.set(creationKey, localTaskId);
         set((prev) => ({
@@ -3004,6 +3038,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       uncertainReplies.clear();
       observedExecutions.clear();
       uncertainCreations.clear();
+      browserLaunches.clear();
       publicCloudEligible.clear();
       publicCloudFlights.clear();
       pendingReplies.clear();

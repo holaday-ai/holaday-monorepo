@@ -171,6 +171,27 @@ it('keeps background task-tab preparation dark before rollout without dispatchin
   expect(send).not.toHaveBeenCalled();
 });
 
+it.each([true, false])(
+  'reports launcher availability without enumerating browser pages (%s)',
+  async (enabled) => {
+    vi.stubEnv('BROWSER_TASK_TABS_ENABLED', String(enabled));
+    vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+      viewportV2: true,
+      observationV2: true,
+      replayV1: false,
+      routingV2: true,
+    });
+    const send = vi.spyOn(ws, 'sendExtensionToolCall');
+    const connections = vi.spyOn(ws, 'getConnectedExtensionClientIds');
+    const caller = router({
+      options: selectionRoutes.localChromeLaunchOptionsProcedure,
+    }).createCaller({ userId: 'alice' } as Context);
+    expect(await caller.options()).toEqual({ backgroundTaskTabs: enabled });
+    expect(send).not.toHaveBeenCalled();
+    expect(connections).not.toHaveBeenCalled();
+  },
+);
+
 it.each(['wrong-connection', 'source-tab', 'other-origin', 'missing-marker'])(
   'rejects an invalid background preparation receipt: %s',
   async (variant) => {

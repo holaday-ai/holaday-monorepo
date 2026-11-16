@@ -19,3 +19,4 @@ export * from './browser-user-contract.js';
 export * from './browser-session-vault.js';
 export * from './login-context.js';
 export * from './reply-language.js';
+export * from './browser-task-mode.js';

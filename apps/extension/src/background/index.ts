@@ -83,6 +83,7 @@ import {
   armCappedSlowRetry,
   connect as connectWs,
   disconnect as disconnectWs,
+  getAuthenticatedExtensionClientId,
   getCurrentWsToken,
   getWsConnectionStatus,
   isConnected,
@@ -1863,7 +1864,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'holaday.status') {
     void getWsConnectionStatus().then(
       (ws) => {
-        safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws });
+        safeSendResponse(sendResponse, {
+          lastWelcomeAt: state.lastWelcomeAt,
+          ws,
+          extensionClientId: getAuthenticatedExtensionClientId(),
+        });
       },
       (err) => {
         console.warn('[holaday] status message failed', compactLogErrorReason(err));

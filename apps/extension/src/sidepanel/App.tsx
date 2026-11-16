@@ -2,9 +2,11 @@
  * Phase 14 — HOLA DAY Side Panel.
  *
  * The Side Panel is the "submit a task from any page" surface. It
- * lives next to whatever website the user is on, reads page context
- * (title / URL / selected text) automatically, and ships the intent
- * + context tail to tasks.create. Real-time progress comes from
+ * lives next to whatever website the user is on and previews metadata.
+ * The enabled task-tab launcher binds a background page by default;
+ * explicit current-page requests bind the captured original instead.
+ * The legacy context-tail path remains available behind the rollout gate.
+ * Real-time progress comes from
  * the SW (which is already on the WS for vision-loop / step events)
  * via chrome.runtime.sendMessage, mirroring the popup pattern.
  *
@@ -15,15 +17,16 @@
  * "在 popup 中查看任务" button at the bottom.
  */
 
+import {
+  BrowserTaskLaunches,
+  type BrowserTaskModeChoice,
+  resolveBrowserTaskMode,
+} from '@holaday/shared-types';
 import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { humanizeExtensionError } from '../shared/error-copy.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
-import {
-  type PageContext,
-  composeContextTail,
-  getActivePageContext,
-} from '../shared/page-context.js';
+import { type PageContext, getActivePageContext } from '../shared/page-context.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import {
   type StoredUser,
@@ -43,6 +46,11 @@ import {
   shouldClearAuthAfterUnauthorized,
 } from './create-task-response.js';
 import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
+import {
+  type ChromeDiscovery,
+  type ChromeLaunchTarget,
+  prepareSidePanelLaunch,
+} from './task-launch.js';
 import {
   type TaskStatus,
   type TaskView,
@@ -78,12 +86,39 @@ const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const CREATE_TASK_TIMEOUT_MS = 10_000;
 const CREATE_TASK_BODY_TIMEOUT_MS = 2_000;
 
+async function browserRequest<T>(
+  authToken: string,
+  procedure: string,
+  input?: unknown,
+): Promise<T> {
+  const res = await fetchWithDeadline(
+    `${ORCHESTRATOR_HTTP}/trpc/tasks.${procedure}`,
+    {
+      method: input === undefined ? 'GET' : 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${authToken}` },
+      ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+    },
+    20_000,
+    'sidepanel_browser_prepare_timeout',
+  );
+  const body = await responseJsonWithDeadline<{
+    result?: { data: T };
+    error?: { message?: string };
+  }>(res, 2_000, 'sidepanel_browser_prepare_body_timeout');
+  if (!res.ok || !body.result)
+    throw new Error(body.error?.message ?? `Chrome 连接暂时不可用（HTTP ${res.status}）`);
+  return body.result.data;
+}
+
 export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const authSyncSeq = useRef(0);
+  const launches = useRef(new BrowserTaskLaunches<ChromeLaunchTarget>());
+  const [backgroundTabs, setBackgroundTabs] = useState(false);
+  const [taskMode, setTaskMode] = useState<BrowserTaskModeChoice>('auto');
 
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [intent, setIntent] = useState('');
@@ -97,6 +132,9 @@ export function App() {
   const mountedRef = useRef(true);
 
   function clearLocalSessionState(): void {
+    launches.current.clear();
+    setBackgroundTabs(false);
+    setTaskMode('auto');
     setUser(null);
     setToken(null);
     setActiveTaskId(null);
@@ -107,6 +145,7 @@ export function App() {
   }
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -205,6 +244,7 @@ export function App() {
       if (area !== 'local') return;
       const tokenChange = changes['holaday.access_token'];
       if (!tokenChange) return;
+      launches.current.clear();
       void (async () => {
         const seq = ++authSyncSeq.current;
         const newToken = normalizeAccessToken(tokenChange.newValue);
@@ -256,7 +296,7 @@ export function App() {
       try {
         do {
           queued = false;
-          const ctx = await getActivePageContext();
+          const ctx = await getActivePageContext({ metadataOnly: true });
           if (!cancelled) setPageContext(ctx);
         } while (!cancelled && queued);
       } finally {
@@ -285,6 +325,20 @@ export function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBackgroundTabs(false);
+    if (token)
+      void browserRequest<{ backgroundTaskTabs: boolean }>(token, 'localChromeLaunchOptions')
+        .then((result) => {
+          if (!cancelled) setBackgroundTabs(result.backgroundTaskTabs === true);
+        })
+        .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   // Subscribe to SW snapshots so the result section reflects the
   // task's progress in real time without polling.
@@ -414,9 +468,36 @@ export function App() {
     taskSubmitInFlight.current = true;
     setSubmitting(true);
     setError(null);
+    const seq = authSyncSeq.current;
     try {
-      const tail = composeContextTail(pageContext);
-      const fullIntent = tail ? `${submittedIntent}${tail}` : submittedIntent;
+      const assertSession = async () => {
+        const current = normalizeAccessToken(await getAccessToken());
+        if (!mountedRef.current || seq !== authSyncSeq.current || current !== token)
+          throw new Error('登录态刚刚切换，请重新发送任务。');
+      };
+      const capturedPage = await getActivePageContext({ metadataOnly: true });
+      await assertSession();
+      const launch = await prepareSidePanelLaunch(
+        { intent: submittedIntent, page: capturedPage, session: seq, choice: taskMode },
+        {
+          discover: () => browserRequest<ChromeDiscovery>(token, 'localChromeTabs'),
+          connection: async () => {
+            const status = await sendRuntimeMessageWithRetry<{
+              extensionClientId?: string;
+              ws?: { connected?: boolean };
+            }>({ type: 'holaday.status' });
+            return status?.ws?.connected === true ? (status.extensionClientId ?? null) : null;
+          },
+          prepare: (selection, preparationId) =>
+            browserRequest<ChromeLaunchTarget>(token, 'localChromeTaskTab', {
+              selection,
+              preparationId,
+            }),
+          assertSession,
+          legacyContext: getActivePageContext,
+          launches: launches.current,
+        },
+      );
       const res = await fetchWithDeadline(
         `${ORCHESTRATOR_HTTP}/trpc/tasks.create`,
         {
@@ -425,7 +506,7 @@ export function App() {
             'content-type': 'application/json',
             authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ intent: fullIntent }),
+          body: JSON.stringify(launch.body),
         },
         CREATE_TASK_TIMEOUT_MS,
         'sidepanel_create_task_timeout',
@@ -471,7 +552,9 @@ export function App() {
         throw new Error('任务已发送，但返回信息不完整；请打开 HOLA DAY 网页查看最新任务。');
       }
       setActiveTaskId(newTaskId);
+      if (launch.key) launches.current.complete(launch.key);
       setIntent('');
+      setTaskMode('auto');
       // Nudge the SW to push the latest snapshot — the SW updates
       // arrive via the listener above as the WS frames flow in.
       await refreshTasksSnapshot();
@@ -533,9 +616,31 @@ export function App() {
       <ContextPreview context={pageContext} />
 
       <div style={panelStyle}>
+        {backgroundTabs ? (
+          <label style={metaSubStyle}>
+            任务页面
+            <select
+              aria-label="任务页面"
+              value={taskMode}
+              onChange={(event) => setTaskMode(event.currentTarget.value as BrowserTaskModeChoice)}
+              disabled={submitting}
+            >
+              <option value="auto">
+                {resolveBrowserTaskMode(intent) === 'current'
+                  ? '处理当前页（按你的指令）'
+                  : '独立任务页（默认）'}
+              </option>
+              <option value="independent">独立任务页</option>
+              <option value="current">处理当前页</option>
+            </select>
+            <div>独立任务页在后台执行，你可以继续浏览。</div>
+          </label>
+        ) : null}
         <textarea
           rows={3}
-          placeholder="想让 HOLA DAY 在这页面上做什么？"
+          placeholder={
+            backgroundTabs ? '想让 HOLA DAY 帮你完成什么？' : '想让 HOLA DAY 在这页面上做什么？'
+          }
           value={intent}
           maxLength={MAX_SIDE_PANEL_INTENT_CHARS}
           onChange={(e) => setIntent(e.currentTarget.value.slice(0, MAX_SIDE_PANEL_INTENT_CHARS))}
@@ -549,7 +654,11 @@ export function App() {
         >
           {submitting ? '提交中...' : '发送任务'}
         </button>
-        {error ? <div style={errorStyle}>{error}</div> : null}
+        {error ? (
+          <div role="alert" style={errorStyle}>
+            {error}
+          </div>
+        ) : null}
       </div>
 
       <ActiveTaskCard task={activeTask} />

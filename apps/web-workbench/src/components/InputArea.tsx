@@ -24,6 +24,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { useBrainOptions } from '@/hooks/useBrainOptions';
 import { isEnglishTask } from '@/lib/assistant-turn';
+import { getAccessToken } from '@/lib/auth';
 import { type AwaitingKind, awaitingComposerPlaceholder } from '@/lib/awaiting-user-copy';
 import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { quotaExhaustedCopy } from '@/lib/quota-exhausted-copy';
@@ -43,6 +44,7 @@ import { cn } from '@/lib/utils';
 import { hasBrowserRecordForWorkbench } from '@/lib/workbench-state';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiSkill, UiSkillSelection } from '@/types/task';
+import { resolveBrowserTaskMode } from '@holaday/shared-types';
 import {
   ArrowUp,
   ChevronDown,
@@ -239,9 +241,29 @@ export function InputArea({
   const englishTask = useTaskStore((s) =>
     isEnglishTask(s.tasks.find((task) => task.taskId === s.selectedTaskId)?.intent ?? ''),
   );
-  const showChromePicker = useTaskStore((s) =>
+  const hasBrowserTask = useTaskStore((s) =>
     hasBrowserRecordForWorkbench(s.tasks.find((task) => task.taskId === s.selectedTaskId) ?? null),
   );
+  const [taskTabLauncherEnabled, setTaskTabLauncherEnabled] = React.useState(false);
+  const launcherOwner = getAccessToken();
+  React.useEffect(() => {
+    let cancelled = false;
+    setTaskTabLauncherEnabled(false);
+    if (!floating && launcherOwner) {
+      // Optional access also preserves older embedded clients during upgrades.
+      void trpc.tasks?.localChromeLaunchOptions
+        ?.query()
+        .then((options) => {
+          if (!cancelled && getAccessToken() === launcherOwner)
+            setTaskTabLauncherEnabled(options.backgroundTaskTabs === true);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [floating, launcherOwner]);
+  const showChromePicker = hasBrowserTask || (taskTabLauncherEnabled && !hasExistingTask);
   const toast = useToast();
   const [value, setValue] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftAttachment[]>([]);
@@ -640,6 +662,16 @@ export function InputArea({
       : trimmed;
     if (!intentForSubmit) {
       toast.show('请输入要让技能完成的任务');
+      return;
+    }
+    if (
+      taskTabLauncherEnabled &&
+      !floating &&
+      !hasExistingTask &&
+      !useTaskStore.getState().localChromeSelection &&
+      resolveBrowserTaskMode(intentForSubmit) === 'current'
+    ) {
+      toast.show('请先选择要处理的 Chrome 页面；云浏览器里的当前页任务请从云浏览器发起。', 'error');
       return;
     }
     // Block submit while any attachment is still uploading; let

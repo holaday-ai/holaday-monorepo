@@ -48,6 +48,11 @@ function supportsTaskTabStart(raw: unknown): boolean {
   return protocol.success && protocol.data.capabilities.includes('task_tab_start');
 }
 
+/** UI rollout hint only: opening the sidepanel never enumerates other pages. */
+export const localChromeLaunchOptionsProcedure = protectedProcedure.query(({ ctx }) => ({
+  backgroundTaskTabs: backgroundTaskTabsEnabled(ctx.userId),
+}));
+
 export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx }) => {
   const connections = getConnectedExtensionClientIds(ctx.userId);
   const results = await Promise.all(

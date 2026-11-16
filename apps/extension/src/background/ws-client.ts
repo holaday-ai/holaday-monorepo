@@ -26,6 +26,7 @@ const WS_ENDPOINT_FAILURE_COOLDOWN_MS = 15_000;
 interface State {
   socket: WebSocket | null;
   token: string | null;
+  authenticatedClientId: string | null;
   openingToken: string | null;
   socketGeneration: number;
   reconnectAttempt: number;
@@ -54,6 +55,7 @@ interface State {
 const state: State = {
   socket: null,
   token: null,
+  authenticatedClientId: null,
   openingToken: null,
   socketGeneration: 0,
   reconnectAttempt: 0,
@@ -133,6 +135,7 @@ function recoverFromCurrentSocketSendFailure(socket: WebSocket): void {
 }
 
 export function disconnect(): void {
+  state.authenticatedClientId = null;
   state.closedByUser = true;
   state.socketGeneration += 1;
   state.openingToken = null;
@@ -257,6 +260,10 @@ export function getCurrentWsToken(): string | null {
   return state.token;
 }
 
+export function getAuthenticatedExtensionClientId(): string | null {
+  return isConnected() ? state.authenticatedClientId : null;
+}
+
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
     connected: isConnected(),
@@ -275,6 +282,7 @@ export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
 }
 
 function openSocket(token: string): void {
+  state.authenticatedClientId = null;
   clearReconnectTimer();
   state.socketGeneration += 1;
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
@@ -540,8 +548,10 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // before closing the socket. Surface it as an "unauthorized" event so
     // the SW clears the stale token instead of looping with bad creds.
     if (result.data.type === 'server.error' && result.data.code === 'UNAUTHORIZED') {
+      state.authenticatedClientId = null;
       fireUnauthorized();
     }
+    if (result.data.type === 'server.welcome') state.authenticatedClientId = result.data.clientId;
     for (const fn of state.listeners) {
       try {
         fn(result.data);

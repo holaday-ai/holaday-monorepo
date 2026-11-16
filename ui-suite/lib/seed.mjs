@@ -277,6 +277,8 @@ export function dispatch(s, name, input = {}, method = 'GET') {
         needsUpdate: false,
         routingV2: false,
       };
+    case 'tasks.localChromeLaunchOptions':
+      return { backgroundTaskTabs: false };
     case 'tasks.wakeBrowser':
       return { status: 'unavailable', reason: 'pool_disabled' };
     case 'auth.assignModelDataRegion':
