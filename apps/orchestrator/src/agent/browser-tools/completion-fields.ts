@@ -245,6 +245,8 @@ export interface FactAssessment {
    * as that counter. The browser loop sends them back once before they go out as 未核实.
    */
   unsettledCounts?: string[];
+  /** GOAL2 H1: contradictions that only pair a count or a tab's price with the wrong item. */
+  pairing?: string[];
 }
 
 interface Fact {
@@ -1397,12 +1399,13 @@ export function assessCompletionFacts(input: {
   if (stale) contradictions.push(stale);
   // FIX-59 P1-1: a price is the tab's or section's it sits under (故宫 5 元 is the halls', not the
   // main ticket's).
-  contradictions.push(
-    ...misattributedPrices(
-      unescapeLiteralBreaks(input.summary),
-      input.pages.map((page) => unescapeLiteralBreaks(page.text)),
-    ),
+  // GOAL2 H1: these and the counters below are pairings — at the last chance the answer goes out
+  // with the unpaired value written 「未能核实」 (settledAnswer), not as a failure.
+  const pairing = misattributedPrices(
+    unescapeLiteralBreaks(input.summary),
+    input.pages.map((page) => unescapeLiteralBreaks(page.text)),
   );
+  contradictions.push(...pairing);
   // FIX-60 P1: a price from a product page's variant selector is that variant's — the searched
   // item's only when the answer says which, or another page (its search card) shows it too.
   contradictions.push(
@@ -1442,6 +1445,7 @@ export function assessCompletionFacts(input: {
     input.pages.map((page) => page.text),
   );
   contradictions.push(...engagement.contradictions);
+  pairing.push(...engagement.contradictions);
   // G7 复审 P2-2: first, so the 8-item cut never drops the only note on such a number.
   unverified.unshift(...engagement.unverified.map((item) => `${item}${COUNTER_MARK}`));
   return {
@@ -1454,6 +1458,7 @@ export function assessCompletionFacts(input: {
       : {}),
     ...(cutPrices.length ? { cutPrices: cutPrices.slice(0, 8) } : {}),
     ...(engagement.unverified.length ? { unsettledCounts: engagement.unverified } : {}),
+    ...(pairing.length ? { pairing } : {}),
     ...(hedged.length ? { hedgedNames: hedged.slice(0, 4) } : {}),
   };
 }
@@ -1467,8 +1472,8 @@ const UNREAD_PRICE_TOKEN_RE = /(?:S\$|US\$|HK\$|\$|¥|￥|SGD|USD|RMB|CNY)\s?\d/
 const TRANSLATED_MARK = '（译述）';
 /** G7 复审 P2-1: an engagement number that is on the page but not settled as that counter. */
 const COUNTER_MARK = '（计数未定）';
-const COUNTER_LEAD = '未核实：以下数字页面上有，但没能确认属于这一项，请自行确认——';
-const COUNTER_LEAD_EN =
+export const COUNTER_LEAD = '未核实：以下数字页面上有，但没能确认属于这一项，请自行确认——';
+export const COUNTER_LEAD_EN =
   'Not verified: these numbers are on the page, but could not be confirmed as this counter — ';
 /** The answer gives `value` as the page's own words: in quotes, or after 页面提到 / 原文 / 写道. */
 function quotedAsPage(summary: string, value: string): boolean {

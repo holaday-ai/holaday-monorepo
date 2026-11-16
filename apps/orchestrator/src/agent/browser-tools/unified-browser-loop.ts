@@ -49,6 +49,8 @@ import {
 } from './completion-coverage.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
+  COUNTER_LEAD,
+  COUNTER_LEAD_EN,
   type ObservedEvidence,
   absentExplainedByPage,
   assessCompletionFacts,
@@ -62,6 +64,7 @@ import {
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
+import { type EngagementKind, settleUnpairedCounts } from './engagement-counts.js';
 import { fullPageRead } from './full-page-read.js';
 import {
   answerCount,
@@ -76,6 +79,7 @@ import {
   claimsNoPlayback,
 } from './playback-guard.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { settleMisattributedPrices } from './section-attribution.js';
 import { partialAnswerPrices, withoutUnmatchedPrices } from './spec-price-pairing.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -520,9 +524,13 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed': {
-      const summary = strip(
-        plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
-        outcome.summary,
+      const summary = settledAnswer(
+        strip(
+          plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+          outcome.summary,
+        ),
+        readTexts,
+        isEnglishIntent(intentText),
       );
       return {
         ...outcome,
@@ -1736,6 +1744,25 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                   observedText.slice(0, 500),
                 steps: step + 1,
                 partial: { found: 0, wanted: 1, missing: missingParts.join('、') },
+              };
+            // GOAL2 H1: what is left only pairs a count or a tab's price with the wrong item —
+            // the answer goes out with those values written 「未能核实」 (settledAnswer).
+            if (
+              (concludeNow || rejectionsLeft <= 0) &&
+              !partialHeld &&
+              blocking.startsWith('答案与已读页面矛盾') &&
+              facts.contradictions.length > 0 &&
+              facts.contradictions.every((c) => facts.pairing?.includes(c))
+            )
+              return {
+                status: 'completed',
+                summary: withLimitations(summary),
+                evidence:
+                  hostProof ||
+                  given ||
+                  deriveEvidence(summary, observedText) ||
+                  observedText.slice(0, 500),
+                steps: step + 1,
               };
             if (concludeNow || rejectionsLeft <= 0)
               // FIX-27 (va core-08): a later answer failing does not undo the held
@@ -3358,6 +3385,46 @@ function rescueSiteNameEn(url: string | undefined): string {
   if (!host) return 'another public page';
   return RESCUE_SITE_EN.find(([re]) => re.test(host))?.[1] ?? host;
 }
+
+/**
+ * GOAL2 H1 — what goes out: a count or a tab's price the read pages do not pair with its own icon,
+ * label or tab is written 「未能核实」 (never another number), with one line saying so. The G7
+ * 「页面上有，但没能确认」 note goes: its numbers are the ones settled here.
+ */
+export function settledAnswer(summary: string, readTexts: readonly string[], en = false): string {
+  const lines = summary
+    .split('\n')
+    .filter((line) => !line.startsWith(COUNTER_LEAD) && !line.startsWith(COUNTER_LEAD_EN));
+  const counts = settleUnpairedCounts(lines.join('\n'), readTexts);
+  const prices = settleMisattributedPrices(counts.answer, readTexts);
+  const notes = [
+    counts.settled.length
+      ? en
+        ? `Not verified: ${counts.settled.map((kind) => ENGAGEMENT_EN[kind]).join(', ')} — no number next to its own icon or label on the page could be confirmed as it, so none is given.`
+        : `未能核实：${counts.settled.map((kind) => `${kind}数`).join('、')}——页面上没有找到和这一项的图标 / 标签直接相邻、能确认属于它的数字，所以没写数字。`
+      : '',
+    prices.settled.length
+      ? en
+        ? `Not verified: ${prices.settled.join(', ')} — on the page it belongs to another tab or section.`
+        : `未能核实：${prices.settled.map((price) => `「${price}」`).join('、')}——页面上它属于另一栏，没能确认是这一项的价格，所以没写。`
+      : '',
+  ].filter(Boolean);
+  const body = prices.summary.replace(/\n{3,}/g, '\n\n').trimEnd();
+  return notes.length
+    ? `${body}\n\n${notes.join('\n')}`
+    : body === summary.trimEnd()
+      ? summary
+      : body;
+}
+
+const ENGAGEMENT_EN: Record<EngagementKind, string> = {
+  点赞: 'like count',
+  评论: 'comment count',
+  收藏: 'favourite count',
+  分享: 'share count',
+  投币: 'coin count',
+  转发: 'repost count',
+};
 
 /**
  * 复审 #7 (协调方第 4 次代体验): one line says it all — where it came from, why not the page the

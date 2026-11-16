@@ -259,9 +259,14 @@ describe('the loop: a wrong counter is sent back, then not delivered', () => {
     expect(outcome).toMatchObject({ status: 'completed' });
     expect(outcome.status === 'completed' && outcome.summary).toContain('20');
   });
-  it('97 twice is not completed', async () => {
+  // GOAL2 H1: the second 97 goes out as 「未能核实」 — never 97, and never the 20 put in its place.
+  it('97 twice goes out with the like count written 未能核实', async () => {
     const { outcome } = await run([...open, answer('97'), answer('97')]);
-    expect(outcome.status).not.toBe('completed');
+    expect(outcome.status).toBe('completed');
+    const summary = outcome.status === 'completed' ? outcome.summary : '';
+    expect(summary).toContain('点赞数：未能核实');
+    expect(summary).not.toMatch(/97|点赞数：20/);
+    expect(summary).toContain('未能核实：点赞数——页面上没有找到和这一项的图标');
   });
 });
 

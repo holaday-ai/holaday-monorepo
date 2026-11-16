@@ -11,10 +11,11 @@ import {
 } from './article-outline.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
-import { markEngagementCounts } from './engagement-counts.js';
+import { markEngagementCounts, pageCountersBlock } from './engagement-counts.js';
 import { fullPageRead } from './full-page-read.js';
 import { redactPageText } from './page-redaction.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { markSelectedTabs } from './selected-tabs.js';
 import { type UnifiedBrowserAction, isMutatingBrowserAction } from './unified-tools.js';
 import {
   YOUTUBE_CARD_KINDS_EXPRESSION,
@@ -2299,10 +2300,17 @@ export class CloudObservation {
         host = new URL(frame.url()).hostname;
       } catch {}
       // FIX-29: a bare count next to an icon says which counter it is (点赞/评论/收藏/分享).
-      const safeTree = await markEngagementCounts(
+      // GOAL2 H1: the page's own labelled counters first (the 40-count cap stops inside a long
+      // comment list), and which plain-span tab is the selected one.
+      const counters = await pageCountersBlock(frame);
+      const marked = await markSelectedTabs(
         frame,
-        /(?:^|\.)youtube\.com$/.test(host) ? markYoutubeCollections(urlSafe) : urlSafe,
+        await markEngagementCounts(
+          frame,
+          /(?:^|\.)youtube\.com$/.test(host) ? markYoutubeCollections(urlSafe) : urlSafe,
+        ),
       );
+      const safeTree = counters ? `${counters}\n${marked}` : marked;
       const before = this.observations.get(frame);
       const prior = before && {
         revision: before.revision,
@@ -2454,12 +2462,15 @@ export class CloudObservation {
         snapshotId = cursor.snapshotId;
         section = cursor.section;
         sectionTitle = cursor.sectionTitle;
-      } else if (section === undefined)
+      } else if (section === undefined) {
         text = await redactPageText(
           frame,
           await (await pageRoot(frame, this.intent)).innerText({ timeout: 5000 }),
         );
-      else {
+        // GOAL2 H1: the page's labelled counters lead the text; its numbers alone say nothing.
+        const counters = await pageCountersBlock(frame);
+        if (counters) text = `${counters}\n\n${text}`;
+      } else {
         // `section` is the article body outline index (see sections).
         const read = (await frame.evaluate(
           articleSectionExpression(section),

@@ -16,6 +16,8 @@
  * price must be the first tab's, the one a page shows as its main.
  */
 
+import { SELECTED_TAB_LEAD } from './selected-tabs.js';
+
 export interface TabSection {
   title: string;
   /** What the tab is about: 「钟表馆」「珍宝馆」 from 「钟表馆、珍宝馆票价优惠政策」. */
@@ -23,6 +25,7 @@ export interface TabSection {
   text: string;
 }
 
+const SELECTED_RE = new RegExp(`^${SELECTED_TAB_LEAD}(.+)$`, 'u');
 const NUMBERED_RE = /^(\d{1,2})\s*[.、．]\s*\S/u;
 const TAB_NAME_RE = /^[^\s\d。，,；;：:！？!?]{2,20}$/u;
 const GENERIC_TAIL_RE =
@@ -83,14 +86,37 @@ function numberedLists(lines: readonly string[], from: number): string[][] {
 }
 
 /** The page's tab groups, each tab with the list under it. */
+/** GOAL2 H1 (real 故宫 snapshot): a carousel's 「上一项」 / 「下一项」 buttons sit between the tabs and the lists. */
+const CAROUSEL_CONTROL_RE =
+  /^\s*-\s+button\s+"(?:上一|下一)(?:项|页|张|个|组)?"|^\s*-\s+button\s+"(?:prev|previous|next)(?: slide)?"/iu;
+
 export function tabSections(pageText: string): TabSection[][] {
-  const lines = pageText.split('\n').map(lineText).filter(Boolean);
+  const lines = pageText
+    .split('\n')
+    .filter((line) => !CAROUSEL_CONTROL_RE.test(line))
+    .map(lineText)
+    .filter(Boolean);
   const groups: TabSection[][] = [];
   for (let at = 0; at < lines.length; at += 1) {
     const tabs = tabNamesAt(lines, at);
     if (!tabs) continue;
-    const lists = numberedLists(lines, tabs.next);
+    // GOAL2 H1: the snapshot says which tab is selected (selected-tabs.ts); it shows only that
+    // tab's list, which is that tab's — the other tabs' are not on this read.
+    const chosen = lines[tabs.next]?.match(SELECTED_RE)?.[1];
+    const picked = chosen ? tabs.names.indexOf(chosen) : -1;
+    const lists = numberedLists(lines, picked >= 0 ? tabs.next + 1 : tabs.next);
     const k = tabs.names.length;
+    if (picked >= 0 && lists.length >= 1 && lists.length < k) {
+      groups.push(
+        tabs.names.map((title, i) => ({
+          title,
+          keys: keysOf(title),
+          text: i === picked ? lists[0]!.join('\n') : '',
+        })),
+      );
+      at = tabs.next;
+      continue;
+    }
     if (lists.length < k) continue;
     const same = (a: string[] | undefined, b: string[] | undefined) =>
       Boolean(a && b) && a!.join('\n') === b!.join('\n');
@@ -144,26 +170,35 @@ function contextOf(
   return `${heading ?? ''}\n${pieces.join('，')}`;
 }
 
-/**
- * Prices the answer puts under the wrong tab: one contradiction per price, saying where the page
- * has it.
- */
-export function misattributedPrices(summary: string, pageTexts: readonly string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
+/** A price the answer puts under the wrong tab: where it is in the answer and what to say. */
+interface MisattributedSpot {
+  line: number;
+  index: number;
+  /** The price as the answer writes it (「5元/人」). */
+  written: string;
+  shown: string;
+  message: string;
+}
+
+function misattributedSpots(summary: string, pageTexts: readonly string[]): MisattributedSpot[] {
+  const spots: MisattributedSpot[] = [];
   const lines = summary.split('\n');
   for (const page of pageTexts) {
     const groups = tabSections(page);
     if (!groups.length) continue;
-    const inGroups = groups.flat().map((section) => section.text);
-    // Outside the tab groups, the page's own text.
-    let outside = tight(page);
+    const inGroups = groups
+      .flat()
+      .map((section) => section.text)
+      .filter(Boolean);
+    // Outside the tab groups, the page's own text (a snapshot's lines as their text).
+    let outside = tight(page.split('\n').map(lineText).join('\n'));
     for (const text of inGroups) outside = outside.split(tight(text)).join(' ');
     lines.forEach((line, at) => {
       for (const m of line.matchAll(ANSWER_PRICE_RE)) {
         const amount = m[1]!;
         const shown = `${amount}${m[2]}`;
-        if (seen.has(shown) || hasPrice(outside, amount)) continue;
+        if (hasPrice(outside, amount)) continue;
+        if (spots.some((spot) => spot.line === at && spot.index === (m.index ?? 0))) continue;
         for (const group of groups) {
           const holders = group.filter((section) => hasPrice(section.text, amount));
           if (!holders.length || holders.length === group.length) continue;
@@ -177,17 +212,56 @@ export function misattributedPrices(summary: string, pageTexts: readonly string[
           if (holders.some(names)) continue;
           const other = group.find((section) => !holders.includes(section) && names(section));
           if (!other && holders.includes(group[0]!)) continue;
-          seen.add(shown);
-          out.push(
-            `答案里的「${shown}」在页面上属于「${holders[0]!.title}」这一栏，答案却${
+          spots.push({
+            line: at,
+            index: m.index ?? 0,
+            written: m[0],
+            shown,
+            message: `答案里的「${shown}」在页面上属于「${holders[0]!.title}」这一栏，答案却${
               other
                 ? `把它写成了「${other.title}」的`
                 : `没写明是这一栏的（读起来像「${group[0]!.title}」的）`
             }：请按数字所在的标签页或小节写清楚是哪一项，或者不写这个数字`,
-          );
+          });
+          break;
         }
       }
     });
   }
+  return spots;
+}
+
+/**
+ * Prices the answer puts under the wrong tab: one contradiction per price, saying where the page
+ * has it.
+ */
+export function misattributedPrices(summary: string, pageTexts: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const spot of misattributedSpots(summary, pageTexts)) {
+    if (seen.has(spot.shown)) continue;
+    seen.add(spot.shown);
+    out.push(spot.message);
+  }
   return out;
+}
+
+/**
+ * GOAL2 H1 — the delivery rule for a tab's prices: a price still put under another tab when the
+ * answer goes out is written 「未能核实」 there; no other price is put in its place.
+ */
+export function settleMisattributedPrices(
+  summary: string,
+  pageTexts: readonly string[],
+): { summary: string; settled: string[] } {
+  const spots = misattributedSpots(summary, pageTexts);
+  if (!spots.length) return { summary, settled: [] };
+  const lines = summary.split('\n');
+  // From the end of each line, so earlier indexes still hold.
+  for (const spot of [...spots].sort((a, b) => b.line - a.line || b.index - a.index)) {
+    const line = lines[spot.line]!;
+    lines[spot.line] =
+      `${line.slice(0, spot.index)}未能核实${line.slice(spot.index + spot.written.length)}`;
+  }
+  return { summary: lines.join('\n'), settled: [...new Set(spots.map((spot) => spot.shown))] };
 }
