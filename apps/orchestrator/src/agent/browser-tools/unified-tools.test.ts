@@ -52,6 +52,20 @@ describe('unified browser tool definitions', () => {
     expect(isMutatingBrowserAction({ tool: 'snapshot' })).toBe(false);
     expect(isMutatingBrowserAction({ tool: 'click', ref: 'e1' })).toBe(true);
   });
+  it('accepts only one concrete file target, including a host-issued chooser id', () => {
+    const chooserId = 'chooser_119a211d-7940-4217-9fa3-d37bad35ceee';
+    expect(parseUnifiedBrowserAction('upload', { chooserId, fileIds: ['file_report'] })).toEqual({
+      tool: 'upload',
+      chooserId,
+      fileIds: ['file_report'],
+    });
+    for (const input of [
+      { ref: 'e3', chooserId, fileIds: ['file_report'] },
+      { chooserId: '#file', fileIds: ['file_report'] },
+      { chooserId, fileIds: ['file_report', 7] },
+    ])
+      expect(() => parseUnifiedBrowserAction('upload', input)).toThrow(UnifiedToolInputError);
+  });
 });
 
 describe('Playwright unified executor (local static page)', () => {

@@ -1,4 +1,4 @@
-import { once } from 'node:events';
+import { type EventEmitter, once } from 'node:events';
 import { rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -55,6 +55,180 @@ describe('owned uploads over an actual CDP connection', () => {
     await chrome?.close();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  it.each([false, true])(
+    'uses the actual native chooser target (detached=%s), without guessing a hidden input',
+    async (detached) => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto(`${origin}/chooser?token=private-chooser-token`);
+      await page.setContent(`<button id="choose">Choose report</button><p id="received"></p>
+        <script>document.querySelector('button').onclick=()=>{const input=document.createElement('input');
+        input.type='file'; input.accept='.csv'; input.style.display='none';
+        ${detached ? '' : 'document.body.append(input);'}
+        input.onchange=async()=>{document.querySelector('p').textContent=await input.files[0].text()};input.click()};</script>`);
+      const tools = createPlaywrightUnifiedExecutor(page, { resolveUploads: async () => [file] });
+      try {
+        const snapshot = await tools.execute({ tool: 'snapshot' });
+        const ref = snapshot.text.match(/button "Choose report" \[ref=(e\d+)\]/)![1]!;
+        const clicked = await tools.execute({ tool: 'click', ref });
+        expect(clicked.fileChooser?.id).toMatch(/^chooser_[a-f0-9-]{36}$/);
+        expect(clicked.text).not.toContain('private-chooser-token');
+        expect((page as unknown as EventEmitter).listenerCount('filechooser')).toBe(0);
+        const action = {
+          tool: 'upload' as const,
+          chooserId: clicked.fileChooser!.id,
+          fileIds: [file.fileId],
+        };
+        const prepared = await tools.prepareUpload(action);
+        expect(prepared.description).toMatchObject({ origin, accept: '.csv', multiple: false });
+        expect((await tools.execute({ ...action })).ok).toBe(false);
+        // A mismatching action object consumed this preparation, so open another real chooser.
+        const next = await tools.execute({ tool: 'click', ref });
+        const approvedAction = { ...action, chooserId: next.fileChooser!.id };
+        const approved = await tools.prepareUpload(approvedAction);
+        approved.approve();
+        expect((await tools.execute(approvedAction)).upload?.status).toBe('handed_to_page');
+        await vi.waitFor(async () =>
+          expect(await page.locator('#received').textContent()).toBe(TEXT),
+        );
+        await expect(tools.prepareUpload(approvedAction)).rejects.toThrow();
+      } finally {
+        tools.dispose();
+        await context.close();
+      }
+    },
+  );
+  it.each(['reload', 'change', 'new-chooser'] as const)(
+    'invalidates an earlier chooser after %s before reading any task bytes',
+    async (change) => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto(origin);
+      await page.setContent(
+        '<input hidden type="file" id="file"><button onclick="document.querySelector(\'input\').click()">Choose</button>',
+      );
+      const resolve = vi.fn(async () => [file]);
+      const tools = createPlaywrightUnifiedExecutor(page, { resolveUploads: resolve });
+      try {
+        const snapshot = await tools.execute({ tool: 'snapshot' });
+        const ref = snapshot.text.match(/button "Choose" \[ref=(e\d+)\]/)![1]!;
+        const first = await tools.execute({ tool: 'click', ref });
+        expect(first.fileChooser?.id).toBeTruthy();
+        if (change === 'reload') await page.reload();
+        if (change === 'change')
+          await page.locator('#file').evaluate((el: HTMLInputElement) => {
+            el.accept = '.png';
+          });
+        if (change === 'new-chooser') await tools.execute({ tool: 'click', ref });
+        await expect(
+          tools.prepareUpload({
+            tool: 'upload',
+            chooserId: first.fileChooser!.id,
+            fileIds: [file.fileId],
+          }),
+        ).rejects.toThrow();
+        expect(resolve).not.toHaveBeenCalled();
+      } finally {
+        tools.dispose();
+        await context.close();
+      }
+    },
+  );
+  it('never installs chooser interception on unrelated pages or when task files are disabled', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const other = await context.newPage();
+    const tools = createPlaywrightUnifiedExecutor(page);
+    try {
+      await page.goto(origin);
+      await page.setContent(
+        '<input hidden type="file"><button onclick="document.querySelector(\'input\').click()">Choose</button>',
+      );
+      const click = vi.spyOn(page, 'on');
+      const snapshot = await tools.execute({ tool: 'snapshot' });
+      const ref = snapshot.text.match(/button "Choose" \[ref=(e\d+)\]/)![1]!;
+      expect((await tools.execute({ tool: 'click', ref })).fileChooser).toBeUndefined();
+      expect(click.mock.calls.some(([event]) => String(event) === 'filechooser')).toBe(false);
+      expect((other as unknown as EventEmitter).listenerCount('filechooser')).toBe(0);
+    } finally {
+      tools.dispose();
+      await context.close();
+    }
+  });
+  it('invalidates the original chooser actor receipt before resolving any attachment', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(origin);
+    await page.setContent(
+      '<input type="file" hidden><button onclick="document.querySelector(\'input\').click()">Choose</button>',
+    );
+    let current = true;
+    const resolve = vi.fn(async () => [file]);
+    const tools = createPlaywrightUnifiedExecutor(page, {
+      resolveUploads: resolve,
+      captureFileChooserGuard: () => () => current,
+    });
+    try {
+      const snapshot = await tools.execute({ tool: 'snapshot' });
+      const ref = snapshot.text.match(/button "Choose" \[ref=(e\d+)\]/)![1]!;
+      const result = await tools.execute({ tool: 'click', ref });
+      current = false;
+      await expect(
+        tools.prepareUpload({
+          tool: 'upload',
+          chooserId: result.fileChooser!.id,
+          fileIds: [file.fileId],
+        }),
+      ).rejects.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+    } finally {
+      tools.dispose();
+      await context.close();
+    }
+  });
+  it('keeps a real iframe chooser bound to that frame and its host-issued observation context', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${origin}/outer`);
+    const frame = page.frames()[1]!;
+    await frame.setContent(
+      '<input hidden type="file"><button onclick="document.querySelector(\'input\').click()">Choose</button><p></p><script>document.querySelector("input").onchange=async function(){document.querySelector("p").textContent=await this.files[0].text()}</script>',
+    );
+    const resolve = vi.fn(async () => [file]);
+    const tools = createPlaywrightUnifiedExecutor(page, {
+      resolveUploads: resolve,
+      observationV2: true,
+    });
+    try {
+      const metadata = await tools.observation!.metadata(frame);
+      const snapshot = await tools.execute({ tool: 'snapshot', ...metadata });
+      const observed = JSON.parse(snapshot.text) as { tree: string };
+      const ref = observed.tree.match(/button "Choose" \[ref=((?:f\d+)?e\d+)\]/)?.[1];
+      expect(ref, snapshot.text).toBeTruthy();
+      const opened = await tools.execute({ tool: 'click', ref: ref!, ...metadata });
+      expect(opened.fileChooser, JSON.stringify({ snapshot, opened })).toMatchObject({
+        frameId: metadata.frameId,
+        tabId: metadata.tabId,
+        origin,
+      });
+      const action = {
+        tool: 'upload' as const,
+        chooserId: opened.fileChooser!.id,
+        fileIds: [file.fileId],
+        frameId: metadata.frameId,
+        tabId: metadata.tabId,
+      };
+      await expect(tools.prepareUpload({ ...action, frameId: undefined })).rejects.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+      const prepared = await tools.prepareUpload(action);
+      prepared.approve();
+      expect((await tools.execute(action)).upload?.status).toBe('handed_to_page');
+      await vi.waitFor(async () => expect(await frame.locator('p').textContent()).toBe(TEXT));
+    } finally {
+      tools.dispose();
+      await context.close();
+    }
   });
   it('delivers owned task bytes through the existing executor only after host approval', async () => {
     received.length = 0;

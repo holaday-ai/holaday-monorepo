@@ -1,4 +1,4 @@
-import type { ElementHandle, Frame, Locator } from 'playwright';
+import type { ElementHandle, FileChooser, Frame, Locator } from 'playwright';
 
 export interface BrowserUploadFile {
   fileId: string;
@@ -12,6 +12,7 @@ export interface BrowserUploadReceipt {
   files: Array<{ fileId: string; name: string; mimeType: string; sizeBytes: number }>;
 }
 interface InputSnapshot {
+  connected: boolean;
   documentUrl: string;
   name: string;
   id: string;
@@ -39,8 +40,9 @@ function acceptsFile(accept: string, file: BrowserUploadFile): boolean {
   );
 }
 const readInput = (node: HTMLInputElement): InputSnapshot | null => {
-  if (!node.isConnected || node.tagName !== 'INPUT' || node.type !== 'file') return null;
+  if (node.tagName !== 'INPUT' || node.type !== 'file') return null;
   return {
+    connected: node.isConnected,
     documentUrl: node.ownerDocument.URL,
     name: node.name,
     id: node.id,
@@ -55,6 +57,18 @@ const readInput = (node: HTMLInputElement): InputSnapshot | null => {
     ),
   };
 };
+
+/** Only a real Playwright FileChooser event creates this server-held capability. */
+export interface CapturedBrowserFileChooser {
+  readonly frame: Frame;
+  readonly description: Readonly<{ origin: string; accept: string; multiple: boolean }>;
+  isCurrent(): Promise<boolean>;
+  prepare(
+    ids: readonly string[],
+    resolve: (ids: readonly string[]) => Promise<BrowserUploadFile[]>,
+  ): Promise<PreparedBrowserUpload>;
+  dispose(): Promise<void>;
+}
 
 /** Server-held, one-shot target. Capture precedes any slow file read or user confirmation. */
 export class PreparedBrowserUpload {
@@ -75,6 +89,8 @@ export class PreparedBrowserUpload {
     private readonly snapshot: InputSnapshot,
     private payloads: BrowserUploadFile[],
     private readonly resolve: (ids: readonly string[]) => Promise<BrowserUploadFile[]>,
+    private readonly chooser?: FileChooser,
+    private readonly sourceCurrent?: () => boolean,
   ) {
     this.description = Object.freeze({
       origin: new URL(snapshot.documentUrl).origin,
@@ -94,23 +110,98 @@ export class PreparedBrowserUpload {
     ids: readonly string[],
     resolve: (ids: readonly string[]) => Promise<BrowserUploadFile[]>,
   ): Promise<PreparedBrowserUpload> {
-    if (
-      !ids.length ||
-      ids.length > 5 ||
-      new Set(ids).size !== ids.length ||
-      ids.some((id) => !/^[A-Za-z0-9_-]{1,160}$/.test(id))
-    )
-      throw new Error('上传文件标识无效。');
     const element = (await locator.elementHandle({
       timeout: 5000,
     })) as ElementHandle<HTMLInputElement> | null;
     if (!element) throw new Error('文件控件已不可用，请重新观察页面。');
+    return PreparedBrowserUpload.captureInput(element, ids, resolve);
+  }
+  static async captureChooser(
+    chooser: FileChooser,
+    sourceCurrent?: () => boolean,
+  ): Promise<CapturedBrowserFileChooser> {
+    const element = chooser.element() as ElementHandle<HTMLInputElement>;
     try {
+      const frame = await element.ownerFrame();
+      const snapshot = await element.evaluate(readInput);
+      if (!frame || !snapshot || frame.page() !== chooser.page() || frame.isDetached())
+        throw new Error('文件选择器已失效。');
+      let consumed = false;
+      let disposed = false;
+      const current = async () => {
+        if (
+          disposed ||
+          frame.isDetached() ||
+          chooser.page().isClosed() ||
+          sourceCurrent?.() === false
+        )
+          return false;
+        try {
+          return (
+            frame.url() === snapshot.documentUrl &&
+            (await element.ownerFrame()) === frame &&
+            JSON.stringify(await element.evaluate(readInput)) === JSON.stringify(snapshot)
+          );
+        } catch {
+          return false;
+        }
+      };
+      return {
+        frame,
+        description: Object.freeze({
+          origin: new URL(snapshot.documentUrl).origin,
+          accept: snapshot.accept,
+          multiple: snapshot.multiple,
+        }),
+        isCurrent: current,
+        async prepare(ids, resolve) {
+          if (consumed) throw new Error('文件选择器已失效。');
+          consumed = true;
+          if (!(await current())) throw new Error('文件选择器已失效。');
+          return PreparedBrowserUpload.captureInput(
+            element,
+            ids,
+            resolve,
+            chooser,
+            snapshot,
+            sourceCurrent,
+          );
+        },
+        async dispose() {
+          disposed = true;
+          await element.dispose().catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      await element.dispose().catch(() => undefined);
+      throw error;
+    }
+  }
+  private static async captureInput(
+    element: ElementHandle<HTMLInputElement>,
+    ids: readonly string[],
+    resolve: (ids: readonly string[]) => Promise<BrowserUploadFile[]>,
+    chooser?: FileChooser,
+    captured?: InputSnapshot,
+    sourceCurrent?: () => boolean,
+  ): Promise<PreparedBrowserUpload> {
+    try {
+      if (
+        !ids.length ||
+        ids.length > 5 ||
+        new Set(ids).size !== ids.length ||
+        ids.some((id) => !/^[A-Za-z0-9_-]{1,160}$/.test(id))
+      )
+        throw new Error('上传文件标识无效。');
       const frame = await element.ownerFrame();
       const snapshot = await element.evaluate(readInput);
       if (
         !frame ||
         !snapshot ||
+        sourceCurrent?.() === false ||
+        (!chooser && !snapshot.connected) ||
+        (chooser && chooser.page() !== frame.page()) ||
+        (captured && JSON.stringify(captured) !== JSON.stringify(snapshot)) ||
         snapshot.disabled ||
         snapshot.directory ||
         !/^https?:/.test(snapshot.documentUrl) ||
@@ -144,6 +235,8 @@ export class PreparedBrowserUpload {
         snapshot,
         files.map((file) => ({ ...file, buffer: Buffer.from(file.buffer) })),
         resolve,
+        chooser,
+        sourceCurrent,
       );
       await prepared.assertCurrent();
       return prepared;
@@ -154,6 +247,7 @@ export class PreparedBrowserUpload {
   }
   private async assertCurrent(): Promise<void> {
     if (
+      this.sourceCurrent?.() === false ||
       this.frame.isDetached() ||
       this.frame.url() !== this.snapshot.documentUrl ||
       (await this.element.ownerFrame()) !== this.frame ||
@@ -215,10 +309,13 @@ export class PreparedBrowserUpload {
     const files = this.description.files.map((file) => ({ ...file }));
     try {
       // Buffers use Playwright's file payload channel; no cloud filesystem path reaches Chrome.
-      await this.element.setInputFiles(
-        this.payloads.map(({ name, mimeType, buffer }) => ({ name, mimeType, buffer })),
-        { timeout: 10_000 },
-      );
+      const payloads = this.payloads.map(({ name, mimeType, buffer }) => ({
+        name,
+        mimeType,
+        buffer,
+      }));
+      if (this.chooser) await this.chooser.setFiles(payloads, { timeout: 10_000 });
+      else await this.element.setInputFiles(payloads, { timeout: 10_000 });
       this.receipt = { status: 'handed_to_page', origin: this.description.origin, files };
     } catch {
       // A timed-out CDP request may already have caused a site's automatic upload.

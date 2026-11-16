@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Dialog, Locator, Page } from 'playwright';
+import type { Dialog, FileChooser, Frame, Locator, Page } from 'playwright';
 import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { scrollWithEvidence } from './browser-scroll.js';
@@ -7,6 +7,7 @@ import { browserToolError } from './browser-tool-error.js';
 import {
   type BrowserUploadFile,
   type BrowserUploadReceipt,
+  type CapturedBrowserFileChooser,
   PreparedBrowserUpload,
 } from './browser-upload-target.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
@@ -52,6 +53,16 @@ export interface UnifiedToolResult {
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
   upload?: BrowserUploadReceipt;
+  /** Actual intercepted chooser from this action, not an inferred button/input association. */
+  fileChooser?: {
+    id: string;
+    origin: string;
+    accept: string;
+    multiple: boolean;
+    tabId?: string;
+    frameId?: string;
+    observationRevision?: string;
+  };
   /** Native JavaScript dialogs (alert/confirm/prompt) this action opened. */
   dialogs?: Array<{ type: string; message: string }>;
   tabId?: string;
@@ -88,6 +99,8 @@ export interface UnifiedExecutorOptions {
   taskIntent?: string;
   /** Host resolves only this task's admitted attachment IDs, never arbitrary local paths. */
   resolveUploads?: (fileIds: readonly string[]) => Promise<BrowserUploadFile[]>;
+  /** Host receipt from the start of an owned click; later human input invalidates its chooser. */
+  captureFileChooserGuard?: () => () => boolean;
   /** Persists a finished download; returns the host path. */
   saveDownload?: (download: import('playwright').Download) => Promise<BrowserDownloadReceipt>;
   actionTimeoutMs?: number;
@@ -300,6 +313,107 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   let uploadUnconfirmed = false;
   let uploadGeneration = 0;
   let uploadDisposed = false;
+  let pendingChooser: {
+    id: string;
+    target: CapturedBrowserFileChooser;
+    detach: () => void;
+  } | null = null;
+  const clearChooser = (dispose = true) => {
+    const current = pendingChooser;
+    pendingChooser = null;
+    current?.detach();
+    if (dispose) void current?.target.dispose();
+    return current;
+  };
+  /** Intercept only while this executor actually clicks its owned page. Other tabs stay native. */
+  const withFileChooser = async (
+    action: UnifiedBrowserAction,
+    work: () => Promise<UnifiedToolResult>,
+  ): Promise<UnifiedToolResult> => {
+    if (!options.resolveUploads || !['click', 'click_at'].includes(action.tool)) return work();
+    const owner = observation
+      ? observation.resolve(action).page
+      : action.tabId
+        ? tabs.get(action.tabId)
+        : page;
+    if (!owner || owner.isClosed()) return fail('文件选择器不属于当前任务。');
+    const captured: Array<Promise<CapturedBrowserFileChooser | null>> = [];
+    const sourceCurrent = options.captureFileChooserGuard?.();
+    const onChooser = (chooser: FileChooser) => {
+      if (chooser.page() !== owner) return;
+      captured.push(PreparedBrowserUpload.captureChooser(chooser, sourceCurrent).catch(() => null));
+    };
+    owner.on('filechooser', onChooser);
+    let result: UnifiedToolResult;
+    try {
+      result = await work();
+    } catch (error) {
+      owner.off('filechooser', onChooser);
+      await Promise.all(captured.map(async (item) => (await item)?.dispose()));
+      throw error;
+    } finally {
+      owner.off('filechooser', onChooser);
+    }
+    if (!captured.length) return result;
+    clearChooser();
+    const targets = await Promise.all(captured);
+    const target = targets.length === 1 ? targets[0] : null;
+    if (uploadDisposed || !target || !(await target.isCurrent())) {
+      await Promise.all(targets.map((item) => item?.dispose()));
+      return {
+        ...result,
+        ok: false,
+        text: `${result.text}\n文件选择器已变化，请重新观察，文件未交付。`,
+      };
+    }
+    const id = `chooser_${randomUUID()}`;
+    const onNavigate = (frame: Frame) => {
+      if (frame === target.frame || frame === owner.mainFrame()) clearChooser();
+    };
+    const onDetach = (frame: Frame) => {
+      if (frame === target.frame) clearChooser();
+    };
+    const onClose = () => clearChooser();
+    const expiry = setTimeout(onClose, 120_000);
+    expiry.unref();
+    owner.on('framenavigated', onNavigate);
+    owner.on('framedetached', onDetach);
+    owner.on('close', onClose);
+    pendingChooser = {
+      id,
+      target,
+      detach: () => {
+        clearTimeout(expiry);
+        owner.off('framenavigated', onNavigate);
+        owner.off('framedetached', onDetach);
+        owner.off('close', onClose);
+      },
+    };
+    let context: Awaited<ReturnType<CloudObservation['metadata']>> | undefined;
+    try {
+      context = observation ? await observation.metadata(target.frame) : undefined;
+    } catch {
+      clearChooser();
+      return { ...result, ok: false, text: `${result.text}\n文件选择器已失效，文件未交付。` };
+    }
+    const fileChooser = {
+      id,
+      ...target.description,
+      accept: target.description.accept.slice(0, 500),
+      ...(context
+        ? {
+            tabId: context.tabId,
+            frameId: context.frameId,
+            observationRevision: context.observationRevision,
+          }
+        : {}),
+    };
+    return {
+      ...result,
+      fileChooser,
+      text: `${result.text}\n原生文件选择器已打开，尚未交付文件。使用 upload 的 chooserId 与任务 fileIds（不要猜测隐藏控件 ref）：${JSON.stringify({ ...fileChooser, chooserId: id })}`,
+    };
+  };
   // AP3 core-10: native dialogs are host receipts. Handling them keeps
   // Playwright's default outcome (dismissed: alert closed, confirm cancelled,
   // prompt empty) and records that one opened.
@@ -811,13 +925,27 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           ? tabs.get(action.tabId)?.mainFrame()
           : activeFrame;
       if (!frame) throw new Error('文件控件不属于当前任务。');
-      const locator =
-        observation?.locator(frame, action.ref) ?? frame.locator(`aria-ref=${action.ref}`);
-      const prepared = await PreparedBrowserUpload.capture(
-        locator,
-        action.fileIds,
-        options.resolveUploads,
-      );
+      let prepared: PreparedBrowserUpload;
+      if (action.chooserId) {
+        if (pendingChooser?.id !== action.chooserId || pendingChooser.target.frame !== frame)
+          throw new Error('文件选择器已失效或不属于当前页面。');
+        const chooser = clearChooser(false)!;
+        try {
+          prepared = await chooser.target.prepare(action.fileIds, options.resolveUploads);
+        } catch (error) {
+          await chooser.target.dispose();
+          throw error;
+        }
+      } else {
+        const ref = action.ref;
+        if (!ref) throw new Error('文件目标无效。');
+        const locator = observation?.locator(frame, ref) ?? frame.locator(`aria-ref=${ref}`);
+        prepared = await PreparedBrowserUpload.capture(
+          locator,
+          action.fileIds,
+          options.resolveUploads,
+        );
+      }
       if (uploadDisposed || generation !== uploadGeneration) {
         await prepared.dispose();
         throw new Error('文件交付准备已失效。');
@@ -837,7 +965,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         pendingUpload = null;
       }
       try {
-        return await withDialogs(action, upload);
+        return await withFileChooser(action, () => withDialogs(action, upload));
       } finally {
         await upload?.dispose();
       }
@@ -881,6 +1009,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     releasePlayback,
     dispose: () => {
       uploadDisposed = true;
+      clearChooser();
       ++uploadGeneration;
       void pendingUpload?.prepared.dispose();
       pendingUpload = null;

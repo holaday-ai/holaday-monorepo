@@ -117,6 +117,8 @@ export class BrowserControl {
   readonly humanActivity: BrowserHumanActivity;
   private readonly collaborationV2: boolean;
   private observedHumanRevision = 0;
+  private lastInteractionRevision = 0;
+  private readonly pendingInteractions = new Set<object>();
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -127,7 +129,24 @@ export class BrowserControl {
   }
 
   hasUnobservedHumanInput(): boolean {
-    return this.collaborationV2 && this.humanActivity.revision > this.observedHumanRevision;
+    return (
+      (this.collaborationV2 || this.lastInteractionRevision > this.observedHumanRevision) &&
+      this.humanActivity.revision > this.observedHumanRevision
+    );
+  }
+
+  /** A trusted host interaction (e.g. the person's file picker), outside the input FIFO. */
+  beginPendingInteraction(): () => void {
+    if (this.isClosed()) throw new Error('browser_control_closed');
+    const receipt = {};
+    this.pendingInteractions.add(receipt);
+    this.noteBusy();
+    this.lastInteractionRevision = this.humanActivity.revision;
+    return () => {
+      if (!this.pendingInteractions.delete(receipt) || this.isClosed()) return;
+      this.noteBusy();
+      this.lastInteractionRevision = this.humanActivity.revision;
+    };
   }
 
   get tracksHeldInput(): boolean {
@@ -213,6 +232,7 @@ export class BrowserControl {
   humanBusy(idleMs = HUMAN_IDLE_MS): boolean {
     return (
       this.pendingInputs > 0 ||
+      this.pendingInteractions.size > 0 ||
       (this.collaborationV2 && this.humanActivity.hasHeld()) ||
       (this.humanActivity.lastBusyAt > 0 && this.now() - this.humanActivity.lastBusyAt < idleMs)
     );
@@ -225,6 +245,7 @@ export class BrowserControl {
   humanBusySince(since: number): boolean {
     return (
       this.pendingInputs > 0 ||
+      this.pendingInteractions.size > 0 ||
       (this.collaborationV2 && this.humanActivity.hasHeld()) ||
       this.humanActivity.lastBusyAt >= since
     );
@@ -245,6 +266,10 @@ export class BrowserControl {
     opts.onWait?.();
     const deadline = started + (opts.maxWaitMs ?? MAX_YIELD_MS);
     while (!this.isClosed() && this.humanBusy(idleMs) && this.now() < deadline) {
+      if (this.pendingInteractions.size > 0) {
+        await this.changedOrAfter(deadline - this.now());
+        continue;
+      }
       if (this.pendingInputs > 0 || (this.collaborationV2 && this.humanActivity.hasHeld())) {
         if (this.collaborationV2) await this.changedOrAfter(deadline - this.now());
         else await this.changed();
@@ -301,7 +326,7 @@ export class BrowserControl {
       await this.changedOrAfter(left);
     }
     let resumed = false;
-    if (reason !== 'closed' && this.collaborationV2 && this.hasUnobservedHumanInput()) {
+    if (reason !== 'closed' && this.hasUnobservedHumanInput()) {
       const receipt = await this.checkpoint(observe);
       resumed = receipt.resumed;
       if (receipt.blocked) reason = 'timeout';
@@ -333,13 +358,11 @@ export class BrowserControl {
     let waitedMs = 0;
     let yielded = false;
     while (true) {
-      const waited = await this.yieldToHuman(
-        this.collaborationV2 ? { maxWaitMs: Math.max(0, deadline - this.now()) } : options,
-      );
+      const waited = await this.yieldToHuman({ maxWaitMs: Math.max(0, deadline - this.now()) });
       waitedMs += waited.waitedMs;
       yielded ||= waited.yielded;
       if (this.isClosed()) return { resumed: false, waitedMs };
-      if (this.collaborationV2 && this.humanBusy())
+      if ((this.collaborationV2 || this.pendingInteractions.size > 0) && this.humanBusy())
         return { resumed: false, blocked: true, waitedMs };
       if (!yielded && !this.hasUnobservedHumanInput()) return { resumed: false, waitedMs };
       const revision = this.humanActivity.revision;
@@ -349,8 +372,11 @@ export class BrowserControl {
         this.close('observation_failed');
         return { resumed: false, waitedMs };
       }
-      if (this.collaborationV2 && this.isClosed()) return { resumed: false, waitedMs };
-      if (this.collaborationV2 && (this.humanActivity.revision !== revision || this.humanBusy(0))) {
+      if (this.isClosed()) return { resumed: false, waitedMs };
+      if (
+        (this.collaborationV2 || this.lastInteractionRevision > revision) &&
+        (this.humanActivity.revision !== revision || this.humanBusy(0))
+      ) {
         if (this.now() >= deadline) return { resumed: false, blocked: true, waitedMs };
         // Input during a screenshot is ordinary collaboration, not a handback request.
         // Wait and read again; only the bounded deadline may ask the person to continue.
@@ -393,6 +419,7 @@ export class BrowserControl {
 
   close(error?: BrowserControlSnapshot['error']): void {
     this.phase = 'closed';
+    this.pendingInteractions.clear();
     if (error) this.error = error;
     this.cancellation.abort();
     this.notify();

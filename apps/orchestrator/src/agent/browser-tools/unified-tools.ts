@@ -162,12 +162,24 @@ export const UNIFIED_BROWSER_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
   },
   {
     name: 'upload',
-    description: '向文件输入框上传用户已提供的附件（fileId 来自任务附件）。',
+    description:
+      '将任务附件交给文件框 ref，或刚才点击后主机返回的原生文件选择器 chooserId。两种目标只选一种；fileId 来自任务附件。',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
-      properties: { ref, fileIds: { type: 'array', items: { type: 'string' }, minItems: 1 } },
-      required: ['ref', 'fileIds'],
+      properties: {
+        ref,
+        chooserId: { type: 'string' },
+        fileIds: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 5,
+          uniqueItems: true,
+        },
+      },
+      required: ['fileIds'],
+      oneOf: [{ required: ['ref'] }, { required: ['chooserId'] }],
     },
   },
   {
@@ -223,7 +235,10 @@ export type UnifiedBrowserAction = (
   | { tool: 'back' }
   | { tool: 'press_key'; key: 'Escape' }
   | { tool: 'download'; ref: string }
-  | { tool: 'upload'; ref: string; fileIds: string[] }
+  | ({ tool: 'upload'; fileIds: string[] } & (
+      | { ref: string; chooserId?: never }
+      | { chooserId: string; ref?: never }
+    ))
   | { tool: 'click_at'; x: number; y: number }
 ) &
   BrowserObservationContext;
@@ -382,11 +397,24 @@ function parseAction(name: string, input: unknown): UnifiedBrowserAction {
       };
     }
     case 'upload': {
-      const fileIds = Array.isArray(args.fileIds)
-        ? args.fileIds.filter((id): id is string => typeof id === 'string')
-        : [];
-      if (fileIds.length === 0) throw new UnifiedToolInputError('upload 需要 fileIds');
-      return { tool: 'upload', ref: refArg() as string, fileIds };
+      const fileIds = Array.isArray(args.fileIds) ? args.fileIds : [];
+      if (
+        !fileIds.length ||
+        fileIds.length > 5 ||
+        new Set(fileIds).size !== fileIds.length ||
+        fileIds.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id))
+      )
+        throw new UnifiedToolInputError('upload 需要有效且不重复的 fileIds（最多 5 个）');
+      if (args.chooserId !== undefined) {
+        if (
+          args.ref !== undefined ||
+          typeof args.chooserId !== 'string' ||
+          !/^chooser_[a-f0-9-]{36}$/.test(args.chooserId)
+        )
+          throw new UnifiedToolInputError('upload 只能使用一个主机返回的文件目标');
+        return { tool: 'upload', chooserId: args.chooserId, fileIds: fileIds as string[] };
+      }
+      return { tool: 'upload', ref: refArg() as string, fileIds: fileIds as string[] };
     }
     case 'click_at': {
       const x = Number(args.x);

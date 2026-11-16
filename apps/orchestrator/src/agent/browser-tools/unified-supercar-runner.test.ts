@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import { rm } from 'node:fs/promises';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -352,6 +353,118 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       },
     };
   }
+  it.each([false, true])(
+    'autonomously delivers task bytes to an actual detached native chooser (v2=%s)',
+    async (collaborationV2) => {
+      const taskId = `t_native_chooser_${collaborationV2}`;
+      const c = await uploadFixture(taskId);
+      await c.page.setContent(`<button>Choose report</button><p id="received"></p><script>
+      document.querySelector('button').onclick=()=>{const file=document.createElement('input');
+      file.type='file';file.accept='.csv';file.onchange=async()=>{document.querySelector('p').textContent='页面读到：'+await file.files[0].text()};file.click()};
+      </script>`);
+      const onAwaitingUser = vi.fn();
+      try {
+        const outcome = await runSupercarTask({
+          taskId,
+          userExternalId: 'usr_alice',
+          intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件，核对页面读到的内容',
+          browserTaskFiles: c.scope,
+          browserControl: new BrowserControl(Date.now, { collaborationV2 }),
+          browserCapabilities: {
+            viewportV2: true,
+            observationV2: true,
+            replayV1: false,
+            routingV2: false,
+          },
+          executor: { getPage: async () => c.page } as never,
+          onAwaitingUser,
+          messagesAdapter: scripted([
+            () => [call('snapshot', {})],
+            (request) => [call('click', { ref: refIn(request, /Choose report/) })],
+            (request) => {
+              const chooserId = JSON.stringify(request.messages.at(-1)).match(
+                /chooser_[a-f0-9-]{36}/,
+              )?.[0];
+              expect(chooserId).toBeTruthy();
+              return [call('upload', { chooserId, fileIds: [c.row.externalId] })];
+            },
+            () => [call('wait_for', { text: '页面读到：sku,qty' })],
+            () => [call('snapshot', {}, 'received')],
+            () => [
+              call('finish', {
+                status: 'completed',
+                summary: '已选择附件，页面读到 A-731,31',
+                evidence: 'A-731,31',
+              }),
+            ],
+          ]),
+        });
+        expect(outcome.status, JSON.stringify(outcome)).toBe('completed');
+        expect(await c.page.locator('#received').textContent()).toContain('A-731,31');
+        expect(onAwaitingUser).not.toHaveBeenCalled();
+        expect((c.page as unknown as EventEmitter).listenerCount('filechooser')).toBe(0);
+      } finally {
+        await c.cleanup();
+      }
+    },
+    30_000,
+  );
+  it.each([false, true])(
+    'does not reuse a native chooser after quiet human intervention (v2=%s)',
+    async (collaborationV2) => {
+      const taskId = `t_native_human_${collaborationV2}`;
+      const c = await uploadFixture(taskId);
+      await c.page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>('#file')!;
+        input.hidden = true;
+        const button = document.createElement('button');
+        button.textContent = 'Choose report';
+        button.onclick = () => input.click();
+        document.body.append(button);
+      });
+      let now = 10_000;
+      const control = new BrowserControl(() => now, { collaborationV2 });
+      const reads = vi.spyOn(c.f.service, 'loadMany');
+      try {
+        const outcome = await runSupercarTask({
+          taskId,
+          intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+          browserTaskFiles: c.scope,
+          browserControl: control,
+          browserCapabilities: {
+            viewportV2: true,
+            observationV2: true,
+            replayV1: false,
+            routingV2: false,
+          },
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted([
+            () => [call('snapshot', {})],
+            (request) => [call('click', { ref: refIn(request, /Choose report/) })],
+            async (request) => {
+              const chooserId = JSON.stringify(request.messages.at(-1)).match(
+                /chooser_[a-f0-9-]{36}/,
+              )?.[0];
+              expect(chooserId).toBeTruthy();
+              await control.runHuman(() => c.page.locator('#note').fill('user kept'), 'insertText');
+              now += 3_000;
+              return [call('upload', { chooserId, fileIds: [c.row.externalId] })];
+            },
+            () => [call('snapshot', {}, 'after-human')],
+            () => [call('finish', { status: 'failed', summary: '人工介入后，旧选择器未交付文件' })],
+          ]),
+        });
+        expect(outcome.status).toBe('failed');
+        expect(await c.page.locator('#note').inputValue()).toBe('user kept');
+        expect(await c.page.locator('#received').textContent()).toBe('');
+        expect(reads).not.toHaveBeenCalled();
+      } finally {
+        reads.mockRestore();
+        await c.cleanup();
+      }
+    },
+    30_000,
+  );
   it('asks with concrete files and destination; file text cannot confirm disclosure', async () => {
     const taskId = 't_upload_proposal';
     const c = await uploadFixture(taskId);

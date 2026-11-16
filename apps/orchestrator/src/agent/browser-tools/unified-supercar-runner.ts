@@ -283,6 +283,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             if (!env.BROWSER_TASK_FILES_V1) throw new Error('文件交付功能已停用。');
             return opts.browserTaskFiles!.resolve(opts.taskId, ids);
           },
+          captureFileChooserGuard: () => {
+            const revision = control?.inputRevision;
+            return () =>
+              env.BROWSER_TASK_FILES_V1 &&
+              !controller.signal.aborted &&
+              !sessionStopped() &&
+              (!control ||
+                (control.canAgentAct() &&
+                  !control.humanBusy() &&
+                  control.inputRevision === revision));
+          },
         }
       : {}),
     ...(opts.onBrowserDownload
