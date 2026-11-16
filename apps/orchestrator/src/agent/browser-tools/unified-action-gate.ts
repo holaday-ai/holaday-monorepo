@@ -164,6 +164,21 @@ const READ_ACTIONABLE = (
             'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]',
           );
   }
+  // GOAL2 H4 (Q-6 #3): a box drawn as a plain element (`<i class="agree-check">` next to 「我已阅读并
+  // 同意《用户协议》」), no checkbox semantics, little or no text of its own: the short text around
+  // it names what it ticks. Its class says whether it is ticked.
+  let drawn = false;
+  if (
+    !box &&
+    /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
+    text.length <= 2 &&
+    /check|tick|agree|consent|radio|switch|(?:^|[\s_-])box(?:$|[\s_-])/i.test(
+      `${target.getAttribute('class') || ''} ${target.getAttribute('id') || ''}`,
+    )
+  ) {
+    box = target;
+    drawn = true;
+  }
   let toggle: { label: string; checked: boolean } | null = null;
   if (box) {
     const parts: string[] = [];
@@ -188,7 +203,13 @@ const READ_ACTIONABLE = (
     toggle = {
       label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
       checked:
-        box.tagName === 'INPUT' ? boxInput.checked : box.getAttribute('aria-checked') === 'true',
+        box.tagName === 'INPUT'
+          ? boxInput.checked
+          : drawn
+            ? /(?:^|[\s_-])(?:checked|is-checked|active|selected|on)(?:$|[\s_-])/i.test(
+                box.getAttribute('class') || '',
+              ) || box.getAttribute('aria-checked') === 'true'
+            : box.getAttribute('aria-checked') === 'true',
     };
   }
   return {

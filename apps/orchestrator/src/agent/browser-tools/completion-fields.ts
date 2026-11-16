@@ -461,7 +461,11 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   // a label that ends its line ("读取标题：\n1. …") heads a list, each line checked below;
   // a numeric label whose value has no number is prose ("播放量为页面原样字符串").
   for (const match of text.matchAll(
-    new RegExp(`(${FACT_LABELS})\\s*[*\`]*\\s*(?:[:：]|为|是)[ \\t]*([^\\n；;|。]+)`, 'giu'),
+    // GOAL2 H4 (G2i bbc): 「标题是：X」 — 是 and its colon are one separator, not 是 then 「：X」.
+    new RegExp(
+      `(${FACT_LABELS})\\s*[*\`]*\\s*(?:(?:为|是)[ \\t]*[:：]?|[:：])[ \\t]*([^\\n；;|。]+)`,
+      'giu',
+    ),
   )) {
     if (/https?:\/\//i.test(match[2]!)) continue;
     if (NUMERIC_LABEL.test(match[1]!) && !/\d/.test(match[2]!)) continue;
@@ -1844,7 +1848,10 @@ export function missingAskedFields(intent: string, summary: string): string[] {
   const values = asked.map((name) =>
     [
       ...own.matchAll(
-        new RegExp(`${name}[^：:\\n为是]{0,4}?(?:[:：]|为|是)([^，,。；;、\\n]*)`, 'g'),
+        new RegExp(
+          `${name}[^：:\\n为是]{0,4}?(?:(?:为|是)[ \\t]*[:：]?|[:：])([^，,。；;、\\n]*)`,
+          'g',
+        ),
       ),
     ].map((m) => m[1]!.replace(VALUE_EDGES_RE, '')),
   );
