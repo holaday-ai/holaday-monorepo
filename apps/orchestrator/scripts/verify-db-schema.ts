@@ -637,7 +637,15 @@ const REQUIRED_COLUMNS: Record<string, readonly string[]> = {
     'result_json',
   ],
   planned_task_run_items: ['external_id', 'planned_task_run_id', 'seq', 'instruction', 'status'],
-  task_files: ['external_id', 'user_id', 'task_id', 'kind', 'status', 'expires_at'],
+  task_files: [
+    'external_id',
+    'user_id',
+    'task_id',
+    'kind',
+    'status',
+    'expires_at',
+    'browser_source',
+  ],
   batch_tasks: [
     'external_id',
     'user_id',

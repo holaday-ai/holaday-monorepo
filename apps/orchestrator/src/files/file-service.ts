@@ -27,6 +27,8 @@ import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import { browserFileBytesMatch } from './browser-file-origin.js';
+import { type BrowserOutputInput, persistBrowserOutput } from './browser-output.js';
 import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
 import {
   R2StorageProvider,
@@ -858,6 +860,19 @@ export class FileService {
     return row;
   }
 
+  /** A server-captured Home download; only this path may create a task-less output. */
+  async storeBrowserOutput(opts: BrowserOutputInput): Promise<TaskFile> {
+    return persistBrowserOutput(
+      {
+        db: this.db,
+        storage: this.storage,
+        logger: this.logger,
+        expiresAt: new Date(Date.now() + outputFileTtlMs()),
+      },
+      { ...opts, filename: sanitiseFilename(opts.filename) },
+    );
+  }
+
   /**
    * Persist a generated artifact from a local file path. Video lanes use this
    * path so multi-hundred-megabyte MP4s are copied/streamed to storage instead
@@ -1178,8 +1193,15 @@ export class FileService {
       .limit(1);
     if (!row || row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
     const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
+    if (meta && row.browserSource) {
+      const bytes = await this.storage.get(
+        row.storagePath,
+        ...(await this.legacyReadOwnerArgs(row)),
+      );
+      if (!bytes || !browserFileBytesMatch(row.browserSource, row.sizeBytes, bytes)) return null;
+    }
     return meta ? row : null;
   }
 
@@ -1221,12 +1243,14 @@ export class FileService {
     if (!row) return null;
     if (row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
     const buffer = await this.storage.get(
       row.storagePath,
       ...(await this.legacyReadOwnerArgs(row)),
     );
     if (!buffer) return null;
+    if (row.browserSource && !browserFileBytesMatch(row.browserSource, row.sizeBytes, buffer))
+      return null;
     return { row, buffer };
   }
 
@@ -1251,12 +1275,15 @@ export class FileService {
       if (!row) continue;
       if (row.userId !== userIdInternal) continue;
       if (row.status !== 'active') continue;
-      if (row.expiresAt && row.expiresAt < new Date()) continue;
+      if (row.expiresAt && row.expiresAt <= new Date()) continue;
       const buffer = await this.storage.get(
         row.storagePath,
         ...(await this.legacyReadOwnerArgs(row)),
       );
-      if (buffer) {
+      if (
+        buffer &&
+        (!row.browserSource || browserFileBytesMatch(row.browserSource, row.sizeBytes, buffer))
+      ) {
         out.push({ row, buffer });
       } else {
         this.logger.warn({ fileId: id }, 'file: load skipped (storage read returned null)');
