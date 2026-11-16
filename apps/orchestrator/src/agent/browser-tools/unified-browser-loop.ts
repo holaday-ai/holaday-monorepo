@@ -851,10 +851,21 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     if (hit?.disposition === 'continue') {
       localNotices.add(hit.message);
+      const host = hostOf(input.currentPageUrl?.());
+      continuedWall = `${host ? (siteOf(host) ?? host) : ''}|${hit.message}`;
       return null;
     }
     return hit;
   };
+  /**
+   * GOAL2 H2 (G7 A/B b-m01 B: 高德 put its login prompt back after every click, the run went on
+   * to its 53-step limit): the same prompt on the same site after three tries to act on the page
+   * is the page saying no. The run is told to finish with what it read (部分完成 for the rest);
+   * if it still acts, the page is the user's.
+   */
+  let continuedWall: string | undefined;
+  const wallTries = new Map<string, number>();
+  let wallStalled: string | undefined;
   // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
   // answer that already tells of the login prompt gets no second one.
   const withLimitations = (summary: string) =>
@@ -1206,6 +1217,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         results.push(toolResult(call.id, `未执行：${WRAP_UP_NOTE}`, true));
         continue;
       }
+      if (concludeNow && call.name !== 'finish' && wallStalled)
+        return {
+          status: 'awaiting_user',
+          reason: 'login',
+          message: `${wallStalled}反复弹出登录提示，挡住了需要的操作：请你在画面上登录或关掉它后再让我继续；不登录的话，我只能交付已经读到的部分。`,
+          steps: step + 1,
+        };
       if (concludeNow && call.name !== 'finish')
         return {
           status: 'failed',
@@ -2721,7 +2739,19 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         }
       }
       if (outcome.ok && input.probeBlocker) {
+        continuedWall = undefined;
         const blocker = await checkBlocker();
+        if (!blocker && continuedWall && WALL_TRY_TOOLS.has(action.tool)) {
+          const tries = (wallTries.get(continuedWall) ?? 0) + 1;
+          wallTries.set(continuedWall, tries);
+          if (tries >= 3 && !wallStalled && !concludeNow) {
+            const host = hostOf(input.currentPageUrl?.());
+            wallStalled = host ? rescueSiteName(input.currentPageUrl?.()) : '网站';
+            concludeNow = true;
+            concludedOtherwise = true;
+            outcome.text += `\n同一个登录提示已经第 ${tries} 次挡在页面上，操作没有进展：不要再关闭、绕过它，也不要登录。下一轮直接 finish：已读到的公开内容照实写；拿不到的部分以「部分完成：」开头说明网站要求登录才能继续。`;
+          }
+        }
         if (formLoginDetour) {
           results.push(
             toolResult(
@@ -3338,7 +3368,10 @@ export const RESCUE_PARTIAL_RE =
 const RESCUE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
   [/(^|\.)m\.jd\.com$|^item\.m\.jd\.com$/, '京东手机版'],
   [/(^|\.)jd\.com$/, '京东'],
-  [/(^|\.)xiaohongshu\.com$/, '小红书'],
+  [/(^|\.)xiaohongshu\.com$|(^|\.)rednote\.com$/, '小红书'],
+  [/(^|\.)amap\.com$/, '高德地图'],
+  [/(^|\.)douyin\.com$/, '抖音'],
+  [/(^|\.)bilibili\.com$/, 'B 站'],
   [/(^|\.)bing\.com$/, '必应搜索'],
   [/(^|\.)smzdm\.com$/, '什么值得买'],
   [/(^|\.)manmanbuy\.com$/, '慢慢买'],
@@ -3385,6 +3418,9 @@ function rescueSiteNameEn(url: string | undefined): string {
   if (!host) return 'another public page';
   return RESCUE_SITE_EN.find(([re]) => re.test(host))?.[1] ?? host;
 }
+
+/** GOAL2 H2: actions that try to work on (or past) a page; reads and scrolls are not tries. */
+const WALL_TRY_TOOLS = new Set(['click', 'click_at', 'press_key', 'type', 'select']);
 
 /**
  * GOAL2 H1 — what goes out: a count or a tab's price the read pages do not pair with its own icon,
