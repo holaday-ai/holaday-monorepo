@@ -106,7 +106,9 @@ export class VaultBrowserWorker {
     context: BrowserContext,
     task?: Checkout,
     onInterrupted?: (reason: string) => void,
+    options?: { interactive: boolean; settled: () => Promise<void> | null },
   ) {
+    const interactive = options?.interactive === true && grant.sessionAccess === 'cloud-home-v1';
     const scope = grant.cookieDomains;
     const pollMs = this.options.statusPollMs ?? STATUS_POLL_MS;
     const timeoutMs = this.options.statusTimeoutMs ?? STATUS_TIMEOUT_MS;
@@ -130,6 +132,8 @@ export class VaultBrowserWorker {
     // Only a confirmed, fresh status lets traffic through; anything else holds it.
     const verified = () => !uncertain && Date.now() - lastConfirmed <= freshMs;
     const check = async () => {
+      // A checkpoint advances the CAS version. Observe only after that same operation settles.
+      if (interactive) await options?.settled();
       if (!task) return this.vault.authorize(userId, grant.id, grant.version, true);
       const status = await this.vault.status(userId, grant.id, task);
       if (status !== 'live') throw new VaultError(status);
@@ -179,23 +183,84 @@ export class VaultBrowserWorker {
         if (
           !live ||
           !verified() ||
-          !['GET', 'HEAD'].includes(req.method()) ||
+          (!interactive && !['GET', 'HEAD'].includes(req.method())) ||
           !(
             url.protocol === 'https:' ||
             (url.protocol === 'http:' && grant.origin.startsWith('http:'))
           ) ||
-          !hostInScope(url.hostname, scope) ||
+          !(
+            hostInScope(url.hostname, scope) ||
+            (interactive &&
+              ['GET', 'HEAD'].includes(req.method()) &&
+              !req.isNavigationRequest() &&
+              ['image', 'font', 'stylesheet', 'script', 'media'].includes(req.resourceType()))
+          ) ||
           !(await (this.options.networkPolicy ?? defaultBrowserNetworkPolicy).check(req.url()))
             .allowed
         )
           return await route.abort('blockedbyclient');
+        if (!live || !verified()) return await route.abort('blockedbyclient');
         await route.continue();
       } catch {
         await route.abort('blockedbyclient').catch(() => {});
       }
     });
-    // WebSockets can mutate state without a POST. They are unavailable in this read-only version.
-    await context.routeWebSocket('**/*', (socket) => socket.close());
+    // Legacy grants remain read-only. An explicit interactive grant may connect only within its
+    // site scope; every frame rechecks liveness, so an already-open socket cannot bypass revoke.
+    await context.routeWebSocket('**/*', async (socket) => {
+      let peer: ReturnType<typeof socket.connectToServer> | undefined;
+      const close = async () => {
+        await Promise.allSettled([socket.close(), ...(peer ? [peer.close()] : [])]);
+      };
+      try {
+        const url = new URL(socket.url());
+        if (
+          !interactive ||
+          !live ||
+          !verified() ||
+          !['ws:', 'wss:'].includes(url.protocol) ||
+          url.username ||
+          url.password ||
+          !hostInScope(url.hostname, scope) ||
+          (url.protocol === 'ws:' && !grant.origin.startsWith('http:'))
+        )
+          return await close();
+        url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+        if (
+          !(await (this.options.networkPolicy ?? defaultBrowserNetworkPolicy).check(url.href))
+            .allowed ||
+          !live ||
+          !verified()
+        )
+          return await close();
+        peer = socket.connectToServer();
+        const server = peer;
+        socket.onMessage((message) => {
+          if (!live || !verified()) {
+            void close();
+            return;
+          }
+          try {
+            server.send(message);
+          } catch {
+            void close();
+          }
+        });
+        server.onMessage((message) => {
+          if (!live || !verified()) {
+            void close();
+            return;
+          }
+          try {
+            socket.send(message);
+          } catch {
+            void close();
+          }
+        });
+      } catch {
+        await close();
+      }
+    });
     const untrack = this.vault.track(userId, grant.id, () => interrupt('grant_unavailable'));
     // Watchdog: independent of any pending query promise.
     const watchdog = setInterval(
@@ -227,7 +292,7 @@ export class VaultBrowserWorker {
       await stop();
       throw error;
     }
-    return { stop, interrupted: () => !live };
+    return { stop, interrupt, interrupted: () => !live };
   }
   /** Current context state restricted to the grant's scope (cookies + selected storage keys). */
   private async capture(context: BrowserContext, page: Page, grant: BrowserGrantMetadata) {
@@ -314,7 +379,11 @@ export class VaultBrowserWorker {
     userId: string,
     id: string,
     factory = this.options.context,
-    options: { write?: boolean; onInterrupted?: (reason: string) => void } = {},
+    options: {
+      write?: boolean;
+      access?: 'cloud-home-v1';
+      onInterrupted?: (reason: string) => void;
+    } = {},
   ): Promise<VaultTask> {
     const task = await this.vault.checkout(userId, id, options);
     let context: BrowserContext | undefined;
@@ -325,11 +394,20 @@ export class VaultBrowserWorker {
         acceptDownloads: false,
       });
       const ownedContext = context;
+      const interactive = task.grant.sessionAccess === 'cloud-home-v1';
+      let flushing: Promise<void> | null = null;
       let interrupted: string | null = null;
-      const guard = await this.guard(userId, task.grant, ownedContext, task, (reason) => {
-        interrupted = reason;
-        options.onInterrupted?.(reason);
-      });
+      const guard = await this.guard(
+        userId,
+        task.grant,
+        ownedContext,
+        task,
+        (reason) => {
+          interrupted = reason;
+          options.onInterrupted?.(reason);
+        },
+        { interactive, settled: () => flushing },
+      );
       const stop = guard.stop;
       const page = await context.newPage();
       const writer = task.mode === 'writer';
@@ -337,20 +415,30 @@ export class VaultBrowserWorker {
       let lastDigest = writer
         ? ((await this.capture(ownedContext, page, task.grant).catch(() => null))?.digest ?? null)
         : null;
+      if (guard.interrupted()) throw new VaultError(interrupted ?? 'browser_unavailable');
       let lastWrite = Date.now();
-      let flushing: Promise<void> | null = null;
       const flush = async (reason: 'interval' | 'site_change') => {
         if (!writer || ended || flushing || interrupted) return;
         if (reason === 'interval' && Date.now() - lastWrite < this.checkpointMs) return;
         flushing = (async () => {
           try {
             const { state, digest } = await this.capture(ownedContext, page, task.grant);
-            if (digest === lastDigest) return;
+            if (digest === lastDigest) {
+              if (interactive) {
+                await this.vault.renewCloudLease(userId, id, task);
+                lastWrite = Date.now();
+              }
+              return;
+            }
             task.version = await this.vault.save(userId, id, task, state, { keepLease: true });
             lastDigest = digest;
             lastWrite = Date.now();
             this.options.onWriteBack?.(reason);
-          } catch {
+          } catch (error) {
+            if (interactive)
+              await guard.interrupt(
+                error instanceof VaultError ? error.code : 'profile_checkpoint_failed',
+              );
             // Lost lease/revoked: the final close discards; never retry with stale state.
           } finally {
             flushing = null;
@@ -362,6 +450,9 @@ export class VaultBrowserWorker {
         ? setInterval(() => void flush('interval'), Math.min(this.checkpointMs, 30000))
         : undefined;
       interval?.unref();
+      ownedContext.once('close', () => {
+        if (interval) clearInterval(interval);
+      });
       // Leaving the current site (main-frame origin change) writes back pending changes.
       let siteOrigin: string | null = null;
       const onNavigate = (frame: import('playwright').Frame) => {
