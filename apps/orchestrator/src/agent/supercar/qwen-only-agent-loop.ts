@@ -37,9 +37,12 @@ export function browserExecutorMode(): 'legacy' | 'unified' {
 export function supercarReply(
   taskId: string,
   message: string,
-  attachmentBlocks?: Parameters<typeof legacyReply>[2],
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
 ): boolean {
-  return unifiedSupercarReply(taskId, message) || legacyReply(taskId, message, attachmentBlocks);
+  return (
+    unifiedSupercarReply(taskId, message, attachmentBlocks) ||
+    legacyReply(taskId, message, attachmentBlocks)
+  );
 }
 
 export function hasParkedSupercarHandle(taskId: string): boolean {

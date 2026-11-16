@@ -21,6 +21,32 @@ export type BrowserModelResponse = Pick<
   };
 };
 
+export type BrowserAttachmentBlock = Extract<NeutralInputContentBlock, { type: 'text' | 'image' }>;
+export const MAX_BROWSER_IMAGE_CHARS = 4_000_000;
+
+/** Reuse the browser protocol conversion; attached data cannot introduce tool messages. */
+export function browserAttachmentBlocks(
+  attachments: readonly Anthropic.Beta.BetaContentBlockParam[],
+): BrowserAttachmentBlock[] {
+  const blocks = contentBlocks([...attachments]);
+  if (
+    typeof blocks === 'string' ||
+    blocks.some((block) => block.type !== 'text' && block.type !== 'image')
+  )
+    throw new MessagesAdapterError('INVALID_REQUEST', 'Unsupported browser attachment');
+  if (
+    blocks.reduce(
+      (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
+      0,
+    ) > MAX_BROWSER_IMAGE_CHARS
+  )
+    throw new MessagesAdapterError(
+      'INVALID_REQUEST',
+      'Browser reference images exceed request budget',
+    );
+  return blocks as BrowserAttachmentBlock[];
+}
+
 const tuple = (length: number, normalized: boolean) => ({
   type: 'array',
   items: { type: 'number', minimum: 0, ...(normalized ? { maximum: 1000 } : {}) },
@@ -173,7 +199,7 @@ export async function createBrowserMessage(
   let bytes = images
     .filter((block) => protectedImages.has(block))
     .reduce((sum, block) => sum + block.source.data.length, 0);
-  if (bytes > 4_000_000)
+  if (bytes > MAX_BROWSER_IMAGE_CHARS)
     throw new MessagesAdapterError(
       'INVALID_REQUEST',
       'Browser reference images exceed request budget',
@@ -181,7 +207,7 @@ export async function createBrowserMessage(
   const keep = new Set(protectedImages);
   let frameCount = 0;
   for (const block of [...images].reverse().filter((block) => !protectedImages.has(block))) {
-    if (frameCount < 3 && bytes + block.source.data.length <= 4_000_000) {
+    if (frameCount < 3 && bytes + block.source.data.length <= MAX_BROWSER_IMAGE_CHARS) {
       keep.add(block);
       bytes += block.source.data.length;
       frameCount++;

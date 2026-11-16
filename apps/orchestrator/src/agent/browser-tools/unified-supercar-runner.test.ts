@@ -1,6 +1,9 @@
+import { rm } from 'node:fs/promises';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { env } from '../../config/env.js';
+import { parseFileForPrompt } from '../../files/parsers.js';
+import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -98,6 +101,146 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     expect(outcome.summary).toBe('legacy');
     expect(legacy.run).toHaveBeenCalledTimes(1);
   });
+
+  it('passes actual parsed CSV and image attachments into the production browser loop', async () => {
+    const page = await browser.newPage();
+    await page.route('https://fixture.browser.test/', (route) =>
+      route.fulfill({ contentType: 'text/html', body: PAGE }),
+    );
+    await page.goto('https://fixture.browser.test/');
+    const f = await browserOutputFixture();
+    const csvRow = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'stock.csv',
+      mimetype: 'text/csv',
+      buffer: Buffer.from('sku,quantity\nBLUE-731,31\n'),
+    });
+    const imageRow = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'reference.png',
+      mimetype: 'image/png',
+      buffer: await page.screenshot(),
+    });
+    const loaded = await f.service.loadMany([csvRow.externalId, imageRow.externalId], 7);
+    expect(loaded).toHaveLength(2);
+    expect(await f.service.loadMany([csvRow.externalId, imageRow.externalId], 8)).toEqual([]);
+    const csv = await parseFileForPrompt(
+      loaded[0]!.buffer,
+      loaded[0]!.row.filename,
+      loaded[0]!.row.mimetype,
+    );
+    const image = await parseFileForPrompt(
+      loaded[1]!.buffer,
+      loaded[1]!.row.filename,
+      loaded[1]!.row.mimetype,
+    );
+    const requests: NeutralMessagesRequest[] = [];
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_actual_attachment',
+        intent: '把附件的 SKU 填入关键词，不要搜索或提交',
+        executor: { getPage: async () => page } as never,
+        attachments: [...csv.blocks, ...image.blocks],
+        messagesAdapter: scripted([
+          (request) => {
+            requests.push(request);
+            return [call('screenshot', {}, 'screenshot-initial')];
+          },
+          () => [call('screenshot', {}, 'screenshot-one')],
+          () => [call('screenshot', {}, 'screenshot-two')],
+          () => [call('snapshot', {}, 'before-fill')],
+          (request) => {
+            requests.push(request);
+            const text = JSON.stringify(request.messages[0]);
+            const sku = text.match(/BLUE-\d+/)?.[0];
+            return sku
+              ? [call('type', { ref: refIn(request, /textbox/), text: sku })]
+              : [call('finish', { status: 'failed', summary: '没有收到附件' })];
+          },
+          () => [call('snapshot', {}, 'after-fill')],
+          () => [
+            call('finish', {
+              status: 'completed',
+              summary: '已填入 BLUE-731，未提交',
+              evidence: 'BLUE-731',
+            }),
+          ],
+        ]),
+      });
+      expect(JSON.stringify(requests[0]?.messages[0])).toContain('BLUE-731');
+      const blocks = requests[0]?.messages[0]?.content;
+      expect(
+        Array.isArray(blocks) &&
+          blocks.some(
+            (block) =>
+              block.type === 'image' &&
+              block.source.data === (image.blocks[0] as { source: { data: string } }).source.data,
+          ),
+      ).toBe(true);
+      const retained = requests.at(-1)?.messages[0]?.content;
+      expect(
+        Array.isArray(retained) &&
+          retained.some(
+            (block) =>
+              block.type === 'image' &&
+              block.source.data === (image.blocks[0] as { source: { data: string } }).source.data,
+          ),
+      ).toBe(true);
+      expect(outcome.status).toBe('completed');
+      expect(await page.locator('input').inputValue()).toBe('BLUE-731');
+      expect(await page.locator('#r').textContent()).toBe('');
+    } finally {
+      await page.close();
+      await rm(f.root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it.each(['unsupported', 'oversized'])(
+    'rejects %s attachments before calling a model or acting',
+    async (kind) => {
+      const page = await browser.newPage();
+      let calls = 0;
+      const onAction = vi.fn();
+      try {
+        const outcome = await runSupercarTask({
+          taskId: `t_attachment_${kind}`,
+          intent: '阅读附件',
+          executor: { getPage: async () => page } as never,
+          attachments:
+            kind === 'unsupported'
+              ? [{ type: 'tool_use', id: 'untrusted-call', name: 'click', input: {} }]
+              : [
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: 'image/png',
+                      data: 'A'.repeat(4_000_001),
+                    },
+                  },
+                ],
+          onAction,
+          messagesAdapter: scripted([
+            () => {
+              calls++;
+              return [call('finish', { status: 'failed', summary: 'should not call a model' })];
+            },
+          ]),
+        });
+        expect(outcome).toMatchObject({
+          status: 'failed',
+          reason: expect.stringContaining('附件'),
+          failureSource: 'tool',
+        });
+        expect(calls).toBe(0);
+        expect(onAction).not.toHaveBeenCalled();
+      } finally {
+        await page.close();
+      }
+    },
+  );
 
   it('does not execute a stale real-page click after a human edit became idle during model thinking', async () => {
     let now = 10_000;
@@ -199,7 +342,10 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       messagesAdapter: scripted([
         () => [call('request_human', { reason: 'login', message: '请先登录' })],
         (request) => {
-          expect(JSON.stringify(request.messages.at(-1))).toContain('用户已在画面上处理完这一步');
+          expect(JSON.stringify(request.messages.at(-1))).toContain('登录好了');
+          expect(JSON.stringify(request.messages.at(-1))).not.toContain(
+            '用户已在画面上处理完这一步',
+          );
           return [call('finish', { status: 'failed', summary: '登录后仍无订单' })];
         },
       ]),
@@ -214,6 +360,42 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     expect(hasParkedSupercarHandle('t_handoff')).toBe(false);
     await page.close();
   }, 60_000);
+
+  it('keeps actual reply text and parsed attachments after a clarification handoff', async () => {
+    const page = await browser.newPage();
+    await page.goto('about:blank');
+    const parsed = await parseFileForPrompt(
+      Buffer.from('period,total\n2026-11,741\n'),
+      'reply.csv',
+      'text/csv',
+    );
+    const requests: NeutralMessagesRequest[] = [];
+    const running = runSupercarTask({
+      taskId: 't_reply_attachment',
+      intent: '按我提供的材料分析，不需要操作其他网页',
+      executor: { getPage: async () => page } as never,
+      messagesAdapter: scripted([
+        () => [call('request_human', { reason: 'clarification', message: '请提供统计月份和材料' })],
+        (request) => {
+          requests.push(request);
+          return [call('finish', { status: 'failed', summary: '只检查材料传递，不宣称完成分析' })];
+        },
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle('t_reply_attachment')).toBe(true));
+      expect(supercarReply('t_reply_attachment', '只统计十一月', parsed.blocks)).toBe(true);
+      await running;
+      const content = JSON.stringify(requests[0]?.messages);
+      expect(content).toContain('只统计十一月');
+      expect(content).toContain('2026-11,741');
+      expect(content).not.toContain('用户已在画面上处理完这一步');
+      expect(hasParkedSupercarHandle('t_reply_attachment')).toBe(false);
+    } finally {
+      supercarAbort('t_reply_attachment');
+      await page.close();
+    }
+  }, 15_000);
 });
 
 describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
@@ -241,6 +423,7 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     taskId: string,
     turns: Parameters<typeof scripted>[0],
     onBeforeAction: NonNullable<Parameters<typeof runSupercarTask>[0]['onBeforeAction']>,
+    attachments?: Parameters<typeof runSupercarTask>[0]['attachments'],
   ) {
     const page = await browser.newPage();
     await page.route('https://fixture.browser.test/', (route) =>
@@ -251,6 +434,7 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     const running = runSupercarTask({
       taskId,
       intent: '处理订单',
+      attachments,
       executor: { getPage: async () => page } as never,
       messagesAdapter: scripted(turns),
       onAwaitingUser,
@@ -261,12 +445,21 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
 
   it('parks an irreversible click until the user confirms, then runs it', async () => {
     const policy = vi.fn(classifyRuntimeAction);
+    const requests: NeutralMessagesRequest[] = [];
+    const replyAttachment = await parseFileForPrompt(
+      Buffer.from('confirmation-note,417\n'),
+      'confirmation.csv',
+      'text/csv',
+    );
     const { page, running, onAwaitingUser, state } = await start(
       't_gate_confirm',
       [
         () => [call('snapshot', {})],
         (request) => [call('click', { ref: refIn(request, /button \\"提交订单\\"/) })],
-        () => [call('finish', { status: 'completed', summary: '已下单', evidence: '已下单' })],
+        (request) => {
+          requests.push(request);
+          return [call('finish', { status: 'completed', summary: '已下单', evidence: '已下单' })];
+        },
       ],
       policy,
     );
@@ -282,11 +475,68 @@ describe('unified runtime safety gate (legacy LIVE-VETO parity)', () => {
     expect(policy).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'click', label: '提交订单', tagName: 'button' }),
     );
-    expect(supercarReply('t_gate_confirm', '确认执行')).toBe(true);
+    expect(supercarReply('t_gate_confirm', '确认执行', replyAttachment.blocks)).toBe(true);
     expect(await running).toMatchObject({ status: 'completed' });
+    expect(JSON.stringify(requests[0]?.messages)).toContain('confirmation-note,417');
     expect(await state()).toBe('已下单');
     await page.close();
   }, 60_000);
+
+  it.each([
+    { initial: 0, reply: 4_000_001 },
+    { initial: 2_500_000, reply: 2_000_000 },
+  ])(
+    'retains the original park when reply images exceed the remaining budget (%o)',
+    async (sizes) => {
+      const { page, running, state, onAwaitingUser } = await start(
+        't_bad_reply_image',
+        [
+          () => [call('snapshot', {})],
+          (request) => [call('click', { ref: refIn(request, /button \\"提交订单\\"/) })],
+          () => [call('finish', { status: 'completed', summary: '已下单', evidence: '已下单' })],
+        ],
+        classifyRuntimeAction,
+        sizes.initial
+          ? [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: 'A'.repeat(sizes.initial),
+                },
+              },
+            ]
+          : undefined,
+      );
+      try {
+        await vi.waitFor(() => expect(hasParkedSupercarHandle('t_bad_reply_image')).toBe(true));
+        expect(
+          supercarReply('t_bad_reply_image', '确认执行', [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(sizes.reply) },
+            },
+          ]),
+        ).toBe(true);
+        await vi.waitFor(() =>
+          expect(onAwaitingUser).toHaveBeenCalledWith(
+            expect.objectContaining({ question: expect.stringContaining('附件') }),
+          ),
+        );
+        expect(hasParkedSupercarHandle('t_bad_reply_image')).toBe(true);
+        expect(await state()).toBe('待提交');
+        expect(supercarReply('t_bad_reply_image', '确认执行')).toBe(true);
+        expect(await running).toMatchObject({ status: 'completed' });
+        expect(await state()).toBe('已下单');
+      } finally {
+        supercarAbort('t_bad_reply_image');
+        await running.catch(() => undefined);
+        await page.close();
+      }
+    },
+    15_000,
+  );
 
   it('stops the task without running the action when the user does not confirm', async () => {
     const { page, running, state } = await start(

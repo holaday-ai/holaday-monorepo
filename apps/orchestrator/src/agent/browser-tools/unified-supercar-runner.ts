@@ -18,6 +18,7 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from '../supercar/browser-control.js';
+import { MAX_BROWSER_IMAGE_CHARS, browserAttachmentBlocks } from '../supercar/browser-messages.js';
 import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
@@ -46,6 +47,7 @@ import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import {
   NOT_STARTED,
+  type UnifiedHumanReply,
   isEnglishIntent,
   isReadOnlyIntent,
   runUnifiedBrowserLoop,
@@ -61,7 +63,9 @@ const BROWSER_KEEP_ALIVE_MS = 30_000;
 const CANCEL_POLL_MS = 2_000;
 
 interface ParkedTask {
-  resolve: (reply: string | null) => void;
+  resolve: (reply: UnifiedHumanReply | null) => void;
+  acceptAttachments: (blocks: ReturnType<typeof browserAttachmentBlocks>) => boolean;
+  rejectInput: () => void;
   abort: () => void;
   intent: string;
 }
@@ -69,11 +73,23 @@ const parked = new Map<string, ParkedTask>();
 const running = new Map<string, AbortController>();
 
 /** Resume a unified task parked on a human handoff. False when none is parked. */
-export function unifiedSupercarReply(taskId: string, message: string): boolean {
+export function unifiedSupercarReply(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+): boolean {
   const task = parked.get(taskId);
   if (!task) return false;
+  let blocks: ReturnType<typeof browserAttachmentBlocks>;
+  try {
+    blocks = browserAttachmentBlocks(attachments ?? []);
+    if (!task.acceptAttachments(blocks)) throw new Error('attachment budget exceeded');
+  } catch {
+    task.rejectInput();
+    return true;
+  }
   parked.delete(taskId);
-  task.resolve(message);
+  task.resolve({ message, attachments: blocks });
   return true;
 }
 
@@ -192,6 +208,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  let attachments: ReturnType<typeof browserAttachmentBlocks>;
+  try {
+    attachments = browserAttachmentBlocks(opts.attachments ?? []);
+  } catch {
+    return {
+      status: 'failed',
+      reason: '附件暂时无法读取或超过图像预算，请缩小后重新上传。',
+      failureSource: 'tool',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  }
+  let attachmentImageChars = attachments.reduce(
+    (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
+    0,
+  );
   // The session vault stopped this task's logged-in context (revoked or its
   // status could not be confirmed): nothing more runs; the task waits for the user.
   const sessionStopped = () => opts.executor?.sessionInterruption ?? null;
@@ -481,7 +513,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   const parkForReply = async (
     question: string,
     awaitingKind: SupercarAwaitingKind,
-  ): Promise<string | null> => {
+  ): Promise<UnifiedHumanReply | null> => {
     // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
     suspendTimeout();
     // FIX-54 #8: nobody watching the panel, the pool's 5-minute idle reclaim closed the browser
@@ -500,13 +532,32 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       if (controller.signal.aborted) return null;
       const since = Date.now();
       let watch: ReturnType<typeof setInterval> | undefined;
-      return await new Promise<string | null>((resolve) => {
+      return await new Promise<UnifiedHumanReply | null>((resolve) => {
         const timer = setTimeout(() => {
           parked.delete(opts.taskId);
           if (watch) clearInterval(watch);
           resolve(null);
         }, HANDOFF_WAIT_MS);
         const entry: ParkedTask = {
+          acceptAttachments: (blocks) => {
+            const chars = blocks.reduce(
+              (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
+              0,
+            );
+            if (attachmentImageChars + chars > MAX_BROWSER_IMAGE_CHARS) return false;
+            attachmentImageChars += chars;
+            return true;
+          },
+          rejectInput: () => {
+            void safe(() =>
+              opts.onAwaitingUser?.({
+                question: `附件暂时无法读取或超过任务图像预算，请缩小后重新提供。原待处理事项：${question}`,
+                at: new Date(),
+                currentUrl: page.url(),
+                awaitingKind: 'clarification',
+              }),
+            );
+          },
           resolve: (value) => {
             clearTimeout(timer);
             if (watch) clearInterval(watch);
@@ -537,7 +588,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 if (!gone || parked.get(opts.taskId) !== entry) return;
                 if (!((await opts.onWallPassed?.().catch(() => false)) ?? false)) return;
                 parked.delete(opts.taskId);
-                entry.resolve('（用户已在画面上完成了这一步，页面已经过了）');
+                entry.resolve({
+                  message: '（用户已在画面上完成了这一步，页面已经过了）',
+                  pageHandled: true,
+                });
               } finally {
                 checking = false;
               }
@@ -554,6 +608,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
   // each live write. tasks.create passes classifyRuntimeAction; a caller that
   // passes nothing still gets it — the gate is never silently off.
+  const pendingReplies: UnifiedHumanReply[] = [];
   const baseGateAction = (targetPage: typeof page) =>
     createUnifiedActionGate({
       page: targetPage,
@@ -564,7 +619,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
       onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
       labelForRef: (ref) => labelForRef(lastSnapshot, ref),
-      park: parkForReply,
+      park: async (question, kind) => {
+        const reply = await parkForReply(question, kind);
+        if (reply) pendingReplies.push(reply);
+        return reply?.message ?? null;
+      },
       readOnly: isReadOnlyIntent(opts.intent),
       userIntent: opts.userRequest ?? opts.intent,
       aborted: () => controller.signal.aborted,
@@ -762,6 +821,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     };
     const outcome = await runUnifiedBrowserLoop({
+      attachments,
+      takeUserReplies: () => pendingReplies.splice(0),
       wrapUp,
       ...(control
         ? {
@@ -1059,7 +1120,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       },
       gateAction,
       requestHuman: async ({ reason, message }) =>
-        (await parkForReply(message, awaitingKindFor(reason))) !== null,
+        (await parkForReply(message, awaitingKindFor(reason))) ?? false,
     });
     const stoppedAtEnd = sessionStopped();
     if (stoppedAtEnd && outcome.status !== 'cancelled')
