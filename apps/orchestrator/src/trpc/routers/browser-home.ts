@@ -26,6 +26,7 @@ import {
   type BrowserHomeRegion,
   resolveBrowserHomeAddress,
 } from '../../browser-home/browser-home-address.js';
+import { browserHomeFiles } from '../../browser-home/browser-home-files.js';
 import { navigateBrowserHome } from '../../browser-home/browser-home-nav.js';
 import {
   browserHomeProfileSaveHash,
@@ -40,6 +41,7 @@ import { VaultError } from '../../browser-session-vault/vault.js';
 import { instanceBrowserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
+import { FileService } from '../../files/file-service.js';
 import type { Context } from '../context.js';
 import { protectedProcedure, router } from '../trpc.js';
 
@@ -118,6 +120,21 @@ function profileFailure(error: unknown): never {
 }
 
 export const browserHomeRouter = router({
+  files: browserHomeProcedure.query(async ({ ctx }) => {
+    if (!appEnv.BROWSER_HOME_FILES_V1) return { enabled: false, files: [], transfers: [] };
+    const [user] = await ctx.db
+      .select({ id: users.id, status: users.status })
+      .from(users)
+      .where(eq(users.externalId, ctx.userId))
+      .limit(1);
+    if (!user || user.status !== 'active')
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: '账号暂不可用' });
+    return {
+      enabled: true,
+      files: await new FileService(ctx.db, ctx.logger).listBrowserOutputsForUser(user.id),
+      transfers: browserHomeFiles.recent(ctx.userId),
+    };
+  }),
   profileOptions: browserHomeProcedure.query(async ({ ctx }) => {
     const runtime = homeProfiles();
     if (!runtime) return { enabled: false as const, profiles: [] };
@@ -243,6 +260,32 @@ export const browserHomeRouter = router({
     let profile: { id: string; origin: string } | undefined;
     let profileId = input?.profileId;
     const availableProfiles = homeProfiles();
+    const fileSetup = appEnv.BROWSER_HOME_FILES_V1
+      ? {
+          onReady: async (
+            instance: import('../../browser-pool/types.js').BrowserInstance,
+            fresh: boolean,
+          ) => {
+            // Existing contexts were not allocated with download acceptance; ask for a fresh one.
+            if (!fresh) return;
+            const [user] = await ctx.db
+              .select({ id: users.id, status: users.status })
+              .from(users)
+              .where(eq(users.externalId, ctx.userId))
+              .limit(1);
+            if (!user || user.status !== 'active') throw new Error('home_file_owner_unavailable');
+            await browserHomeFiles.attach({
+              instance,
+              pool,
+              userIdInternal: user.id,
+              fileService: new FileService(ctx.db, ctx.logger),
+              enabled: () => appEnv.BROWSER_HOME_FILES_V1 && isBrowserHomeEnabledFor(ctx.userId),
+              onIdle: (original) =>
+                browserHomeSessions.backgroundOperationEnded(pool, ctx.userId, original),
+            });
+          },
+        }
+      : undefined;
     if (!profileId && availableProfiles && !browserHomeSessions.locate(pool, ctx.userId))
       profileId =
         (await availableProfiles.vault.cloudHomeSettings(ctx.userId)).selectedProfileId ??
@@ -267,10 +310,15 @@ export const browserHomeRouter = router({
         ctx.logger,
         input?.viewerId,
         profile,
+        fileSetup,
       );
       const location = browserHomeSessions.locate(pool, ctx.userId);
       if (!location) throw new Error('Browser is not ready for reuse');
-      return { ...opened, capabilities: instanceBrowserCapabilities(location.instance) };
+      return {
+        ...opened,
+        capabilities: instanceBrowserCapabilities(location.instance),
+        filesEnabled: appEnv.BROWSER_HOME_FILES_V1 && browserHomeFiles.has(location.instance),
+      };
     } catch (error) {
       if (error instanceof Error && error.message === 'home_session_interrupted')
         throw new TRPCError({

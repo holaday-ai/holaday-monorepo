@@ -20,14 +20,14 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { type PlanId, newExternalId } from '@holaday/shared-types';
-import { and, asc, eq, gt, isNull, like, notLike, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, like, notLike, or } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import { browserFileBytesMatch } from './browser-file-origin.js';
+import { browserFileBytesMatch, browserFileSourceSchema } from './browser-file-origin.js';
 import { type BrowserOutputInput, persistBrowserOutput } from './browser-output.js';
 import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
 import {
@@ -871,6 +871,41 @@ export class FileService {
       },
       { ...opts, filename: sanitiseFilename(opts.filename) },
     );
+  }
+
+  /** Recent Home-origin files survive context teardown. Availability is metadata; reads verify bytes. */
+  async listBrowserOutputsForUser(userIdInternal: number) {
+    const rows = await this.db
+      .select()
+      .from(taskFiles)
+      .where(and(eq(taskFiles.userId, userIdInternal), isNotNull(taskFiles.browserSource)))
+      .orderBy(desc(taskFiles.id))
+      .limit(50);
+    const items = [];
+    for (const row of rows) {
+      const source = browserFileSourceSchema.safeParse(row.browserSource);
+      if (row.userId !== userIdInternal || row.kind === 'temp' || !source.success) continue;
+      const live =
+        row.status === 'active' && (!row.expiresAt || row.expiresAt.getTime() > Date.now());
+      const meta = live
+        ? await this.storage
+            .stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)))
+            .catch(() => null)
+        : null;
+      items.push({
+        fileId: row.externalId,
+        filename: row.filename,
+        sizeBytes: row.sizeBytes,
+        mimetype: row.mimetype,
+        expiresAt: row.expiresAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+        origin: source.data.origin,
+        taskId: source.data.taskId,
+        available: Boolean(meta && meta.sizeBytes === row.sizeBytes),
+        downloadUrl: `/api/files/${row.externalId}/download`,
+      });
+    }
+    return items;
   }
 
   /**

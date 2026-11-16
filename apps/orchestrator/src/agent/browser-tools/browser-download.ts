@@ -6,6 +6,45 @@ import type { Download } from 'playwright';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import type { BrowserDownloadReceipt } from './playwright-unified-executor.js';
 
+/** One physical download has one persistence owner, even when a task also awaits its event. */
+const ownedDownloads = new WeakMap<
+  Download,
+  { owner: object; promise: Promise<BrowserDownloadReceipt> }
+>();
+export function sharedBrowserDownload(
+  download: Download,
+  owner: object,
+): Promise<BrowserDownloadReceipt> | null {
+  const saved = ownedDownloads.get(download);
+  if (!saved) return null;
+  if (saved.owner !== owner) throw new Error('download_owner_changed');
+  return saved.promise;
+}
+export function ownBrowserDownload(
+  download: Download,
+  owner: object,
+  save: () => Promise<BrowserDownloadReceipt>,
+): Promise<BrowserDownloadReceipt> {
+  const current = sharedBrowserDownload(download, owner);
+  if (current) return current;
+  const promise = Promise.resolve().then(save);
+  ownedDownloads.set(download, { owner, promise });
+  return promise;
+}
+
+/** A shared Home save still publishes the result to the task's normal attachment path. */
+export async function persistTaskBrowserDownload(
+  download: Download,
+  owner: object,
+  store: Parameters<typeof persistBrowserDownload>[1],
+  publish?: (receipt: BrowserDownloadReceipt) => void | Promise<void>,
+): Promise<BrowserDownloadReceipt> {
+  const receipt = await (sharedBrowserDownload(download, owner) ??
+    persistBrowserDownload(download, store));
+  await publish?.(receipt);
+  return receipt;
+}
+
 export async function persistBrowserDownload(
   download: Download,
   store: (input: {

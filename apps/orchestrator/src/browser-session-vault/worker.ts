@@ -391,6 +391,7 @@ export class VaultBrowserWorker {
       access?: 'cloud-home-v1';
       /** Server-owned personal workspace only; saved state remains site-scoped. */
       workspace?: boolean;
+      allowDownloads?: boolean;
       onInterrupted?: (reason: string) => void;
     } = {},
   ): Promise<VaultTask> {
@@ -400,7 +401,10 @@ export class VaultBrowserWorker {
       context = await factory({
         storageState: this.browserState(task.state, task.grant),
         serviceWorkers: 'block',
-        acceptDownloads: false,
+        acceptDownloads:
+          options.access === 'cloud-home-v1' &&
+          options.workspace === true &&
+          options.allowDownloads === true,
       });
       const ownedContext = context;
       const interactive = task.grant.sessionAccess === 'cloud-home-v1';

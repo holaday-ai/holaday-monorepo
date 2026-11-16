@@ -6832,14 +6832,21 @@ export const tasksRouter = router({
                       sizeBytes: stored.sizeBytes,
                       sha256,
                       downloadUrl: `/api/files/${stored.externalId}/download`,
+                      mimetype: stored.mimetype,
+                      expiresAt: stored.expiresAt?.toISOString(),
                     };
+                    return receipt;
+                  },
+                  onBrowserDownloadSaved(receipt) {
+                    if (!receipt.expiresAt || !receipt.mimetype)
+                      throw new Error('download_metadata_unavailable');
+                    if (pdfAttachments.some((item) => item.fileId === receipt.fileId)) return;
                     pdfAttachments.push({
                       ...receipt,
-                      mimetype: 'application/octet-stream',
-                      expiresAt: stored.expiresAt!.toISOString(),
+                      mimetype: receipt.mimetype,
+                      expiresAt: receipt.expiresAt,
                       kind: 'file',
                     });
-                    return receipt;
                   },
                   async onCreateFile({ filename, format, content }) {
                     if (!isCreateFileFormat(format)) {

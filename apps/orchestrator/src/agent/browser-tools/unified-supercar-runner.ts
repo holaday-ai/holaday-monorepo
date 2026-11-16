@@ -22,7 +22,7 @@ import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
-import { persistBrowserDownload } from './browser-download.js';
+import { persistTaskBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
 import { browserToolError } from './browser-tool-error.js';
@@ -225,7 +225,15 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
     ...(opts.onBrowserDownload
-      ? { saveDownload: (download) => persistBrowserDownload(download, opts.onBrowserDownload!) }
+      ? {
+          saveDownload: (download) =>
+            persistTaskBrowserDownload(
+              download,
+              opts.executor!,
+              opts.onBrowserDownload!,
+              opts.onBrowserDownloadSaved,
+            ),
+        }
       : {}),
     observationV2: capabilities.observationV2,
     taskIntent: opts.intent,

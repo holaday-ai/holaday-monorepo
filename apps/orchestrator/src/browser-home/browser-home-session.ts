@@ -102,6 +102,9 @@ export interface BrowserHomeProfileSelection {
   id: string;
   origin: string;
 }
+export interface BrowserHomeFileSetup {
+  onReady(instance: BrowserInstance, fresh: boolean): Promise<void>;
+}
 
 /** What leave() did: other pages still use it, its release was scheduled, or none was open. */
 export type BrowserHomeLeaveResult = 'kept' | 'scheduled' | 'none';
@@ -231,6 +234,7 @@ export class BrowserHomeSessions {
     logger: Logger,
     viewerId?: string,
     profile?: BrowserHomeProfileSelection,
+    files?: BrowserHomeFileSetup,
   ): Promise<BrowserHomeOpenResult> {
     this.cancelPendingRelease(userId);
     const pending = this.opening.get(userId);
@@ -240,7 +244,7 @@ export class BrowserHomeSessions {
     if (!pending && !this.locate(pool, userId)) this.viewers.delete(userId);
     if (viewerId) this.addViewer(userId, viewerId);
     if (pending) return pending.promise;
-    const promise = this.openOnce(pool, userId, logger, profile).finally(() => {
+    const promise = this.openOnce(pool, userId, logger, profile, files).finally(() => {
       if (this.opening.get(userId)?.promise === promise) this.opening.delete(userId);
     });
     this.opening.set(userId, { promise, profileId: profile?.id ?? null });
@@ -252,6 +256,7 @@ export class BrowserHomeSessions {
     userId: string,
     logger: Logger,
     profile?: BrowserHomeProfileSelection,
+    files?: BrowserHomeFileSetup,
   ): Promise<BrowserHomeOpenResult> {
     const sessionId = browserHomeSessionId(userId);
     const existing = this.locate(pool, userId);
@@ -262,6 +267,7 @@ export class BrowserHomeSessions {
       // While a task holds it, the person's input already goes through the task's control.
       if (!existing.heldBy) openPersonControl(existing.instance);
       const url = await currentUrl(existing.instance, true);
+      await files?.onReady(existing.instance, false);
       this.rememberUrl(userId, url);
       return {
         sessionId,
@@ -281,8 +287,16 @@ export class BrowserHomeSessions {
       targetUrl: restoreTo,
       sessionPolicy: 'personal_home',
       ...(profile ? { cloudProfileId: profile.id } : {}),
+      ...(files ? { homeDownloadsEnabled: true } : {}),
     });
     pool.setIdleTimeout(sessionId, BROWSER_HOME_IDLE_TIMEOUT_MS);
+    try {
+      await files?.onReady(instance, true);
+    } catch (error) {
+      if (pool.peek(instance.taskId) === instance)
+        await pool.release(instance.taskId, 'browser-home-file-setup-failed');
+      throw error;
+    }
     await this.watchNavigations(instance, userId);
     let url: string | null = null;
     if (restoreTo) url = await this.restore(instance, restoreTo, userId, logger);
@@ -397,6 +411,26 @@ export class BrowserHomeSessions {
     this.pendingReleases.delete(userId);
   }
 
+  /** Last transfer settled after the last viewer left: restart the ordinary close grace. */
+  backgroundOperationEnded(pool: BrowserHomePool, userId: string, instance: BrowserInstance): void {
+    if (
+      (this.viewers.get(userId)?.size ?? 0) > 0 ||
+      this.locate(pool, userId)?.instance !== instance
+    )
+      return;
+    if (instance.homeFileTransfers?.pending()) return;
+    this.cancelPendingRelease(userId);
+    const timer = setTimeout(() => {
+      if (this.pendingReleases.get(userId) !== timer) return;
+      this.pendingReleases.delete(userId);
+      void this.close(pool, userId, { onlyIfUnused: true, expectedInstance: instance }).catch(
+        () => undefined,
+      );
+    }, this.closeGraceMs);
+    timer.unref?.();
+    this.pendingReleases.set(userId, timer);
+  }
+
   /**
    * Release the user's home browser (remembering where it was). False when none was open. While a
    * task holds it, the session ends instead: nothing is given back when that task ends, and the
@@ -405,7 +439,7 @@ export class BrowserHomeSessions {
   async close(
     pool: BrowserHomePool,
     userId: string,
-    options: { onlyIfUnused?: boolean } = {},
+    options: { onlyIfUnused?: boolean; expectedInstance?: BrowserInstance } = {},
   ): Promise<boolean> {
     // A page opened since the last one left keeps it (the grace path re-checks after each await).
     const reused = () => options.onlyIfUnused === true && (this.viewers.get(userId)?.size ?? 0) > 0;
@@ -417,10 +451,13 @@ export class BrowserHomeSessions {
     await this.opening.get(userId)?.promise.catch(() => {});
     const seen = this.locate(pool, userId);
     if (!seen) return false;
+    if (options.expectedInstance && seen.instance !== options.expectedInstance) return false;
+    if (options.onlyIfUnused && seen.instance.homeFileTransfers?.pending()) return false;
     this.rememberUrl(userId, await currentUrl(seen.instance));
     // Located again after the await: the task may have given it back meanwhile.
     const location = this.locate(pool, userId);
-    if (!location || reused()) return false;
+    if (!location || location.instance !== seen.instance || reused()) return false;
+    if (options.onlyIfUnused && location.instance.homeFileTransfers?.pending()) return false;
     if (location.heldBy) {
       // Leaving the viewer is not an instruction to end the ongoing task's workspace.
       if (options.onlyIfUnused) return false;

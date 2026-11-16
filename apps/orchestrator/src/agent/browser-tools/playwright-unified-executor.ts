@@ -73,6 +73,8 @@ export interface BrowserDownloadReceipt {
   sizeBytes: number;
   sha256: string;
   downloadUrl: string;
+  expiresAt?: string;
+  mimetype?: string;
 }
 
 export interface UnifiedExecutorOptions {

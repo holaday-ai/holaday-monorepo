@@ -1,5 +1,6 @@
 import { replyLanguageRule } from '@holaday/shared-types';
 import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
+import type { BrowserDownloadReceipt } from '../browser-tools/playwright-unified-executor.js';
 /**
  * Supercar agent loop.
  *
@@ -739,9 +740,13 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
-  onBrowserDownload?: (input: { filename: string; buffer: Buffer; sha256: string }) => Promise<
-    import('../browser-tools/playwright-unified-executor.js').BrowserDownloadReceipt
-  >;
+  onBrowserDownload?: (input: {
+    filename: string;
+    buffer: Buffer;
+    sha256: string;
+  }) => Promise<BrowserDownloadReceipt>;
+  /** Publish both newly persisted and already-owned Home download receipts to this task. */
+  onBrowserDownloadSaved?: (receipt: BrowserDownloadReceipt) => void | Promise<void>;
   /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
   unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
   /** FIRECRAWL-1: web search once the task met a wall (no Firecrawl fallback). */

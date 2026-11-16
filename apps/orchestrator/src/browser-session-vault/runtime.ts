@@ -109,7 +109,13 @@ export function createVaultRuntime(options: {
         grantId,
         (config) => executor.createSessionVaultContext(config),
         {
-          ...(personal ? { access: 'cloud-home-v1' as const, workspace: true } : {}),
+          ...(personal
+            ? {
+                access: 'cloud-home-v1' as const,
+                workspace: true,
+                allowDownloads: session.homeDownloadsEnabled === true,
+              }
+            : {}),
           // Revoked or unverifiable: the task parks for the user instead of continuing.
           onInterrupted: (reason) => {
             executor.markSessionInterrupted(reason);

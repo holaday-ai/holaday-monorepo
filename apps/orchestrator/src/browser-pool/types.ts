@@ -49,6 +49,8 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   /** Fixed at allocation; adoption never mixes anonymous and identity contexts. */
   sessionPolicy?: BrowserSessionPolicy;
   cloudProfileId?: string;
+  /** Server-installed transfer lifetime; not client capability or persisted identity. */
+  homeFileTransfers?: { pending(): boolean };
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;
@@ -114,6 +116,8 @@ export interface BrowserSessionTarget {
   targetUrl?: string | null;
   sessionPolicy?: BrowserSessionPolicy;
   cloudProfileId?: string;
+  /** Server-only Home setup: a file observer is installed before navigation. */
+  homeDownloadsEnabled?: boolean;
 }
 
 /** Missing/unknown policy never inherits personal or readonly saved state. */
