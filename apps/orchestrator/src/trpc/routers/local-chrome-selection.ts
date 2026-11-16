@@ -3,6 +3,7 @@ import { userBrowserProtocolSchema } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { env } from '../../config/env.js';
 import { getConnectedExtensionClientIds, sendExtensionToolCall } from '../../ws/server.js';
 import { protectedProcedure } from '../trpc.js';
 
@@ -33,6 +34,19 @@ const tabsSchema = z.object({
     .max(100),
   truncated: z.boolean(),
 });
+
+export function backgroundTaskTabsEnabled(userId: string): boolean {
+  const configured = process.env.BROWSER_TASK_TABS_ENABLED;
+  return (
+    (configured === undefined ? env.BROWSER_TASK_TABS_ENABLED : configured === 'true') &&
+    browserCapabilities(userId).routingV2
+  );
+}
+
+function supportsTaskTabStart(raw: unknown): boolean {
+  const protocol = userBrowserProtocolSchema.safeParse(raw);
+  return protocol.success && protocol.data.capabilities.includes('task_tab_start');
+}
 
 export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx }) => {
   const connections = getConnectedExtensionClientIds(ctx.userId);
@@ -66,6 +80,14 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
           ...tab,
           expectedUrl: url,
           extensionClientId,
+          ...(backgroundTaskTabsEnabled(ctx.userId)
+            ? {
+                backgroundTaskTabs: true,
+                taskTabStart: supportsTaskTabStart(
+                  (reply.result as Record<string, unknown>)?.userBrowserProtocol,
+                ),
+              }
+            : {}),
         })),
         unavailable: false,
         needsUpdate: false,
@@ -78,6 +100,7 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
     unavailable: results.some((result) => result.unavailable),
     needsUpdate: results.some((result) => result.needsUpdate),
     routingV2: browserCapabilities(ctx.userId).routingV2,
+    ...(backgroundTaskTabsEnabled(ctx.userId) ? { backgroundTaskTabs: true } : {}),
   };
 });
 
@@ -137,3 +160,71 @@ export async function assertLocalChromeSelection(
     });
   }
 }
+
+/** Prepare only the user's chosen site in an inactive tab; no original-page DOM is read. */
+export const localChromeTaskTabProcedure = protectedProcedure
+  .input(
+    z.object({ selection: localChromeSelectionSchema, preparationId: z.string().uuid() }).strict(),
+  )
+  .mutation(async ({ ctx, input }) => {
+    if (!backgroundTaskTabsEnabled(ctx.userId))
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '独立任务标签页暂未开放。未创建任务或扣除额度。',
+      });
+    const { extensionClientId, ...target } = input.selection;
+    if (!getConnectedExtensionClientIds(ctx.userId).includes(extensionClientId))
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '所选 Chrome 连接已断开，请重新连接。未扣除额度。',
+      });
+    const handshake = await sendExtensionToolCall(ctx.userId, {
+      taskId: `prepare-${input.preparationId}`,
+      kind: 'tabs',
+      extensionClientId,
+      timeoutMs: 5000,
+    });
+    if (
+      !handshake.ok ||
+      handshake.extensionClientId !== extensionClientId ||
+      !supportsTaskTabStart((handshake.result as Record<string, unknown>)?.userBrowserProtocol)
+    )
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '请更新并重新连接 HOLADAY Chrome 插件后使用独立任务页。未扣除额度。',
+      });
+    const reply = await sendExtensionToolCall(ctx.userId, {
+      taskId: `prepare-${input.preparationId}`,
+      kind: 'task_tab',
+      extensionClientId,
+      args: { target, preparationId: input.preparationId },
+      timeoutMs: 15000,
+    });
+    const parsed = z
+      .object({
+        taskTabCreated: z.literal(true),
+        tabId: z.number().int().nonnegative(),
+        selectionId: z.string().uuid(),
+        url: httpUrl,
+        title: z.string().max(512),
+      })
+      .safeParse(reply.result);
+    if (
+      !reply.ok ||
+      reply.extensionClientId !== extensionClientId ||
+      !parsed.success ||
+      parsed.data.tabId === target.tabId ||
+      parsed.data.url !== new URL(target.expectedUrl).origin
+    )
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: '独立任务页尚未准备好，请重试；不会操作原页面。未扣除额度。',
+      });
+    return {
+      extensionClientId,
+      tabId: parsed.data.tabId,
+      selectionId: parsed.data.selectionId,
+      expectedUrl: parsed.data.url,
+      title: parsed.data.title,
+    };
+  });

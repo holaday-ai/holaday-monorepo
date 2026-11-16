@@ -829,6 +829,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
+    // A bound task/current-page session must never steal the user's focus,
+    // even when every background capture mechanism is unavailable.
+    if (this.opts.attachToTabId !== null) {
+      return {
+        status: 'skipped',
+        data: {
+          skipped: true,
+          backgroundOnly: true,
+          reason: `Background capture unavailable: clean=${first.error}; plain=${second.error}; rawCdp=${third.error}`,
+        },
+      };
+    }
     console.warn(
       '[holaday][screenshot] raw CDP failed, falling back to captureVisibleTab (will foreground window)',
       { error: third.error },

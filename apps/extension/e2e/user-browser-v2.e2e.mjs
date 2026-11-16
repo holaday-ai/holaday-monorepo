@@ -159,6 +159,84 @@ test(
         action,
         binding: { token: target.token, observationRevision: target.observationRevision },
       });
+    await t.test('background task tab keeps normal browsing and input untouched', async () => {
+      const sourcePage = await context.newPage();
+      await sourcePage.goto(`${server.origin}/v2.html?start=background`);
+      const userPage = await context.newPage();
+      await userPage.goto(`${server.origin}/page.html`);
+      await userPage.bringToFront();
+      await userPage.locator('#query').fill('user typing');
+      const discovery = await server.call(TASK_ID, 'tabs');
+      const source = discovery.result.tabs.find((tab) => tab.title === 'V2 fixture');
+      const userTab = discovery.result.tabs.find((tab) => tab.active);
+      assert.ok(source && userTab);
+      const preparationId = '4488c303-9880-44d9-885e-51e13755933b';
+      const target = {
+        tabId: source.tabId,
+        expectedUrl: server.origin,
+        selectionId: source.selectionId,
+      };
+      const newPage = context.waitForEvent('page');
+      const prepared = await server.call(TASK_ID, 'task_tab', { target, preparationId });
+      assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
+      const taskPage = await newPage;
+      await taskPage.waitForLoadState('domcontentloaded');
+      assert.notEqual(prepared.result.tabId, source.tabId);
+      const repeated = await server.call(TASK_ID, 'task_tab', { target, preparationId });
+      assert.deepEqual(repeated.result, prepared.result);
+      const opened = await call({
+        op: 'open',
+        target: {
+          tabId: prepared.result.tabId,
+          expectedUrl: prepared.result.url,
+          selectionId: prepared.result.selectionId,
+        },
+        protocol,
+        grantedOrigins: [server.origin],
+      });
+      assert.equal(opened.ok, true, JSON.stringify(opened.error));
+      const sessionId = opened.result.sessionId;
+      try {
+        const tabs = await call({ op: 'tabs', sessionId, operation: 'list' });
+        assert.deepEqual(
+          tabs.result.tabs.map(({ tabId, ownership }) => ({ tabId, ownership })),
+          [{ tabId: prepared.result.tabId, ownership: 'task' }],
+        );
+        const action = { kind: 'click', selector: css('#search') };
+        const described = await call({
+          op: 'describe',
+          sessionId,
+          action,
+          observationRevision: opened.result.observation.observationRevision,
+        });
+        assert.equal(described.ok, true, JSON.stringify(described.error));
+        const applied = await call({
+          op: 'act',
+          sessionId,
+          action,
+          binding: {
+            token: described.result.target.token,
+            observationRevision: described.result.target.observationRevision,
+          },
+        });
+        assert.equal(applied.ok, true, JSON.stringify(applied.error));
+        assert.equal(await taskPage.locator('#effects').textContent(), '1');
+        assert.equal(await sourcePage.locator('#effects').textContent(), '0');
+        assert.equal(await userPage.locator('#query').inputValue(), 'user typing');
+        const active = await serviceWorker.evaluate(
+          async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+        );
+        assert.equal(active, userTab.tabId);
+        await userPage.locator('#query').press('End');
+        await userPage.keyboard.type(' continues');
+        assert.equal(await userPage.locator('#query').inputValue(), 'user typing continues');
+      } finally {
+        await call({ op: 'close', sessionId });
+      }
+      await taskPage.close();
+      await sourcePage.close();
+      await userPage.close();
+    });
     await t.test(
       'open v2 handshake and ordinary button auto click through unified gate',
       async () => {

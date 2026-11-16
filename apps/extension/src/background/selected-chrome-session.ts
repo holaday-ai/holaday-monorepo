@@ -86,6 +86,7 @@ export class SelectedChromeSession {
     validate: () => Promise<void>;
     protocol?: UserBrowserProtocol;
     grantedOrigins?: readonly string[];
+    ownership?: 'selected' | 'task';
   }): Promise<SessionReply> {
     if (this.entry) return { ok: false, error: 'browser_busy' };
     const owner = this.deps.owner();
@@ -123,7 +124,7 @@ export class SelectedChromeSession {
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
         origin: entry.origins[0] ?? '',
-        ownership: 'selected',
+        ownership: input.ownership ?? 'selected',
       });
       const attached = await entry.driver.attachExistingTab();
       if (attached.status !== 'ok')

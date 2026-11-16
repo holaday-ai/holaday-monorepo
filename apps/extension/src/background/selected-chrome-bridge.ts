@@ -1,7 +1,7 @@
 import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import type { ServerMessage, UserBrowserProtocol } from '@holaday/shared-types';
 import { SelectedChromeSession } from './selected-chrome-session.js';
-import { readSelectedTab } from './selected-tab-read.js';
+import { readSelectedTab, selectedTabOwnership } from './selected-tab-read.js';
 import { getCurrentWsToken } from './ws-client.js';
 
 type Target = NonNullable<
@@ -28,15 +28,22 @@ export function createSelectedChromeBridge() {
     chrome.tabs?.onRemoved?.addListener?.((tabId) => session.markTabClosed(tabId));
   }
   return {
-    open: (
+    open: async (
       taskId: string,
       target: Target,
       options?: { protocol?: UserBrowserProtocol; grantedOrigins?: readonly string[] },
     ) => {
-      if (!target) return Promise.resolve({ ok: false as const, error: 'target_required' });
+      if (!target) return { ok: false as const, error: 'target_required' };
+      let ownership: 'selected' | 'task';
+      try {
+        ownership = await selectedTabOwnership(target);
+      } catch {
+        return { ok: false as const, error: 'target_changed' };
+      }
       return session.open({
         taskId,
         tabId: target.tabId,
+        ownership,
         ...options,
         validate: async () => {
           await readSelectedTab(target);

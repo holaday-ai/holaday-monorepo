@@ -446,6 +446,12 @@ const baseEnvSchema = z.object({
   /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
 
+  /** BA-1: independent local Chrome task tabs, staged rollout (default OFF). */
+  BROWSER_TASK_TABS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
   /**
    * BROWSER-HOME-1 — the「云浏览器」entry: one task-less cloud browser per user
    * (`bhs_<userId>`, tRPC `browserHome`). Default OFF: every browserHome endpoint

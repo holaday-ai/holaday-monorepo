@@ -5,6 +5,7 @@ import {
   configureExtensionToolRuntime,
   handleExtensionToolCall,
 } from './extension-tools.js';
+import { prepareIndependentTaskTab } from './selected-tab-read.js';
 import { getCurrentWsToken, send } from './ws-client.js';
 
 vi.mock('./ws-client.js', () => ({
@@ -355,4 +356,126 @@ describe('selected Chrome tab read transport', () => {
     expect(result.bodyText.length).toBeLessThanOrEqual(8128);
     expect(JSON.stringify(reply)).not.toContain('secret');
   });
+});
+
+describe('background task tab preparation', () => {
+  const preparationId = '4488c303-9880-44d9-885e-51e13755933b';
+  async function readyBrowser() {
+    vi.mocked(getCurrentWsToken).mockReturnValue('owner-a');
+    const browser = await installBrowser();
+    configureExtensionToolRuntime({
+      transport: {
+        handle: async () => ({ ok: false, error: 'session_unavailable' }),
+        stopTask: async () => {},
+      },
+      runLegacy: (run) => run(),
+    });
+    browser.tabs.create.mockResolvedValue({
+      id: 73,
+      url: target.expectedUrl,
+      title: 'Projects',
+      active: false,
+    });
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      active: args[0] === 9,
+    }));
+    return browser;
+  }
+  it('creates a separate inactive task tab without reading or focusing the source page', async () => {
+    const browser = await readyBrowser();
+    const reply = await call('task_tab', { target, preparationId });
+    expect(reply).toMatchObject({
+      ok: true,
+      result: { taskTabCreated: true, tabId: 73, url: 'https://work.example' },
+    });
+    expect(browser.tabs.create).toHaveBeenCalledWith({ url: target.expectedUrl, active: false });
+    expect(browser.tabs.update).not.toHaveBeenCalled();
+    expect(browser.windows.update).not.toHaveBeenCalled();
+    expect(browser.scripting.executeScript).not.toHaveBeenCalled();
+    expect(
+      reply?.type === 'client.extension.tool_result' &&
+        (reply.result as { selectionId: string }).selectionId,
+    ).toEqual(expect.any(String));
+  });
+  it('deduplicates retries even when a new wire request id is used', async () => {
+    const browser = await readyBrowser();
+    const first = await call('task_tab', { target, preparationId });
+    const second = await call('task_tab', { target, preparationId });
+    expect(first).toMatchObject({ ok: true });
+    expect(second?.type === 'client.extension.tool_result' && second.result).toEqual(
+      first?.type === 'client.extension.tool_result' && first.result,
+    );
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+  });
+  it('rejects an owner switch before opening another tab', async () => {
+    const browser = await readyBrowser();
+    vi.mocked(getCurrentWsToken).mockReturnValue('owner-b');
+    expect(await call('task_tab', { target, preparationId })).toMatchObject({ ok: false });
+    expect(browser.tabs.create).not.toHaveBeenCalled();
+  });
+});
+
+it('keeps a signed start URL local while exporting only an opaque prepared selection', async () => {
+  vi.mocked(getCurrentWsToken).mockReturnValue('owner-a');
+  const browser = await installBrowser();
+  const raw = 'https://work.example/private/signed-path?token=fixture-secret&sig=opaque-value';
+  browser.tabs.query.mockResolvedValue([{ id: 42, url: raw, title: 'Report', active: false }]);
+  browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+    id: args[0] as number,
+    url: raw,
+    title: 'Report',
+  }));
+  browser.tabs.create.mockResolvedValue({ id: 73, url: raw, title: 'Report' });
+  configureExtensionToolRuntime({
+    transport: {
+      handle: async () => ({ ok: false, error: 'session_unavailable' }),
+      stopTask: async () => {},
+    },
+    runLegacy: (run) => run(),
+  });
+  const discovered = await call('tabs');
+  const source = (discovered as { result: { tabs: Array<{ tabId: number; selectionId: string }> } })
+    .result.tabs[0];
+  if (!source) throw new Error('source tab missing');
+  const reply = await call('task_tab', {
+    target: {
+      tabId: source.tabId,
+      selectionId: source.selectionId,
+      expectedUrl: 'https://work.example',
+    },
+    preparationId: '7450cc61-6ab3-421a-8241-f267c418fd3f',
+  });
+  expect(reply).toMatchObject({ ok: true, result: { tabId: 73, url: 'https://work.example' } });
+  expect(browser.tabs.create).toHaveBeenCalledWith({ url: raw, active: false });
+  expect(JSON.stringify(reply)).not.toContain('fixture-secret');
+  expect(JSON.stringify(reply)).not.toContain('signed-path');
+  expect(browser.scripting.executeScript).not.toHaveBeenCalled();
+});
+
+it('shares an in-flight preparation rather than opening a second tab on retry', async () => {
+  vi.mocked(getCurrentWsToken).mockReturnValue('owner-a');
+  const browser = await installBrowser();
+  let finish!: (tab: { id: number; url: string }) => void;
+  browser.tabs.create.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+    id: args[0] as number,
+    url: target.expectedUrl,
+    title: 'Projects',
+  }));
+  if (!target.selectionId) throw new Error('selection missing');
+  const boundTarget = { ...target, selectionId: target.selectionId };
+  const first = prepareIndependentTaskTab(boundTarget, '72cc2a5e-75e1-4484-adcc-60a7a7e9696b');
+  await vi.waitFor(() => expect(browser.tabs.create).toHaveBeenCalledTimes(1));
+  const retry = prepareIndependentTaskTab(boundTarget, '72cc2a5e-75e1-4484-adcc-60a7a7e9696b');
+  finish({ id: 73, url: target.expectedUrl });
+  expect(await retry).toEqual(await first);
+  expect(browser.tabs.create).toHaveBeenCalledTimes(1);
 });

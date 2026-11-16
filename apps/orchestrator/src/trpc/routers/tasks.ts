@@ -377,6 +377,7 @@ import {
   assertLocalChromeSelection,
   localChromeSelectionSchema,
   localChromeTabsProcedure,
+  localChromeTaskTabProcedure,
 } from './local-chrome-selection.js';
 import { deferredTaskCosts } from './media-task-background.js';
 import { runMediaTaskBackground } from './media-task-background.js';
@@ -12416,6 +12417,7 @@ export const tasksRouter = router({
   browserProfileStatus: browserProfileStatusProcedure,
   browserProfileClear: browserProfileClearProcedure,
   localChromeTabs: localChromeTabsProcedure,
+  localChromeTaskTab: localChromeTaskTabProcedure,
   browserNav: browserNavProcedure,
 
   /**

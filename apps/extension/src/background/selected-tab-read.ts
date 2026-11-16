@@ -15,10 +15,15 @@ const selections = new Map<
     url: string;
     ownerToken: string | null;
     expiresAt: number;
+    ownership: 'selected' | 'task';
   }
 >();
 
-function rememberSelection(tab: chrome.tabs.Tab, ownerToken: string | null): string {
+function rememberSelection(
+  tab: chrome.tabs.Tab,
+  ownerToken: string | null,
+  ownership: 'selected' | 'task' = 'selected',
+): string {
   const now = Date.now();
   for (const [id, selection] of selections) {
     if (selection.expiresAt <= now || selection.ownerToken !== ownerToken) selections.delete(id);
@@ -34,12 +39,14 @@ function rememberSelection(tab: chrome.tabs.Tab, ownerToken: string | null): str
     url: tab.url ?? '',
     ownerToken,
     expiresAt: now + SELECTION_TTL_MS,
+    ownership,
   });
   return id;
 }
 
 export function resetTabSelectionsForTests(): void {
   selections.clear();
+  taskTabPreparations.clear();
 }
 
 /** Only display origin. Signed credentials can occur in any path/query field;
@@ -165,4 +172,98 @@ export async function readSelectedTab(target: Target) {
     bodyText: result.bodyText.slice(0, MAX_TEXT),
     truncated: result.truncated === true || result.bodyText.length > MAX_TEXT,
   };
+}
+
+export async function selectedTabOwnership(target: Target): Promise<'selected' | 'task'> {
+  return (await selectedTabState(target)).selection.ownership;
+}
+
+type PreparedTaskTab = {
+  taskTabCreated: true;
+  tabId: number;
+  selectionId: string;
+  url: string;
+  title: string;
+};
+const taskTabPreparations = new Map<
+  string,
+  {
+    owner: string;
+    target: string;
+    expiresAt: number;
+    settled: boolean;
+    result: Promise<PreparedTaskTab>;
+  }
+>();
+
+/** Only Chrome metadata is read. The raw, potentially signed URL stays in this worker. */
+export async function prepareIndependentTaskTab(
+  target: Target,
+  preparationId: string | undefined,
+): Promise<PreparedTaskTab> {
+  const owner = getCurrentWsToken();
+  if (!owner || !target || !preparationId || !/^[a-f0-9-]{36}$/i.test(preparationId))
+    throw new Error('target_required');
+  const key = JSON.stringify([owner, preparationId]);
+  const fingerprint = JSON.stringify(target);
+  const existing = taskTabPreparations.get(key);
+  if (existing) {
+    if (existing.target !== fingerprint) throw new Error('target_changed');
+    const prepared = await existing.result;
+    // A timed-out caller can safely retry, but never receive a different owner's handle.
+    if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+    return prepared;
+  }
+  for (const [id, item] of taskTabPreparations) {
+    if (item.settled && (item.expiresAt <= Date.now() || item.owner !== owner))
+      taskTabPreparations.delete(id);
+  }
+  if (taskTabPreparations.size >= 64) throw new Error('browser_busy');
+  const entry = {
+    owner,
+    target: fingerprint,
+    expiresAt: Date.now() + SELECTION_TTL_MS,
+    settled: false,
+    result: Promise.resolve(null) as unknown as Promise<PreparedTaskTab>,
+  };
+  taskTabPreparations.set(key, entry);
+  entry.result = (async () => {
+    const source = await validateSelectedTab(target);
+    const raw = new URL(source.url ?? '');
+    if (!/^https?:$/.test(raw.protocol) || raw.username || raw.password)
+      throw new Error('target_changed');
+    if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+    const created = await chrome.tabs.create({ url: source.url, active: false });
+    if (created.id === undefined) throw new Error('tab_create_failed');
+    const deadline = Date.now() + 8000;
+    for (;;) {
+      if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+      const tab = await withDeadline(chrome.tabs.get(created.id), 1500, 'extension_tool_timeout');
+      const origin = publicWebUrl(tab.url);
+      if (!tab.pendingUrl && tab.status !== 'loading') {
+        if (origin && origin !== raw.origin) throw new Error('origin_grant_required');
+        if (origin === raw.origin) {
+          return {
+            taskTabCreated: true as const,
+            tabId: created.id,
+            selectionId: rememberSelection(tab, owner, 'task'),
+            url: origin,
+            title: (tab.title ?? '').slice(0, 512),
+          };
+        }
+      }
+      if (Date.now() >= deadline) throw new Error('task_tab_not_ready');
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  })();
+  // Keep unknown/late creation outcomes in the dedupe map. Never create a second tab on retry.
+  void entry.result.then(
+    () => {
+      entry.settled = true;
+    },
+    () => {
+      entry.settled = true;
+    },
+  );
+  return entry.result;
 }

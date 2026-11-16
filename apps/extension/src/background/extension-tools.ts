@@ -40,6 +40,7 @@ import { sanitizePageContextUrl } from '../shared/page-context.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import {
   listReadableTabs,
+  prepareIndependentTaskTab,
   readSelectedTab,
   resetTabSelectionsForTests,
 } from './selected-tab-read.js';
@@ -886,6 +887,17 @@ async function computeExtensionToolResult(
         error: { message: sanitized.message, code: reply.error },
       };
     }
+    if (kind === 'task_tab') {
+      if (!extensionToolRuntime.transport) throw new Error('capability_missing');
+      const result = await withDeadline(
+        extensionToolRuntime.runLegacy(() =>
+          prepareIndependentTaskTab(args?.target, args?.preparationId),
+        ),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return { ok: true, result: { ...result, selectedSessionVersion: 1 } };
+    }
     if (args?.target && kind !== 'read') throw new Error('target_unsupported');
     if (kind === 'tabs' || kind === 'read') {
       const result = await withDeadline<unknown>(
@@ -898,7 +910,14 @@ async function computeExtensionToolResult(
         result: {
           ...(typeof result === 'object' && result !== null ? result : {}),
           selectedSessionVersion: extensionToolRuntime.transport ? 1 : 0,
-          ...(extensionToolRuntime.transport ? { userBrowserProtocol: USER_BROWSER_PROTOCOL } : {}),
+          ...(extensionToolRuntime.transport
+            ? {
+                userBrowserProtocol: {
+                  ...USER_BROWSER_PROTOCOL,
+                  capabilities: [...USER_BROWSER_PROTOCOL.capabilities, 'task_tab_start'],
+                },
+              }
+            : {}),
         },
       };
     }

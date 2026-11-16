@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import * as capabilities from '../../config/browser-capabilities.js';
 import * as ws from '../../ws/server.js';
 import type { Context } from '../context.js';
 import { router } from '../trpc.js';
+import * as selectionRoutes from './local-chrome-selection.js';
 import { assertLocalChromeSelection, localChromeTabsProcedure } from './local-chrome-selection.js';
 const selection = {
   extensionClientId: 'connection',
@@ -9,7 +11,10 @@ const selection = {
   expectedUrl: 'https://work.example',
   selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
 };
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 it('keeps an unanswered discovery unavailable without asserting that a timeout proves an old version', async () => {
   vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
   vi.spyOn(ws, 'sendExtensionToolCall').mockResolvedValue({
@@ -76,5 +81,143 @@ it.each(['wrong-connection', 'wrong-tab', 'changed-page', 'offline'])(
       },
     });
     await expect(assertLocalChromeSelection('alice', selection)).rejects.toThrow('未扣除额度');
+  },
+);
+
+it('prepares an inactive task tab only on the authenticated compatible connection', async () => {
+  vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
+  vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+    viewportV2: true,
+    observationV2: true,
+    replayV1: false,
+    routingV2: true,
+  });
+  vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+  vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+  const send = vi
+    .spyOn(ws, 'sendExtensionToolCall')
+    .mockResolvedValueOnce({
+      ok: true,
+      extensionClientId: 'connection',
+      result: {
+        userBrowserProtocol: {
+          version: 2,
+          capabilitiesVersion: 1,
+          capabilities: [
+            'real_target',
+            'revision_binding',
+            'exact_origin',
+            'scroll',
+            'select',
+            'task_tabs',
+            'task_tab_start',
+          ],
+        },
+      },
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      extensionClientId: 'connection',
+      result: {
+        taskTabCreated: true,
+        tabId: 73,
+        selectionId: '4488c303-9880-44d9-885e-51e13755933b',
+        title: 'Task page',
+        url: 'https://work.example',
+      },
+    });
+  expect(selectionRoutes.localChromeTaskTabProcedure).toBeDefined();
+  const caller = router({ prepare: selectionRoutes.localChromeTaskTabProcedure }).createCaller({
+    userId: 'alice',
+  } as Context);
+  const result = await caller.prepare({
+    selection,
+    preparationId: '61c56349-421b-4a44-b946-507476393185',
+  });
+  expect(result).toEqual({
+    extensionClientId: 'connection',
+    tabId: 73,
+    expectedUrl: 'https://work.example',
+    selectionId: '4488c303-9880-44d9-885e-51e13755933b',
+    title: 'Task page',
+  });
+  expect(send).toHaveBeenLastCalledWith(
+    'alice',
+    expect.objectContaining({
+      kind: 'task_tab',
+      extensionClientId: 'connection',
+      args: {
+        target: {
+          tabId: selection.tabId,
+          expectedUrl: selection.expectedUrl,
+          selectionId: selection.selectionId,
+        },
+        preparationId: '61c56349-421b-4a44-b946-507476393185',
+      },
+    }),
+  );
+});
+
+it('keeps background task-tab preparation dark before rollout without dispatching', async () => {
+  vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'false');
+  const send = vi.spyOn(ws, 'sendExtensionToolCall');
+  expect(selectionRoutes.localChromeTaskTabProcedure).toBeDefined();
+  const caller = router({ prepare: selectionRoutes.localChromeTaskTabProcedure }).createCaller({
+    userId: 'alice',
+  } as Context);
+  await expect(
+    caller.prepare({ selection, preparationId: '61c56349-421b-4a44-b946-507476393185' }),
+  ).rejects.toThrow('未开放');
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each(['wrong-connection', 'source-tab', 'other-origin', 'missing-marker'])(
+  'rejects an invalid background preparation receipt: %s',
+  async (variant) => {
+    vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
+    vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+      viewportV2: true,
+      observationV2: true,
+      replayV1: false,
+      routingV2: true,
+    });
+    vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+    vi.spyOn(ws, 'sendExtensionToolCall')
+      .mockResolvedValueOnce({
+        ok: true,
+        extensionClientId: 'connection',
+        result: {
+          userBrowserProtocol: {
+            version: 2,
+            capabilitiesVersion: 1,
+            capabilities: [
+              'real_target',
+              'revision_binding',
+              'exact_origin',
+              'scroll',
+              'select',
+              'task_tabs',
+              'task_tab_start',
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        extensionClientId: variant === 'wrong-connection' ? 'other' : 'connection',
+        result: {
+          taskTabCreated: variant === 'missing-marker' ? undefined : true,
+          tabId: variant === 'source-tab' ? 42 : 73,
+          selectionId: '4488c303-9880-44d9-885e-51e13755933b',
+          url: variant === 'other-origin' ? 'https://other.example' : 'https://work.example',
+          title: 'Task',
+        },
+      });
+    const caller = router({ prepare: selectionRoutes.localChromeTaskTabProcedure }).createCaller({
+      userId: 'alice',
+    } as Context);
+    await expect(
+      caller.prepare({ selection, preparationId: '61c56349-421b-4a44-b946-507476393185' }),
+    ).rejects.toThrow('未扣除额度');
   },
 );

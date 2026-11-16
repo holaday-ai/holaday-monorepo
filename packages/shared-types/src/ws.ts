@@ -1003,11 +1003,13 @@ export const serverExtensionToolCallSchema = z.object({
   type: z.literal('server.extension.tool_call'),
   taskId: z.string().min(1).max(64),
   requestId: z.string().min(1).max(64),
-  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session', 'session_import']),
+  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session', 'session_import', 'task_tab']),
   /** `url` is for legacy navigate; `target` is required for read only. */
   args: z
     .object({
       url: httpUrlSchema.optional(),
+      /** Idempotent background task-tab preparation, scoped to the selected connection. */
+      preparationId: z.string().uuid().optional(),
       /** Explicit local tab for read. Never infer it from the active tab. */
       target: selectedChromeTargetSchema.optional(),
       /** Selected-tab mutation/observation command. Required by the session handler. */

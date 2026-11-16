@@ -657,12 +657,14 @@ export async function sendExtensionToolCall(
   const requestId = randomUUID();
   const timeoutMs = Math.max(1000, Math.min(60_000, opts.timeoutMs ?? 30_000));
 
-  if (opts.kind === 'read' && (!opts.extensionClientId || !opts.args?.target)) {
+  if (['read', 'task_tab'].includes(opts.kind) && (!opts.extensionClientId || !opts.args?.target)) {
     return {
       ok: false,
       error: { code: 'target_required', message: '请先选择 Chrome 连接和标签页' },
     };
   }
+  if (opts.kind === 'task_tab' && !opts.args?.preparationId)
+    return { ok: false, error: { code: 'target_required', message: '请重新准备独立任务页' } };
   if (opts.kind === 'session_import' && (!opts.extensionClientId || !opts.args?.sessionImport))
     return { ok: false, error: { code: 'target_required', message: '请重新选择授权站点' } };
   if (opts.kind === 'session') {
@@ -679,7 +681,7 @@ export async function sendExtensionToolCall(
   }
   // An explicitly targeted operation must never fall through to the legacy
   // active-tab tools, even if a caller accidentally chooses the wrong kind.
-  if (opts.args?.target && opts.kind !== 'read') {
+  if (opts.args?.target && !['read', 'task_tab'].includes(opts.kind)) {
     return {
       ok: false,
       error: { code: 'target_unsupported', message: '此工具暂不支持指定标签页' },

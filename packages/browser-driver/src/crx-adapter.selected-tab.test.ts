@@ -489,3 +489,35 @@ describe('PlaywrightCrxAdapter selected-tab bridge', () => {
     expect(page.close).not.toHaveBeenCalled();
   });
 });
+
+it('never foregrounds a bound task tab when every background screenshot path fails', async () => {
+  const { page } = createCrxBoundary();
+  const update = vi.fn(async () => ({}));
+  const focus = vi.fn(async () => ({}));
+  const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,aGVsbG8=');
+  vi.stubGlobal('chrome', {
+    tabs: { get: vi.fn(async () => ({ id: 42, windowId: 5 })), update, captureVisibleTab },
+    windows: { update: focus },
+    debugger: {
+      sendCommand: vi.fn(async () => {
+        throw new Error('capture unavailable');
+      }),
+    },
+  });
+  try {
+    const adapter = new PlaywrightCrxAdapter({
+      attachToTabId: 42,
+      allowedOrigins: ['allowed.example'],
+    });
+    await adapter.attachExistingTab();
+    const result = await adapter.execute({ kind: 'screenshot' });
+    expect(update).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    expect(page.bringToFront).not.toHaveBeenCalled();
+    expect(captureVisibleTab).not.toHaveBeenCalled();
+    expect(result.status).toBe('skipped');
+    await adapter.dispose();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
