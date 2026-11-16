@@ -49,6 +49,10 @@ export type BrowserHomePool = Pick<
 const CLAIM_STALE_MS = 2 * 60_000;
 
 export interface BrowserHomeTaskClaim {
+  /** The server-owned browser present when this task was admitted. */
+  readonly instance: BrowserInstance;
+  /** A superseded claim or replacement browser may never inherit this task. */
+  isCurrent(): boolean;
   /** The request hands the claim to the task's dispatch, which lends the browser. */
   handOver(): void;
   /** Drop it (the browser is lent, or the task never got that far). Idempotent. */
@@ -149,7 +153,8 @@ export class BrowserHomeSessions {
     const existing = this.taskClaims.get(userId);
     if (existing && now - existing.at < CLAIM_STALE_MS) return { kind: 'busy' };
     if (pool.browserHomeHolder(userId)) return { kind: 'busy' };
-    if (!this.instanceFor(pool, userId)) return { kind: 'closed' };
+    const instance = this.instanceFor(pool, userId);
+    if (!instance) return { kind: 'closed' };
     const token = {};
     this.taskClaims.set(userId, { token, at: now });
     let handedOver = false;
@@ -159,6 +164,11 @@ export class BrowserHomeSessions {
     return {
       kind: 'claimed',
       claim: {
+        instance,
+        isCurrent: () =>
+          this.taskClaims.get(userId)?.token === token &&
+          this.instanceFor(pool, userId) === instance &&
+          !pool.browserHomeHolder(userId),
         handOver: () => {
           handedOver = true;
         },

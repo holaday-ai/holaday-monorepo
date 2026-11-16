@@ -15,7 +15,10 @@ import type { SupercarOutcome } from '../../agent/supercar/agent-loop.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { BROWSER_HOME_IDLE_TIMEOUT_MS } from '../../browser-home/browser-home-session.js';
-import { lendBrowserHomeToTask } from '../../browser-home/browser-home-task.js';
+import {
+  claimBrowserHomeTaskOrThrow,
+  lendBrowserHomeToTask,
+} from '../../browser-home/browser-home-task.js';
 import { BrowserPool } from '../../browser-pool/browser-pool.js';
 import type {
   BrowserInstance,
@@ -633,18 +636,18 @@ describe('lendBrowserHomeToTask — the person still acting (P2-6)', () => {
         }),
       'navigate',
     );
-    const claim = { handOver: vi.fn(), release: vi.fn(), settle: vi.fn() };
+    const claim = claimBrowserHomeTaskOrThrow({ pool, userId: USER });
     await expect(
       lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_busy', claim, settleMs: 50 }),
     ).rejects.toThrow('你在云浏览器里的操作还没有完成，任务没有执行。请稍后再发送。');
-    expect(claim.release).toHaveBeenCalled();
     expect(pool.peek(`bhs_${USER}`)).toBe(home);
     expect(pool.browserHomeHolder(USER)).toBeNull();
     finishAction();
     await action;
     // Settled: lent at once.
+    const next = claimBrowserHomeTaskOrThrow({ pool, userId: USER });
     await expect(
-      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_now', claim: null, settleMs: 50 }),
+      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_now', claim: next, settleMs: 50 }),
     ).resolves.toBe(home);
   });
 });

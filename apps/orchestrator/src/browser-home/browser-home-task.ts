@@ -39,6 +39,7 @@ export const BROWSER_HOME_PERSON_SETTLE_MS = 5_000;
 
 export interface BrowserHomeTaskRequest {
   browserHomeSession?: boolean;
+  browserPreference?: unknown;
   replyToTaskId?: string;
   retryOfTaskId?: string;
   localChrome?: unknown;
@@ -65,6 +66,7 @@ export function assertBrowserHomeTaskAllowed(args: {
     throw new TRPCError({ code: 'FORBIDDEN', message: BROWSER_HOME_TASK_COPY.disabled });
   if (
     input.replyToTaskId ||
+    input.browserPreference !== undefined ||
     input.retryOfTaskId ||
     input.localChrome ||
     input.publicCloudContinuationOf ||
@@ -111,17 +113,22 @@ export async function lendBrowserHomeToTask(args: {
   sessions?: BrowserHomeSessions;
 }) {
   try {
-    const home = (args.sessions ?? browserHomeSessions).instanceFor(args.pool, args.userId);
-    if (
+    const sessions = args.sessions ?? browserHomeSessions;
+    const home = sessions.instanceFor(args.pool, args.userId);
+    const current = () =>
       home &&
-      !(await browserControlSessions.inputSettledWithin(
-        home,
-        args.settleMs ?? BROWSER_HOME_PERSON_SETTLE_MS,
-      ))
-    )
-      throw new Error(BROWSER_HOME_TASK_COPY.personBusy);
+      args.claim?.instance === home &&
+      args.claim.isCurrent() &&
+      sessions.instanceFor(args.pool, args.userId) === home;
+    if (!current() || !home) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
+    const settled = await browserControlSessions.inputSettledWithin(
+      home,
+      args.settleMs ?? BROWSER_HOME_PERSON_SETTLE_MS,
+    );
+    if (!current()) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
+    if (!settled) throw new Error(BROWSER_HOME_TASK_COPY.personBusy);
     const instance = args.pool.lendBrowserHome(args.userId, args.taskId, 'anonymous');
-    if (!instance) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
+    if (instance !== home) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
     return instance;
   } finally {
     args.claim?.release();
