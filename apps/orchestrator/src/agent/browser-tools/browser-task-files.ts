@@ -1,0 +1,93 @@
+import { createHash } from 'node:crypto';
+import type { FileService } from '../../files/file-service.js';
+import type { BrowserUploadFile } from './browser-upload-target.js';
+
+type LoadedFile = Awaited<ReturnType<FileService['loadMany']>>[number];
+interface Reference {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+}
+const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
+
+/** A run's admitted user materials, not a grant over all of the account's files. */
+export class BrowserTaskFiles {
+  private readonly inputs = new Map<string, Reference>();
+  constructor(
+    private readonly options: {
+      taskId: string;
+      userId: number;
+      files: Pick<FileService, 'loadMany'>;
+      active: () => Promise<boolean>;
+    },
+  ) {}
+  get taskId(): string {
+    return this.options.taskId;
+  }
+  references() {
+    return [...this.inputs.values()].map(({ sha256: _hash, ...reference }) => reference);
+  }
+  /** Only server-validated FileService results enter here, including a later user reply. */
+  admitValidated(files: readonly LoadedFile[]): void {
+    const references: Reference[] = [];
+    for (const { row, buffer } of files) {
+      if (
+        row.userId !== this.options.userId ||
+        row.status !== 'active' ||
+        row.kind === 'temp' ||
+        (row.expiresAt && row.expiresAt <= new Date()) ||
+        row.sizeBytes !== buffer.length
+      )
+        throw new Error('附件不属于当前任务的可用材料。');
+      const reference = {
+        fileId: row.externalId,
+        name: row.filename,
+        mimeType: row.mimetype,
+        sizeBytes: buffer.length,
+        sha256: hash(buffer),
+      };
+      const prior = this.inputs.get(reference.fileId);
+      if (prior && JSON.stringify(prior) !== JSON.stringify(reference))
+        throw new Error('已选附件内容发生变化，请重新提交材料。');
+      references.push(reference);
+    }
+    for (const reference of references) this.inputs.set(reference.fileId, reference);
+  }
+  async resolve(taskId: string, ids: readonly string[]): Promise<BrowserUploadFile[]> {
+    if (
+      taskId !== this.options.taskId ||
+      !ids.length ||
+      ids.length > 5 ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !this.inputs.has(id))
+    )
+      throw new Error('附件不在当前任务明确提供的材料范围内。');
+    if (!(await this.options.active())) throw new Error('任务或账号已不可用。');
+    const loaded = await this.options.files.loadMany(ids, this.options.userId);
+    const result: BrowserUploadFile[] = [];
+    for (const id of ids) {
+      const file = loaded.find((file) => file.row.externalId === id);
+      const original = this.inputs.get(id)!;
+      if (
+        !file ||
+        file.row.userId !== this.options.userId ||
+        file.row.kind === 'temp' ||
+        file.row.filename !== original.name ||
+        file.row.mimetype !== original.mimeType ||
+        file.buffer.length !== original.sizeBytes ||
+        hash(file.buffer) !== original.sha256
+      )
+        throw new Error('附件已失效或内容已变化，请重新提供。');
+      result.push({
+        fileId: id,
+        name: original.name,
+        mimeType: original.mimeType,
+        buffer: file.buffer,
+      });
+    }
+    if (!(await this.options.active())) throw new Error('任务或账号已不可用。');
+    return result;
+  }
+}

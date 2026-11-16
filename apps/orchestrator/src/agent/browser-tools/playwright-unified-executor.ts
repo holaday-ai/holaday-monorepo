@@ -4,6 +4,11 @@ import { stripTrackingFromUrl } from '../../execution/url-identity.js';
 import { probeBrowserBlocker } from './browser-blocker-probe.js';
 import { scrollWithEvidence } from './browser-scroll.js';
 import { browserToolError } from './browser-tool-error.js';
+import {
+  type BrowserUploadFile,
+  type BrowserUploadReceipt,
+  PreparedBrowserUpload,
+} from './browser-upload-target.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { CloudObservation, pageRoot } from './cloud-observation.js';
 import { SENSITIVE_SCREENSHOT_STYLE, fullPageRead } from './full-page-read.js';
@@ -46,6 +51,7 @@ export interface UnifiedToolResult {
   image?: { mediaType: 'image/jpeg'; data: string };
   /** Present on `download`: where the file was saved by the host. */
   download?: BrowserDownloadReceipt;
+  upload?: BrowserUploadReceipt;
   /** Native JavaScript dialogs (alert/confirm/prompt) this action opened. */
   dialogs?: Array<{ type: string; message: string }>;
   tabId?: string;
@@ -80,8 +86,8 @@ export interface BrowserDownloadReceipt {
 export interface UnifiedExecutorOptions {
   observationV2?: boolean;
   taskIntent?: string;
-  /** Resolves task attachment ids to local file paths for `upload`. */
-  resolveUploads?: (fileIds: readonly string[]) => Promise<string[]>;
+  /** Host resolves only this task's admitted attachment IDs, never arbitrary local paths. */
+  resolveUploads?: (fileIds: readonly string[]) => Promise<BrowserUploadFile[]>;
   /** Persists a finished download; returns the host path. */
   saveDownload?: (download: import('playwright').Download) => Promise<BrowserDownloadReceipt>;
   actionTimeoutMs?: number;
@@ -290,6 +296,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
   };
   const byRef = (ref: string) =>
     observation?.locator(activeFrame, ref) ?? activeFrame.locator(`aria-ref=${ref}`);
+  let pendingUpload: { action: object; prepared: PreparedBrowserUpload } | null = null;
+  let uploadUnconfirmed = false;
+  let uploadGeneration = 0;
+  let uploadDisposed = false;
   // AP3 core-10: native dialogs are host receipts. Handling them keeps
   // Playwright's default outcome (dismissed: alert closed, confirm cancelled,
   // prompt empty) and records that one opened.
@@ -350,7 +360,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     };
   };
 
-  async function execute(action: UnifiedBrowserAction): Promise<UnifiedToolResult> {
+  async function execute(
+    action: UnifiedBrowserAction,
+    upload?: PreparedBrowserUpload,
+  ): Promise<UnifiedToolResult> {
     try {
       // A local-wall exception authorizes reading public data, never clicking through that wall.
       if (
@@ -697,10 +710,16 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
           };
         }
         case 'upload': {
-          if (!options.resolveUploads) return fail('当前环境不支持上传附件');
-          const paths = await options.resolveUploads(action.fileIds);
-          await byRef(action.ref).setInputFiles(paths, { timeout });
-          return done(`已上传 ${paths.length} 个文件`);
+          if (!upload) return fail('文件交付尚未由主机准备并批准。');
+          const receipt = await upload.deliver();
+          uploadUnconfirmed = receipt.status === 'unknown';
+          return {
+            ok: !uploadUnconfirmed,
+            upload: receipt,
+            text: uploadUnconfirmed
+              ? '文件交付结果未知，请先核验网页状态，不要重复上传。'
+              : '文件已交给网页控件；是否接收或提交需核验网页状态。',
+          };
         }
         case 'click_at':
           await page.mouse.click(action.x, action.y);
@@ -711,9 +730,12 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     }
   }
 
-  const withDialogs = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
+  const withDialogs = async (
+    action: UnifiedBrowserAction,
+    upload?: PreparedBrowserUpload,
+  ): Promise<UnifiedToolResult> => {
     const start = dialogs.length;
-    const result = await wrappedExecute(action);
+    const result = await wrappedExecute(action, upload);
     if (dialogs.length === start) return result;
     const opened = dialogs.slice(start);
     return {
@@ -724,7 +746,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         .join('；')}（已自动关闭：alert 确认、confirm 取消、prompt 不输入）。`,
     };
   };
-  const wrappedExecute = async (action: UnifiedBrowserAction): Promise<UnifiedToolResult> => {
+  const wrappedExecute = async (
+    action: UnifiedBrowserAction,
+    upload?: PreparedBrowserUpload,
+  ): Promise<UnifiedToolResult> => {
     if (!observation) {
       if (action.tabId) {
         const target = tabs.get(action.tabId);
@@ -732,7 +757,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         page = target;
         activeFrame = page.mainFrame();
       }
-      return execute(action);
+      return execute(action, upload);
     }
     try {
       const interruption = observation.interruption();
@@ -758,7 +783,7 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
         return (await observation.read({ ...action, tool: 'get_page_text', maxChars: 16000 }))!;
       const read = await observation.read(action);
       if (read) return read;
-      return await observation.act(action, () => execute(action));
+      return await observation.act(action, () => execute(action, upload));
     } catch (error) {
       const failure = browserToolError(error);
       if (['stale_ref', 'stale_context'].includes(failure.errorCode)) {
@@ -770,9 +795,52 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     }
   };
   return {
+    async prepareUpload(action: Extract<UnifiedBrowserAction, { tool: 'upload' }>) {
+      if (!options.resolveUploads || uploadUnconfirmed || uploadDisposed)
+        throw new Error(
+          uploadUnconfirmed
+            ? '上一笔文件交付结果未知，请先核验网页状态。'
+            : '当前环境不支持上传附件。',
+        );
+      const generation = ++uploadGeneration;
+      await pendingUpload?.prepared.dispose();
+      pendingUpload = null;
+      const frame = observation
+        ? observation.resolve(action).frame
+        : action.tabId
+          ? tabs.get(action.tabId)?.mainFrame()
+          : activeFrame;
+      if (!frame) throw new Error('文件控件不属于当前任务。');
+      const locator =
+        observation?.locator(frame, action.ref) ?? frame.locator(`aria-ref=${action.ref}`);
+      const prepared = await PreparedBrowserUpload.capture(
+        locator,
+        action.fileIds,
+        options.resolveUploads,
+      );
+      if (uploadDisposed || generation !== uploadGeneration) {
+        await prepared.dispose();
+        throw new Error('文件交付准备已失效。');
+      }
+      pendingUpload = { action, prepared };
+      return prepared;
+    },
     execute: async (action: UnifiedBrowserAction) => {
       await playbackGuard;
-      return withDialogs(action);
+      const upload =
+        action.tool === 'upload' && pendingUpload?.action === action
+          ? pendingUpload.prepared
+          : undefined;
+      if (action.tool === 'upload') {
+        ++uploadGeneration;
+        if (!upload) await pendingUpload?.prepared.dispose();
+        pendingUpload = null;
+      }
+      try {
+        return await withDialogs(action, upload);
+      } finally {
+        await upload?.dispose();
+      }
     },
     /** FIX-27: what the task's media actually played; null when it could not be read. */
     async playbackReceipt() {
@@ -812,6 +880,10 @@ export function createPlaywrightUnifiedExecutor(page: Page, options: UnifiedExec
     observation,
     releasePlayback,
     dispose: () => {
+      uploadDisposed = true;
+      ++uploadGeneration;
+      void pendingUpload?.prepared.dispose();
+      pendingUpload = null;
       page.context().off('dialog', onDialog);
       observation?.dispose();
       void releasePlayback();
