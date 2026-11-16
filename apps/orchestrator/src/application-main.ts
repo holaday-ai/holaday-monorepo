@@ -66,10 +66,11 @@ import { currentOperationLifetime } from './execution/owned-operation.js';
 import { createPeriodicWork } from './execution/periodic-work.js';
 
 export async function startApplication(boot?: ApplicationBoot, ordinary?: OrdinaryApplication) {
-  // No production KeyProvider is selected in this PR: enabling either flag fails closed.
+  // No production KeyProvider is selected here: enabling a Vault path fails closed.
   const browserVault = createVaultRuntime({
     importEnabled: env.BROWSER_SESSION_IMPORT_V2,
     profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
+    cloudHomeEnabled: env.BROWSER_HOME_PROFILE_V1,
     db,
   });
   installVaultRuntime(browserVault);

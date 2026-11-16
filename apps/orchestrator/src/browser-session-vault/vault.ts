@@ -3,6 +3,7 @@ import {
   type BrowserGrantMetadata,
   type BrowserSessionState,
   type BrowserSessionStatus,
+  browserCloudProfileConsentSchema,
   browserGrantRequestSchema,
   browserSessionStateSchema,
 } from '@holaday/shared-types';
@@ -22,6 +23,7 @@ export const PROFILE_ABSOLUTE_TTL = 30 * 86400000;
 export const LEASE_TTL = 15 * 60000;
 /** Active (usable or awaiting) grants per user; inactive history is pruned. */
 export const MAX_ACTIVE_GRANTS = 100;
+const CLOUD_CAPTURE_WINDOW_MS = 5 * 60_000;
 const MAX_INACTIVE_KEPT = 20;
 export class VaultError extends Error {
   constructor(readonly code: string) {
@@ -52,6 +54,8 @@ export function nextExpiryAt(doc: VaultDocument): number | null {
   for (const g of doc.grants) {
     if (g.status === 'revoked' || g.status === 'expired') continue;
     next = Math.min(next, g.expiresAt, g.snapshot?.expiresAt ?? Number.POSITIVE_INFINITY);
+    if (g.sessionAccess === 'cloud-home-v1' && g.status === 'awaiting_import')
+      next = Math.min(next, g.issuedAt + CLOUD_CAPTURE_WINDOW_MS);
     if (g.profileCreatedAt)
       next = Math.min(
         next,
@@ -117,6 +121,7 @@ export class SessionVault {
       keys: KeyProvider;
       importEnabled: boolean;
       profileEnabled: boolean;
+      cloudHomeEnabled?: boolean;
       now?: () => number;
       audit?: (event: {
         userId: string;
@@ -136,7 +141,12 @@ export class SessionVault {
     return (this.options.now ?? Date.now)();
   }
   private ensureEnabled() {
-    if (!this.options.importEnabled && !this.options.profileEnabled) fail('vault_disabled');
+    if (
+      !this.options.importEnabled &&
+      !this.options.profileEnabled &&
+      !this.options.cloudHomeEnabled
+    )
+      fail('vault_disabled');
   }
   private context(
     userId: string,
@@ -149,6 +159,7 @@ export class SessionVault {
       grantId: grant.id,
       purpose: snapshot.purpose,
       version: snapshot.version,
+      ...(grant.sessionAccess ? { access: grant.sessionAccess } : {}),
     };
   }
   private metadata(grant: GrantRecord): BrowserGrantMetadata {
@@ -179,6 +190,11 @@ export class SessionVault {
       grant.revokedAt === null &&
       grant.expiresAt > this.now() &&
       (grant.snapshot?.expiresAt ?? grant.expiresAt) > this.now() &&
+      !(
+        grant.sessionAccess === 'cloud-home-v1' &&
+        grant.status === 'awaiting_import' &&
+        grant.issuedAt + CLOUD_CAPTURE_WINDOW_MS <= this.now()
+      ) &&
       (!grant.profileCreatedAt ||
         (grant.profileCreatedAt + PROFILE_ABSOLUTE_TTL > this.now() &&
           (grant.lastUsedAt ?? grant.issuedAt) + PROFILE_IDLE_TTL > this.now()))
@@ -228,6 +244,123 @@ export class SessionVault {
       ...(cookies.length ? cookies : [Number.POSITIVE_INFINITY]),
     );
   }
+  private addGrant(
+    userId: string,
+    doc: VaultDocument,
+    grant: GrantRecord,
+    kind: string,
+  ): BrowserGrantMetadata {
+    const active = doc.grants.filter((g) => g.status !== 'revoked' && this.usable(g));
+    if (active.length >= MAX_ACTIVE_GRANTS) fail('grant_limit');
+    const inactive = doc.grants
+      .filter((g) => !active.includes(g))
+      .sort((a, b) => b.issuedAt - a.issuedAt)
+      .slice(0, MAX_INACTIVE_KEPT);
+    doc.grants = [...active, ...inactive, grant];
+    this.audit(userId, grant, kind);
+    return this.metadata(grant);
+  }
+  /** State is read only by a trusted server callback bound to the actual owned home browser.
+   * Connected means a state snapshot is saved; it does not prove website login/identity.
+   */
+  async captureCloudProfile(
+    userId: string,
+    raw: unknown,
+    capture: () => Promise<{ origin: string; state: unknown }>,
+  ): Promise<BrowserGrantMetadata> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    const parsed = browserCloudProfileConsentSchema.safeParse(raw);
+    if (!parsed.success) fail('invalid_grant');
+    const input = parsed.data;
+    if (
+      !input.origin.startsWith('https:') &&
+      !(
+        process.env.NODE_ENV === 'test' &&
+        ['127.0.0.1', 'localhost'].includes(new URL(input.origin).hostname)
+      )
+    )
+      fail('invalid_grant');
+    const now = this.now();
+    const expiresAt = input.expiresAt ?? now + PROFILE_ABSOLUTE_TTL;
+    if (expiresAt <= now || expiresAt > now + PROFILE_ABSOLUTE_TTL) fail('invalid_grant');
+    let cookieDomains: string[];
+    try {
+      cookieDomains = cookieScopeForOrigin(input.origin);
+    } catch {
+      fail('invalid_grant');
+    }
+    // Commit consent before reading browser state: clear/revoke during capture must win.
+    const initial = await this.options.store.update(userId, async (doc) => {
+      const grant: GrantRecord = {
+        id: randomUUID(),
+        origin: input.origin,
+        originSet: [input.origin],
+        cookieDomains,
+        importScope: {
+          cookies: true,
+          localStorageKeys: [...new Set(input.storageKeys)],
+          indexedDB: false,
+        },
+        purposes: ['read', 'act', 'profile-persist'],
+        storageKeys: [...new Set(input.storageKeys)],
+        issuedAt: now,
+        expiresAt,
+        revokedAt: null,
+        version: 1,
+        status: 'awaiting_import',
+        lastUsedAt: null,
+        cookieCount: 0,
+        reason: null,
+        consumed: true,
+        sessionAccess: 'cloud-home-v1',
+      };
+      return this.addGrant(userId, doc, grant, 'cloud_consent');
+    });
+    try {
+      const actual = await capture();
+      if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+      if (actual.origin !== initial.origin) fail('scope_denied');
+      return await this.options.store.update(userId, async (doc) => {
+        const g = this.find(doc, initial.id);
+        this.requireLive(g);
+        if (
+          g.version !== initial.version ||
+          g.status !== 'awaiting_import' ||
+          g.sessionAccess !== 'cloud-home-v1'
+        )
+          fail('grant_unavailable');
+        const state = this.state(g, actual.state);
+        if (!state.cookies.length && !state.storage.length) fail('empty_session');
+        g.profileCreatedAt = this.now();
+        const expiresAt = this.expireAt(g, state, true);
+        if (expiresAt <= this.now()) fail('session_expired');
+        g.snapshot = {
+          version: 1,
+          purpose: 'profile',
+          expiresAt,
+          envelope: await seal(
+            this.options.keys,
+            this.context(userId, g, { version: 1, purpose: 'profile' }),
+            state,
+          ),
+        };
+        g.status = 'connected';
+        g.cookieCount = state.cookies.length;
+        g.lastUsedAt = this.now();
+        this.audit(userId, g, 'cloud_capture');
+        return this.metadata(g);
+      });
+    } catch (error) {
+      await this.options.store
+        .update(userId, async (doc) => {
+          const g = this.find(doc, initial.id);
+          if (g.version === initial.version && g.status === 'awaiting_import')
+            this.tombstone(g, 'capture_failed');
+        })
+        .catch(() => undefined);
+      throw error instanceof VaultError ? error : new VaultError('profile_capture_failed');
+    }
+  }
   async grant(userId: string, raw: unknown): Promise<BrowserGrantMetadata> {
     this.ensureEnabled();
     const parsed = browserGrantRequestSchema.safeParse(raw);
@@ -261,14 +394,6 @@ export class SessionVault {
       fail('invalid_grant');
     }
     return this.options.store.update(userId, async (doc) => {
-      // Only usable or pending grants count; revoked/expired history is pruned.
-      const active = doc.grants.filter((g) => g.status !== 'revoked' && this.usable(g));
-      if (active.length >= MAX_ACTIVE_GRANTS) fail('grant_limit');
-      const inactive = doc.grants
-        .filter((g) => !active.includes(g))
-        .sort((a, b) => b.issuedAt - a.issuedAt)
-        .slice(0, MAX_INACTIVE_KEPT);
-      doc.grants = [...active, ...inactive];
       const grant: GrantRecord = {
         id: randomUUID(),
         origin: input.origin,
@@ -287,9 +412,7 @@ export class SessionVault {
         reason: null,
         consumed: false,
       };
-      doc.grants.push(grant);
-      this.audit(userId, grant, 'grant');
-      return this.metadata(grant);
+      return this.addGrant(userId, doc, grant, 'grant');
     });
   }
   async list(userId: string): Promise<BrowserGrantMetadata[]> {
@@ -410,7 +533,36 @@ export class SessionVault {
             g.snapshot &&
             this.usable(g) &&
             g.purposes.includes('read') &&
+            !g.sessionAccess &&
+            !g.purposes.includes('act') &&
             hostInScope(host, this.scope(g)),
+        )
+        .sort((a, b) => b.issuedAt - a.issuedAt)[0];
+      return found ? this.metadata(found) : null;
+    });
+  }
+  /** Interactive state is only considered after an explicit home-profile choice. */
+  async matchCloudProfile(userId: string, targetUrl: string): Promise<BrowserGrantMetadata | null> {
+    if (!this.options.cloudHomeEnabled) return null;
+    let origin: string;
+    try {
+      const url = new URL(targetUrl);
+      if (!/^https?:$/.test(url.protocol) || url.username || url.password) return null;
+      origin = url.origin;
+    } catch {
+      return null;
+    }
+    return this.options.store.read(userId, (doc) => {
+      const found = doc.grants
+        .filter(
+          (g) =>
+            g.sessionAccess === 'cloud-home-v1' &&
+            g.origin === origin &&
+            g.status === 'connected' &&
+            g.snapshot &&
+            this.usable(g) &&
+            g.purposes.includes('act') &&
+            g.purposes.includes('profile-persist'),
         )
         .sort((a, b) => b.issuedAt - a.issuedAt)[0];
       return found ? this.metadata(found) : null;
@@ -421,10 +573,24 @@ export class SessionVault {
    * lease checks out as the writer; every other task gets a read-only fork of
    * the same snapshot version (never a writer_busy allocation failure).
    */
-  async checkout(userId: string, id: string, options: { write?: boolean } = {}): Promise<Checkout> {
+  async checkout(
+    userId: string,
+    id: string,
+    options: { write?: boolean; access?: 'cloud-home-v1' } = {},
+  ): Promise<Checkout> {
     this.ensureEnabled();
     return this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
+      const interactive = g.sessionAccess === 'cloud-home-v1';
+      if (interactive && !this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+      if (
+        interactive !== (options.access === 'cloud-home-v1') ||
+        (interactive &&
+          (options.write === false ||
+            !g.purposes.includes('act') ||
+            !g.purposes.includes('profile-persist')))
+      )
+        fail('scope_denied');
       this.requireLive(g);
       if (g.status !== 'connected' || !g.snapshot || !g.purposes.includes('read'))
         fail('grant_unavailable');
@@ -433,8 +599,11 @@ export class SessionVault {
         await unseal(this.options.keys, this.context(userId, g, g.snapshot), g.snapshot.envelope),
       );
       g.lastUsedAt = this.now();
-      const persist = g.purposes.includes('profile-persist') && this.options.profileEnabled;
+      const persist =
+        g.purposes.includes('profile-persist') &&
+        (interactive ? this.options.cloudHomeEnabled === true : this.options.profileEnabled);
       const busy = Boolean(g.writer && g.writer.expiresAt > this.now());
+      if (interactive && busy) fail('writer_busy');
       if (options.write !== false && persist && !busy) {
         g.writer = { token: randomUUID(), expiresAt: this.now() + LEASE_TTL };
         return {
@@ -465,10 +634,42 @@ export class SessionVault {
     return this.options.store.read(userId, (doc) => {
       const g = doc.grants.find((grant) => grant.id === id);
       if (!g || !this.usable(g) || g.status !== 'connected') return 'grant_unavailable' as const;
+      if (g.sessionAccess === 'cloud-home-v1' && !this.options.cloudHomeEnabled)
+        return 'grant_unavailable' as const;
+      if (g.sessionAccess === 'cloud-home-v1' && task.token === null)
+        return 'cas_conflict' as const;
       if (task.token === null) return 'live' as const;
-      if (g.writer?.token !== task.token || g.snapshot?.version !== task.version)
+      if (
+        g.writer?.token !== task.token ||
+        g.snapshot?.version !== task.version ||
+        (g.sessionAccess === 'cloud-home-v1' && g.writer.expiresAt <= this.now())
+      )
         return 'cas_conflict' as const;
       return 'live' as const;
+    });
+  }
+  /** A live home may be active without changing cookies. Renew its exclusive lease, not the
+   * snapshot or consent expiry; an expired/revoked owner cannot reclaim it from a successor.
+   */
+  async renewCloudLease(
+    userId: string,
+    id: string,
+    task: Pick<Checkout, 'token' | 'version'>,
+  ): Promise<void> {
+    if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
+    await this.options.store.update(userId, async (doc) => {
+      const g = this.find(doc, id);
+      this.requireLive(g);
+      if (g.sessionAccess !== 'cloud-home-v1' || g.status !== 'connected') fail('scope_denied');
+      if (
+        task.token === null ||
+        g.writer?.token !== task.token ||
+        g.writer.expiresAt <= this.now() ||
+        g.snapshot?.version !== task.version
+      )
+        fail('cas_conflict');
+      g.writer.expiresAt = this.now() + LEASE_TTL;
+      g.lastUsedAt = this.now();
     });
   }
   async release(
@@ -505,6 +706,8 @@ export class SessionVault {
     await this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
       this.requireLive(g);
+      if (g.sessionAccess === 'cloud-home-v1' && !this.options.cloudHomeEnabled)
+        fail('cloud_profile_disabled');
       if (
         task.token === null ||
         g.writer?.token !== task.token ||
@@ -518,7 +721,12 @@ export class SessionVault {
         loggedOut = true;
         return;
       }
-      if (!g.purposes.includes('profile-persist') || !this.options.profileEnabled) {
+      if (
+        !g.purposes.includes('profile-persist') ||
+        !(g.sessionAccess === 'cloud-home-v1'
+          ? this.options.cloudHomeEnabled
+          : this.options.profileEnabled)
+      ) {
         g.writer = undefined;
         return;
       }

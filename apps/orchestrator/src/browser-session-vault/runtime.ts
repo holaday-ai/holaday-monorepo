@@ -32,13 +32,15 @@ export function installVaultRuntime(runtime: VaultRuntime | undefined) {
 export function createVaultRuntime(options: {
   importEnabled: boolean;
   profileEnabled: boolean;
+  cloudHomeEnabled?: boolean;
   keys?: KeyProvider;
   db?: DB;
   store?: VaultStore;
   context?: ContextFactory;
   probes?: ReadonlyMap<string, { path: string; selector: string }>;
 }): VaultRuntime | undefined {
-  if (!options.importEnabled && !options.profileEnabled) return undefined;
+  if (!options.importEnabled && !options.profileEnabled && !options.cloudHomeEnabled)
+    return undefined;
   assertVaultConfiguration(options);
   const store = options.store ?? (options.db ? new SqlVaultStore(options.db) : undefined);
   if (!store || !options.keys) throw new VaultError('vault_store_required');
