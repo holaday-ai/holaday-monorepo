@@ -142,3 +142,77 @@ describe('G2g s01: a search answer about a name like the assistant’s own comes
     ).toHaveLength(1);
   });
 });
+
+describe('GOAL2 H4: a question about HOLA DAY itself reads holaday.ai too', () => {
+  const OWN =
+    '# HOLA DAY\n\nHOLA DAY 是一个帮你上网办事的 AI 助手：说出想做的事，它在云浏览器里替你完成。';
+  it('the search did not bring it: holaday.ai is read and is material', async () => {
+    const lane = searchLane();
+    (lane.scrape as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      url: 'https://holaday.ai/',
+      markdown: OWN,
+      title: 'HOLA DAY',
+    });
+    const { adapter, requests } = adapterSaying([
+      'HOLA DAY 是一个帮你上网办事的 AI 助手（来源：holaday.ai）。',
+    ]);
+    const outcome = await run(adapter, lane);
+    expect(lane.scrape).toHaveBeenCalledWith('https://holaday.ai/');
+    expect(JSON.stringify(requests[0]!.input)).toContain('帮你上网办事的 AI 助手');
+    expect(outcome.status).toBe('completed');
+  });
+  it('a search that brought it, or another subject, reads nothing more', async () => {
+    const lane = searchLane();
+    (lane.search as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      results: [{ url: 'https://holaday.ai/', markdown: OWN, title: 'HOLA DAY' }],
+    });
+    const { adapter } = adapterSaying(['HOLA DAY 是一个帮你上网办事的 AI 助手。']);
+    await run(adapter, lane);
+    expect(lane.scrape).not.toHaveBeenCalled();
+  });
+
+  it('复审 #2-10: a complaint or comparison about HOLA DAY reads no extra page', async () => {
+    const lane = searchLane();
+    const { adapter } = adapterSaying(['搜索结果里没有 HOLA DAY 的差评。']);
+    await runScrapeTask({
+      taskId: 'tsk_g2g_s01b',
+      userId: 'usr_test',
+      intent: '搜一下 HOLA DAY 的差评',
+      responsesAdapter: adapter,
+      firecrawl: lane,
+      logger,
+    });
+    expect(lane.scrape).not.toHaveBeenCalled();
+  });
+
+  it('复审 #3-7/8: read second, after the first result; 「HolaDayAI 是干嘛的」 counts', async () => {
+    const lane = searchLane();
+    (lane.search as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      results: Array.from({ length: 5 }, (_, i) => ({
+        url: `https://dayofai.org/${i}`,
+        markdown: `# Day of AI ${i}\n\n${'Day of AI is an initiative. '.repeat(500)}`,
+        title: `Day of AI ${i}`,
+      })),
+    });
+    (lane.scrape as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      url: 'https://holaday.ai/',
+      markdown: OWN,
+      title: 'HOLA DAY',
+    });
+    const { adapter, requests } = adapterSaying(['HOLA DAY 是一个帮你上网办事的 AI 助手。']);
+    await runScrapeTask({
+      taskId: 'tsk_g2g_s01c',
+      userId: 'usr_test',
+      intent: 'HolaDayAI 是干嘛的',
+      responsesAdapter: adapter,
+      firecrawl: lane,
+      logger,
+    });
+    expect(lane.scrape).toHaveBeenCalledWith('https://holaday.ai/');
+    expect(JSON.stringify(requests[0]!.input)).toContain('帮你上网办事的 AI 助手');
+  });
+});

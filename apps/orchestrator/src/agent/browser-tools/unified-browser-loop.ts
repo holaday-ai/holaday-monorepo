@@ -49,6 +49,8 @@ import {
 } from './completion-coverage.js';
 import { completionDiagnostic } from './completion-diagnostic.js';
 import {
+  COUNTER_LEAD,
+  COUNTER_LEAD_EN,
   type ObservedEvidence,
   absentExplainedByPage,
   assessCompletionFacts,
@@ -62,7 +64,12 @@ import {
   unverifiedNote,
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
-import { fullPageRead } from './full-page-read.js';
+import {
+  type EngagementKind,
+  manyItemsRequest,
+  settleUnpairedCounts,
+} from './engagement-counts.js';
+import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
 import {
   answerCount,
   checkSectionClaim,
@@ -76,6 +83,7 @@ import {
   claimsNoPlayback,
 } from './playback-guard.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
+import { settleMisattributedPrices } from './section-attribution.js';
 import { partialAnswerPrices, withoutUnmatchedPrices } from './spec-price-pairing.js';
 import {
   UNIFIED_BROWSER_TOOLS,
@@ -289,6 +297,8 @@ export interface UnifiedBrowserLoopInput {
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   /** FIX-52 #5: the aria-label / title of the current page's controls, for the iframe check. */
   controlLabels?: () => Promise<string[]>;
+  /** GOAL2 H1 复审 #2-9: the loop's own page reads, for the answer's delivery rule. */
+  evidenceSink?: { texts: () => string[] };
   probeBlocker?: () => Promise<{
     reason: string;
     message: string;
@@ -472,8 +482,10 @@ export async function runUnifiedBrowserLoop(
   const readTexts: string[] = [];
   // 复审 #8: a price no kept read shows is only 「not read」 when no read has dropped out.
   let readsDropped = false;
+  const evidenceSink: { texts: () => string[] } = { texts: () => [] };
   const looped = await browserLoop({
     ...input,
+    evidenceSink,
     rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
@@ -520,9 +532,14 @@ export async function runUnifiedBrowserLoop(
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
     case 'completed': {
-      const summary = strip(
-        plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
-        outcome.summary,
+      const summary = settledAnswer(
+        strip(
+          plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
+          outcome.summary,
+        ),
+        // 复审 P0 / #2-9: the pages and the request exactly as the checks read them.
+        evidenceSink.texts(),
+        { english: isEnglishIntent(intentText), manyItems: manyItemsRequest(input.intent) },
       );
       return {
         ...outcome,
@@ -570,6 +587,9 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     },
   ];
   const pageEvidence: ObservedEvidence[] = [];
+  /** GOAL2 H2: reads kept so far (pageEvidence is a window; this only counts). */
+  let readsDone = 0;
+  if (input.evidenceSink) input.evidenceSink.texts = () => pageEvidence.map((page) => page.text);
   // Tabs read successfully and their latest listed titles. Kept apart from
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
@@ -600,6 +620,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     )
       return '';
     pageEvidence.push(item);
+    readsDone += 1;
     if (item.tabId) {
       readTabs.add(item.tabId);
       // FIX-27: a read's first level-1 heading is the document title.
@@ -843,10 +864,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     if (hit?.disposition === 'continue') {
       localNotices.add(hit.message);
+      // GOAL2 H2 复审 #2-1: only the login popup itself, on this page (a comment box's own
+      // 「需登录」 notice is no stop to the page).
+      if (hit.message === LOGIN_POPUP_NOTICE)
+        continuedWall = pageKey(input.currentPageUrl?.() ?? '');
       return null;
     }
     return hit;
   };
+  /**
+   * GOAL2 H2 (G7 A/B b-m01 B: 高德 put its login prompt back after every click, the run went on
+   * to its 53-step limit): the same prompt on the same site after three tries to act on the page
+   * is the page saying no. The run is told to finish with what it read (部分完成 for the rest);
+   * if it still acts, the page is the user's.
+   */
+  let continuedWall: string | undefined;
+  /** The page the popup was last seen on after a try, and how many tries in a row it stayed. */
+  let wallTries: { page: string; tries: number; reads: Set<string>; readsAt: number } | null = null;
+  let wallStalled: string | undefined;
   // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
   // answer that already tells of the login prompt gets no second one.
   const withLimitations = (summary: string) =>
@@ -1198,6 +1233,13 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         results.push(toolResult(call.id, `未执行：${WRAP_UP_NOTE}`, true));
         continue;
       }
+      if (concludeNow && call.name !== 'finish' && wallStalled)
+        return {
+          status: 'awaiting_user',
+          reason: 'login',
+          message: `${wallStalled}反复弹出登录提示，挡住了需要的操作：请你在画面上登录或关掉它后再让我继续；不登录的话，我只能交付已经读到的部分。`,
+          steps: step + 1,
+        };
       if (concludeNow && call.name !== 'finish')
         return {
           status: 'failed',
@@ -1737,6 +1779,48 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 steps: step + 1,
                 partial: { found: 0, wanted: 1, missing: missingParts.join('、') },
               };
+            // GOAL2 H1: what is left only pairs a count or a tab's price with the wrong item —
+            // the answer goes out with those values written 「未能核实」 (settledAnswer).
+            if (
+              (concludeNow || rejectionsLeft <= 0) &&
+              !partialHeld &&
+              blocking.startsWith('答案与已读页面矛盾') &&
+              facts.contradictions.length > 0 &&
+              facts.contradictions.every((c) => facts.pairing?.includes(c))
+            ) {
+              // 复审 P0: settled here on the pages the checks read, and checked again — anything
+              // still contradicted fails as before.
+              const settled = settledAnswer(
+                summary,
+                pageEvidence.map((page) => page.text),
+                {
+                  english: isEnglishIntent(input.userIntent ?? input.intent),
+                  manyItems: manyItemsRequest(input.intent),
+                },
+              );
+              const again = assessCompletionFacts({
+                summary: settled,
+                fields: args.fields,
+                pages: [
+                  ...pageEvidence,
+                  ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence),
+                ],
+                receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
+                toolTexts: toolTexts.join('\n'),
+                intent: input.intent,
+              });
+              if (again.contradictions.length === 0)
+                return {
+                  status: 'completed',
+                  summary: withLimitations(settled),
+                  evidence:
+                    hostProof ||
+                    given ||
+                    deriveEvidence(summary, observedText) ||
+                    observedText.slice(0, 500),
+                  steps: step + 1,
+                };
+            }
             if (concludeNow || rejectionsLeft <= 0)
               // FIX-27 (va core-08): a later answer failing does not undo the held
               // honest 部分完成 that passed every check.
@@ -2694,7 +2778,45 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         }
       }
       if (outcome.ok && input.probeBlocker) {
+        continuedWall = undefined;
         const blocker = await checkBlocker();
+        // GOAL2 H2 复审 #2/#3: tries count once per turn (「type 起点 / type 终点 / click 搜索」 is one
+        // try), on the same page, with nothing new read in between; a closed popup that comes back
+        // is the same popup. A new page or a read showing something new starts again.
+        if (!blocker && continuedWall && WALL_TRY_TOOLS.has(action.tool)) {
+          const read = (pageEvidence.at(-1)?.text ?? '').replace(/\[ref=[^\]]*\]/g, '');
+          const before: {
+            page: string;
+            tries: number;
+            reads: Set<string>;
+            readsAt: number;
+          } | null = wallTries;
+          // 复审 #4-3: a try counts again only after a read in between, and only when that read
+          // is one already seen on this page (the popup closed and back is no progress). Typing
+          // the start, typing the end and clicking search, a turn each, is one try.
+          const onPage = !!before && before.page === continuedWall;
+          const newRead = !onPage || before.readsAt !== readsDone;
+          const seenBefore = onPage && before.reads.has(read);
+          const tries: number = !onPage
+            ? 1
+            : !newRead
+              ? before.tries
+              : seenBefore
+                ? before.tries + 1
+                : 1;
+          const reads: Set<string> = new Set(onPage ? before.reads : []);
+          reads.add(read);
+          wallTries = { page: continuedWall, tries, reads, readsAt: readsDone };
+          if (tries >= 3 && !wallStalled && !concludeNow) {
+            const host = hostOf(input.currentPageUrl?.());
+            wallStalled = host ? rescueSiteName(input.currentPageUrl?.()) : '网站';
+            concludeNow = true;
+            concludedOtherwise = true;
+            outcome.text += `\n同一个登录提示已经第 ${tries} 次挡在页面上，操作没有进展：不要再关闭、绕过它，也不要登录。下一轮直接 finish：已读到的公开内容照实写；拿不到的部分以「部分完成：」开头说明网站要求登录才能继续。`;
+            // The rest of this turn waits (this action is handled as usual); the finish comes next.
+            staleTurn = true;
+          }
+        }
         if (formLoginDetour) {
           results.push(
             toolResult(
@@ -3311,7 +3433,10 @@ export const RESCUE_PARTIAL_RE =
 const RESCUE_SITE_NAMES: ReadonlyArray<[RegExp, string]> = [
   [/(^|\.)m\.jd\.com$|^item\.m\.jd\.com$/, '京东手机版'],
   [/(^|\.)jd\.com$/, '京东'],
-  [/(^|\.)xiaohongshu\.com$/, '小红书'],
+  [/(^|\.)xiaohongshu\.com$|(^|\.)rednote\.com$/, '小红书'],
+  [/(^|\.)amap\.com$/, '高德地图'],
+  [/(^|\.)douyin\.com$/, '抖音'],
+  [/(^|\.)bilibili\.com$/, 'B 站'],
   [/(^|\.)bing\.com$/, '必应搜索'],
   [/(^|\.)smzdm\.com$/, '什么值得买'],
   [/(^|\.)manmanbuy\.com$/, '慢慢买'],
@@ -3358,6 +3483,55 @@ function rescueSiteNameEn(url: string | undefined): string {
   if (!host) return 'another public page';
   return RESCUE_SITE_EN.find(([re]) => re.test(host))?.[1] ?? host;
 }
+
+/** GOAL2 H2: actions that try to work on (or past) a page; reads and scrolls are not tries. */
+const WALL_TRY_TOOLS = new Set(['click', 'click_at', 'press_key', 'type', 'select']);
+
+/**
+ * GOAL2 H1 — what goes out: a count or a tab's price the read pages do not pair with its own icon,
+ * label or tab is written 「未能核实」 (never another number), with one line saying so. The G7
+ * 「页面上有，但没能确认」 note goes: its numbers are the ones settled here.
+ */
+export function settledAnswer(
+  summary: string,
+  pageTexts: readonly string[],
+  options: { english?: boolean; manyItems?: boolean } = {},
+): string {
+  const en = options.english ?? false;
+  const lines = summary
+    .split('\n')
+    .filter((line) => !line.startsWith(COUNTER_LEAD) && !line.startsWith(COUNTER_LEAD_EN));
+  const counts = settleUnpairedCounts(lines.join('\n'), pageTexts, options);
+  const prices = settleMisattributedPrices(counts.answer, pageTexts);
+  const notes = [
+    counts.settled.length
+      ? en
+        ? `Not verified: ${counts.settled.map((kind) => ENGAGEMENT_EN[kind]).join(', ')} — no number next to its own icon or label on the page could be confirmed as it, so none is given.`
+        : `未能核实：${counts.settled.map((kind) => `${kind}数`).join('、')}——页面上没有找到和这一项的图标 / 标签直接相邻、能确认属于它的数字，所以没写数字。`
+      : '',
+    // The note names no amount: a price written again here would be one more misplaced price.
+    prices.settled.length
+      ? en
+        ? `Not verified: ${prices.settled.length === 1 ? 'one price' : `${prices.settled.length} prices`} — on the page it belongs to another tab or section, so it is not given.`
+        : `未能核实：${prices.settled.length} 处票价——页面上它属于另一个标签页或小节，没能确认是这一项的价格，所以没写。`
+      : '',
+  ].filter(Boolean);
+  const body = prices.summary.replace(/\n{3,}/g, '\n\n').trimEnd();
+  return notes.length
+    ? `${body}\n\n${notes.join('\n')}`
+    : body === summary.trimEnd()
+      ? summary
+      : body;
+}
+
+const ENGAGEMENT_EN: Record<EngagementKind, string> = {
+  点赞: 'like count',
+  评论: 'comment count',
+  收藏: 'favourite count',
+  分享: 'share count',
+  投币: 'coin count',
+  转发: 'repost count',
+};
 
 /**
  * 复审 #7 (协调方第 4 次代体验): one line says it all — where it came from, why not the page the

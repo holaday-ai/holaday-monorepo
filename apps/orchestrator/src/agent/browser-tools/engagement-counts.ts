@@ -15,8 +15,9 @@ export type EngagementKind = (typeof ENGAGEMENT_KINDS)[number];
 /** Markup hints (attributes, class names) per kind; the first level that names exactly one kind wins. */
 const MARKUP_HINTS: ReadonlyArray<readonly [EngagementKind, string]> = [
   ['点赞', 'digg|(?<!dis)like|thumbs?-?up|upvote|praise|点赞|获赞'],
-  ['评论', 'comment|评论'],
-  ['收藏', 'collect|favou?rite|bookmark|收藏'],
+  // GOAL2 H1: Xiaohongshu's comment counter is `chat-wrapper`; Bilibili's favourite is `video-fav`.
+  ['评论', 'comment|chat-wrapper|评论'],
+  ['收藏', 'collect|favou?rite|(?:^|[\\s_-])fav(?:$|[\\s_-])|bookmark|收藏'],
   ['分享', 'share|分享'],
   ['投币', 'coin|投币'],
   ['转发', 'repost|retweet|forward|转发'],
@@ -43,6 +44,16 @@ const COUNT_LINE = new RegExp(
   'i',
 );
 const MARK = /\[互动=([^\]]+)\]/;
+
+/**
+ * GOAL2 H1 (G6 r5 xhs-read): a note page also shows each comment's own 点赞 / 回复 counters and the
+ * related cards' counters, with the same class names as the note's bar (`like-wrapper`). A counter
+ * under one of these ancestors is another item's: it is marked `[互动=点赞·其他条目]`, never the
+ * note's own 点赞.
+ */
+const OTHER_ITEM_SCOPE = String.raw`comment-?item|comment-inner|comment-?list|comments?-(?:el|container|wrap)|reply-?(?:item|list)|sub-comment|parent-comment|related|recommend|rec-list|note-item|feeds?-(?:container|list|item)|video-page-card|card-box`;
+export const OTHER_ITEM = '·其他条目';
+const MARKUP = { hints: MARKUP_HINTS, scope: OTHER_ITEM_SCOPE };
 
 /** "1.2W" / "1,234" / "20 " → "1.2万" / "1234" / "20". */
 export function normalizeCount(value: string): string {
@@ -93,7 +104,7 @@ export function sameCount(answer: string, page: string): boolean {
  */
 function counterKind(
   element: Element,
-  hints: ReadonlyArray<readonly [string, string]>,
+  { hints, scope }: { hints: ReadonlyArray<readonly [string, string]>; scope: string },
 ): string | null {
   let node: Element | null = element;
   for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
@@ -117,8 +128,22 @@ function counterKind(
     const kinds = hints
       .filter(([, source]) => new RegExp(source, 'i').test(hint))
       .map(([kind]) => kind);
-    if (kinds.length === 1) return kinds[0]!;
     if (kinds.length > 1) return null;
+    if (kinds.length === 1) {
+      // GOAL2 H1: a comment's or a related card's counter is that item's, not the page's own.
+      const other = new RegExp(scope, 'i');
+      let up = node.parentElement;
+      for (let i = 0; up && i < 25; i += 1, up = up.parentElement)
+        if (
+          other.test(
+            [up.getAttribute('class'), up.getAttribute('id'), up.getAttribute('data-e2e')]
+              .filter(Boolean)
+              .join(' '),
+          )
+        )
+          return `${kinds[0]!}·其他条目`;
+      return kinds[0]!;
+    }
   }
   const value = ((element as HTMLElement).innerText ?? element.textContent ?? '').trim();
   const owners = new Set<string>();
@@ -184,7 +209,7 @@ export async function markEngagementCounts(frame: Frame, tree: string): Promise<
     if (Date.now() > deadline) break;
     const kind = await frame
       .locator(`aria-ref=${ref}`)
-      .evaluate(counterKind, MARKUP_HINTS, { timeout: 1000 })
+      .evaluate(counterKind, MARKUP, { timeout: 1000 })
       .catch(() => null);
     if (!kind) continue;
     lines[index] = /\[ref=/.test(lines[index]!)
@@ -194,34 +219,192 @@ export async function markEngagementCounts(frame: Frame, tree: string): Promise<
   return lines.join('\n');
 }
 
+/**
+ * GOAL2 H1: in-page, every counter the page's own markup names (its icon's class, its aria-label,
+ * its data-e2e), for the page's own item only — a comment's or a related card's counters are left
+ * out; each is named by its own markup (no value matching, unlike FIX-29's fallback). A heavy page's snapshot
+ * reaches its 40-count cap inside the comments before the note's own bar (G6 r5 xhs-read: the
+ * note's 1584 was never marked, a comment's 「1」 was); this reads the whole document once.
+ * No named local functions (see counterKind).
+ */
+function documentCounters({
+  hints,
+  scope,
+}: {
+  hints: ReadonlyArray<readonly [string, string]>;
+  scope: string;
+}): Array<{ kind: string; value: string }> {
+  const found: Array<{ kind: string; value: string; shown: boolean }> = [];
+  const other = new RegExp(scope, 'i');
+  const number = /^\d[\d.,]*\s*(?:万|亿|千|[wkm])?\+?$/i;
+  const elements = document.querySelectorAll('span,div,a,button,strong,b,em,i,p,li,dd,label');
+  for (let at = 0; at < elements.length && at < 25000 && found.length < 40; at += 1) {
+    const element = elements[at]!;
+    if (element.children.length > 2) continue;
+    const raw = (element.textContent ?? '').trim();
+    if (raw.length > 12 || !number.test(raw)) continue;
+    // The innermost element holding the number speaks for it.
+    if (Array.from(element.children).some((child) => (child.textContent ?? '').trim() === raw))
+      continue;
+    let kind: string | null = null;
+    let owner: Element | null = null;
+    let node: Element | null = element;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      if (depth > 0 && ((node.textContent ?? '').match(/\d[\d.,]*/g) ?? []).length > 1) break;
+      const parts = [
+        node.getAttribute('aria-label'),
+        node.getAttribute('title'),
+        node.getAttribute('data-e2e'),
+        node.getAttribute('data-testid'),
+        node.getAttribute('class'),
+      ];
+      for (const icon of Array.from(
+        node.querySelectorAll(':scope > svg, :scope > img, :scope > i'),
+      ))
+        parts.push(
+          icon.getAttribute('aria-label'),
+          icon.getAttribute('alt'),
+          icon.getAttribute('title'),
+          icon.getAttribute('class'),
+        );
+      const hint = parts.filter(Boolean).join(' ');
+      const kinds = hints
+        .filter(([, source]) => new RegExp(source, 'i').test(hint))
+        .map(([name]) => name);
+      if (kinds.length > 1) break;
+      if (kinds.length === 1) {
+        kind = kinds[0]!;
+        owner = node;
+        break;
+      }
+    }
+    if (!kind || !owner) continue;
+    let mine = true;
+    let up = owner.parentElement;
+    for (let i = 0; up && i < 25; i += 1, up = up.parentElement)
+      if (
+        other.test(
+          [up.getAttribute('class'), up.getAttribute('id'), up.getAttribute('data-e2e')]
+            .filter(Boolean)
+            .join(' '),
+        )
+      ) {
+        mine = false;
+        break;
+      }
+    if (!mine) continue;
+    const value = raw.replace(/\s+/g, '');
+    // Codex review: `visibility: hidden` / `opacity: 0` keep their boxes but are not shown.
+    const check = (
+      element as Element & {
+        checkVisibility?: (options: Record<string, boolean>) => boolean;
+      }
+    ).checkVisibility;
+    const shown = check
+      ? check.call(element, {
+          checkOpacity: true,
+          checkVisibilityCSS: true,
+          opacityProperty: true,
+          visibilityProperty: true,
+        })
+      : element.getClientRects().length > 0;
+    if (
+      !found.some((entry) => entry.kind === kind && entry.value === value && entry.shown === shown)
+    )
+      found.push({ kind, value, shown });
+  }
+  // 复审 #10: a kind shown on screen speaks for itself; a hidden copy (Douyin's player bar, a
+  // preloaded next video) only where nothing of that kind is shown.
+  const kept = found.filter(
+    (entry) => entry.shown || !found.some((two) => two.kind === entry.kind && two.shown),
+  );
+  const unique: Array<{ kind: string; value: string }> = [];
+  for (const entry of kept)
+    if (!unique.some((one) => one.kind === entry.kind && one.value === entry.value))
+      unique.push({ kind: entry.kind, value: entry.value });
+  // Codex review: each entry is named by its own markup, so two kinds with the same value
+  // (点赞 20, 评论 20) are both kept.
+  return unique;
+}
+
+export const PAGE_COUNTERS_HEAD =
+  '页面计数（页面标记在图标 / 标签旁的数字，只含这一项自己的；评论、推荐里的不算）：';
+
+/** The page's own labelled counters as lines `engagementFindings` reads as marks; '' when none. */
+export async function pageCountersBlock(frame: Frame): Promise<string> {
+  // 复审 #10: a heavy page does not hold up the read.
+  const found = await Promise.race([
+    frame.evaluate(documentCounters, MARKUP),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500)),
+  ]).catch(() => [] as Array<{ kind: string; value: string }>);
+  if (!found.length) return '';
+  return [
+    PAGE_COUNTERS_HEAD,
+    ...found.slice(0, 12).map(({ kind, value }) => `- 计数 [互动=${kind}]: "${value}"`),
+  ].join('\n');
+}
+
 /** Engagement numbers an answer states, by kind ("点赞数为「97」", "评论：2", "20 个赞"). */
-export function engagementClaims(
-  answer: string,
-): Array<{ kind: EngagementKind; value: string; text: string }> {
-  const claims: Array<{ kind: EngagementKind; value: string; text: string }> = [];
+export interface EngagementClaim {
+  kind: EngagementKind;
+  value: string;
+  text: string;
+  /** The number as the answer writes it (「1,584」), and where it starts in the answer. */
+  raw: string;
+  index: number;
+  /** 「1584 个赞」: the number comes before its word. */
+  numberFirst?: boolean;
+}
+
+/** Every engagement number the answer states, each time it states it (GOAL2 H1 复审 #2). */
+export function engagementClaims(answer: string): EngagementClaim[] {
+  const claims: EngagementClaim[] = [];
   const kindOf = (word: string) => ENGAGEMENT_KINDS.find((kind) => KIND_WORDS[kind].test(word));
   // FIX-36 (local reg-dy-2): a numbered list's marker is no count — 「3. 点赞数：4740」 is not
-  // 「3 点赞」.
-  const text = answer.replace(/^([ \t]*)\d{1,3}[.)、][ \t]+/gm, '$1');
+  // 「3 点赞」. Blanked, not cut, so every index is the answer's own.
+  const text = answer.replace(
+    /^([ \t]*)(\d{1,3}[.)、])(?=[ \t])/gm,
+    (_, lead: string, marker: string) => `${lead}${' '.repeat(marker.length)}`,
+  );
+  // GOAL2 H1 复审 #3: 「点赞数：**217**」 and 「| 点赞数 | **217** |」 are claims too.
   const labelFirst = new RegExp(
-    String.raw`(点赞|获赞|评论|收藏|分享|转发|投币|(?<![A-Za-z])(?:likes?|comments?|shares?|favou?rites?|reposts?)\b)(?:数|量|次数|数量|count)?\s*[*\x60]*\s*(?:[:：]|为|是|有)?\s*[「“"']?\s*(${COUNT})(?![\d年月日号:：/-])`,
-    'giu',
+    String.raw`(点赞|获赞|评论|收藏|分享|转发|投币|(?<![A-Za-z])(?:likes?|comments?|shares?|favou?rites?|reposts?)\b)(?:数|量|次数|数量|count)?\s*[*\x60]*\s*(?:\|\s*)?(?:[:：]|为|是|有)?\s*[*\x60]*\s*[「“"']?\s*(${COUNT})(?![\d年月日号:：/-])`,
+    'giud',
   );
   for (const m of text.matchAll(labelFirst)) {
     const kind = kindOf(m[1]!);
-    if (kind) claims.push({ kind, value: normalizeCount(m[2]!), text: m[0].trim() });
+    if (!kind) continue;
+    const raw = m[2]!.trim();
+    claims.push({
+      kind,
+      value: normalizeCount(raw),
+      text: m[0].trim(),
+      raw,
+      index: m.indices![2]![0],
+    });
   }
   const numberFirst = new RegExp(
-    // On one line: 「4740\n评论数：214」 is two lines, not 「4740 评论」.
-    String.raw`(?<![\d.])(${COUNT})[ \t]*(?:个|次|人)?[ \t]*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
-    'giu',
+    // On one line: 「4740\n评论数：214」 is two lines, not 「4740 评论」. 复审 #9: 「点赞最高的 3 个
+    // 评论」「前 5 条评论」 count the items listed, not a counter.
+    String.raw`(?<![\d.])(?<!(?<![目当此之提以先])前\s{0,2}|最[高多]的?\s{0,2}|top\s{0,2})(${COUNT})[ \t]*(?:个|次|人)?[ \t]*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
+    'giud',
   );
   for (const m of text.matchAll(numberFirst)) {
     const kind = kindOf(m[2]!);
-    if (kind && !claims.some((c) => c.kind === kind && c.value === normalizeCount(m[1]!)))
-      claims.push({ kind, value: normalizeCount(m[1]!), text: m[0].trim() });
+    if (!kind) continue;
+    const index = m.indices![1]![0];
+    if (claims.some((c) => c.index === index)) continue;
+    const raw = m[1]!.trim();
+    claims.push({
+      kind,
+      value: normalizeCount(raw),
+      text: m[0].trim(),
+      raw,
+      index,
+      numberFirst: true,
+    });
   }
-  return claims;
+  return claims.sort((a, b) => a.index - b.index);
 }
 
 /**
@@ -237,6 +420,50 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
   return engagementFindings(answer, pageTexts).contradictions;
 }
 
+export interface EngagementOptions {
+  /**
+   * GOAL2 H1 复审 #5: the request is about several items (a search's notes, a note's comments):
+   * their own counters are what it asks for, so 「·其他条目」 marks pair too.
+   */
+  manyItems?: boolean;
+}
+
+/**
+ * A request about several items or a note's comments, said in so many words (「前 5 条笔记」「每条」
+ * 「热门评论」). 复审 #2-4: 「点赞、评论、收藏」「搜索…打开第一篇」「结果」 are about one item.
+ */
+const N = '(?:\\d+|[一二三四五六七八九十两几百]+)';
+export const MANY_ITEMS_RE = new RegExp(
+  [
+    `前\\s*${N}\\s*(?:条|个|篇|名|位|项)`,
+    // 复审 #3-3: 「5 条笔记」「三篇笔记」「几个视频」; two or more, never 「一条」.
+    `(?<![\\d])(?:[2-9]|\\d{2,}|[二三四五六七八九十两几])\\s*(?:条|篇|个)\\s*(?:笔记|视频|评论|帖子|结果|内容|回答)`,
+    // 复审 #4-2: 「列出」「搜索结果」「评论区」 only with a number or a many-word after them.
+    `列出\\s*(?:前\\s*)?(?:${N}|所有|全部|各|每|这些)`,
+    `搜索结果(?:里|中|的)?[^，。,；;]{0,6}(?:最多|最高|每|各|前|所有|全部|几)`,
+    `评论区(?:里|中|的)?[^，。,；;]{0,6}(?:点赞|赞数|最多|最高|热门|每|各|前)`,
+    `最[高多]的?\\s*${N}?\\s*(?:条|个)?\\s*(?:评论|笔记|视频)`,
+    '每(?:条|个|篇|一条|一个|一篇)|各(?:条|个|篇)',
+    '(?:热门|精选|最新|高赞)评论',
+    '(?:这些|多条|几条)(?:笔记|评论|视频|结果)',
+    '\\btop[-\\s]?(?:\\d+|liked|rated)\\b',
+    '\\bfirst\\s+(?:\\d+|two|three|four|five|six|seven|eight|nine|ten)\\b',
+    '\\b(?:each|every)\\s+(?:note|post|video|comment|result)\\b',
+  ].join('|'),
+  'i',
+);
+
+/** 复审 #4-2: 「第 3 篇」「第十二个」 name one item; they are taken out before the request is read. */
+export function manyItemsRequest(intent: string): boolean {
+  return MANY_ITEMS_RE.test(
+    intent.replace(new RegExp(`第\\s*${N}\\s*(?:条|篇|个|名|位|项)`, 'g'), ''),
+  );
+}
+
+type Verdict =
+  | { claim: EngagementClaim; kind: 'paired' | 'unchecked' }
+  | { claim: EngagementClaim; kind: 'contradiction' | 'unverified'; message: string };
+
 /**
  * G7 (G6 r5 xhs-read, tsk f24-cuxBxon1): the run read 「1584」 from the note's own bar
  * (get_page_text 「评论\n1584\n1823\n24」), but a comment's like button was marked 点赞 「1」, the
@@ -244,20 +471,120 @@ export function assessEngagementClaims(answer: string, pageTexts: readonly strin
  * page marks other items' counters too (comments, related notes), so a number the run did read
  * from the page, marked as no other kind, is not contradicted by a different 点赞 mark: it is
  * delivered with an 未核实 note instead, and no message ever offers another number to switch to.
+ *
+ * GOAL2 H1: one verdict per number as written — the loop's check and the delivery rule
+ * (settleUnpairedCounts) read the same verdicts, so what goes out 「未能核实」 is exactly what the
+ * check could not pair.
  */
+function claimVerdicts(
+  answer: string,
+  pageTexts: readonly string[],
+  options: EngagementOptions = {},
+): Verdict[] {
+  const claims = engagementClaims(answer);
+  if (!claims.length) return [];
+  const page = readCounters(pageTexts);
+  const { marks, bare, worded } = page;
+  // 复审 #2-3: only a request about several items pairs their own counters; for one item another
+  // item's counter is never its, marked page or not.
+  const pairsOthers = options.manyItems === true;
+  return claims.map((claim): Verdict => {
+    const hit = (values?: Set<string>) =>
+      !!values && [...values].some((v) => sameCount(claim.value, v));
+    const own = new Set([
+      ...(marks.get(claim.kind) ?? []),
+      ...(pairsOthers ? (marks.get(`${claim.kind}${OTHER_ITEM}`) ?? []) : []),
+    ]);
+    if (hit(own) || hit(worded.get(claim.kind))) return { claim, kind: 'paired' };
+    const other = [...marks].find(
+      ([kind, values]) =>
+        kind !== claim.kind &&
+        !(pairsOthers && kind === `${claim.kind}${OTHER_ITEM}`) &&
+        hit(values),
+    )?.[0];
+    // GOAL2 H1: a comment's or a related card's counter (「1」 under a comment) is never this one's.
+    const otherItem = other?.endsWith(OTHER_ITEM) ? other.slice(0, -OTHER_ITEM.length) : null;
+    const say = (kind: 'contradiction' | 'unverified', message: string): Verdict => ({
+      claim,
+      kind,
+      message,
+    });
+    if (otherItem)
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在页面上是评论或推荐里其他条目的${otherItem}数，不是这一项的${
+          own.size ? `：这一项标注为${claim.kind}的数字是「${[...own].join('、')}」` : ''
+        }；确认不了就如实写「${claim.kind}数未能核实」`,
+      );
+    if (own.size && !other && hit(bare))
+      return say(
+        'unverified',
+        `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容）`,
+      );
+    if (own.size && !other)
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在已读页面上没有找到（页面上标为${claim.kind}的数字也可能属于评论等其他内容）：只写你在页面上确认属于这一项的数字；确认不了就如实写「${claim.kind}数未能核实」，不要为了通过核对改成页面上别的数字`,
+      );
+    if (own.size)
+      // A definite wrong counter (FIX-29 Douyin 97 = 分享): the page's own mark may be named.
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数：页面标注为${claim.kind}的数字是「${[...own].join('、')}」；确认不了就如实写「${claim.kind}数未能核实」`,
+      );
+    if (other)
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数`,
+      );
+    if (hit(bare))
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在页面上只是图标旁的数字，没有标签能确认它是${claim.kind}数；请用 snapshot 查看带 [互动=…] 标注的数字，读不到标签就如实写「无法确认${claim.kind}数」，不要按图标顺序猜`,
+      );
+    // GOAL2 H1 (r5a1 xhs: 217 / 3052): a counter page, and the number is nowhere on it.
+    if (page.marked && !page.anywhere(claim.value))
+      return say(
+        'contradiction',
+        `答案的${claim.kind}数「${claim.value}」在已读页面上没有出现：只写页面上和这一项的图标 / 标签直接相邻的数字；读不到就如实写「${claim.kind}数未能核实」，不要估计或编数字`,
+      );
+    return { claim, kind: 'unchecked' };
+  });
+}
+
 export function engagementFindings(
   answer: string,
   pageTexts: readonly string[],
+  options: EngagementOptions = {},
 ): { contradictions: string[]; unverified: string[] } {
-  const claims = engagementClaims(answer);
-  if (!claims.length) return { contradictions: [], unverified: [] };
-  const marks = new Map<EngagementKind, Set<string>>();
+  const contradictions: string[] = [];
+  const unverified: string[] = [];
+  for (const verdict of claimVerdicts(answer, pageTexts, options)) {
+    if (verdict.kind !== 'contradiction' && verdict.kind !== 'unverified') continue;
+    // One line per number, however often the answer repeats it (local g7y2 / g7y3).
+    const list = verdict.kind === 'contradiction' ? contradictions : unverified;
+    if (!list.includes(verdict.message)) list.push(verdict.message);
+  }
+  return { contradictions, unverified };
+}
+
+/** What the read pages say about counters: marked values by kind, bare numbers, worded ones. */
+function readCounters(pageTexts: readonly string[]) {
+  const marks = new Map<string, Set<string>>();
   const bare = new Set<string>();
   const worded = new Map<EngagementKind, Set<string>>();
-  for (const text of pageTexts) {
+  const numbers = new Set<string>();
+  // A tool result as it came (JSON): its escaped quotes and line breaks read as the page's.
+  for (const text of pageTexts.map((one) => one.replace(/\\"/g, '"'))) {
+    // 复审 #8: an element id (`[ref=e217]`) or a link address is no number the page shows.
+    const shown = text
+      .replace(/\[ref=[^\]]*\]/g, ' ')
+      .replace(/(?:^|\\n|\n)\s*-\s*\/url:[^\n\\]*/g, '\n')
+      .replace(/https?:\/\/[^\s"'\\)]+/g, ' ');
+    for (const m of shown.matchAll(new RegExp(COUNT, 'gi'))) numbers.add(normalizeCount(m[0]));
     for (const raw of text.split(/\\n|\n/)) {
       const line = raw.trim();
-      const kind = line.match(MARK)?.[1] as EngagementKind | undefined;
+      const kind = line.match(MARK)?.[1];
       const count = line.match(new RegExp(String.raw`\]:\s*"?(${COUNT})"?$`, 'i'))?.[1];
       if (kind && count) {
         if (!marks.has(kind)) marks.set(kind, new Set());
@@ -280,40 +607,59 @@ export function engagementFindings(
       }
     }
   }
-  const out: string[] = [];
-  const unverified: string[] = [];
-  for (const claim of claims) {
-    const own = marks.get(claim.kind);
-    const hit = (values?: Set<string>) =>
-      !!values && [...values].some((v) => sameCount(claim.value, v));
-    if (hit(own) || hit(worded.get(claim.kind))) continue;
-    const other = [...marks].find(([kind, values]) => kind !== claim.kind && hit(values))?.[0];
-    if (own?.size && !other && hit(bare)) {
-      // One line per number, however often the answer repeats it (local g7y2 / g7y3).
-      if (unverified.some((line) => line.startsWith(`${claim.kind}数「${claim.value}」`))) continue;
-      unverified.push(
-        `${claim.kind}数「${claim.value}」（页面上另有标为${claim.kind}的数字，可能属于评论等其他内容）`,
-      );
-    } else if (own?.size && !other) {
-      out.push(
-        `答案的${claim.kind}数「${claim.value}」在已读页面上没有找到（页面上标为${claim.kind}的数字也可能属于评论等其他内容）：只写你在页面上确认属于这一项的数字；确认不了就如实写「${claim.kind}数未能核实」，不要为了通过核对改成页面上别的数字`,
-      );
-    } else if (own?.size) {
-      out.push(
-        // A definite wrong counter (FIX-29 Douyin 97 = 分享): the page's own mark may be named.
-        `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数：页面标注为${claim.kind}的数字是「${[...own].join('、')}」；确认不了就如实写「${claim.kind}数未能核实」`,
-      );
-    } else if (other) {
-      out.push(
-        `答案的${claim.kind}数「${claim.value}」在页面上标注的是${other}数，不是${claim.kind}数`,
-      );
-    } else if (hit(bare)) {
-      out.push(
-        `答案的${claim.kind}数「${claim.value}」在页面上只是图标旁的数字，没有标签能确认它是${claim.kind}数；请用 snapshot 查看带 [互动=…] 标注的数字，读不到标签就如实写「无法确认${claim.kind}数」，不要按图标顺序猜`,
-      );
+  return {
+    marks,
+    bare,
+    worded,
+    /** The page marks counters at all (a social / video page), so its counters can be paired. */
+    marked: marks.size > 0,
+    anywhere: (value: string) => [...numbers].some((n) => sameCount(value, n)),
+  };
+}
+
+const KIND_EN: Record<EngagementKind, string> = {
+  点赞: 'like count',
+  评论: 'comment count',
+  收藏: 'favourite count',
+  分享: 'share count',
+  投币: 'coin count',
+  转发: 'repost count',
+};
+
+/**
+ * GOAL2 H1 — the delivery rule for counters: a number the check could not pair with its counter
+ * (a guess, another counter's, a comment's, one the page shows only beside an unlabelled icon) is
+ * written 「未能核实」 where it stands, every time the answer states it; no other number is put in
+ * its place. A number the check leaves alone (no counter on the page to pair it with, shown with
+ * words around it) is left as it is.
+ */
+export function settleUnpairedCounts(
+  answer: string,
+  pageTexts: readonly string[],
+  options: EngagementOptions & { english?: boolean } = {},
+): { answer: string; settled: EngagementKind[] } {
+  const unpaired = claimVerdicts(answer, pageTexts, options).filter(
+    (verdict) => verdict.kind === 'contradiction' || verdict.kind === 'unverified',
+  );
+  if (!unpaired.length) return { answer, settled: [] };
+  let out = answer;
+  // From the end, so each earlier index still holds.
+  for (const { claim } of [...unpaired].reverse()) {
+    if (out.slice(claim.index, claim.index + claim.raw.length) !== claim.raw) continue;
+    if (claim.numberFirst) {
+      const end = answer.indexOf(claim.text, claim.index) + claim.text.length;
+      if (end < claim.index + claim.raw.length) continue;
+      const written = options.english
+        ? `${KIND_EN[claim.kind]} not verified`
+        : `${claim.kind}数未能核实`;
+      out = `${out.slice(0, claim.index)}${written}${out.slice(end)}`;
+    } else {
+      out = `${out.slice(0, claim.index)}${options.english ? 'not verified' : '未能核实'}${out.slice(claim.index + claim.raw.length)}`;
     }
   }
-  return { contradictions: out, unverified };
+  const settled: EngagementKind[] = [];
+  for (const { claim } of unpaired) if (!settled.includes(claim.kind)) settled.push(claim.kind);
+  return { answer: out, settled };
 }
 
 /** Engagement kinds a line names (「点赞数在未登录时不显示」 → 点赞). */

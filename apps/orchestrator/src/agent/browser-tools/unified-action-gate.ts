@@ -66,7 +66,7 @@ interface ElementSignals {
   /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control. */
   loginControl?: boolean;
   /** G2i: the click toggles a checkbox / radio / switch — its label and current state. */
-  toggle?: { label: string; checked: boolean } | null;
+  toggle?: { label: string; checked: boolean; drawn?: boolean } | null;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
@@ -164,7 +164,34 @@ const READ_ACTIONABLE = (
             'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]',
           );
   }
-  let toggle: { label: string; checked: boolean } | null = null;
+  // GOAL2 H4 (Q-6 #3): a box drawn as a plain element (`<i class="agree-check">` next to 「我已阅读并
+  // 同意《用户协议》」), no checkbox semantics, little or no text of its own: the short text around
+  // it names what it ticks. Its class says whether it is ticked.
+  let drawn = false;
+  // 复审 #2-7: whole class words (`agree-check`, `ui-checkbox`), never 「checkout」「ticket」, and
+  // never a close button.
+  const words = `${target.getAttribute('class') || ''} ${target.getAttribute('id') || ''}`
+    .split(/[\s_-]+|(?<=[a-z])(?=[A-Z])/)
+    .filter(Boolean);
+  if (
+    !box &&
+    /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
+    // 复审 #3-6: a drawn box has no text, or only a mark; 「同意」 with text is a button.
+    // 复审 #4-1: an icon-font glyph (`&#xe60f;`), a symbol or a zero-width space is no text.
+    !text.replace(/[\p{Co}\p{So}\u200b-\u200f\ufeff\s]/gu, '') &&
+    !/[×✕╳]/.test(text) &&
+    words.some((word) =>
+      // 复审 #3-5: 「icon-unchecked」「checked」「ticked」「agreed」 too.
+      /^(?:un)?(?:check(?:ed|box|mark)?|tick(?:ed)?)$|^(?:agree(?:d|ment)?|consent|radio|switch|box)$/i.test(
+        word,
+      ),
+    ) &&
+    !words.some((word) => /^(?:close|dismiss|cancel|clear|delete|remove)$/i.test(word))
+  ) {
+    box = target;
+    drawn = true;
+  }
+  let toggle: { label: string; checked: boolean; drawn?: boolean } | null = null;
   if (box) {
     const parts: string[] = [];
     parts.push(box.getAttribute('aria-label') || '');
@@ -186,9 +213,28 @@ const READ_ACTIONABLE = (
     if (!parts.join('').trim())
       parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
     toggle = {
+      ...(drawn ? { drawn: true } : {}),
       label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
       checked:
-        box.tagName === 'INPUT' ? boxInput.checked : box.getAttribute('aria-checked') === 'true',
+        box.tagName === 'INPUT'
+          ? boxInput.checked
+          : drawn
+            ? // 复审 #2-7: the ticked state may sit on the box or the row around it.
+              // 复审 #3-4: the box's own class may say 「active / selected / on」; a container's
+              // only 「checked / ticked」 (a panel's 「active」 is no tick).
+              /(?:^|[\s_-])(?:checked|is-checked|ticked|active|selected|on)(?:$|[\s_-])/i.test(
+                box.getAttribute('class') || '',
+              ) ||
+              box.getAttribute('aria-checked') === 'true' ||
+              [box.parentElement, box.parentElement?.parentElement].some(
+                (node) =>
+                  !!node &&
+                  (/(?:^|[\s_-])(?:checked|is-checked|ticked)(?:$|[\s_-])/i.test(
+                    node.getAttribute('class') || '',
+                  ) ||
+                    node.getAttribute('aria-checked') === 'true'),
+              )
+            : box.getAttribute('aria-checked') === 'true',
     };
   }
   return {
@@ -755,11 +801,15 @@ function clickConsent(
   fallbackLabel: string | null,
 ): ConsentTarget | null {
   if (!signals) return null;
-  if (signals.toggle)
-    return consentToggle({
+  if (signals.toggle) {
+    const consent = consentToggle({
       label: signals.toggle.label || fallbackLabel || '',
       checked: signals.toggle.checked,
     });
+    if (!signals.toggle.drawn) return consent;
+    // 复审 #2-7: a drawn box is judged like a sentence — closing a cookie banner is no consent.
+    if (consent && consent.kind !== 'cookie') return consent;
+  }
   const tag = (signals.tagName ?? '').toLowerCase();
   const type = (signals.type ?? '').toLowerCase();
   const plain = ['div', 'span', 'li', 'p', 'label', 'i', 'em'].includes(tag);

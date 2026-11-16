@@ -139,6 +139,21 @@ export interface RunScrapeOpts {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 8192;
+/** GOAL2 H4: HOLA DAY's own site, read for a question about HOLA DAY itself. */
+const OWN_SITE = 'https://holaday.ai/';
+const OWN_NAME_RE = /\bhola\s*day(?:\s*ai)?(?![a-z])|\bholaday(?:\s*ai)?(?![a-z])/i;
+/** 复审 #2-10: only a question about what it is (not 差评 / 对比 / 投诉). */
+const OWN_WHAT_RE =
+  /是什么|是啥|是个什么|介绍|官网|官方网站|干什么|做什么|干嘛|\bwhat\s+(?:is|does)\b|^\s*tell\s+me\s+about\b/i;
+const OWN_HOST_RE = /(?:^|\.)holaday\.ai$/i;
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+};
+
 const DEFAULT_SEARCH_LIMIT = 5;
 const MAX_CONTENT_PER_SOURCE = 12_000;
 const MAX_TOTAL_CONTENT = 30_000;
@@ -416,6 +431,32 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       });
     }
     usage.credits += result.credits ?? result.results.length;
+    // GOAL2 H4 (G3 online s01 「搜一下 HOLA DAY AI 是什么」): the search engine had nothing on HOLA
+    // DAY and the answer offered 「Day of AI」. A question about HOLA DAY itself also reads its own
+    // site, when the search did not bring it.
+    if (
+      OWN_NAME_RE.test(query) &&
+      OWN_WHAT_RE.test(opts.intent) &&
+      !result.results.some((item) => OWN_HOST_RE.test(hostOf(item.url)))
+    ) {
+      let own: Awaited<ReturnType<typeof opts.firecrawl.scrape>> | null = null;
+      try {
+        own = await opts.firecrawl.scrape(OWN_SITE);
+      } catch {
+        own = null;
+      }
+      usage.calls += 1;
+      if (own?.ok) {
+        usage.credits += own.credits ?? 1;
+        // 复审 #3-7: second, after the search's first result — near enough the front to fit the
+        // write-up's budget, not put above what the search found.
+        result.results.splice(1, 0, {
+          url: own.url ?? OWN_SITE,
+          markdown: own.markdown,
+          ...(own.title ? { title: own.title } : {}),
+        });
+      }
+    }
     // A result that is only a wall is not material.
     const readable = result.results.filter(
       (item) =>
