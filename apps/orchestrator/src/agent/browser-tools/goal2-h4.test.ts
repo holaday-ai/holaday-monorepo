@@ -18,7 +18,11 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>Sign up</title>
 <div class="news"><span id="news" class="ui-checkbox"></span><span>订阅优惠信息</span></div>
 <div class="row is-checked"><i id="rowticked" class="agree-check"></i><span>我已阅读并同意《用户协议》</span></div>
 <div class="buy"><i id="checkout" class="checkout-icon"></i><span>同意《购买须知》后结算</span></div>
-<div class="cookie-banner">We use cookies. <span id="cookieclose" class="consent-close">×</span></div>`;
+<div class="cookie-banner">We use cookies. <span id="cookieclose" class="consent-close">×</span></div>
+<div class="login-panel active"><div class="agree-row"><i id="panelactive" class="agree-check"></i><span>我已阅读并同意《用户协议》</span></div></div>
+<div class="agree-row"><i id="unchecked" class="icon-unchecked"></i><span>我已阅读并同意《隐私政策》</span></div>
+<div class="cookie-bar">We use cookies <span id="cookieagree" class="cookie-consent-btn">同意</span></div>
+<div class="terms"><span id="agreebtn" class="agree-btn">同意</span><span>不同意</span><span>《用户协议》</span></div>`;
 
 let browser: Browser;
 beforeAll(async () => {
@@ -47,7 +51,15 @@ describe('H4 · a consent box drawn without checkbox semantics is the user’s',
     try {
       await page.setContent(PAGE);
       const intent = '打开注册页，把表单填好但不要提交';
-      for (const css of ['#agree', '#news'])
+      // 复审 #3-4/5/6: a panel's 「active」 is no tick; 「icon-unchecked」; 「同意」 buttons with text.
+      for (const css of [
+        '#agree',
+        '#news',
+        '#panelactive',
+        '#unchecked',
+        '#cookieagree',
+        '#agreebtn',
+      ])
         expect(await clickAt(page, css, intent)).toMatchObject({
           kind: 'skip',
           message: expect.stringContaining('没有执行'),

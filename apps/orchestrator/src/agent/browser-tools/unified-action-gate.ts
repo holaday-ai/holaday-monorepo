@@ -176,10 +176,13 @@ const READ_ACTIONABLE = (
   if (
     !box &&
     /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
-    text.length <= 2 &&
-    !/[×✕╳]/.test(text) &&
+    // 复审 #3-6: a drawn box has no text, or only a tick mark; 「同意」 with text is a button.
+    /^[✓√✔☑☐□]?$/.test(text) &&
     words.some((word) =>
-      /^(?:check|checkbox|checkmark|tick|agree|agreement|consent|radio|switch|box)$/i.test(word),
+      // 复审 #3-5: 「icon-unchecked」「checked」「ticked」「agreed」 too.
+      /^(?:un)?(?:check(?:ed|box|mark)?|tick(?:ed)?)$|^(?:agree(?:d|ment)?|consent|radio|switch|box)$/i.test(
+        word,
+      ),
     ) &&
     !words.some((word) => /^(?:close|dismiss|cancel|clear|delete|remove)$/i.test(word))
   ) {
@@ -215,10 +218,16 @@ const READ_ACTIONABLE = (
           ? boxInput.checked
           : drawn
             ? // 复审 #2-7: the ticked state may sit on the box or the row around it.
-              [box, box.parentElement, box.parentElement?.parentElement].some(
+              // 复审 #3-4: the box's own class may say 「active / selected / on」; a container's
+              // only 「checked / ticked」 (a panel's 「active」 is no tick).
+              /(?:^|[\s_-])(?:checked|is-checked|ticked|active|selected|on)(?:$|[\s_-])/i.test(
+                box.getAttribute('class') || '',
+              ) ||
+              box.getAttribute('aria-checked') === 'true' ||
+              [box.parentElement, box.parentElement?.parentElement].some(
                 (node) =>
                   !!node &&
-                  (/(?:^|[\s_-])(?:checked|is-checked|active|selected|on)(?:$|[\s_-])/i.test(
+                  (/(?:^|[\s_-])(?:checked|is-checked|ticked)(?:$|[\s_-])/i.test(
                     node.getAttribute('class') || '',
                   ) ||
                     node.getAttribute('aria-checked') === 'true'),
@@ -795,8 +804,9 @@ function clickConsent(
       label: signals.toggle.label || fallbackLabel || '',
       checked: signals.toggle.checked,
     });
+    if (!signals.toggle.drawn) return consent;
     // 复审 #2-7: a drawn box is judged like a sentence — closing a cookie banner is no consent.
-    return signals.toggle.drawn && consent?.kind === 'cookie' ? null : consent;
+    if (consent && consent.kind !== 'cookie') return consent;
   }
   const tag = (signals.tagName ?? '').toLowerCase();
   const type = (signals.type ?? '').toLowerCase();

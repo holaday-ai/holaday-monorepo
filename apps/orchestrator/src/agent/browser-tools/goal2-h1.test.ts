@@ -292,6 +292,15 @@ describe('H1 复审 #2', () => {
       '每条评论的点赞数',
       '热门评论有哪些',
       'top 3 videos',
+      // 复审 #3-3
+      '列出5条笔记的标题和点赞数',
+      '给我三篇笔记的点赞数',
+      '点赞最高的3条评论分别多少赞',
+      '评论区点赞最多的评论',
+      '前几个视频的点赞数',
+      '搜索结果里点赞最多的笔记',
+      'the first three videos',
+      'top-liked comments',
     ])
       expect(MANY_ITEMS_RE.test(many)).toBe(true);
   });

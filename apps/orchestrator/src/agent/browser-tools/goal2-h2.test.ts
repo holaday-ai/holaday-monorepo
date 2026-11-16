@@ -152,4 +152,80 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
     expect(seen).toContain('同一个登录提示已经第 3 次');
     expect(outcome.status).toBe('completed');
   });
+
+  it('复审 #3-1: closing the popup, then trying again, over and over, still ends', async () => {
+    const close = { name: 'click', input: { ref: 'e3' } };
+    let n = 0;
+    const { seen, outcome } = await run(
+      [...open, close, click, close, click, close, click, close, click, close, click],
+      () => ++n % 2 === 0,
+    );
+    expect(seen).toContain('同一个登录提示已经第 3 次');
+    expect(outcome.steps).toBeLessThan(16);
+  });
+
+  it('复审 #3-2: several tries in one turn are one try; a new read starts again', async () => {
+    const done = { name: 'finish', input: { status: 'failed', summary: '没有查到。' } };
+    let turn = 0;
+    const calls = [
+      { name: 'navigate', input: { url: 'https://www.amap.com/' } },
+      { name: 'snapshot', input: {} },
+    ];
+    const adapter: MessagesAdapter = {
+      metadata: { provider: 'anthropic', model: 'fixture' },
+      async create() {
+        turn += 1;
+        const blocks =
+          turn <= calls.length
+            ? [{ type: 'tool_use' as const, id: String(turn), ...calls[turn - 1]! }]
+            : turn === 3
+              ? ['e3', 'e4', 'e5'].map((ref, i) => ({
+                  type: 'tool_use' as const,
+                  id: `${turn}-${i}`,
+                  name: 'click',
+                  input: { ref },
+                }))
+              : [{ type: 'tool_use' as const, id: String(turn), ...done }];
+        return {
+          id: String(turn),
+          metadata: { provider: 'anthropic', model: 'fixture' },
+          content: blocks,
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    let url = 'about:blank';
+    const seen: string[] = [];
+    await runUnifiedBrowserLoop({
+      intent: '请使用云端浏览器，高德地图查一下杭州东站到西湖断桥怎么走',
+      adapter: {
+        ...adapter,
+        create: async (request) => {
+          seen.push(JSON.stringify(request.messages.at(-1)));
+          return adapter.create(request);
+        },
+      },
+      maxSteps: 10,
+      execute: (async (action: { tool: string; url?: string }) => {
+        if (action.tool === 'navigate') url = action.url!;
+        return action.tool === 'snapshot'
+          ? { ok: true, text: JSON.stringify({ tree, sourceURL: url }), url }
+          : { ok: true, text: '已执行', url };
+      }) as never,
+      currentPageUrl: () => url,
+      probeBlocker: async () => ({
+        reason: 'login',
+        message: PROMPT,
+        disposition: 'continue' as const,
+      }),
+    });
+    expect(seen.join('\n')).not.toContain('同一个登录提示已经');
+  });
 });

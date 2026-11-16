@@ -141,9 +141,10 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 8192;
 /** GOAL2 H4: HOLA DAY's own site, read for a question about HOLA DAY itself. */
 const OWN_SITE = 'https://holaday.ai/';
-const OWN_NAME_RE = /\bhola\s*day\b|\bholaday\b/i;
+const OWN_NAME_RE = /\bhola\s*day(?:\s*ai)?(?![a-z])|\bholaday(?:\s*ai)?(?![a-z])/i;
 /** 复审 #2-10: only a question about what it is (not 差评 / 对比 / 投诉). */
-const OWN_WHAT_RE = /是什么|是啥|介绍|官网|干什么|做什么|\bwhat\s+is\b|\babout\b/i;
+const OWN_WHAT_RE =
+  /是什么|是啥|是个什么|介绍|官网|官方网站|干什么|做什么|干嘛|\bwhat\s+(?:is|does)\b|^\s*tell\s+me\s+about\b/i;
 const OWN_HOST_RE = /(?:^|\.)holaday\.ai$/i;
 const hostOf = (url: string) => {
   try {
@@ -447,8 +448,9 @@ export async function runScrapeTask(opts: RunScrapeOpts): Promise<ScrapeOutcome>
       usage.calls += 1;
       if (own?.ok) {
         usage.credits += own.credits ?? 1;
-        // After the search's own results: material like any other, not put first.
-        result.results.push({
+        // 复审 #3-7: second, after the search's first result — near enough the front to fit the
+        // write-up's budget, not put above what the search found.
+        result.results.splice(1, 0, {
           url: own.url ?? OWN_SITE,
           markdown: own.markdown,
           ...(own.title ? { title: own.title } : {}),

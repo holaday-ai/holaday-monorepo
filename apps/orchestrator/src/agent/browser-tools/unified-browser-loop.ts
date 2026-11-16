@@ -873,7 +873,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    */
   let continuedWall: string | undefined;
   /** The page the popup was last seen on after a try, and how many tries in a row it stayed. */
-  let wallTries: { page: string; tries: number; read: string } | null = null;
+  let wallTries: { page: string; tries: number; reads: Set<string>; step: number } | null = null;
   let wallStalled: string | undefined;
   // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
   // answer that already tells of the login prompt gets no second one.
@@ -2773,25 +2773,28 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       if (outcome.ok && input.probeBlocker) {
         continuedWall = undefined;
         const blocker = await checkBlocker();
-        // 复审 #2-1: a try after which the popup is gone, or the page moved, starts the count
-        // again; so does a read that shows something new.
-        if (!blocker && !continuedWall) wallTries = null;
+        // GOAL2 H2 复审 #2/#3: tries count once per turn (「type 起点 / type 终点 / click 搜索」 is one
+        // try), on the same page, with nothing new read in between; a closed popup that comes back
+        // is the same popup. A new page or a read showing something new starts again.
         if (!blocker && continuedWall && WALL_TRY_TOOLS.has(action.tool)) {
-          const read = pageEvidence.at(-1)?.text.slice(0, 4000) ?? '';
-          const before: { page: string; tries: number; read: string } | null = wallTries;
-          const tries: number =
-            before && before.page === continuedWall && before.read === read ? before.tries + 1 : 1;
-          wallTries = { page: continuedWall, tries, read };
+          const read = (pageEvidence.at(-1)?.text ?? '').replace(/\[ref=[^\]]*\]/g, '');
+          const before: { page: string; tries: number; reads: Set<string>; step: number } | null =
+            wallTries;
+          // A read seen before on this page (the popup open, then closed, then open again) is
+          // nothing new.
+          const same: boolean = !!before && before.page === continuedWall && before.reads.has(read);
+          const tries: number = same && before ? before.tries + (before.step === step ? 0 : 1) : 1;
+          const reads: Set<string> = new Set(before?.page === continuedWall ? before.reads : []);
+          reads.add(read);
+          wallTries = { page: continuedWall, tries, reads, step };
           if (tries >= 3 && !wallStalled && !concludeNow) {
             const host = hostOf(input.currentPageUrl?.());
             wallStalled = host ? rescueSiteName(input.currentPageUrl?.()) : '网站';
             concludeNow = true;
             concludedOtherwise = true;
             outcome.text += `\n同一个登录提示已经第 ${tries} 次挡在页面上，操作没有进展：不要再关闭、绕过它，也不要登录。下一轮直接 finish：已读到的公开内容照实写；拿不到的部分以「部分完成：」开头说明网站要求登录才能继续。`;
-            // 复审 #2-2: the rest of this turn waits; the next turn is the finish.
-            results.push(toolResult(call.id, outcome.text));
+            // The rest of this turn waits (this action is handled as usual); the finish comes next.
             staleTurn = true;
-            continue;
           }
         }
         if (formLoginDetour) {
