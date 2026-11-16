@@ -78,3 +78,34 @@ describe('browser login and data settings', () => {
     expect(JSON.stringify(calls)).not.toContain('SYNTHETIC_ONLY');
   });
 });
+
+it('labels personal cloud snapshots as saved and keeps Chrome readonly import wording separate', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            enabled: true,
+            importEnabled: false,
+            profileEnabled: false,
+            grants: [
+              {
+                id: 'ee52fe57-1dd1-4562-828d-afcb84b0c96f',
+                origin: 'https://fixture.test',
+                status: 'connected',
+                sessionAccess: 'cloud-home-v1',
+                cookieCount: 1,
+                expiresAt: 1_800_000_000_000,
+                lastUsedAt: null,
+              },
+            ],
+          }),
+        ),
+    ),
+  );
+  render(<BrowserDataSection />);
+  expect(await screen.findByText(/fixture.test · 已保存/)).toBeTruthy();
+  expect(screen.getByText(/个人云浏览器的保存状态，可用于/)).toBeTruthy();
+  expect(screen.queryByText(/当前云端任务只读/)).toBeNull();
+});

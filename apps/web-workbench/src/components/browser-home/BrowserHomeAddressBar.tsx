@@ -18,6 +18,7 @@ export function BrowserHomeAddressBar({
   pending,
   onNavigate,
   onHome,
+  endContent,
 }: {
   view: 'home' | 'browser';
   /** The page the cloud browser shows (only meaningful in the browser view). */
@@ -25,6 +26,7 @@ export function BrowserHomeAddressBar({
   pending: boolean;
   onNavigate(direction: 'back' | 'forward' | 'reload' | 'goto', input?: string): Promise<boolean>;
   onHome(): void;
+  endContent?: React.ReactNode;
 }): JSX.Element {
   const shown = view === 'home' ? '' : (url ?? '');
   const [draft, setDraft] = React.useState(shown);
@@ -145,6 +147,7 @@ export function BrowserHomeAddressBar({
           )}
         />
       </form>
+      {endContent}
     </div>
   );
 }

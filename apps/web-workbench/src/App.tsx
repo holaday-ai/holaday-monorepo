@@ -320,7 +320,12 @@ function BrowserHomeRoute(): JSX.Element {
   return (
     <BrowserHomeGate enabled={me ? me.browserHomeEnabled : null}>
       {lazyElement(
-        <BrowserHomePage region={me?.modelDataRegion ?? null} plan={me?.plan ?? 'free'} />,
+        <BrowserHomePage
+          region={me?.modelDataRegion ?? null}
+          plan={me?.plan ?? 'free'}
+          ownerId={me?.userId}
+          profilesEnabled={me?.browserHomeProfilesEnabled === true}
+        />,
       )}
     </BrowserHomeGate>
   );

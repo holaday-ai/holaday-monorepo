@@ -121,13 +121,23 @@ function LeaveButton(): JSX.Element {
   );
 }
 
-function mount(region: 'cn' | 'intl' | null = 'cn') {
+function mount(region: 'cn' | 'intl' | null = 'cn', profilesEnabled = false) {
   render(
     <MemoryRouter initialEntries={['/browser']}>
       <ToastProvider>
         <LeaveButton />
         <Routes>
-          <Route path="/browser" element={<BrowserHomePage region={region} plan="pro" />} />
+          <Route
+            path="/browser"
+            element={
+              <BrowserHomePage
+                region={region}
+                plan="pro"
+                ownerId="usr_fixture"
+                profilesEnabled={profilesEnabled}
+              />
+            }
+          />
           <Route path="/elsewhere" element={<p>别的页面</p>} />
         </Routes>
       </ToastProvider>
@@ -140,6 +150,61 @@ const addressBar = () =>
   screen.getByRole('textbox', { name: /云浏览器地址栏/ }) as HTMLInputElement;
 
 describe('BROWSER-HOME-1 BrowserHomePage', () => {
+  it.each([false, true])(
+    'rejoins a back-forward-cache page only for the same actor (changed=%s)',
+    async (changed) => {
+      localStorage.setItem('holaday.access_token', 'synthetic-original-actor');
+      const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+      try {
+        mount();
+        await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+        if (changed) localStorage.setItem('holaday.access_token', 'synthetic-new-actor');
+        const event = new Event('pageshow');
+        Object.defineProperty(event, 'persisted', { value: true });
+        window.dispatchEvent(event);
+        if (changed) {
+          expect(reload).toHaveBeenCalledOnce();
+          expect(api.open).toHaveBeenCalledTimes(1);
+        } else {
+          await waitFor(() => expect(api.open).toHaveBeenCalledTimes(2));
+          expect(reload).not.toHaveBeenCalled();
+        }
+      } finally {
+        reload.mockRestore();
+      }
+    },
+  );
+  it('notifies the original viewer on full-page departure with keepalive and its original actor', async () => {
+    localStorage.setItem('holaday.access_token', 'synthetic-original-actor');
+    mount();
+    await waitFor(() => expect(api.open).toHaveBeenCalled());
+    const viewerId = api.open.mock.calls[0]?.[0]?.viewerId;
+    localStorage.setItem('holaday.access_token', 'synthetic-new-actor');
+    window.dispatchEvent(new Event('pagehide'));
+    const calls = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => url === '/api/trpc/browserHome.close');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      keepalive: true,
+      headers: { authorization: 'Bearer synthetic-original-actor' },
+      body: JSON.stringify({ viewerId }),
+    });
+    cleanup();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/trpc/browserHome.close'),
+    ).toHaveLength(1);
+  });
+  it('shows saved-site controls only with the explicit server capability', async () => {
+    mount();
+    await screen.findByText('HOLA DAY');
+    expect(screen.queryByRole('button', { name: '已保存的网站' })).toBeNull();
+    cleanup();
+    mount('cn', true);
+    expect(screen.getByRole('button', { name: '已保存的网站' })).toBeTruthy();
+  });
   it('opens the cloud browser on mount and shows the HOLA DAY home meanwhile', async () => {
     mount();
     expect(api.open).toHaveBeenCalledTimes(1);

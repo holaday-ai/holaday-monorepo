@@ -4,6 +4,7 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { InputArea } from '@/components/InputArea';
 import { BrowserHomeAddressBar } from '@/components/browser-home/BrowserHomeAddressBar';
+import { BrowserHomeProfiles } from '@/components/browser-home/BrowserHomeProfiles';
 import { BrowserHomeTaskCard } from '@/components/browser-home/BrowserHomeTaskCard';
 import { BrowserHomeView, recentBrowserHomeTasks } from '@/components/browser-home/BrowserHomeView';
 import {
@@ -12,6 +13,7 @@ import {
   keepComposerOnSubmitFailure,
 } from '@/components/composer-submit';
 import { useToast } from '@/components/ui/toast';
+import { getAccessToken } from '@/lib/auth';
 import {
   type BrowserHomeNavDirection,
   type BrowserHomeRegion,
@@ -63,9 +65,13 @@ function newViewerId(): string {
 export function BrowserHomePage({
   region,
   plan,
+  ownerId,
+  profilesEnabled = false,
 }: {
   region: BrowserHomeRegion | null;
   plan: string;
+  ownerId?: string;
+  profilesEnabled?: boolean;
 }): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -125,9 +131,33 @@ export function BrowserHomePage({
   React.useEffect(() => {
     aliveRef.current = true;
     const viewerId = newViewerId();
+    const viewerToken = getAccessToken();
     viewerIdRef.current = viewerId;
     void openSession();
+    // React cleanup is not guaranteed on a reload or full-page navigation. Release exactly
+    // this document's viewer; a new document's open cancels the server's close grace.
+    const leaveDocument = () => {
+      if (!viewerToken) return;
+      void fetch('/api/trpc/browserHome.close', {
+        method: 'POST',
+        keepalive: true,
+        headers: { authorization: `Bearer ${viewerToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ viewerId }),
+      }).catch(() => undefined);
+    };
+    const rejoinDocument = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      if (getAccessToken() !== viewerToken) {
+        window.location.reload();
+        return;
+      }
+      void openSession({ quiet: true });
+    };
+    window.addEventListener('pagehide', leaveDocument);
+    window.addEventListener('pageshow', rejoinDocument);
     return () => {
+      window.removeEventListener('pagehide', leaveDocument);
+      window.removeEventListener('pageshow', rejoinDocument);
       aliveRef.current = false;
       openRef.current = null;
       if (viewerIdRef.current === viewerId) viewerIdRef.current = null;
@@ -288,6 +318,11 @@ export function BrowserHomePage({
         pending={pending}
         onNavigate={navigateBrowser}
         onHome={() => setView('home')}
+        endContent={
+          profilesEnabled && ownerId ? (
+            <BrowserHomeProfiles key={ownerId} ownerId={ownerId} />
+          ) : null
+        }
       />
       <div className="relative min-h-0 flex-1">
         {view === 'home' ? (

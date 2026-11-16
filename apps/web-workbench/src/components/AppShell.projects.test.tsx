@@ -90,6 +90,7 @@ const AUTH_ME = {
   role: 'user',
   videoEnabled: false,
   browserHomeEnabled: false,
+  browserHomeProfilesEnabled: false,
   mediaModels: { image: [], video: [], petVideo: [] },
   teamProjectsEnabled: true,
   teamTaskLifecycleEnabled: false,

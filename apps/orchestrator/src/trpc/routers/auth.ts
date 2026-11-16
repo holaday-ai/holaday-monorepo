@@ -10,6 +10,7 @@ import { authenticateAccessTokenSession } from '../../auth/middleware.js';
 import { AuthError, AuthService } from '../../auth/service.js';
 import { issueSessionAccessToken, revokeAllSessions, revokeSession } from '../../auth/sessions.js';
 import { isBrowserHomeEnabledFor } from '../../browser-home/browser-home-access.js';
+import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
 import {
@@ -499,6 +500,10 @@ export const authRouter = router({
       // BROWSER-HOME-1 — the「云浏览器」entry gate (sidebar entry + /browser route). Single source
       // with the browserHome router (browser-home/browser-home-access.ts).
       browserHomeEnabled: isBrowserHomeEnabledFor(ctx.userId),
+      browserHomeProfilesEnabled:
+        isBrowserHomeEnabledFor(ctx.userId) &&
+        appEnv.BROWSER_HOME_PROFILE_V1 &&
+        getVaultRuntime()?.cloudHomeEnabled === true,
       // Capability recovery — image/video model choices this deployment can
       // serve (credential presence only). The SPA hides everything else.
       mediaModels: currentMediaModels(),
