@@ -463,7 +463,7 @@ function answerFacts(summary: string, intent = ''): Fact[] {
   for (const match of text.matchAll(
     // GOAL2 H4 (G2i bbc): 「标题是：X」 — 是 and its colon are one separator, not 是 then 「：X」.
     new RegExp(
-      `(${FACT_LABELS})\\s*[*\`]*\\s*(?:(?:为|是)[ \\t]*[:：]?|[:：])[ \\t]*([^\\n；;|。]+)`,
+      `(${FACT_LABELS})\\s*[*\`]*\\s*(?:(?:为|是)[ \\t]*[:：]?|[:：])[ \\t]*([^\\n；;|。:：][^\\n；;|。]*)`,
       'giu',
     ),
   )) {
@@ -1849,7 +1849,7 @@ export function missingAskedFields(intent: string, summary: string): string[] {
     [
       ...own.matchAll(
         new RegExp(
-          `${name}[^：:\\n为是]{0,4}?(?:(?:为|是)[ \\t]*[:：]?|[:：])([^，,。；;、\\n]*)`,
+          `${name}[^：:\\n为是]{0,4}?(?:(?:为|是)[ \\t]*[:：]?|[:：])((?:[^，,。；;、\\n:：][^，,。；;、\\n]*)?)`,
           'g',
         ),
       ),

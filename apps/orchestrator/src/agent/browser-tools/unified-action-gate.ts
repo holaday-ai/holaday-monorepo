@@ -66,7 +66,7 @@ interface ElementSignals {
   /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control. */
   loginControl?: boolean;
   /** G2i: the click toggles a checkbox / radio / switch — its label and current state. */
-  toggle?: { label: string; checked: boolean } | null;
+  toggle?: { label: string; checked: boolean; drawn?: boolean } | null;
 }
 
 /** What Enter in a field submits: the real form semantics, not just a button. */
@@ -168,18 +168,25 @@ const READ_ACTIONABLE = (
   // 同意《用户协议》」), no checkbox semantics, little or no text of its own: the short text around
   // it names what it ticks. Its class says whether it is ticked.
   let drawn = false;
+  // 复审 #2-7: whole class words (`agree-check`, `ui-checkbox`), never 「checkout」「ticket」, and
+  // never a close button.
+  const words = `${target.getAttribute('class') || ''} ${target.getAttribute('id') || ''}`
+    .split(/[\s_-]+|(?<=[a-z])(?=[A-Z])/)
+    .filter(Boolean);
   if (
     !box &&
     /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
     text.length <= 2 &&
-    /check|tick|agree|consent|radio|switch|(?:^|[\s_-])box(?:$|[\s_-])/i.test(
-      `${target.getAttribute('class') || ''} ${target.getAttribute('id') || ''}`,
-    )
+    !/[×✕╳]/.test(text) &&
+    words.some((word) =>
+      /^(?:check|checkbox|checkmark|tick|agree|agreement|consent|radio|switch|box)$/i.test(word),
+    ) &&
+    !words.some((word) => /^(?:close|dismiss|cancel|clear|delete|remove)$/i.test(word))
   ) {
     box = target;
     drawn = true;
   }
-  let toggle: { label: string; checked: boolean } | null = null;
+  let toggle: { label: string; checked: boolean; drawn?: boolean } | null = null;
   if (box) {
     const parts: string[] = [];
     parts.push(box.getAttribute('aria-label') || '');
@@ -201,14 +208,21 @@ const READ_ACTIONABLE = (
     if (!parts.join('').trim())
       parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
     toggle = {
+      ...(drawn ? { drawn: true } : {}),
       label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
       checked:
         box.tagName === 'INPUT'
           ? boxInput.checked
           : drawn
-            ? /(?:^|[\s_-])(?:checked|is-checked|active|selected|on)(?:$|[\s_-])/i.test(
-                box.getAttribute('class') || '',
-              ) || box.getAttribute('aria-checked') === 'true'
+            ? // 复审 #2-7: the ticked state may sit on the box or the row around it.
+              [box, box.parentElement, box.parentElement?.parentElement].some(
+                (node) =>
+                  !!node &&
+                  (/(?:^|[\s_-])(?:checked|is-checked|active|selected|on)(?:$|[\s_-])/i.test(
+                    node.getAttribute('class') || '',
+                  ) ||
+                    node.getAttribute('aria-checked') === 'true'),
+              )
             : box.getAttribute('aria-checked') === 'true',
     };
   }
@@ -776,11 +790,14 @@ function clickConsent(
   fallbackLabel: string | null,
 ): ConsentTarget | null {
   if (!signals) return null;
-  if (signals.toggle)
-    return consentToggle({
+  if (signals.toggle) {
+    const consent = consentToggle({
       label: signals.toggle.label || fallbackLabel || '',
       checked: signals.toggle.checked,
     });
+    // 复审 #2-7: a drawn box is judged like a sentence — closing a cookie banner is no consent.
+    return signals.toggle.drawn && consent?.kind === 'cookie' ? null : consent;
+  }
   const tag = (signals.tagName ?? '').toLowerCase();
   const type = (signals.type ?? '').toLowerCase();
   const plain = ['div', 'span', 'li', 'p', 'label', 'i', 'em'].includes(tag);

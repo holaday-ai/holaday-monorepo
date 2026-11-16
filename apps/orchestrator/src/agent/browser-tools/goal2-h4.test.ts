@@ -15,7 +15,10 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>Sign up</title>
 <div class="agree-row"><i id="agree" class="agree-check"></i><span>我已阅读并同意《用户协议》和《隐私政策》</span></div>
 <div class="agree-row"><i id="ticked" class="agree-check checked"></i><span>我已阅读并同意《会员服务协议》</span></div>
 <div class="filter"><i id="stock" class="check-icon"></i><span>只看有货</span></div>
-<div class="news"><span id="news" class="ui-checkbox"></span><span>订阅优惠信息</span></div>`;
+<div class="news"><span id="news" class="ui-checkbox"></span><span>订阅优惠信息</span></div>
+<div class="row is-checked"><i id="rowticked" class="agree-check"></i><span>我已阅读并同意《用户协议》</span></div>
+<div class="buy"><i id="checkout" class="checkout-icon"></i><span>同意《购买须知》后结算</span></div>
+<div class="cookie-banner">We use cookies. <span id="cookieclose" class="consent-close">×</span></div>`;
 
 let browser: Browser;
 beforeAll(async () => {
@@ -50,7 +53,8 @@ describe('H4 · a consent box drawn without checkbox semantics is the user’s',
           message: expect.stringContaining('没有执行'),
         });
       // Unticking one already ticked, and an ordinary filter box, go ahead.
-      for (const css of ['#ticked', '#stock'])
+      // 复审 #2-7: ticked on the row, a 「checkout」 icon, a cookie banner's ×: not consent boxes.
+      for (const css of ['#ticked', '#stock', '#rowticked', '#checkout', '#cookieclose'])
         expect(await clickAt(page, css, intent)).toMatchObject({ kind: 'proceed' });
       // The user asking to agree in so many words lets the terms box be ticked.
       expect(await clickAt(page, '#agree', '勾选同意用户协议')).toMatchObject({ kind: 'proceed' });
@@ -71,5 +75,16 @@ describe('H4 · 「标题是：X」 is the value X', () => {
     });
     expect(facts.unverified.join('\n')).not.toContain('：BBC');
     expect(facts.contradictions).toEqual([]);
+  });
+});
+
+describe('H4 复审 #2-6 · a label ending its line heads a list', () => {
+  it('「页面标题是：」 then a list: no 「：」 value', () => {
+    const facts = assessCompletionFacts({
+      summary: '页面标题是：\n1. 西湖\n2. 断桥',
+      pages: [{ text: '- heading "西湖" [level=1]\n- heading "断桥" [level=2]' }],
+      intent: '读页面标题',
+    });
+    expect(facts.unverified.join('\n')).not.toMatch(/「：」/);
   });
 });

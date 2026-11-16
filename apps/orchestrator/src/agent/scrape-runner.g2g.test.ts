@@ -172,4 +172,18 @@ describe('GOAL2 H4: a question about HOLA DAY itself reads holaday.ai too', () =
     await run(adapter, lane);
     expect(lane.scrape).not.toHaveBeenCalled();
   });
+
+  it('复审 #2-10: a complaint or comparison about HOLA DAY reads no extra page', async () => {
+    const lane = searchLane();
+    const { adapter } = adapterSaying(['搜索结果里没有 HOLA DAY 的差评。']);
+    await runScrapeTask({
+      taskId: 'tsk_g2g_s01b',
+      userId: 'usr_test',
+      intent: '搜一下 HOLA DAY 的差评',
+      responsesAdapter: adapter,
+      firecrawl: lane,
+      logger,
+    });
+    expect(lane.scrape).not.toHaveBeenCalled();
+  });
 });

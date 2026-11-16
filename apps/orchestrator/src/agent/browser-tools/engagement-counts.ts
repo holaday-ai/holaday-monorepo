@@ -373,7 +373,7 @@ export function engagementClaims(answer: string): EngagementClaim[] {
   const numberFirst = new RegExp(
     // On one line: 「4740\n评论数：214」 is two lines, not 「4740 评论」. 复审 #9: 「点赞最高的 3 个
     // 评论」「前 5 条评论」 count the items listed, not a counter.
-    String.raw`(?<![\d.])(?<!前\s{0,2}|最[高多]的?\s{0,2}|top\s{0,2})(${COUNT})[ \t]*(?:个|次|人)?[ \t]*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
+    String.raw`(?<![\d.])(?<!(?<![目当此之提以先])前\s{0,2}|最[高多]的?\s{0,2}|top\s{0,2})(${COUNT})[ \t]*(?:个|次|人)?[ \t]*(赞|点赞|评论|收藏|分享|转发|likes?|comments?|shares?)`,
     'giud',
   );
   for (const m of text.matchAll(numberFirst)) {
@@ -415,9 +415,12 @@ export interface EngagementOptions {
   manyItems?: boolean;
 }
 
-/** A request about several items or a note's comments (「前 5 条笔记」「热门评论」「搜索…」). */
+/**
+ * A request about several items or a note's comments, said in so many words (「前 5 条笔记」「每条」
+ * 「热门评论」). 复审 #2-4: 「点赞、评论、收藏」「搜索…打开第一篇」「结果」 are about one item.
+ */
 export const MANY_ITEMS_RE =
-  /评论(?!数|量)|前\s*[0-9一二三四五六七八九十两]+|列出|搜索|搜一下|搜(?!狐)|结果|每(?:条|个|篇|一)|各(?:条|个|篇)|几(?:条|个|篇)|\btop\s*\d|\bcomments?\b(?!\s*count)|\bsearch\b/i;
+  /前\s*[0-9一二三四五六七八九十两]+\s*(?:条|个|篇|名|位|项)|每(?:条|个|篇|一条|一个|一篇)|各(?:条|个|篇)|(?:热门|精选|最新|高赞)评论|评论区(?:的|里|中)?(?:内容|评论|留言)|(?:这些|多条|几条)(?:笔记|评论|视频|结果)|\btop\s*\d+|\bfirst\s+\d+\s+(?:notes|posts|videos|comments|results)\b|\b(?:each|every)\s+(?:note|post|video|comment|result)\b/i;
 
 type Verdict =
   | { claim: EngagementClaim; kind: 'paired' | 'unchecked' }
@@ -444,9 +447,9 @@ function claimVerdicts(
   if (!claims.length) return [];
   const page = readCounters(pageTexts);
   const { marks, bare, worded } = page;
-  // A page with no counter of its own (a search list): its items' counters are what it shows.
-  const ownMarked = [...marks.keys()].some((kind) => !kind.endsWith(OTHER_ITEM));
-  const pairsOthers = options.manyItems || !ownMarked;
+  // 复审 #2-3: only a request about several items pairs their own counters; for one item another
+  // item's counter is never its, marked page or not.
+  const pairsOthers = options.manyItems === true;
   return claims.map((claim): Verdict => {
     const hit = (values?: Set<string>) =>
       !!values && [...values].some((v) => sameCount(claim.value, v));
@@ -538,7 +541,7 @@ function readCounters(pageTexts: readonly string[]) {
     // 复审 #8: an element id (`[ref=e217]`) or a link address is no number the page shows.
     const shown = text
       .replace(/\[ref=[^\]]*\]/g, ' ')
-      .replace(/(?:^|\\n|\n)\s*-\s*\/url:[^\n]*/g, '\n')
+      .replace(/(?:^|\\n|\n)\s*-\s*\/url:[^\n\\]*/g, '\n')
       .replace(/https?:\/\/[^\s"'\\)]+/g, ' ');
     for (const m of shown.matchAll(new RegExp(COUNT, 'gi'))) numbers.add(normalizeCount(m[0]));
     for (const raw of text.split(/\\n|\n/)) {

@@ -3,7 +3,12 @@ import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { COUNTER_LEAD } from './completion-fields.js';
-import { engagementClaims, engagementFindings, settleUnpairedCounts } from './engagement-counts.js';
+import {
+  MANY_ITEMS_RE,
+  engagementClaims,
+  engagementFindings,
+  settleUnpairedCounts,
+} from './engagement-counts.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import {
   misattributedPrices,
@@ -162,9 +167,9 @@ describe('H1 · delivery: an unpaired count is written 未能核实, never anoth
     expect(settleUnpairedCounts('1. 笔记A：点赞 1.2万', pages, { manyItems: true }).answer).toBe(
       '1. 笔记A：点赞 1.2万',
     );
-    // A search list with no counter of its own pairs its cards' counters.
+    // 复审 #2-3: for one item, another item's counter never pairs, marked page or not.
     expect(settleUnpairedCounts('点赞 1.2万', [pages[0]!.split('\n')[0]!]).answer).toBe(
-      '点赞 1.2万',
+      '点赞 未能核实',
     );
   });
   it('settledAnswer drops the G7 未核实 counter line and says what it settled', () => {
@@ -265,5 +270,39 @@ describe('H1 · a ticket price belongs to the tab it is shown under', () => {
     expect(withSelectedTabs('- text: 甲栏 乙栏\n- text: 甲栏 乙栏 丙', groups)).toBe(
       '- text: 甲栏 乙栏\n- text: 当前选中的标签：乙栏（甲栏｜乙栏）\n- text: 甲栏 乙栏 丙',
     );
+  });
+});
+
+describe('H1 复审 #2', () => {
+  it('#2-3: one item, no counter of its own marked — a comment’s 「1」 is still not its like count', () => {
+    const pages = ['- generic [ref=e9] [互动=点赞·其他条目]: "1"'];
+    expect(settleUnpairedCounts('点赞数：1', pages).answer).toBe('点赞数：未能核实');
+  });
+  it('#2-4: only requests about several items in so many words count as many', () => {
+    for (const one of [
+      '这条抖音视频的点赞、评论、收藏分别是多少',
+      '告诉我点赞和评论',
+      '在小红书搜索露营，打开第一篇笔记，告诉我它的点赞数',
+      '把结果告诉我',
+      'tell me the likes and comments',
+    ])
+      expect(MANY_ITEMS_RE.test(one)).toBe(false);
+    for (const many of [
+      '列出前 5 条笔记的点赞数',
+      '每条评论的点赞数',
+      '热门评论有哪些',
+      'top 3 videos',
+    ])
+      expect(MANY_ITEMS_RE.test(many)).toBe(true);
+  });
+  it('#2-5: 「目前 3052 个赞」 is a claim; 「前 5 条评论」 is not', () => {
+    expect(engagementClaims('目前 3052 个赞')).toMatchObject([{ kind: '点赞', value: '3052' }]);
+    expect(engagementClaims('当前3052赞')).toMatchObject([{ kind: '点赞', value: '3052' }]);
+    expect(engagementClaims('前 5 条评论')).toEqual([]);
+  });
+  it('#2-8: a link line in an escaped tool result does not swallow what follows it', () => {
+    const raw =
+      '- link "笔记" [ref=e3]:\\n  - /url: /explore/1\\n- generic [ref=e4] [互动=点赞]: \\"1584\\"';
+    expect(engagementFindings('点赞数：1584', [raw]).contradictions).toEqual([]);
   });
 });

@@ -65,7 +65,7 @@ import {
 } from './completion-fields.js';
 import { contentIds, namedContentUrl, onNamedContent } from './content-target.js';
 import { type EngagementKind, MANY_ITEMS_RE, settleUnpairedCounts } from './engagement-counts.js';
-import { fullPageRead } from './full-page-read.js';
+import { LOGIN_POPUP_NOTICE, fullPageRead } from './full-page-read.js';
 import {
   answerCount,
   checkSectionClaim,
@@ -293,6 +293,8 @@ export interface UnifiedBrowserLoopInput {
   supportedTools?: { download: boolean; upload: boolean; tabs: boolean };
   /** FIX-52 #5: the aria-label / title of the current page's controls, for the iframe check. */
   controlLabels?: () => Promise<string[]>;
+  /** GOAL2 H1 复审 #2-9: the loop's own page reads, for the answer's delivery rule. */
+  evidenceSink?: { texts: () => string[] };
   probeBlocker?: () => Promise<{
     reason: string;
     message: string;
@@ -476,8 +478,10 @@ export async function runUnifiedBrowserLoop(
   const readTexts: string[] = [];
   // 复审 #8: a price no kept read shows is only 「not read」 when no read has dropped out.
   let readsDropped = false;
+  const evidenceSink: { texts: () => string[] } = { texts: () => [] };
   const looped = await browserLoop({
     ...input,
+    evidenceSink,
     rescueState,
     execute: async (action) => {
       const result = await input.execute(action);
@@ -529,9 +533,9 @@ export async function runUnifiedBrowserLoop(
           plainAnswer(outcome.summary, isEnglishIntent(input.userIntent ?? input.intent)),
           outcome.summary,
         ),
-        // 复审 P0: the pages as the checks read them (a tool result is JSON).
-        readTexts.map((text) => observedPageText(text) || text),
-        { english: isEnglishIntent(intentText), manyItems: MANY_ITEMS_RE.test(intentText) },
+        // 复审 P0 / #2-9: the pages and the request exactly as the checks read them.
+        evidenceSink.texts(),
+        { english: isEnglishIntent(intentText), manyItems: MANY_ITEMS_RE.test(input.intent) },
       );
       return {
         ...outcome,
@@ -579,6 +583,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     },
   ];
   const pageEvidence: ObservedEvidence[] = [];
+  if (input.evidenceSink) input.evidenceSink.texts = () => pageEvidence.map((page) => page.text);
   // Tabs read successfully and their latest listed titles. Kept apart from
   // pageEvidence, which evicts old reads of long pages.
   const readTabs = new Set<string>();
@@ -852,8 +857,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
     }
     if (hit?.disposition === 'continue') {
       localNotices.add(hit.message);
-      const host = hostOf(input.currentPageUrl?.());
-      continuedWall = `${host ? (siteOf(host) ?? host) : ''}|${hit.message}`;
+      // GOAL2 H2 复审 #2-1: only the login popup itself, on this page (a comment box's own
+      // 「需登录」 notice is no stop to the page).
+      if (hit.message === LOGIN_POPUP_NOTICE)
+        continuedWall = pageKey(input.currentPageUrl?.() ?? '');
       return null;
     }
     return hit;
@@ -865,7 +872,8 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
    * if it still acts, the page is the user's.
    */
   let continuedWall: string | undefined;
-  const wallTries = new Map<string, number>();
+  /** The page the popup was last seen on after a try, and how many tries in a row it stayed. */
+  let wallTries: { page: string; tries: number; read: string } | null = null;
   let wallStalled: string | undefined;
   // FIX-45 (Deploy-45 core-03): the notice follows the answer, so it points up (「以上为…」); an
   // answer that already tells of the login prompt gets no second one.
@@ -1780,7 +1788,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 pageEvidence.map((page) => page.text),
                 {
                   english: isEnglishIntent(input.userIntent ?? input.intent),
-                  manyItems: MANY_ITEMS_RE.test(input.userIntent ?? input.intent),
+                  manyItems: MANY_ITEMS_RE.test(input.intent),
                 },
               );
               const again = assessCompletionFacts({
@@ -2765,15 +2773,25 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
       if (outcome.ok && input.probeBlocker) {
         continuedWall = undefined;
         const blocker = await checkBlocker();
+        // 复审 #2-1: a try after which the popup is gone, or the page moved, starts the count
+        // again; so does a read that shows something new.
+        if (!blocker && !continuedWall) wallTries = null;
         if (!blocker && continuedWall && WALL_TRY_TOOLS.has(action.tool)) {
-          const tries = (wallTries.get(continuedWall) ?? 0) + 1;
-          wallTries.set(continuedWall, tries);
+          const read = pageEvidence.at(-1)?.text.slice(0, 4000) ?? '';
+          const before: { page: string; tries: number; read: string } | null = wallTries;
+          const tries: number =
+            before && before.page === continuedWall && before.read === read ? before.tries + 1 : 1;
+          wallTries = { page: continuedWall, tries, read };
           if (tries >= 3 && !wallStalled && !concludeNow) {
             const host = hostOf(input.currentPageUrl?.());
             wallStalled = host ? rescueSiteName(input.currentPageUrl?.()) : '网站';
             concludeNow = true;
             concludedOtherwise = true;
             outcome.text += `\n同一个登录提示已经第 ${tries} 次挡在页面上，操作没有进展：不要再关闭、绕过它，也不要登录。下一轮直接 finish：已读到的公开内容照实写；拿不到的部分以「部分完成：」开头说明网站要求登录才能继续。`;
+            // 复审 #2-2: the rest of this turn waits; the next turn is the finish.
+            results.push(toolResult(call.id, outcome.text));
+            staleTurn = true;
+            continue;
           }
         }
         if (formLoginDetour) {

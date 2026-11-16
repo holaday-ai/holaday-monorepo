@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
 import type { UnifiedToolResult } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 
@@ -36,7 +37,7 @@ function scripted(calls: Array<{ name: string; input: Record<string, unknown> }>
   return { adapter, seen };
 }
 
-const PROMPT = '页面弹出了登录提示（未登录、未输入任何信息），以下为页面公开内容。';
+const PROMPT = LOGIN_POPUP_NOTICE;
 const tree = [
   '- textbox "起点" [ref=e3]',
   '- textbox "终点" [ref=e4]',
@@ -113,5 +114,42 @@ describe('H2 · the same login prompt after three tries ends the run, not 53 ste
     let shown = 0;
     const gone = await run([...open, click, click, click, click, done], () => ++shown % 2 === 0);
     expect(gone.seen).not.toContain('同一个登录提示已经');
+  });
+
+  it('复审 #2-1: a page that moves on, a new read, or a comment box notice starts no count', async () => {
+    const done = { name: 'finish', input: { status: 'failed', summary: '没有查到。' } };
+    // Search, open a result, open another: the address changes every click.
+    let n = 0;
+    const moving = await run(
+      [
+        ...open,
+        { name: 'click', input: { ref: 'e5' } },
+        { name: 'navigate', input: { url: 'https://www.amap.com/search?q=1' } },
+        { name: 'click', input: { ref: 'e5' } },
+        { name: 'navigate', input: { url: 'https://www.amap.com/place/2' } },
+        { name: 'click', input: { ref: 'e5' } },
+        done,
+      ],
+      () => ++n > 0,
+    );
+    expect(moving.seen).not.toContain('同一个登录提示已经');
+  });
+
+  it('复审 #2-2: when it triggers, the rest of that turn waits — the finish comes next', async () => {
+    const { outcome, seen } = await run([
+      ...open,
+      click,
+      click,
+      click,
+      {
+        name: 'finish',
+        input: {
+          status: 'completed',
+          summary: '部分完成：高德地图要求登录才能查路线，路线和用时没有查到。',
+        },
+      },
+    ]);
+    expect(seen).toContain('同一个登录提示已经第 3 次');
+    expect(outcome.status).toBe('completed');
   });
 });
