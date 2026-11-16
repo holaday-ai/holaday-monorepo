@@ -111,7 +111,13 @@ describe('the snapshot says which counter a bare number is', () => {
   });
   it('two marked counters with the same value, and a page number: no mark', async () => {
     const { tree } = await observe('/same');
-    expect(tree).not.toContain('[互动=');
+    // The bare 「10」s beside unlabelled icons get no mark (their value matches two kinds)…
+    expect(
+      tree.split('\n').filter((line) => /\[ref=/.test(line) && line.includes('[互动=')),
+    ).toEqual([]);
+    // …while GOAL2's page counters list each counter its own markup names (Codex review).
+    expect(tree).toContain('- 计数 [互动=点赞]: "10"');
+    expect(tree).toContain('- 计数 [互动=收藏]: "10"');
   });
   it("a counter's own label marks it; a labelled button keeps its name", async () => {
     const { tree } = await observe('/labelled');

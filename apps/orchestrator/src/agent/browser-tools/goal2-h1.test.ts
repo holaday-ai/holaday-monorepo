@@ -41,6 +41,8 @@ const XHS = `<!doctype html><meta charset="utf-8"><title>📍杭州｜西湖一�
       <span class="collect-wrapper"><svg></svg><span class="count">1827</span></span>
       <span class="chat-wrapper"><svg></svg><span class="count">24</span></span>
     </div></div></div></div></div>
+    <!-- Codex review: a preloaded copy kept in layout but not shown is not the note's. -->
+    <div class="preload" style="visibility:hidden"><span class="like-wrapper"><svg></svg><span class="count">9999</span></span></div>
   </div>
 </div>`;
 

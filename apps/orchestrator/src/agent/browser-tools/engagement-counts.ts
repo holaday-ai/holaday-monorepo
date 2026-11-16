@@ -222,7 +222,7 @@ export async function markEngagementCounts(frame: Frame, tree: string): Promise<
 /**
  * GOAL2 H1: in-page, every counter the page's own markup names (its icon's class, its aria-label,
  * its data-e2e), for the page's own item only — a comment's or a related card's counters are left
- * out, and a value two kinds both claim tells nothing (FIX-29 `/same`). A heavy page's snapshot
+ * out; each is named by its own markup (no value matching, unlike FIX-29's fallback). A heavy page's snapshot
  * reaches its 40-count cap inside the comments before the note's own bar (G6 r5 xhs-read: the
  * note's 1584 was never marked, a comment's 「1」 was); this reads the whole document once.
  * No named local functions (see counterKind).
@@ -294,7 +294,20 @@ function documentCounters({
       }
     if (!mine) continue;
     const value = raw.replace(/\s+/g, '');
-    const shown = element.getClientRects().length > 0;
+    // Codex review: `visibility: hidden` / `opacity: 0` keep their boxes but are not shown.
+    const check = (
+      element as Element & {
+        checkVisibility?: (options: Record<string, boolean>) => boolean;
+      }
+    ).checkVisibility;
+    const shown = check
+      ? check.call(element, {
+          checkOpacity: true,
+          checkVisibilityCSS: true,
+          opacityProperty: true,
+          visibilityProperty: true,
+        })
+      : element.getClientRects().length > 0;
     if (
       !found.some((entry) => entry.kind === kind && entry.value === value && entry.shown === shown)
     )
@@ -309,9 +322,9 @@ function documentCounters({
   for (const entry of kept)
     if (!unique.some((one) => one.kind === entry.kind && one.value === entry.value))
       unique.push({ kind: entry.kind, value: entry.value });
-  return unique.filter(
-    (entry) => !unique.some((two) => two.value === entry.value && two.kind !== entry.kind),
-  );
+  // Codex review: each entry is named by its own markup, so two kinds with the same value
+  // (点赞 20, 评论 20) are both kept.
+  return unique;
 }
 
 export const PAGE_COUNTERS_HEAD =
