@@ -29,6 +29,7 @@ import {
 import { navigateBrowserHome } from '../../browser-home/browser-home-nav.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
 import { PoolCapacityError } from '../../browser-pool/browser-pool.js';
+import { getVaultRuntime } from '../../browser-session-vault/runtime.js';
 import { instanceBrowserCapabilities } from '../../config/browser-capabilities.js';
 import { env as appEnv } from '../../config/env.js';
 import { users } from '../../db/schema/users.js';
@@ -61,16 +62,75 @@ async function regionFor(ctx: Context & { userId: string }): Promise<BrowserHome
 
 /** P2-4: the /browser page instance (one id per mount) — see BrowserHomeSessions.leave. */
 const viewerInput = z.object({ viewerId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) }).optional();
+const openInput = z
+  .object({
+    viewerId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{8,64}$/)
+      .optional(),
+    profileId: z.string().uuid().optional(),
+  })
+  .strict()
+  .optional();
+function homeProfiles() {
+  const runtime = getVaultRuntime();
+  return appEnv.BROWSER_HOME_PROFILE_V1 && runtime?.cloudHomeEnabled ? runtime : null;
+}
 
 export const browserHomeRouter = router({
-  open: browserHomeProcedure.input(viewerInput).mutation(async ({ ctx, input }) => {
+  profileOptions: browserHomeProcedure.query(async ({ ctx }) => {
+    const runtime = homeProfiles();
+    if (!runtime) return { enabled: false, profiles: [] };
+    const grants = await runtime.vault.list(ctx.userId);
+    return {
+      enabled: true,
+      profiles: grants
+        .filter((g) => g.sessionAccess === 'cloud-home-v1')
+        .map((g) => ({
+          id: g.id,
+          origin: g.origin,
+          status: g.status,
+          expiresAt: g.expiresAt,
+        })),
+    };
+  }),
+  open: browserHomeProcedure.input(openInput).mutation(async ({ ctx, input }) => {
     const pool = requirePool(ctx);
+    let profile: { id: string; origin: string } | undefined;
+    if (input?.profileId) {
+      const runtime = homeProfiles();
+      if (!runtime)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '保存的云端状态暂不可用。' });
+      const grant = (await runtime.vault.list(ctx.userId)).find(
+        (g) =>
+          g.id === input.profileId &&
+          g.sessionAccess === 'cloud-home-v1' &&
+          g.status === 'connected',
+      );
+      if (!grant)
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '保存的站点状态已失效或不属于当前账号。',
+        });
+      profile = { id: grant.id, origin: grant.origin };
+    }
     try {
-      const opened = await browserHomeSessions.open(pool, ctx.userId, ctx.logger, input?.viewerId);
+      const opened = await browserHomeSessions.open(
+        pool,
+        ctx.userId,
+        ctx.logger,
+        input?.viewerId,
+        profile,
+      );
       const location = browserHomeSessions.locate(pool, ctx.userId);
       if (!location) throw new Error('Browser is not ready for reuse');
       return { ...opened, capabilities: instanceBrowserCapabilities(location.instance) };
     } catch (error) {
+      if (error instanceof Error && error.message === 'home_profile_switch_required')
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '当前个人浏览器仍在使用，请先结束当前会话再切换保存状态。',
+        });
       if (error instanceof PoolCapacityError) {
         throw new TRPCError({
           code: 'TOO_MANY_REQUESTS',

@@ -232,6 +232,7 @@ import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
+  storedBrowserHomeProfileId,
   storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
 import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
@@ -2085,8 +2086,8 @@ export const tasksRouter = router({
               executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
             const browserRoute: UserBrowserRoute =
               executionMode === 'browser' && input.browserHomeSession
-                ? // BROWSER-HOME-1: the person's own (anonymous) cloud browser, as it is.
-                  { lane: 'cloud', reason: 'public_site', sessionPolicy: 'anonymous' }
+                ? // The explicitly selected personal workspace may already carry manual login.
+                  { lane: 'cloud', reason: 'personal_home', sessionPolicy: 'personal_home' }
                 : executionMode === 'browser'
                   ? decideUserBrowserRoute({
                       enabled: taskBrowserCapabilities.routingV2,
@@ -2102,13 +2103,16 @@ export const tasksRouter = router({
                   : { lane: 'legacy' as const, reason: 'flag_off' as const };
             // D17-P1-01 — which sessions this task's browser may load, fixed here by the
             // server and stored on the task. Only a task that needs the user's own data
-            // may load a vault session (and not after a public choice or on a logged-out
-            // route); everything else is `anonymous`. Nothing later can widen it.
+            // may load a readonly vault session (and not after a public choice or on a logged-out
+            // route). Explicit Home tasks preserve their personal workspace scope.
             const taskSessionPolicy: BrowserSessionPolicy = deriveTaskSessionPolicy({
               identityRequired: identityDecision?.required === true,
               publicCloudRequested: input.browserPreference === 'cloud-public',
               route: browserRoute,
             });
+            const taskCloudProfileId = input.browserHomeSession
+              ? browserHomeClaim?.instance.cloudProfileId
+              : undefined;
             if (scrapeBrowserRetry && browserRoute.lane === 'awaiting_user')
               throw new TRPCError({
                 code: 'PRECONDITION_FAILED',
@@ -5674,7 +5678,11 @@ export const tasksRouter = router({
                   roleId: dispatchRoleId,
                   opusUsed: opusActuallyConsumed,
                   executionMode: 'browser',
-                  sourceContext: { browserSessionPolicy: taskSessionPolicy },
+                  sourceContext: {
+                    browserSessionPolicy: taskSessionPolicy,
+                    ...(input.browserHomeSession ? { browserHomeSession: true } : {}),
+                    ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
+                  },
                 },
               );
 
@@ -5698,6 +5706,7 @@ export const tasksRouter = router({
                         targetUrl: browserTargetUrl,
                         capabilities: taskBrowserCapabilities,
                         sessionPolicy: taskSessionPolicy,
+                        ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                       }));
                     executor = instance.executor;
                     allocatedPool = true;
@@ -5963,6 +5972,8 @@ export const tasksRouter = router({
               const browserSourceContext = {
                 ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                 browserSessionPolicy: taskSessionPolicy,
+                ...(input.browserHomeSession ? { browserHomeSession: true } : {}),
+                ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                 ...(input.browserHomeSession && browserQwenEndpoint
                   ? { qwenEndpoint: browserQwenEndpoint }
                   : {}),
@@ -6139,6 +6150,7 @@ export const tasksRouter = router({
                           targetUrl: browserTargetUrl,
                           capabilities: taskBrowserCapabilities,
                           sessionPolicy: taskSessionPolicy,
+                          ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                         });
                     allocatedForContinuation = adopted == null;
                     const continuation = resolveBrowserFollowUpContinuation({
@@ -12271,6 +12283,13 @@ export const tasksRouter = router({
             message: '这个任务没有可恢复的真实浏览器页面',
           });
         }
+        const sessionPolicy = storedBrowserSessionPolicy(taskRow);
+        const cloudProfileId = storedBrowserHomeProfileId(taskRow);
+        if (sessionPolicy === 'personal_home' && !cloudProfileId)
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: '原个人浏览器会话已结束，请从云浏览器入口重新打开并核对登录状态。',
+          });
 
         const decision = await defaultBrowserNetworkPolicy.check(target.url);
         if (!decision.allowed) {
@@ -12284,9 +12303,10 @@ export const tasksRouter = router({
         try {
           const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
             targetUrl: target.url,
-            // Fail closed: only a task stored as vault_allowed may reload a session;
-            // legacy rows and logged-out promises restore anonymously (D17-P1-02).
-            sessionPolicy: storedBrowserSessionPolicy(taskRow),
+            // Restore only the stored policy and explicit personal profile. Legacy
+            // rows and their logged-out promises stay anonymous (D17-P1-02).
+            sessionPolicy,
+            ...(cloudProfileId ? { cloudProfileId } : {}),
           });
           allocated = true;
           await instance.executor.resetPageForTask();

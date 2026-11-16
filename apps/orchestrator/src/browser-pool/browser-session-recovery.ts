@@ -81,7 +81,9 @@ const LOGGED_OUT_PROMISE = /无登录态|看不到你的个人信息|无法读�
  * an identity task, i.e. the server stored `browserSessionPolicy: 'vault_allowed'`
  * in its immutable sourceContext at creation (PR #271 onward).
  *
- * Everything else is `anonymous`:
+ * A stored personal_home remains personal; only a valid server-recorded profile
+ * ID can restore it. An ended unsaved Home must not silently become anonymous.
+ * All other policies are `anonymous`:
  * - rows created before the policy existed (sourceContext null or without the
  *   field). No older record stores the route that would prove identity: Deploy-16
  *   persisted only `browserLimitation` for logged-out routes and never the
@@ -89,15 +91,20 @@ const LOGGED_OUT_PROMISE = /无登录态|看不到你的个人信息|无法读�
  * - an unknown or malformed value;
  * - any record whose result promised a logged-out run (`metadata.browserLimitation`
  *   saying 无登录态 / 看不到你的个人信息 / 无法读取个人信息), even if the
- *   sourceContext says otherwise.
+ *   sourceContext says vault_allowed. This legacy limitation cannot reinterpret
+ *   an explicitly personal Home as public.
  * Old business records are read as they are; nothing is migrated or rewritten.
  * A legacy identity task therefore restores without its saved login; the user
  * re-runs it to use the session again.
  */
 export function storedBrowserSessionPolicy(
   task: { sourceContext?: unknown; result?: unknown } | null | undefined,
-): 'anonymous' | 'vault_allowed' {
+): 'anonymous' | 'vault_allowed' | 'personal_home' {
   if (!task || typeof task !== 'object') return 'anonymous';
+  const source =
+    task.sourceContext && typeof task.sourceContext === 'object' ? task.sourceContext : null;
+  const value = (source as { browserSessionPolicy?: unknown } | null)?.browserSessionPolicy;
+  if (value === 'personal_home') return 'personal_home';
   const result = task.result && typeof task.result === 'object' ? task.result : null;
   const metadata = (result as { metadata?: unknown } | null)?.metadata;
   const limitation =
@@ -105,8 +112,18 @@ export function storedBrowserSessionPolicy(
       ? (metadata as { browserLimitation?: unknown }).browserLimitation
       : undefined;
   if (typeof limitation === 'string' && LOGGED_OUT_PROMISE.test(limitation)) return 'anonymous';
-  const source =
-    task.sourceContext && typeof task.sourceContext === 'object' ? task.sourceContext : null;
-  const value = (source as { browserSessionPolicy?: unknown } | null)?.browserSessionPolicy;
   return value === 'vault_allowed' ? 'vault_allowed' : 'anonymous';
+}
+
+/** Only a server-recorded personal Home may name a saved identity for restoration. */
+export function storedBrowserHomeProfileId(task: { sourceContext?: unknown; result?: unknown }):
+  | string
+  | undefined {
+  if (storedBrowserSessionPolicy(task) !== 'personal_home') return undefined;
+  const source = task.sourceContext as { cloudProfileId?: unknown } | null;
+  const id = source?.cloudProfileId;
+  return typeof id === 'string' &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)
+    ? id
+    : undefined;
 }

@@ -2,8 +2,9 @@
  * BROWSER-HOME-1 — a user's cloud browser that belongs to no task.
  *
  * One per user, keyed `bhs_<userId>` in the BrowserPool (no tasks row). It is allocated like a
- * task browser — same Brave pool, network policy and egress proxy, anonymous session (no login
- * state is kept) — but idles out after 15 minutes instead of the pool-wide default. The last
+ * task browser — same Brave pool, network policy and egress proxy, personal identity scope —
+ * but idles out after 15 minutes instead of the pool-wide default. No saved identity is loaded
+ * unless the server explicitly selects an owned profile. The last
  * address it showed (the URL only, never page content) is kept in memory so a reopened session
  * goes back there.
  */
@@ -95,6 +96,11 @@ export interface BrowserHomeOpenResult {
   sessionId: string;
   /** The page the browser shows; null = a blank page (the SPA shows the HOLA DAY home). */
   url: string | null;
+  cloudProfileId?: string;
+}
+export interface BrowserHomeProfileSelection {
+  id: string;
+  origin: string;
 }
 
 /** What leave() did: other pages still use it, its release was scheduled, or none was open. */
@@ -102,7 +108,13 @@ export type BrowserHomeLeaveResult = 'kept' | 'scheduled' | 'none';
 
 export class BrowserHomeSessions {
   private readonly lastUrls = new Map<string, string>();
-  private readonly opening = new Map<string, Promise<BrowserHomeOpenResult>>();
+  private readonly opening = new Map<
+    string,
+    {
+      profileId: string | null;
+      promise: Promise<BrowserHomeOpenResult>;
+    }
+  >();
   private readonly watched = new WeakSet<object>();
   private readonly taskClaims = new Map<string, { token: object; at: number }>();
   /**
@@ -217,17 +229,20 @@ export class BrowserHomeSessions {
     userId: string,
     logger: Logger,
     viewerId?: string,
+    profile?: BrowserHomeProfileSelection,
   ): Promise<BrowserHomeOpenResult> {
     this.cancelPendingRelease(userId);
     const pending = this.opening.get(userId);
+    if (pending && profile && pending.profileId !== profile.id)
+      throw new Error('home_profile_switch_required');
     // A fresh browser: pages recorded for an earlier one (gone by idle or a crash) do not count.
     if (!pending && !this.locate(pool, userId)) this.viewers.delete(userId);
     if (viewerId) this.addViewer(userId, viewerId);
-    if (pending) return pending;
-    const promise = this.openOnce(pool, userId, logger).finally(() => {
-      if (this.opening.get(userId) === promise) this.opening.delete(userId);
+    if (pending) return pending.promise;
+    const promise = this.openOnce(pool, userId, logger, profile).finally(() => {
+      if (this.opening.get(userId)?.promise === promise) this.opening.delete(userId);
     });
-    this.opening.set(userId, promise);
+    this.opening.set(userId, { promise, profileId: profile?.id ?? null });
     return promise;
   }
 
@@ -235,30 +250,43 @@ export class BrowserHomeSessions {
     pool: BrowserHomePool,
     userId: string,
     logger: Logger,
+    profile?: BrowserHomeProfileSelection,
   ): Promise<BrowserHomeOpenResult> {
     const sessionId = browserHomeSessionId(userId);
     const existing = this.locate(pool, userId);
     if (existing) {
+      if (profile && existing.instance.cloudProfileId !== profile.id)
+        throw new Error('home_profile_switch_required');
       pool.touch(existing.instance.taskId);
       // While a task holds it, the person's input already goes through the task's control.
       if (!existing.heldBy) openPersonControl(existing.instance);
       const url = await currentUrl(existing.instance);
       this.rememberUrl(userId, url);
-      return { sessionId, url: rememberable(url) ? url : null };
+      return {
+        sessionId,
+        url: rememberable(url) ? url : null,
+        ...(existing.instance.cloudProfileId
+          ? { cloudProfileId: existing.instance.cloudProfileId }
+          : {}),
+      };
     }
 
-    const restoreTo = this.lastUrl(userId);
+    const remembered = this.lastUrl(userId);
+    const restoreTo =
+      profile && (!remembered || new URL(remembered).origin !== profile.origin)
+        ? profile.origin
+        : remembered;
     const instance = await pool.allocate(sessionId, userId, undefined, {
       targetUrl: restoreTo,
-      // Login state is not kept for the home browser (a resident profile is later work).
-      sessionPolicy: 'anonymous',
+      sessionPolicy: 'personal_home',
+      ...(profile ? { cloudProfileId: profile.id } : {}),
     });
     pool.setIdleTimeout(sessionId, BROWSER_HOME_IDLE_TIMEOUT_MS);
     await this.watchNavigations(instance, userId);
     let url: string | null = null;
     if (restoreTo) url = await this.restore(instance, restoreTo, userId, logger);
     openPersonControl(instance);
-    return { sessionId, url };
+    return { sessionId, url, ...(profile ? { cloudProfileId: profile.id } : {}) };
   }
 
   private async restore(
@@ -383,7 +411,7 @@ export class BrowserHomeSessions {
       this.cancelPendingRelease(userId);
       this.viewers.delete(userId);
     }
-    await this.opening.get(userId)?.catch(() => {});
+    await this.opening.get(userId)?.promise.catch(() => {});
     const seen = this.locate(pool, userId);
     if (!seen) return false;
     this.rememberUrl(userId, await currentUrl(seen.instance));

@@ -11,7 +11,13 @@ import {
 function fixture() {
   const sessions = new BrowserHomeSessions();
   const fresh = () =>
-    ({ userId: 'alice', taskId: 'bhs_alice', status: 'ready', executor: {} }) as BrowserInstance;
+    ({
+      userId: 'alice',
+      taskId: 'bhs_alice',
+      status: 'ready',
+      sessionPolicy: 'personal_home',
+      executor: {},
+    }) as BrowserInstance;
   let current: BrowserInstance | null = fresh();
   const pool = {
     peek: (id: string) => (current?.taskId === id ? current : null),

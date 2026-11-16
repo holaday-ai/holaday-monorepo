@@ -379,7 +379,16 @@ export class BrowserPool {
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
       // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
-      if (sessionPolicyOf(session) === 'vault_allowed')
+      if (
+        sessionPolicyOf(session) === 'personal_home' &&
+        session?.cloudProfileId &&
+        !this.config.prepareSession
+      )
+        throw new Error('cloud_profile_runtime_required');
+      if (
+        sessionPolicyOf(session) === 'vault_allowed' ||
+        (sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId)
+      )
         await this.config.prepareSession?.(userId, record.executor, session);
       this.#checkBroker(record);
       const now = Date.now();
@@ -391,6 +400,9 @@ export class BrowserPool {
         executor: record.executor,
         capabilities: session?.capabilities,
         sessionPolicy: sessionPolicyOf(session),
+        ...(sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId
+          ? { cloudProfileId: session.cloudProfileId }
+          : {}),
         status: 'ready',
         createdAt: now,
         lastActiveAt: now,
@@ -841,7 +853,7 @@ export class BrowserPool {
   lendBrowserHome(
     userId: string,
     taskId: string,
-    /** The task's policy: it must match the browser's (a home browser is anonymous). */
+    /** The task's policy must match this personal browser, never a public anonymous task. */
     sessionPolicy: BrowserSessionPolicy,
   ): BrowserInstance | null {
     if (this.shuttingDown || !userId) return null;
@@ -1639,7 +1651,16 @@ export class BrowserPool {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
       // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
-      if (sessionPolicyOf(session) === 'vault_allowed')
+      if (
+        sessionPolicyOf(session) === 'personal_home' &&
+        session?.cloudProfileId &&
+        !this.config.prepareSession
+      )
+        throw new Error('cloud_profile_runtime_required');
+      if (
+        sessionPolicyOf(session) === 'vault_allowed' ||
+        (sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId)
+      )
         await this.config.prepareSession?.(userId, executor, session);
       assertActive();
       const now = Date.now();
@@ -1651,6 +1672,9 @@ export class BrowserPool {
         executor,
         capabilities: session?.capabilities,
         sessionPolicy: sessionPolicyOf(session),
+        ...(sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId
+          ? { cloudProfileId: session.cloudProfileId }
+          : {}),
         xvfbPid: xvfb?.pid ?? 0,
         bravePid: browserProcess.pid,
         x11vncPid: x11vnc?.pid ?? 0,

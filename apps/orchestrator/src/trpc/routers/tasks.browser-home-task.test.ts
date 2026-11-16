@@ -121,7 +121,7 @@ function makePool() {
 
 async function openHome(pool: BrowserPool, userId = USER): Promise<BrowserInstance> {
   const inst = await pool.allocate(`bhs_${userId}`, userId, undefined, {
-    sessionPolicy: 'anonymous',
+    sessionPolicy: 'personal_home',
   });
   pool.setIdleTimeout(`bhs_${userId}`, BROWSER_HOME_IDLE_TIMEOUT_MS);
   return inst;
@@ -300,6 +300,7 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
     async (kind) => {
       const { pool, spawn } = makePool();
       const home = await openHome(pool);
+      home.cloudProfileId = 'ee52fe57-1dd1-4562-828d-afcb84b0c96f';
       const seen: Array<Record<string, unknown>> = [];
       script.run = async (args) => {
         seen.push({
@@ -320,6 +321,13 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
 
       expect(result.status).toBe('executing');
       expect(result.executionMode).toBe('browser');
+      expect(vi.mocked(TaskRepository.prototype.insertTask).mock.calls[0]?.[1]).toMatchObject({
+        sourceContext: {
+          browserSessionPolicy: 'personal_home',
+          browserHomeSession: true,
+          cloudProfileId: home.cloudProfileId,
+        },
+      });
       await vi.waitFor(() => expect(pool.peek(`bhs_${USER}`)).toBe(home), { timeout: 10_000 });
 
       // While it ran: the task held the very same browser, kept its page, the stream followed it.

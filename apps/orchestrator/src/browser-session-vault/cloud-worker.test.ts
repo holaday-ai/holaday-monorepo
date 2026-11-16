@@ -12,11 +12,23 @@ let writes = 0;
 let messages = 0;
 let outsideOrigin: string;
 let outsideWrites = 0;
+let outsideMessages = 0;
+let outsideCookie: string | undefined;
 const outsideServer = createServer((req, res) => {
   if (req.method === 'POST') outsideWrites++;
-  res.setHeader('content-type', 'application/javascript');
-  res.end('window.fixtureAssetLoaded = true');
+  outsideCookie = req.headers.cookie;
+  res.setHeader('content-type', req.url === '/asset.js' ? 'application/javascript' : 'text/html');
+  res.end(
+    req.url === '/asset.js' ? 'window.fixtureAssetLoaded = true' : '<main>Other public site</main>',
+  );
 });
+const outsideWs = new WebSocketServer({ server: outsideServer });
+outsideWs.on('connection', (ws) =>
+  ws.on('message', (data) => {
+    outsideMessages++;
+    ws.send(`outside:${data}`);
+  }),
+);
 const server = createServer((req, res) => {
   res.setHeader('content-type', 'text/html');
   if (req.url === '/write' && req.method === 'POST') {
@@ -56,7 +68,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   for (const ws of wsServer.clients) ws.terminate();
+  for (const ws of outsideWs.clients) ws.terminate();
   await new Promise<void>((r) => wsServer.close(() => r()));
+  await new Promise<void>((r) => outsideWs.close(() => r()));
   await new Promise<void>((r) => server.close(() => r()));
   await new Promise<void>((r) => outsideServer.close(() => r()));
 });
@@ -131,6 +145,55 @@ async function until(check: () => Promise<boolean>, label: string) {
 }
 
 describe('real interactive cloud-profile context', () => {
+  it('lets a personal workspace use another public site without transferring the saved site identity', async () => {
+    const f = await fixture();
+    const home = await f.worker.open('alice', f.grant.id, undefined, {
+      access: 'cloud-home-v1',
+      workspace: true,
+    });
+    try {
+      await home.page.goto(origin);
+      expect(await home.page.evaluate(() => localStorage.getItem('account'))).toBe(
+        'SYNTHETIC_ACCOUNT',
+      );
+      await home.page.goto(outsideOrigin);
+      expect(outsideCookie).toBeUndefined();
+      expect(await home.context.cookies(outsideOrigin)).toEqual([]);
+      expect(await home.page.evaluate(() => localStorage.getItem('account'))).toBeNull();
+      const beforeWrites = outsideWrites;
+      expect(
+        await home.page.evaluate(async () => (await fetch('/write', { method: 'POST' })).ok),
+      ).toBe(true);
+      expect(outsideWrites).toBe(beforeWrites + 1);
+      const beforeMessages = outsideMessages;
+      expect(
+        await home.page.evaluate(
+          () =>
+            new Promise<string>((resolve) => {
+              const socket = new WebSocket(location.origin.replace('http:', 'ws:'));
+              const timer = setTimeout(() => {
+                socket.close();
+                resolve('timeout');
+              }, 1000);
+              socket.onopen = () => socket.send('EDIT');
+              socket.onmessage = (event) => {
+                clearTimeout(timer);
+                socket.close();
+                resolve(String(event.data));
+              };
+            }),
+        ),
+      ).toBe('outside:EDIT');
+      expect(outsideMessages).toBe(beforeMessages + 1);
+      await home.page.evaluate(() => localStorage.setItem('other-site', 'NOT_IN_SEED_GRANT'));
+      await home.close();
+      const restored = await f.vault.checkout('alice', f.grant.id, { access: 'cloud-home-v1' });
+      expect(restored.state.storage).toEqual([{ name: 'account', value: 'SYNTHETIC_ACCOUNT' }]);
+      await f.vault.release('alice', f.grant.id, restored);
+    } finally {
+      await home.close(false);
+    }
+  });
   it('restores owned state, actually writes and exchanges WS messages, then closes on revoke', async () => {
     const f = await fixture();
     await expect(f.worker.open('alice', f.grant.id)).rejects.toThrow('scope_denied');

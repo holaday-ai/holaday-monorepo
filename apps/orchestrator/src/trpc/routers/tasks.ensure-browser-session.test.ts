@@ -97,3 +97,32 @@ it.each([
     }),
   ]);
 });
+
+it.each([undefined, '', 'not-a-profile-id'])(
+  'refuses an ended personal Home without a valid saved profile (%s)',
+  async (cloudProfileId) => {
+    const { call, sessions } = caller(
+      row({}, { browserSessionPolicy: 'personal_home', cloudProfileId }),
+    );
+    await expect(call()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(sessions).toEqual([]);
+  },
+);
+
+it('restores only the server-recorded personal profile and never silently allocates anonymously', async () => {
+  vi.spyOn(defaultBrowserNetworkPolicy, 'check').mockResolvedValue({ allowed: true } as never);
+  const cloudProfileId = 'ee52fe57-1dd1-4562-828d-afcb84b0c96f';
+  const { call, sessions } = caller(
+    row(
+      { browserLimitation: LEGACY_PUBLIC_LIMITATION },
+      {
+        browserSessionPolicy: 'personal_home',
+        cloudProfileId,
+      },
+    ),
+  );
+  await expect(call()).resolves.toMatchObject({ status: 'ready', restored: true });
+  expect(sessions).toEqual([
+    expect.objectContaining({ sessionPolicy: 'personal_home', cloudProfileId }),
+  ]);
+});

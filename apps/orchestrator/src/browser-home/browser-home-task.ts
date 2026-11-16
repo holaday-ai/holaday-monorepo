@@ -127,7 +127,8 @@ export async function lendBrowserHomeToTask(args: {
     );
     if (!current()) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
     if (!settled) throw new Error(BROWSER_HOME_TASK_COPY.personBusy);
-    const instance = args.pool.lendBrowserHome(args.userId, args.taskId, 'anonymous');
+    if (home.sessionPolicy !== 'personal_home') throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
+    const instance = args.pool.lendBrowserHome(args.userId, args.taskId, 'personal_home');
     if (instance !== home) throw new Error(BROWSER_HOME_TASK_COPY.lendFailed);
     return instance;
   } finally {

@@ -150,10 +150,10 @@ export interface UserBrowserRoute {
   /** Readable identity decision (which personal-data object matched, if any). */
   identityReason?: string;
   /**
-   * Set when the route promises a logged-out run ("无登录态" / "看不到你的个人
-   *信息"): the browser for this task must not load any user session.
+   * anonymous promises a logged-out run. personal_home explicitly uses the
+   * person's open workspace; a public-information task there is still personal.
    */
-  sessionPolicy?: 'anonymous';
+  sessionPolicy?: 'anonymous' | 'personal_home';
   question?: string;
   origin?: string;
   limitation?: string;
@@ -165,7 +165,8 @@ export interface UserBrowserRoute {
     | 'selection_required'
     | 'origin_grant_required'
     | 'selected'
-    | 'vault_session';
+    | 'vault_session'
+    | 'personal_home';
 }
 export function decideUserBrowserRoute(input: {
   enabled: boolean;
@@ -297,14 +298,19 @@ export function decideUserBrowserRoute(input: {
  * in FIX-INTENT-ROUTE-BROWSER): only a task that reads or acts on the user's
  * own data may load a vault session, and never after an explicit public-cloud
  * choice or on a route that promised a logged-out run. Public and uncertain
- * tasks (search, public pages, forms on test sites…) are always `anonymous`.
+ * tasks (search, public pages, forms on test sites…) otherwise use `anonymous`.
+ * Explicitly using one's personal Home preserves that personal identity scope,
+ * even for a public lookup. A contradictory public-cloud request is rejected at admission.
  */
 export function deriveTaskSessionPolicy(input: {
   identityRequired: boolean;
   publicCloudRequested: boolean;
-  route: { sessionPolicy?: 'anonymous' } | { lane: string; reason: string };
-}): 'anonymous' | 'vault_allowed' {
-  if (!input.identityRequired || input.publicCloudRequested) return 'anonymous';
+  route: { sessionPolicy?: 'anonymous' | 'personal_home' } | { lane: string; reason: string };
+}): 'anonymous' | 'vault_allowed' | 'personal_home' {
+  if (input.publicCloudRequested) return 'anonymous';
+  if ('sessionPolicy' in input.route && input.route.sessionPolicy === 'personal_home')
+    return 'personal_home';
+  if (!input.identityRequired) return 'anonymous';
   if ('sessionPolicy' in input.route && input.route.sessionPolicy === 'anonymous')
     return 'anonymous';
   return 'vault_allowed';

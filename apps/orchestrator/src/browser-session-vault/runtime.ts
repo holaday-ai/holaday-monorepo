@@ -1,4 +1,5 @@
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
+import type { BrowserSessionTarget } from '../browser-pool/types.js';
 import { logger } from '../config/logger.js';
 import type { DB } from '../db/client.js';
 import { type KeyProvider, assertVaultConfiguration } from './crypto.js';
@@ -7,16 +8,17 @@ import { SessionVault, VaultError, type VaultStore } from './vault.js';
 import { type ContextFactory, VaultBrowserWorker, type VaultTask } from './worker.js';
 
 export interface VaultRuntime {
+  readonly cloudHomeEnabled: boolean;
   vault: SessionVault;
   worker: VaultBrowserWorker;
   /**
-   * Only a task whose target site is covered by a connected grant gets the
-   * vault context; every other task (no target, other site) is untouched.
+   * A legacy identity task may load a matching readonly grant. A personal Home
+   * loads only its explicitly selected owned interactive profile; no implicit match.
    */
   prepare(
     userId: string,
     executor: PlaywrightExecutor,
-    session?: { targetUrl?: string | null; sessionPolicy?: 'anonymous' | 'vault_allowed' },
+    session?: BrowserSessionTarget,
   ): Promise<void>;
   sweep(): Promise<void>;
   finish(executor: PlaywrightExecutor): Promise<void>;
@@ -76,6 +78,7 @@ export function createVaultRuntime(options: {
   });
   const tasks = new WeakMap<PlaywrightExecutor, VaultTask>();
   return {
+    cloudHomeEnabled: options.cloudHomeEnabled === true,
     vault,
     worker,
     async sweep() {
@@ -90,18 +93,23 @@ export function createVaultRuntime(options: {
       }
     },
     async prepare(userId, executor, session) {
-      // Fail closed: only a task the server derived as `vault_allowed` may load a
-      // grant. An anonymous ("公开云端") task never matches or opens one.
-      if (session?.sessionPolicy !== 'vault_allowed') return;
-      const targetUrl = session.targetUrl;
-      if (!targetUrl) return;
-      const grant = await vault.match(userId, targetUrl);
-      if (!grant) return;
+      // Anonymous ("公开云端") tasks never match or open a grant. Personal Home
+      // uses an explicit owned profile, never the legacy target-site matcher.
+      const personal = session?.sessionPolicy === 'personal_home';
+      if (personal && !session.cloudProfileId) return;
+      if (!personal && session?.sessionPolicy !== 'vault_allowed') return;
+      const grantId = personal
+        ? session.cloudProfileId
+        : session.targetUrl
+          ? (await vault.match(userId, session.targetUrl))?.id
+          : undefined;
+      if (!grantId) return;
       const task = await worker.open(
         userId,
-        grant.id,
+        grantId,
         (config) => executor.createSessionVaultContext(config),
         {
+          ...(personal ? { access: 'cloud-home-v1' as const, workspace: true } : {}),
           // Revoked or unverifiable: the task parks for the user instead of continuing.
           onInterrupted: (reason) => {
             executor.markSessionInterrupted(reason);

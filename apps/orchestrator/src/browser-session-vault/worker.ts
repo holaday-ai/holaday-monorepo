@@ -106,9 +106,10 @@ export class VaultBrowserWorker {
     context: BrowserContext,
     task?: Checkout,
     onInterrupted?: (reason: string) => void,
-    options?: { interactive: boolean; settled: () => Promise<void> | null },
+    options?: { interactive: boolean; workspace?: boolean; settled: () => Promise<void> | null },
   ) {
     const interactive = options?.interactive === true && grant.sessionAccess === 'cloud-home-v1';
+    const workspace = interactive && options?.workspace === true;
     const scope = grant.cookieDomains;
     const pollMs = this.options.statusPollMs ?? STATUS_POLL_MS;
     const timeoutMs = this.options.statusTimeoutMs ?? STATUS_TIMEOUT_MS;
@@ -186,9 +187,10 @@ export class VaultBrowserWorker {
           (!interactive && !['GET', 'HEAD'].includes(req.method())) ||
           !(
             url.protocol === 'https:' ||
-            (url.protocol === 'http:' && grant.origin.startsWith('http:'))
+            (url.protocol === 'http:' && (workspace || grant.origin.startsWith('http:')))
           ) ||
           !(
+            workspace ||
             hostInScope(url.hostname, scope) ||
             (interactive &&
               ['GET', 'HEAD'].includes(req.method()) &&
@@ -205,8 +207,8 @@ export class VaultBrowserWorker {
         await route.abort('blockedbyclient').catch(() => {});
       }
     });
-    // Legacy grants remain read-only. An explicit interactive grant may connect only within its
-    // site scope; every frame rechecks liveness, so an already-open socket cannot bypass revoke.
+    // Legacy grants remain read-only. Interactive site contexts stay scoped; only a trusted
+    // personal workspace may browse other public sites. Every WS frame checks liveness.
     await context.routeWebSocket('**/*', async (socket) => {
       let peer: ReturnType<typeof socket.connectToServer> | undefined;
       const close = async () => {
@@ -221,8 +223,8 @@ export class VaultBrowserWorker {
           !['ws:', 'wss:'].includes(url.protocol) ||
           url.username ||
           url.password ||
-          !hostInScope(url.hostname, scope) ||
-          (url.protocol === 'ws:' && !grant.origin.startsWith('http:'))
+          (!workspace && !hostInScope(url.hostname, scope)) ||
+          (url.protocol === 'ws:' && !workspace && !grant.origin.startsWith('http:'))
         )
           return await close();
         url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
@@ -382,6 +384,8 @@ export class VaultBrowserWorker {
     options: {
       write?: boolean;
       access?: 'cloud-home-v1';
+      /** Server-owned personal workspace only; saved state remains site-scoped. */
+      workspace?: boolean;
       onInterrupted?: (reason: string) => void;
     } = {},
   ): Promise<VaultTask> {
@@ -406,7 +410,7 @@ export class VaultBrowserWorker {
           interrupted = reason;
           options.onInterrupted?.(reason);
         },
-        { interactive, settled: () => flushing },
+        { interactive, workspace: options.workspace, settled: () => flushing },
       );
       const stop = guard.stop;
       const page = await context.newPage();
