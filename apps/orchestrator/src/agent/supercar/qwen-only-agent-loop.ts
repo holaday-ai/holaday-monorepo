@@ -1,6 +1,7 @@
 import type { ValidatedBrowserTaskFile } from '../browser-tools/browser-task-files.js';
 import type { RunSupercarOptions, SupercarOutcome } from './agent-loop.js';
 import { runSupercarTask as runBrowserTask } from './agent-loop.js';
+export { validateExternalBrowserReply } from './agent-loop.js';
 
 export type {
   RunSupercarOptions,

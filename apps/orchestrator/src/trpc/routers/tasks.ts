@@ -91,6 +91,7 @@ import {
   supercarAbort,
   supercarHandoffToGenerate,
   supercarReply,
+  validateExternalBrowserReply,
 } from '../../agent/supercar/index.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import {
@@ -7548,6 +7549,7 @@ export const tasksRouter = router({
                     taskId,
                     intent: effectiveIntent,
                     userRequest: parentUserContext + input.intent,
+                    attachments: supercarArgs.attachments,
                     messagesAdapter: browserMessagesAdapter,
                     client: session.client,
                     control: session.control,
@@ -11383,6 +11385,18 @@ export const tasksRouter = router({
         // never moves.
         const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
         if (supercarHasHandle) {
+          try {
+            validateExternalBrowserReply(
+              input.taskId,
+              replyAttachmentBlocks,
+              replyKind === 'manual_data',
+            );
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '补充材料超过当前浏览器任务范围或预算，请缩小后重试；任务仍在等待。',
+            });
+          }
           try {
             const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
             const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);

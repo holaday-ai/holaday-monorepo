@@ -5,6 +5,7 @@ export {
   supercarHandoffToGenerate,
   supercarHandleOriginalIntent,
   hasParkedSupercarHandle,
+  validateExternalBrowserReply,
 } from './qwen-only-agent-loop.js';
 export type {
   SupercarOutcome,

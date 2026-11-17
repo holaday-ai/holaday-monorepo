@@ -81,7 +81,11 @@ import {
   HUMAN_ALSO_ACTED_NOTE,
 } from './browser-control.js';
 import { toBrowserPixels } from './browser-coordinates.js';
-import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
+import {
+  type BrowserModelResponse,
+  browserAttachmentBlocks,
+  createBrowserMessage,
+} from './browser-messages.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
 import {
   type Effort,
@@ -1171,9 +1175,24 @@ interface RunHandle {
    */
   pendingAttachmentBlocks: ReadonlyArray<{ type: string }> | null;
   replyAttachmentHistory: NonNullable<RunSupercarOptions['attachments']>;
+  validateReply?: (blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>) => void;
+  canHandoff?: () => boolean;
 }
 
 const handles = new Map<string, RunHandle>();
+
+/** Preflight external-lane materials before tasks.reply releases its DB wait. */
+export function validateExternalBrowserReply(
+  taskId: string,
+  blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  handoff = false,
+): void {
+  const handle = handles.get(taskId);
+  if (!handle?.validateReply) return;
+  if (!handle.resolveReply || (handoff && handle.canHandoff && !handle.canHandoff()))
+    throw new Error('Browser reply is not accepted in the current wait');
+  handle.validateReply(blocks);
+}
 
 /** Register a non-cloud browser lane with the existing task reply lifecycle. */
 export function createExternalBrowserPark(options: {
@@ -1183,7 +1202,9 @@ export function createExternalBrowserPark(options: {
   onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
   aborted: () => boolean;
   timeoutMs?: number;
+  attachments?: RunSupercarOptions['attachments'];
 }) {
+  let parkedKind: SupercarAwaitingKind | null = null;
   const handle: RunHandle = {
     resolveReply: null,
     abort: () => handle.resolveReply?.('__SUPERCAR_ABORT__'),
@@ -1191,6 +1212,15 @@ export function createExternalBrowserPark(options: {
     originalIntent: options.intent,
     pendingAttachmentBlocks: null,
     replyAttachmentHistory: [],
+    validateReply: (blocks) => {
+      browserAttachmentBlocks([
+        ...(options.attachments ?? []),
+        ...handle.replyAttachmentHistory,
+        ...blocks,
+      ]);
+    },
+    canHandoff: () =>
+      parkedKind !== null && ['clarification', 'login', 'captcha'].includes(parkedKind),
   };
   if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
   handles.set(options.taskId, handle);
@@ -1204,6 +1234,7 @@ export function createExternalBrowserPark(options: {
         resolve = r;
       });
       handle.resolveReply = resolve;
+      parkedKind = awaitingKind;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await options.onAwaitingUser?.({ question, awaitingKind, at: new Date(), currentUrl: '' });
@@ -1218,7 +1249,23 @@ export function createExternalBrowserPark(options: {
       } finally {
         if (timer) clearTimeout(timer);
         if (handle.resolveReply === resolve) handle.resolveReply = null;
+        parkedKind = null;
       }
+    },
+    takeReply() {
+      const attachments = [...(handle.pendingAttachmentBlocks ?? [])] as NonNullable<
+        RunSupercarOptions['attachments']
+      >;
+      handle.pendingAttachmentBlocks = null;
+      const handoff =
+        handle.handoffMessage === null
+          ? null
+          : {
+              message: handle.handoffMessage,
+              attachments: [...handle.replyAttachmentHistory],
+            };
+      handle.handoffMessage = null;
+      return { attachments, handoff };
     },
     close() {
       options.signal?.removeEventListener('abort', abort);
@@ -1245,6 +1292,11 @@ export function supercarReply(
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
+  try {
+    handle.validateReply?.(attachmentBlocks ?? []);
+  } catch {
+    return false;
+  }
   if (attachmentBlocks && attachmentBlocks.length > 0) {
     handle.pendingAttachmentBlocks = attachmentBlocks;
     handle.replyAttachmentHistory.push(...attachmentBlocks);
@@ -1285,6 +1337,12 @@ export function supercarHandoffToGenerate(
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
+  if (handle.canHandoff && !handle.canHandoff()) return false;
+  try {
+    handle.validateReply?.(attachmentBlocks ?? []);
+  } catch {
+    return false;
+  }
   handle.handoffMessage = message;
   if (attachmentBlocks?.length) handle.replyAttachmentHistory.push(...attachmentBlocks);
   const resolve = handle.resolveReply;
