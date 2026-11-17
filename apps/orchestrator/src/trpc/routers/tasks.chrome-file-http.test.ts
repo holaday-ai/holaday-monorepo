@@ -10,6 +10,7 @@ import express from 'express';
 import type { Connection } from 'mysql2/promise';
 import { type BrowserContext, type Page, type Worker, chromium } from 'playwright';
 import { afterAll, expect, it, vi } from 'vitest';
+import type { TableAggregate } from '../../agent/browser-tools/browser-task-table.js';
 import * as classifier from '../../agent/intent-classifier.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { signAccessToken } from '../../auth/jwt.js';
@@ -61,7 +62,10 @@ interface Bridge {
 const root = fileURLToPath(new URL('../../../../..', import.meta.url));
 const web = join(root, 'apps/web-workbench');
 const extension = join(root, 'apps/extension');
-const payload = Buffer.from('sku,qty\nFORMAL-HTTP-731,31\n');
+const payload = Buffer.from(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
+const expectedAnalysis = 'metric,value\nsum,1099.9\nrows,10001\n';
+const intent =
+  '从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我';
 const hash = (buffer: Uint8Array) => createHash('sha256').update(buffer).digest('hex');
 const originalEnv = { ...env };
 let context: BrowserContext | undefined;
@@ -93,7 +97,7 @@ afterAll(async () => {
   reloadFeatureFlagsForTest();
 });
 
-it('creates an independent plugin file task over authenticated HTTP and downloads its exact bytes from the rendered Workbench result', async () => {
+it('exports, reads and fully analyzes a plugin report over authenticated HTTP and delivers both files through Workbench', async () => {
   temp = await realpath(await mkdtemp(join(tmpdir(), 'ba-formal-chrome-file-')));
   const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR ?? join(temp, 'artifacts');
   await mkdir(artifacts, { recursive: true });
@@ -245,6 +249,8 @@ it('creates an independent plugin file task over authenticated HTTP and download
     });
   vi.spyOn(extensionWs, 'broadcastToUser').mockReturnValue(0);
   const modelRequests: string[] = [];
+  let analysis: TableAggregate | undefined;
+  let originalFileId: string | undefined;
   const metadata = {
     provider: 'alibaba-model-studio',
     model: 'formal-chrome-file-fixture',
@@ -259,6 +265,79 @@ it('creates an independent plugin file task over authenticated HTTP and download
       modelRequests.push(JSON.stringify(request));
       const first = modelRequests.length === 1;
       expect(request.tools?.some((tool) => tool.name === 'browser_download_file')).toBe(true);
+      const turn = modelRequests.length;
+      const toolResults = request.messages
+        .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+        .flatMap((block) =>
+          block.type === 'tool_result' && typeof block.content === 'string'
+            ? [JSON.parse(block.content)]
+            : [],
+        );
+      let name = 'browser_download_file';
+      let input: Record<string, unknown> = {
+        selector: {
+          description: 'Export report',
+          strategies: [{ kind: 'role', role: 'link', name: 'Export report' }],
+          selfHeal: false,
+        },
+      };
+      if (!first) {
+        expect(request.tools?.map((tool) => tool.name)).toEqual(
+          expect.arrayContaining(['read_task_file', 'analyze_task_table', 'create_file']),
+        );
+        originalFileId ??= String(
+          fixture.records.find((file) => file.filename === 'report.csv')!.externalId,
+        );
+        if (turn === 2) {
+          name = 'read_task_file';
+          input = { fileId: originalFileId };
+        } else if (turn === 3) {
+          const read = toolResults.at(-1)!;
+          expect(read).toMatchObject({
+            ok: true,
+            fileId: originalFileId,
+            coverage: { complete: false },
+          });
+          expect(read.text).toContain('channel,amount');
+          name = 'analyze_task_table';
+          input = {
+            fileId: originalFileId,
+            mode: 'aggregate',
+            metrics: [{ op: 'sum', column: 'B' }, { op: 'count_rows' }],
+          };
+        } else if (turn === 4) {
+          analysis = toolResults.at(-1) as TableAggregate;
+          expect(analysis).toMatchObject({
+            complete: true,
+            scope: { scannedRows: 10001, matchedRows: 10001 },
+          });
+          expect(analysis.overall.map((metric) => metric.value)).toEqual(['1099.9', '10001']);
+          name = 'create_file';
+          input = {
+            filename: 'analysis.csv',
+            format: 'csv',
+            content: `metric,value\nsum,${analysis.overall[0]!.value}\nrows,${analysis.overall[1]!.value}\n`,
+          };
+        } else {
+          expect(turn).toBe(5);
+          expect(toolResults.at(-1)).toMatchObject({
+            ok: true,
+            file: { filename: 'analysis.csv' },
+          });
+          name = 'browser_finish';
+          input = {
+            status: 'completed',
+            summary: '已保存原报表，完整统计并生成分析文件。',
+            evidenceText: 'Export report',
+            fields: analysis!.overall.map((metric) => ({
+              name: metric.name,
+              value: metric.value,
+              fileId: originalFileId,
+              tableFactId: metric.id,
+            })),
+          };
+        }
+      }
       return {
         id: `formal-${modelRequests.length}`,
         metadata,
@@ -267,20 +346,8 @@ it('creates an independent plugin file task over authenticated HTTP and download
           {
             type: 'tool_use',
             id: `file-${modelRequests.length}`,
-            name: first ? 'browser_download_file' : 'browser_finish',
-            input: first
-              ? {
-                  selector: {
-                    description: 'Export report',
-                    strategies: [{ kind: 'role', role: 'link', name: 'Export report' }],
-                    selfHeal: false,
-                  },
-                }
-              : {
-                  status: 'completed',
-                  summary: '已保存网站原始 report.csv 文件。',
-                  evidenceText: 'Export report',
-                },
+            name,
+            input,
           },
         ],
         usage: {
@@ -310,6 +377,7 @@ it('creates an independent plugin file task over authenticated HTTP and download
     res.json({
       taskId: fixture.taskRecords[0]!.externalId,
       status: result?.status,
+      intent,
       resultText: result?.summary,
       tickCount: 2,
     }),
@@ -406,7 +474,7 @@ it('creates an independent plugin file task over authenticated HTTP and download
   );
   await writeFile(
     join(temp, 'entry.tsx'),
-    `import React from 'react';import {createRoot} from 'react-dom/client';import {TaskStream} from '${web}/src/components/TaskStream';import {ToastProvider} from '${web}/src/components/ui/toast';import '${web}/src/index.css';import '${web}/src/styles/holaday-ui.css';import '${web}/src/styles/approved-ui.css';const data=await (await fetch('/candidate/result')).json();createRoot(document.getElementById('root')).render(<ToastProvider><main className="holaday-shell mx-auto min-h-screen max-w-3xl bg-background p-4"><TaskStream task={{...data,intent:'导出网页原始文件',title:null,browserSource:'local-chrome',createdAt:new Date()}} /></main></ToastProvider>);`,
+    `import React from 'react';import {createRoot} from 'react-dom/client';import {TaskStream} from '${web}/src/components/TaskStream';import {ToastProvider} from '${web}/src/components/ui/toast';import '${web}/src/index.css';import '${web}/src/styles/holaday-ui.css';import '${web}/src/styles/approved-ui.css';const data=await (await fetch('/candidate/result')).json();createRoot(document.getElementById('root')).render(<ToastProvider><main className="holaday-shell mx-auto min-h-screen max-w-3xl bg-background p-4"><TaskStream task={{...data,title:null,browserSource:'local-chrome',createdAt:new Date()}} /></main></ToastProvider>);`,
   );
   const uiConfig = join(temp, 'vite.config.mjs');
   await writeFile(
@@ -503,7 +571,7 @@ it('creates an independent plugin file task over authenticated HTTP and download
   const created = await rpc(
     'tasks.create',
     {
-      intent: '从此网站导出 report.csv 原始文件并交给我',
+      intent,
       localChrome,
       mode: 'auto',
       expertMode: 'normal',
@@ -535,7 +603,12 @@ it('creates an independent plugin file task over authenticated HTTP and download
     site,
   );
   expect(modelRequests.join('\n')).not.toContain('PRIVATE-');
-  const file = fixture.records[0]!;
+  expect(modelRequests).toHaveLength(5);
+  const file = fixture.records.find((row) => row.filename === 'report.csv')!;
+  const generated = fixture.records.find((row) => row.filename === 'analysis.csv')!;
+  expect(generated).toBeDefined();
+  expect(fixture.records).toHaveLength(2);
+  expect(analysis?.complete).toBe(true);
   expect(file.browserSource).toMatchObject({
     kind: 'task_download',
     taskId: created.taskId,
@@ -558,31 +631,42 @@ it('creates an independent plugin file task over authenticated HTTP and download
     await ui.setViewportSize(viewport);
     await ui.goto(appOrigin);
     expect(await ui.title()).toBe('Holaday task result candidate');
-    const button = ui.getByRole('button', { name: /下载.*report\.csv/ });
-    await button.waitFor({ timeout: 10_000 });
-    expect(await ui.locator('body').innerText()).toContain('report.csv');
-    expect(await ui.locator('vite-error-overlay').count()).toBe(0);
-    const [download] = await Promise.all([ui.waitForEvent('download'), button.click()]);
-    const stream = await download.createReadStream();
-    if (!stream) throw new Error('No Workbench download stream');
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-    expect(Buffer.concat(chunks)).toEqual(payload);
-    await download.delete();
-    const bounds = await button.boundingBox();
-    expect(bounds).not.toBeNull();
-    expect(bounds!.x).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(await ui.locator('body').innerText()).toContain(intent);
+    const files = [];
+    for (const filename of ['report.csv', 'analysis.csv']) {
+      const button = ui.getByRole('button', {
+        name: new RegExp(`下载.*${filename.replace('.', '\\.')}`),
+      });
+      await button.waitFor({ timeout: 10_000 });
+      expect(await ui.locator('body').innerText()).toContain(filename);
+      expect(await ui.locator('vite-error-overlay').count()).toBe(0);
+      const [download] = await Promise.all([ui.waitForEvent('download'), button.click()]);
+      const stream = await download.createReadStream();
+      if (!stream) throw new Error('No Workbench download stream');
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      const received = Buffer.concat(chunks);
+      if (filename === 'report.csv') expect(received).toEqual(payload);
+      else
+        expect(
+          received
+            .toString()
+            .replace(/^\uFEFF/, '')
+            .replace(/\r\n/g, '\n'),
+        ).toBe(expectedAnalysis);
+      expect(download.suggestedFilename()).toBe(filename);
+      await download.delete();
+      const bounds = await button.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+      files.push({ filename, sha256: hash(received), sizeBytes: received.length, bounds });
+    }
     await ui.screenshot({
       path: join(artifacts, `workbench-result-${viewport.width}.png`),
       fullPage: true,
     });
-    views.push({
-      ...viewport,
-      filename: download.suggestedFilename(),
-      sha256: hash(Buffer.concat(chunks)),
-      bounds,
-    });
+    views.push({ ...viewport, files });
   }
   expect(errors).toEqual([]);
   expect(consoleErrors).toEqual([]);
@@ -603,6 +687,13 @@ it('creates an independent plugin file task over authenticated HTTP and download
         created,
         preparedTaskTab: { tabId: prepared.tabId, originalTabId: chosen.tabId },
         source: file.browserSource,
+        analyzedRows: analysis?.scope.scannedRows,
+        statistics: analysis?.overall.map(({ name, value }) => ({ name, value })),
+        analysisFile: {
+          fileId: generated.externalId,
+          filename: generated.filename,
+          sizeBytes: generated.sizeBytes,
+        },
         originalRequests: exported,
         sourceUserPageUnchanged: true,
         otherTabUnchanged: true,
