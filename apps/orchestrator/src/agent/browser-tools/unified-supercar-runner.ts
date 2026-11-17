@@ -31,6 +31,7 @@ import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
 import { persistTaskBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
+import { BrowserTaskFileReader } from './browser-task-file-reader.js';
 import type { ValidatedBrowserTaskFile } from './browser-task-files.js';
 import { browserToolError } from './browser-tool-error.js';
 import { createBrowserUploadGate } from './browser-upload-gate.js';
@@ -304,6 +305,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   const controller = new AbortController();
+  const fileReader =
+    env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+      ? new BrowserTaskFileReader(opts.browserTaskFiles)
+      : undefined;
+  let fileReadCorrection = false;
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
@@ -328,13 +334,21 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       : {}),
     ...(opts.onBrowserDownload
       ? {
-          saveDownload: (download) =>
-            persistTaskBrowserDownload(
+          saveDownload: async (download) => {
+            const receipt = await persistTaskBrowserDownload(
               download,
               opts.executor!,
               opts.onBrowserDownload!,
               opts.onBrowserDownloadSaved,
-            ),
+              fileReader ? opts.taskId : undefined,
+            );
+            if (fileReader) {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              await opts.browserTaskFiles!.admitDownloaded(receipt);
+            }
+            return receipt;
+          },
         }
       : {}),
     observationV2: capabilities.observationV2,
@@ -1041,6 +1055,19 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
+      ...(fileReader
+        ? {
+            readTaskFile: async (request: Parameters<BrowserTaskFileReader['read']>[0]) => {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              toolsUsed.add('read_task_file');
+              const read = await fileReader.read(request);
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              return read;
+            },
+          }
+        : {}),
       controlLabels: tools.controlLabels,
       probeBlocker: async () => {
         const blocker = await tools.blocker();
@@ -1250,12 +1277,36 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return result;
       },
       gateAction,
-      beforeFinish: async () => {
+      beforeFinish: async (answer) => {
         if (control && !control.canAgentAct()) return controlClosedStop();
         if (control && (control.humanBusy() || control.hasUnobservedHumanInput())) {
           await control.yieldToHuman();
           if (!control.canAgentAct()) return controlClosedStop();
           return humanActedSkip();
+        }
+        if (
+          fileReader &&
+          (!env.BROWSER_TASK_FILES_V1 ||
+            !(await opts.browserTaskFiles!.isActive().catch(() => false)))
+        )
+          return {
+            kind: 'stop',
+            outcome: {
+              status: 'failed',
+              reason: '任务文件功能、任务或账号已不可用，未继续交付分析。',
+              steps: 0,
+            },
+          };
+        if (
+          answer.status === 'completed' &&
+          fileReader?.incomplete() &&
+          !/^\s*(?:部分完成|partially completed)/i.test(answer.summary)
+        ) {
+          const message = `尚未读取完整的请求文件，不能宣告全量分析完成。请继续 read_task_file 的 nextOffset，或以“部分完成”开头明确说明只读取了哪些范围。\n${fileReader.coverageNote(isEnglishIntent(opts.intent))}`;
+          if (fileReadCorrection)
+            return { kind: 'stop', outcome: { status: 'failed', reason: message, steps: 0 } };
+          fileReadCorrection = true;
+          return { kind: 'skip', message };
         }
         return { kind: 'proceed' };
       },
@@ -1308,6 +1359,17 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     }
     switch (outcome.status) {
       case 'completed':
+        if (
+          fileReader &&
+          (!env.BROWSER_TASK_FILES_V1 ||
+            !(await opts.browserTaskFiles!.isActive().catch(() => false)))
+        )
+          return {
+            status: 'failed',
+            reason: '任务文件功能、任务或账号已不可用，未继续交付分析。',
+            iterations: outcome.steps,
+            toolsUsed: [...toolsUsed],
+          };
         await safe(() =>
           opts.onEvidence?.({
             fact: outcome.evidence,
@@ -1318,10 +1380,24 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         return {
           status: 'completed',
-          summary: withAlternateNotice(outcome.summary),
+          summary: withAlternateNotice(
+            [outcome.summary, fileReader?.coverageNote(isEnglishIntent(opts.intent))]
+              .filter(Boolean)
+              .join('\n\n'),
+          ),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
-          ...(outcome.partial ? { partial: outcome.partial } : {}),
+          ...(outcome.partial
+            ? { partial: outcome.partial }
+            : fileReader?.incomplete()
+              ? {
+                  partial: {
+                    found: 0,
+                    wanted: 1,
+                    missing: '请求的文件正文未完整读取，分析范围受限',
+                  },
+                }
+              : {}),
         };
       case 'awaiting_user':
         return {
@@ -1351,7 +1427,12 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           !(await opts.isTaskCancelled?.());
         // Out of time during the remediation turn: deliver the held answer for
         // verification (it explains what is missing) instead of a bare timeout.
-        if (timedOut && outcome.heldAnswer) {
+        if (
+          timedOut &&
+          outcome.heldAnswer &&
+          !fileReader?.incomplete() &&
+          (!fileReader || env.BROWSER_TASK_FILES_V1)
+        ) {
           await safe(() =>
             opts.onEvidence?.({
               fact: outcome.heldAnswer?.evidence ?? '',
@@ -1362,7 +1443,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
           return {
             status: 'completed',
-            summary: withAlternateNotice(outcome.heldAnswer.summary),
+            summary: withAlternateNotice(
+              [outcome.heldAnswer.summary, fileReader?.coverageNote(isEnglishIntent(opts.intent))]
+                .filter(Boolean)
+                .join('\n\n'),
+            ),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],
           };

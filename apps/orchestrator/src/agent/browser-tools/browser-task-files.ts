@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { FileService } from '../../files/file-service.js';
+import { taskBrowserDownloadSource } from './browser-download.js';
 import type { BrowserUploadFile } from './browser-upload-target.js';
+import type { BrowserDownloadReceipt } from './playwright-unified-executor.js';
 
 type LoadedFile = Awaited<ReturnType<FileService['loadMany']>>[number];
 interface Reference {
@@ -21,6 +23,14 @@ const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex
 /** A run's admitted user materials, not a grant over all of the account's files. */
 export class BrowserTaskFiles {
   private readonly inputs = new Map<string, Reference>();
+  private readonly downloadSources = new Map<
+    string,
+    Readonly<{
+      kind: 'browser_download';
+      origin: string;
+      originBasis: 'download_url' | 'owning_page';
+    }>
+  >();
   constructor(
     private readonly options: {
       taskId: string;
@@ -37,6 +47,43 @@ export class BrowserTaskFiles {
   }
   references() {
     return [...this.inputs.values()].map(({ sha256: _hash, ...reference }) => reference);
+  }
+  source(
+    fileId: string,
+  ): Readonly<
+    | { kind: 'browser_download'; origin: string; originBasis: 'download_url' | 'owning_page' }
+    | { kind: 'user_attachment' }
+  > {
+    return this.downloadSources.get(fileId) ?? { kind: 'user_attachment' };
+  }
+  /** Called only with the original host receipt of a saved download from this run. */
+  async admitDownloaded(receipt: BrowserDownloadReceipt): Promise<void> {
+    const source = taskBrowserDownloadSource(receipt, this.options.taskId);
+    if (!source || !(await this.options.active()))
+      throw new Error('下载不属于当前任务的可用材料。');
+    const loaded = await this.options.files.loadMany([receipt.fileId], this.options.userId);
+    const file = loaded.find((item) => item.row.externalId === receipt.fileId);
+    if (
+      !file ||
+      file.row.kind !== 'output' ||
+      file.row.filename !== receipt.filename ||
+      file.buffer.length !== receipt.sizeBytes ||
+      hash(file.buffer) !== receipt.sha256 ||
+      file.row.mimetype !== receipt.mimetype ||
+      file.row.expiresAt?.toISOString() !== receipt.expiresAt
+    )
+      throw new Error('下载保存回执与实际文件不一致。');
+    const refs = BrowserTaskFiles.validatedReferences([file], this.options.userId);
+    if (!(await this.options.active())) throw new Error('任务或账号已不可用。');
+    this.admitReferences(refs);
+    this.downloadSources.set(
+      receipt.fileId,
+      Object.freeze({
+        kind: 'browser_download',
+        origin: source.origin,
+        originBasis: source.originBasis,
+      }),
+    );
   }
   /** Only server-validated FileService results enter here, including a later user reply. */
   admitValidated(files: readonly LoadedFile[]): void {

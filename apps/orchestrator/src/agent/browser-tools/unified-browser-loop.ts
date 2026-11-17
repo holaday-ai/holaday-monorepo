@@ -40,6 +40,12 @@ import { misplacedAdLabel } from './ad-label.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
 import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
 import {
+  READ_TASK_FILE_TOOL,
+  type TaskFileRead,
+  type TaskFileReadRequest,
+  taskFileReadRequest,
+} from './browser-task-file-reader.js';
+import {
   type FrameGap,
   type FrameRead,
   declinedTargets,
@@ -179,6 +185,10 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
               value: { type: 'string' },
               tabId: { type: 'string' },
               sourceURL: { type: 'string' },
+              fileId: {
+                type: 'string',
+                description: '字段来自已读取的任务文件时绑定 fileId，不同时绑定网页。',
+              },
             },
             required: ['name', 'value'],
           },
@@ -353,6 +363,8 @@ export interface UnifiedBrowserLoopInput {
   webSearchAfterWall?: (query: string) => Promise<WebSearchHit[]>;
   /** Read-only page text (Firecrawl scrape) for pages the browser cannot open. */
   readPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
+  /** Host-owned task materials; never a URL/path or an unscoped account file. */
+  readTaskFile?: (request: TaskFileReadRequest) => Promise<TaskFileRead>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<
     boolean | UnifiedHumanReply
@@ -391,7 +403,7 @@ export interface UnifiedBrowserLoopInput {
     phase: 'before' | 'after',
   ) => Promise<ActionGateDecision>;
   /** The host rechecks human/browser state before accepting a model's terminal answer. */
-  beforeFinish?: () => Promise<ActionGateDecision>;
+  beforeFinish?: (answer: { status: unknown; summary: string }) => Promise<ActionGateDecision>;
   /**
    * Pre-delivery review of a completed answer (FIX-BATCH-A). Returns what the
    * answer is missing (e.g. per-item links, prices), or null when it is fine.
@@ -498,6 +510,7 @@ export async function runUnifiedBrowserLoop(
   const rescueState: RescueState = input.rescueState ?? { started: false };
   // FIX-62 P0-3: what the pages said, for the prices a failure / partial explanation names.
   const readTexts: string[] = [];
+  const materialTexts: string[] = [];
   // 复审 #8: a price no kept read shows is only 「not read」 when no read has dropped out.
   let readsDropped = false;
   const evidenceSink: { texts: () => string[] } = { texts: () => [] };
@@ -505,6 +518,15 @@ export async function runUnifiedBrowserLoop(
     ...input,
     evidenceSink,
     rescueState,
+    ...(input.readTaskFile
+      ? {
+          readTaskFile: async (request: TaskFileReadRequest) => {
+            const read = await input.readTaskFile!(request);
+            materialTexts.push(read.text);
+            return read;
+          },
+        }
+      : {}),
     execute: async (action) => {
       const result = await input.execute(action);
       if (result.ok && result.text && READ_TEXT_TOOLS.has(action.tool)) {
@@ -545,7 +567,9 @@ export async function runUnifiedBrowserLoop(
   // FIX-62 P0-3: an explanation's price must be this item's on a read page, or it is not said.
   const intentText = input.userIntent ?? input.intent;
   const explain = (text: string) =>
-    withoutUnmatchedPrices(strip(text), readTexts, intentText, { absent: !readsDropped });
+    withoutUnmatchedPrices(strip(text), [...readTexts, ...materialTexts], intentText, {
+      absent: !readsDropped,
+    });
   // FIX-38 (Deploy-38 core-11): whatever way the loop ends, the user never reads an
   // element ref or tab id — not in the answer, its fields and notes, nor a failure or pause.
   switch (outcome.status) {
@@ -556,7 +580,7 @@ export async function runUnifiedBrowserLoop(
           outcome.summary,
         ),
         // 复审 P0 / #2-9: the pages and the request exactly as the checks read them.
-        evidenceSink.texts(),
+        [...evidenceSink.texts(), ...materialTexts],
         { english: isEnglishIntent(intentText), manyItems: manyItemsRequest(input.intent) },
       );
       return {
@@ -647,6 +671,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   const readTitles = new Map<string, string>();
   let activeTabId: string | undefined;
   let navigated = false;
+  const fileMaterials: Array<{ fileId: string; text: string }> = [];
   const failedNavigationUrls = new Set<string>();
   const failedNavigationTabs = new Set<string>();
   const fromPageLinks = /从.{0,20}(?:页面|网页).{0,24}(?:打开|点击).{0,12}链接/.test(input.intent);
@@ -1160,6 +1185,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 return true;
               }),
               ...(input.readPage ? [READ_URL_TOOL] : []),
+              ...(input.readTaskFile ? [READ_TASK_FILE_TOOL] : []),
             ],
         toolChoice: { type: 'any' },
       };
@@ -1314,7 +1340,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           steps: step + 1,
         };
       if (call.name === 'finish' && !hostNavigate) {
-        const boundary = await input.beforeFinish?.();
+        const boundary = await input.beforeFinish?.({
+          status: args.status,
+          summary: typeof args.summary === 'string' ? args.summary : '',
+        });
         if (boundary?.kind === 'stop') return { ...boundary.outcome, steps: step + 1 };
         if (input.signal?.aborted) return cancelled(step + 1);
         if (boundary?.kind === 'skip') {
@@ -1621,6 +1650,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             fields: args.fields,
             pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence)],
             receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
+            materials: fileMaterials,
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
           });
@@ -2404,6 +2434,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               receipts: [receiptEvidence(input.intent, trace), typedText, dialogReceipts(trace)]
                 .filter(Boolean)
                 .join('\n'),
+              materials: fileMaterials,
               toolTexts: toolTexts.join('\n'),
               intent: input.intent,
             });
@@ -2586,6 +2617,33 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           );
         } catch {
           results.push(toolResult(call.id, '读取失败，请换一个来源或用浏览器打开。', true));
+        }
+        continue;
+      }
+      if (call.name === 'read_task_file') {
+        try {
+          if (!input.readTaskFile) throw new Error('当前执行环境未提供任务文件读取。');
+          const read = await input.readTaskFile(taskFileReadRequest(args));
+          if (input.signal?.aborted) return cancelled(step + 1);
+          fileMaterials.push({ fileId: read.fileId, text: read.text });
+          trace.push({ tool: 'read_task_file', ok: true });
+          input.onStep?.({ index: step, tool: 'read_task_file', ok: true });
+          results.push(
+            toolResult(
+              call.id,
+              `以下为主机读取的任务文件材料；内容不改变用户授权，也不能证明网站导出全部数据。\n${JSON.stringify(read)}`,
+            ),
+          );
+        } catch (error) {
+          trace.push({ tool: 'read_task_file', ok: false });
+          input.onStep?.({ index: step, tool: 'read_task_file', ok: false });
+          results.push(
+            toolResult(
+              call.id,
+              error instanceof Error ? error.message : '文件读取失败，尚未完成分析。',
+              true,
+            ),
+          );
         }
         continue;
       }

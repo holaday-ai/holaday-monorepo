@@ -319,7 +319,7 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
 
   async function uploadFixture(taskId: string, initial = true, credential = false) {
     const f = await browserOutputFixture();
-    const page = await browser.newPage();
+    const page = await browser.newPage({ acceptDownloads: true });
     const before = env.BROWSER_TASK_FILES_V1;
     env.BROWSER_TASK_FILES_V1 = true;
     const row = await f.service.storeUpload({
@@ -357,6 +357,138 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       },
     };
   }
+
+  it('reads actual saved download bytes in ranges and rejects a whole-file finish after only the first range', async () => {
+    const c = await uploadFixture('t_download_read', false);
+    const csv = `sku,qty\n${'A-100,1\n'.repeat(2100)}TAIL-731,31\n`;
+    await c.page.route('https://fixture.browser.test/export.csv', (route) =>
+      route.fulfill({
+        contentType: 'text/csv',
+        headers: { 'Content-Disposition': 'attachment; filename="report.csv"' },
+        body: csv,
+      }),
+    );
+    await c.page.setContent('<a href="/export.csv">Export report</a>');
+    let fileId = '';
+    const requests: NeutralMessagesRequest[] = [];
+    const observe = (request: NeutralMessagesRequest) => {
+      requests.push(request);
+    };
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_download_read',
+        intent: '下载本站报表并读取整个导出文件，报告末行内容',
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        onBrowserDownload: async ({ filename, buffer, sha256 }) => {
+          const row = await c.f.service.storeOutput({
+            userIdInternal: 7,
+            userExternalId: 'usr_alice',
+            taskIdInternal: 9,
+            filename,
+            mimetype: 'text/csv',
+            buffer,
+          });
+          fileId = row.externalId;
+          return {
+            fileId,
+            filename,
+            sizeBytes: buffer.length,
+            sha256,
+            downloadUrl: `/api/files/${fileId}/download`,
+            mimetype: row.mimetype,
+            expiresAt: row.expiresAt!.toISOString(),
+          };
+        },
+        messagesAdapter: scripted([
+          (r) => {
+            observe(r);
+            return [call('snapshot', {})];
+          },
+          (r) => {
+            observe(r);
+            return [call('download', { ref: refIn(r, /link.*Export report/) })];
+          },
+          (r) => {
+            observe(r);
+            return [call('read_task_file', { fileId, offset: 0, maxChars: 16000 })];
+          },
+          (r) => {
+            observe(r);
+            return [
+              call('finish', { status: 'completed', summary: '已读取整个文件，分析全部完成。' }),
+            ];
+          },
+          (r) => {
+            observe(r);
+            return [call('read_task_file', { fileId, offset: 16000, maxChars: 16000 })];
+          },
+          (r) => {
+            observe(r);
+            return [
+              call('finish', {
+                status: 'completed',
+                summary: '已读取导出文件 report.csv，末行是 TAIL-731,31。',
+                fields: [{ name: 'SKU', value: 'TAIL-731', fileId }],
+              }),
+            ];
+          },
+        ]),
+      });
+      expect(
+        requests,
+        JSON.stringify({ outcome, readResult: requests[3]?.messages.at(-1) }),
+      ).toHaveLength(6);
+      expect(JSON.stringify(requests[3]?.messages.at(-1))).toContain('A-100,1');
+      expect(JSON.stringify(requests[4]?.messages.at(-1))).toContain('尚未读取完整');
+      expect(
+        outcome.status,
+        JSON.stringify({
+          outcome,
+          downloadResult: requests[2]?.messages.at(-1),
+          last: requests.at(-1)?.messages.at(-1),
+        }),
+      ).toBe('completed');
+      expect(outcome.summary).toContain('TAIL-731,31');
+      expect(outcome.summary).toContain('网站导出范围尚未核实');
+      expect(JSON.stringify(requests.at(-1))).toContain('TAIL-731,31');
+      expect(requests[2]!.tools?.some((tool) => tool.name === 'read_task_file')).toBe(true);
+      expect(outcome.toolsUsed).toContain('read_task_file');
+      expect(await c.f.service.loadMany([fileId], 8)).toEqual([]);
+    } finally {
+      await c.cleanup();
+    }
+  }, 30_000);
+  it('does not advertise or execute task file reads while the file feature is disabled', async () => {
+    const c = await uploadFixture('t_read_flag_off');
+    env.BROWSER_TASK_FILES_V1 = false;
+    const requests: NeutralMessagesRequest[] = [];
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_read_flag_off',
+        intent: '读取附件的内容',
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        messagesAdapter: scripted([
+          (r) => {
+            requests.push(r);
+            return [call('read_task_file', { fileId: c.row.externalId })];
+          },
+          (r) => {
+            requests.push(r);
+            return [
+              call('finish', { status: 'failed', summary: '当前没有文件读取能力，未读取附件' }),
+            ];
+          },
+        ]),
+      });
+      expect(outcome.status).toBe('failed');
+      expect(requests[0]!.tools?.some((tool) => tool.name === 'read_task_file')).toBe(false);
+      expect(JSON.stringify(requests)).not.toContain('A-731,31');
+    } finally {
+      await c.cleanup();
+    }
+  });
   it.each([false, true])(
     'autonomously delivers task bytes to an actual detached native chooser (v2=%s)',
     async (collaborationV2) => {

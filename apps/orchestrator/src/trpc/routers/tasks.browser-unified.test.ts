@@ -89,28 +89,29 @@ it.each([
   'file-upload',
   'file-upload-reply',
   'file-upload-manual-data',
+  'file-download-read',
 ] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     const manualData = scenario === 'file-upload-manual-data';
+    const downloading = scenario === 'file-download-read';
     const withReply = scenario === 'file-upload-reply' || manualData;
-    const uploadFixture = scenario.startsWith('file-upload')
-      ? await browserOutputFixture()
-      : undefined;
+    const uploadFixture = scenario.startsWith('file-') ? await browserOutputFixture() : undefined;
     let replying = false;
     const fixtureUserId = uploadFixture ? 7 : 41;
     const fixtureExternalId = uploadFixture ? 'usr_alice' : 'usr_browser_unified';
-    const inputFile = uploadFixture
-      ? await uploadFixture.service.storeUpload({
-          userIdInternal: 7,
-          userExternalId: 'usr_alice',
-          filename: withReply ? 'notes.csv' : 'report.csv',
-          mimetype: 'text/csv',
-          buffer: Buffer.from(
-            manualData ? 'scope,note\ncompleted-only,INITIAL-531\n' : 'sku,qty\nA-731,31\n',
-          ),
-        })
-      : undefined;
+    const inputFile =
+      uploadFixture && !downloading
+        ? await uploadFixture.service.storeUpload({
+            userIdInternal: 7,
+            userExternalId: 'usr_alice',
+            filename: withReply ? 'notes.csv' : 'report.csv',
+            mimetype: 'text/csv',
+            buffer: Buffer.from(
+              manualData ? 'scope,note\ncompleted-only,INITIAL-531\n' : 'sku,qty\nA-731,31\n',
+            ),
+          })
+        : undefined;
     const replyFile = withReply
       ? await uploadFixture!.service.storeUpload({
           userIdInternal: 7,
@@ -156,7 +157,9 @@ it.each([
           executionId: null,
           executionRevision: 0,
           coreRecordVersion: 0,
-          intent: '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
+          intent: downloading
+            ? '下载本站报表并读取文件内容'
+            : '把附件 report.csv 上传到 fixture.browser.test 的文件控件',
           result: { executionMode: 'browser' },
         });
       });
@@ -228,6 +231,7 @@ it.each([
       });
     // LLM-RETRY-1: a timed-out call is retried; turns count answered calls only.
     let answered = 0;
+    let downloadedFileId = '';
     vi.spyOn(messages, 'createQwenMessagesAdapter').mockImplementation(() => ({
       metadata,
       async create(request) {
@@ -243,82 +247,111 @@ it.each([
           expect.arrayContaining(['snapshot', 'click', 'finish']),
         );
         expect(request.toolChoice).toEqual({ type: 'any' });
-        const content: Block[] = manualData
+        const content: Block[] = downloading
           ? turn === 1
             ? [toolUse('s1', 'snapshot', {})]
-            : [
-                toolUse('h1', 'request_human', {
-                  reason: 'clarification',
-                  message: '请补充报表数据和附件',
-                }),
-              ]
-          : scenario === 'file-upload-reply'
-            ? turn === 1
-              ? [toolUse('s1', 'snapshot', {})]
-              : turn === 2
-                ? [
-                    toolUse('h1', 'request_human', {
-                      reason: 'clarification',
-                      message: '请提供 report.csv',
+            : turn === 2
+              ? [
+                  toolUse('d1', 'download', {
+                    ref: JSON.stringify(request.messages.at(-1))
+                      .split('\\n')
+                      .find((line) => /link.*Export report/.test(line))
+                      ?.match(/\[ref=(e\d+)\]/)?.[1],
+                  }),
+                ]
+              : turn === 3
+                ? (() => {
+                    const last = request.messages.at(-1)?.content;
+                    const result = Array.isArray(last)
+                      ? last.find((block) => block.type === 'tool_result')
+                      : undefined;
+                    downloadedFileId =
+                      result?.type === 'tool_result' ? JSON.parse(result.content).fileId : '';
+                    return [toolUse('r1', 'read_task_file', { fileId: downloadedFileId })];
+                  })()
+                : [
+                    toolUse('f1', 'finish', {
+                      status: 'completed',
+                      summary: '导出文件 report.csv 中的 SKU 为 API-DOWN-731，数量31。',
+                      fields: [{ name: 'SKU', value: 'API-DOWN-731', fileId: downloadedFileId }],
                     }),
                   ]
-                : turn === 3
-                  ? [toolUse('s2', 'snapshot', {})]
-                  : turn === 4
+          : manualData
+            ? turn === 1
+              ? [toolUse('s1', 'snapshot', {})]
+              : [
+                  toolUse('h1', 'request_human', {
+                    reason: 'clarification',
+                    message: '请补充报表数据和附件',
+                  }),
+                ]
+            : scenario === 'file-upload-reply'
+              ? turn === 1
+                ? [toolUse('s1', 'snapshot', {})]
+                : turn === 2
+                  ? [
+                      toolUse('h1', 'request_human', {
+                        reason: 'clarification',
+                        message: '请提供 report.csv',
+                      }),
+                    ]
+                  : turn === 3
+                    ? [toolUse('s2', 'snapshot', {})]
+                    : turn === 4
+                      ? [
+                          toolUse('u1', 'upload', {
+                            ref: JSON.stringify(request.messages.at(-1)).match(
+                              /button \\"Report\\" \[ref=(e\d+)\]/,
+                            )![1],
+                            fileIds: [replyFile!.externalId],
+                          }),
+                        ]
+                      : turn === 5
+                        ? [toolUse('s3', 'snapshot', {})]
+                        : [
+                            toolUse('f1', 'finish', {
+                              status: 'completed',
+                              summary: '回复文件已交给页面，页面读到 A-731,31',
+                              evidence: 'A-731,31',
+                            }),
+                          ]
+              : scenario === 'file-upload'
+                ? turn === 1
+                  ? [toolUse('s1', 'snapshot', {})]
+                  : turn === 2
                     ? [
                         toolUse('u1', 'upload', {
                           ref: JSON.stringify(request.messages.at(-1)).match(
                             /button \\"Report\\" \[ref=(e\d+)\]/,
                           )![1],
-                          fileIds: [replyFile!.externalId],
+                          fileIds: [inputFile!.externalId],
                         }),
                       ]
-                    : turn === 5
-                      ? [toolUse('s3', 'snapshot', {})]
+                    : turn === 3
+                      ? [toolUse('s2', 'snapshot', {})]
                       : [
                           toolUse('f1', 'finish', {
                             status: 'completed',
-                            summary: '回复文件已交给页面，页面读到 A-731,31',
+                            summary: '文件已交给页面控件，页面读到 A-731,31',
                             evidence: 'A-731,31',
                           }),
                         ]
-            : scenario === 'file-upload'
-              ? turn === 1
-                ? [toolUse('s1', 'snapshot', {})]
-                : turn === 2
-                  ? [
-                      toolUse('u1', 'upload', {
-                        ref: JSON.stringify(request.messages.at(-1)).match(
-                          /button \\"Report\\" \[ref=(e\d+)\]/,
-                        )![1],
-                        fileIds: [inputFile!.externalId],
-                      }),
-                    ]
-                  : turn === 3
-                    ? [toolUse('s2', 'snapshot', {})]
-                    : [
-                        toolUse('f1', 'finish', {
-                          status: 'completed',
-                          summary: '文件已交给页面控件，页面读到 A-731,31',
-                          evidence: 'A-731,31',
-                        }),
-                      ]
-              : turn === 1
-                ? [toolUse('s1', 'snapshot', {})]
-                : turn === 2
-                  ? [toolUse('c1', 'click', { ref: saveRef(request) })]
-                  : turn === 3
-                    ? [toolUse('s2', 'snapshot', {})]
-                    : [
-                        toolUse('f1', 'finish', {
-                          status: scenario === 'scrape-retry-partial' ? 'failed' : 'completed',
-                          summary:
-                            scenario === 'tool-block'
-                              ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
-                              : '订单已保存。',
-                          evidence: '已保存',
-                        }),
-                      ];
+                : turn === 1
+                  ? [toolUse('s1', 'snapshot', {})]
+                  : turn === 2
+                    ? [toolUse('c1', 'click', { ref: saveRef(request) })]
+                    : turn === 3
+                      ? [toolUse('s2', 'snapshot', {})]
+                      : [
+                          toolUse('f1', 'finish', {
+                            status: scenario === 'scrape-retry-partial' ? 'failed' : 'completed',
+                            summary:
+                              scenario === 'tool-block'
+                                ? '订单已保存。\n\n```json\n{"name": "browser_use", "arguments": {"action": "click", "ref": "e3"}}\n```'
+                                : '订单已保存。',
+                            evidence: '已保存',
+                          }),
+                        ];
         return {
           id: `response-${turn}`,
           metadata,
@@ -335,15 +368,25 @@ it.each([
       },
     }));
 
-    const page: Page = await browser.newPage();
+    const page: Page = await browser.newPage({ acceptDownloads: downloading });
     await page.route('https://fixture.browser.test/', (route) =>
       route.fulfill({
         contentType: 'text/html; charset=utf-8',
-        body: uploadFixture
-          ? `${PAGE}<label>Report <input type="file" id="file" accept=".csv"></label><script>document.querySelector("#file").onchange=async function(){document.querySelector("#status").textContent="页面读到："+await this.files[0].text();}</script>`
-          : PAGE,
+        body: downloading
+          ? `${PAGE}<a href="/export.csv">Export report</a>`
+          : uploadFixture
+            ? `${PAGE}<label>Report <input type="file" id="file" accept=".csv"></label><script>document.querySelector("#file").onchange=async function(){document.querySelector("#status").textContent="页面读到："+await this.files[0].text();}</script>`
+            : PAGE,
       }),
     );
+    if (downloading)
+      await page.route('https://fixture.browser.test/export.csv', (route) =>
+        route.fulfill({
+          contentType: 'text/csv',
+          headers: { 'content-disposition': 'attachment; filename="report.csv"' },
+          body: 'sku,qty\nAPI-DOWN-731,31\n',
+        }),
+      );
     await page.goto('https://fixture.browser.test/');
     const replyImage = manualData
       ? await uploadFixture!.service.storeUpload({
@@ -401,18 +444,22 @@ it.each([
             uploadFixture &&
             (table === taskFiles ||
               (table === users && !('plan' in projection)) ||
-              (table === tasks && ('origin' in projection || replying)))
+              (table === tasks &&
+                ('origin' in projection || replying || (downloading && 'id' in projection))))
               ? uploadFixture.db.select().from(table as typeof taskFiles)
               : query,
         };
       },
-      insert: (table: unknown) => ({
-        values: async (row: Record<string, unknown>) => {
-          if (table === llmCalls) recorded.push(row);
-          if (table === taskSteps) stepRecords.push(row);
-          return [];
-        },
-      }),
+      insert: (table: unknown) =>
+        downloading && table === taskFiles
+          ? uploadFixture!.db.insert(taskFiles)
+          : {
+              values: async (row: Record<string, unknown>) => {
+                if (table === llmCalls) recorded.push(row);
+                if (table === taskSteps) stepRecords.push(row);
+                return [];
+              },
+            },
       update: () => ({ set: () => ({ where: async () => [] }) }),
     };
     const ctx = {
@@ -450,11 +497,13 @@ it.each([
     try {
       const result = await tasksRouter.createCaller(ctx).create({
         // Executor path under test; an explicit order/login need would route to the user's Chrome.
-        intent: manualData
-          ? '打开报表页面读取数据并整理分析，无法读取时使用我补充的数据'
-          : uploadFixture
-            ? '把附件 report.csv 上传到 fixture.browser.test 的文件控件'
-            : '打开详情页并点击保存',
+        intent: downloading
+          ? '下载本站报表并读取整个导出文件，报告其中的SKU和数量'
+          : manualData
+            ? '打开报表页面读取数据并整理分析，无法读取时使用我补充的数据'
+            : uploadFixture
+              ? '把附件 report.csv 上传到 fixture.browser.test 的文件控件'
+              : '打开详情页并点击保存',
         ...(inputFile ? { fileIds: [inputFile.externalId] } : {}),
         mode: 'auto',
         expertMode: 'normal',
@@ -481,7 +530,29 @@ it.each([
         errors: logger.error.mock.calls,
         outcome,
         requests: requests.length,
+        ...(downloading ? { downloadResult: requests[2]?.messages.at(-1) } : {}),
       });
+      if (downloading) {
+        expect(outcome, diagnostics).toMatchObject({
+          status: 'completed',
+          summary: expect.stringContaining('API-DOWN-731'),
+        });
+        expect(JSON.stringify(outcome)).toContain(downloadedFileId);
+        expect(JSON.stringify(outcome)).toContain('网站导出范围尚未核实');
+        const [stored] = await uploadFixture!.service.loadMany([downloadedFileId], 7);
+        expect(stored?.buffer.toString()).toBe('sku,qty\nAPI-DOWN-731,31\n');
+        expect(stored?.row).toMatchObject({
+          taskId: 91,
+          kind: 'output',
+          mimetype: 'application/octet-stream',
+        });
+        expect(await uploadFixture!.service.loadMany([downloadedFileId], 8)).toEqual([]);
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain('API-DOWN-731');
+        expect(await page.locator('#status').textContent()).toBe('草稿');
+        expect(consume).toHaveBeenCalledTimes(1);
+        expect(requests).toHaveLength(4);
+        return;
+      }
       if (manualData) {
         expect(outcome, diagnostics).toMatchObject({
           status: 'completed',

@@ -11,6 +11,22 @@ const ownedDownloads = new WeakMap<
   Download,
   { owner: object; promise: Promise<BrowserDownloadReceipt> }
 >();
+const TASK_DOWNLOAD = Symbol('saved-owned-task-download');
+type TaskDownloadSource = Readonly<{
+  taskId: string;
+  origin: string;
+  originBasis: 'download_url' | 'owning_page';
+}>;
+/** An opaque receipt from the actual Download path, never a client file-ID grant. */
+export function taskBrowserDownloadSource(
+  receipt: BrowserDownloadReceipt,
+  taskId: string,
+): TaskDownloadSource | null {
+  const source = (receipt as BrowserDownloadReceipt & { [TASK_DOWNLOAD]?: TaskDownloadSource })[
+    TASK_DOWNLOAD
+  ];
+  return source?.taskId === taskId ? source : null;
+}
 export function sharedBrowserDownload(
   download: Download,
   owner: object,
@@ -38,10 +54,31 @@ export async function persistTaskBrowserDownload(
   owner: object,
   store: Parameters<typeof persistBrowserDownload>[1],
   publish?: (receipt: BrowserDownloadReceipt) => void | Promise<void>,
+  taskId?: string,
 ): Promise<BrowserDownloadReceipt> {
+  // Capture at the actual Download, before storage I/O or a later navigation.
+  let taskSource: TaskDownloadSource | null = null;
+  if (taskId) {
+    try {
+      const url = new URL(download.url());
+      let origin = url.origin;
+      let originBasis: TaskDownloadSource['originBasis'] = 'download_url';
+      if (origin === 'null' && ['data:', 'blob:'].includes(url.protocol)) {
+        origin = new URL(download.page().url()).origin;
+        originBasis = 'owning_page';
+      }
+      if (/^https?:\/\//.test(origin)) taskSource = Object.freeze({ taskId, origin, originBasis });
+    } catch {
+      /* Unavailable sources must not grant file-reading authority. */
+    }
+  }
   const receipt = await (sharedBrowserDownload(download, owner) ??
     persistBrowserDownload(download, store));
   await publish?.(receipt);
+  if (taskId) {
+    if (!taskSource) throw new Error('download_source_unavailable');
+    return Object.freeze({ ...receipt, [TASK_DOWNLOAD]: taskSource });
+  }
   return receipt;
 }
 
