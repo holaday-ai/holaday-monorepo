@@ -79,7 +79,8 @@ interface MetricResult extends Omit<TaskTableFact, 'value'> {
   op: Metric['op'];
   column?: string;
   label?: string;
-  numericCount: number;
+  /** Present only for operations that actually parse numeric cells. */
+  numericCount?: number;
   missingCount: number;
   invalidCount: number;
   invalidExamples: string[];
@@ -543,7 +544,7 @@ export class BrowserTaskTable {
             metricId: `m${i + 1}`,
             ...metric,
             ...(metric.column ? { label } : {}),
-            numericCount,
+            ...(metric.op.startsWith('count_') ? {} : { numericCount }),
             missingCount: state.missing,
             invalidCount: state.invalid,
             invalidExamples: state.examples,

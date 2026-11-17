@@ -39,6 +39,24 @@ async function fixture(text: string | Buffer, name = 'report.csv') {
   };
 }
 describe('owned CSV table analysis', () => {
+  it('does not present nonempty text counts as numeric parsing counts', async () => {
+    const f = await fixture('name,value\nalice,1\nbob,2\n');
+    const result = await f.table.run({
+      fileId: f.row.externalId,
+      mode: 'aggregate',
+      metrics: [
+        { op: 'count_rows' },
+        { op: 'count_nonempty', column: 'A' },
+        { op: 'count_distinct', column: 'A' },
+        { op: 'sum', column: 'B' },
+      ],
+    });
+    if (result.mode !== 'aggregate') throw new Error('wrong result');
+    expect(result.overall.map((metric) => metric.value)).toEqual(['2', '2', '2', '3']);
+    for (const metric of result.overall.slice(0, 3))
+      expect(metric).not.toHaveProperty('numericCount');
+    expect(result.overall[3]?.numericCount).toBe(2);
+  });
   it('computes exact decimal statistics over the real full CSV, including rows beyond the old 50k preview', async () => {
     const f = await fixture(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
     const result = await f.table.run({

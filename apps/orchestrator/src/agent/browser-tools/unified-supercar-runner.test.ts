@@ -590,6 +590,198 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       await c.cleanup();
     }
   }, 30_000);
+  it.each(['read_task_file', 'analyze_task_table'] as const)(
+    'does not finish a file analysis after %s parameters were rejected before reaching the host',
+    async (tool) => {
+      const c = await uploadFixture(`t_bad_file_${tool}`);
+      const requests: NeutralMessagesRequest[] = [];
+      const finish = () =>
+        call('finish', { status: 'completed', summary: '已经完整分析报表，合计999。' });
+      try {
+        const outcome = await runSupercarTask({
+          taskId: `t_bad_file_${tool}`,
+          intent: '分析我提供的 report.csv，给出数量合计',
+          browserTaskFiles: c.scope,
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted([
+            (r) => {
+              requests.push(r);
+              return [call('snapshot', {})];
+            },
+            (r) => {
+              requests.push(r);
+              return [
+                call(
+                  tool,
+                  tool === 'read_task_file'
+                    ? { fileId: c.row.externalId, offset: -1 }
+                    : {
+                        fileId: c.row.externalId,
+                        mode: 'aggregate',
+                        metrics: [{ op: 'sum', column: 'B' }],
+                        code: 'not allowed',
+                      },
+                ),
+              ];
+            },
+            (r) => {
+              requests.push(r);
+              return [finish()];
+            },
+            (r) => {
+              requests.push(r);
+              return [finish()];
+            },
+          ]),
+        });
+        expect(outcome.status, JSON.stringify(outcome)).toBe('failed');
+        expect(requests).toHaveLength(4);
+        expect(outcome.reason).toContain('回执');
+      } finally {
+        await c.cleanup();
+      }
+    },
+  );
+  it('requires an actual statistic binding before accepting an analysis without structured fields', async () => {
+    const c = await uploadFixture('t_table_proof_required');
+    const requests: NeutralMessagesRequest[] = [];
+    let factId = '';
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_table_proof_required',
+        intent: '分析提供的 report.csv 并统计数量合计',
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        messagesAdapter: scripted([
+          (r) => {
+            requests.push(r);
+            return [call('snapshot', {})];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('read_task_file', { fileId: c.row.externalId, offset: -1 })];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('finish', { status: 'completed', summary: '已经完整分析，合计999。' })];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('read_task_file', { fileId: c.row.externalId })];
+          },
+          (r) => {
+            requests.push(r);
+            return [
+              call('analyze_task_table', {
+                fileId: c.row.externalId,
+                mode: 'aggregate',
+                metrics: [{ op: 'sum', column: 'B' }],
+              }),
+            ];
+          },
+          (r) => {
+            requests.push(r);
+            factId = JSON.stringify(r.messages.at(-1)).match(/tbf_[a-f0-9]{32}/)?.[0] ?? '';
+            return [call('finish', { status: 'completed', summary: '数量合计999，已全部完成。' })];
+          },
+          (r) => {
+            requests.push(r);
+            return [
+              call('finish', {
+                status: 'completed',
+                summary: '数量合计31。',
+                fields: [
+                  {
+                    name: 'qty [B] 合计',
+                    value: '31',
+                    fileId: c.row.externalId,
+                    tableFactId: factId,
+                  },
+                ],
+              }),
+            ];
+          },
+        ]),
+      });
+      expect(requests).toHaveLength(7);
+      expect(outcome.status, JSON.stringify(outcome)).toBe('completed');
+      expect(outcome.summary).toContain('31');
+      expect(outcome.summary).not.toContain('999');
+    } finally {
+      await c.cleanup();
+    }
+  });
+  it.each([false, true])(
+    'allows honest partial delivery or a corrected read after a rejected file call (repair=%s)',
+    async (repair) => {
+      const taskId = `t_file_repair_${repair}`;
+      const c = await uploadFixture(taskId);
+      const requests: NeutralMessagesRequest[] = [];
+      const turns: Parameters<typeof scripted>[0] = [
+        (r) => {
+          requests.push(r);
+          return [call('snapshot', {})];
+        },
+        (r) => {
+          requests.push(r);
+          return [call('read_task_file', { fileId: c.row.externalId, offset: -1 })];
+        },
+      ];
+      if (repair)
+        turns.push(
+          (r) => {
+            requests.push(r);
+            return [
+              call('finish', { status: 'completed', summary: '报表已经完整分析，合计999。' }),
+            ];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('read_task_file', { fileId: c.row.externalId })];
+          },
+          (r) => {
+            requests.push(r);
+            return [
+              call('finish', {
+                status: 'completed',
+                summary: '提供的报表数量为31。',
+                fields: [{ name: '数量', value: '31', fileId: c.row.externalId }],
+              }),
+            ];
+          },
+        );
+      else
+        turns.push((r) => {
+          requests.push(r);
+          return [
+            call('finish', {
+              status: 'completed',
+              summary: '部分完成：只打开了报表页面，文件未读到，数据尚未分析。',
+            }),
+          ];
+        });
+      try {
+        const outcome = await runSupercarTask({
+          taskId,
+          intent: '分析提供的 report.csv 并统计数量',
+          browserTaskFiles: c.scope,
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted(turns),
+        });
+        expect(outcome.status, JSON.stringify(outcome)).toBe('completed');
+        if (repair) {
+          expect(outcome.partial).toBeUndefined();
+          expect(requests).toHaveLength(5);
+          expect(outcome.summary).not.toContain('999');
+        } else {
+          expect(outcome.partial).toBeDefined();
+          expect(outcome.summary).toMatch(/^部分完成/);
+        }
+      } finally {
+        await c.cleanup();
+      }
+    },
+  );
   it.each([false, true])(
     'autonomously delivers task bytes to an actual detached native chooser (v2=%s)',
     async (collaborationV2) => {

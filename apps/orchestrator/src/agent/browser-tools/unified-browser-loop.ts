@@ -687,6 +687,10 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let navigated = false;
   const fileMaterials: Array<{ fileId: string; text: string }> = [];
   const tableFacts: TaskTableFact[] = [];
+  const pendingFileErrors = new Set<'read' | 'describe' | 'aggregate'>();
+  let aggregateAttempted = false;
+  let aggregateSucceeded = false;
+  let fileProofCorrected = false;
   const failedNavigationUrls = new Set<string>();
   const failedNavigationTabs = new Set<string>();
   const fromPageLinks = /从.{0,20}(?:页面|网页).{0,24}(?:打开|点击).{0,12}链接/.test(input.intent);
@@ -1364,6 +1368,44 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         if (input.signal?.aborted) return cancelled(step + 1);
         if (boundary?.kind === 'skip') {
           results.push(toolResult(call.id, boundary.message));
+          staleTurn = true;
+          continue;
+        }
+        const partialFileResult =
+          typeof args.summary === 'string' &&
+          /^\s*(?:部分完成|partially completed)/i.test(args.summary);
+        const knownStatistic =
+          Array.isArray(args.fields) &&
+          args.fields.some((field) => {
+            if (!field || typeof field !== 'object') return false;
+            const value = field as Record<string, unknown>;
+            return tableFacts.some(
+              (fact) => fact.id === value.tableFactId && fact.fileId === value.fileId,
+            );
+          });
+        const englishFiles = isEnglishIntent(input.userIntent ?? input.intent);
+        const fileGap =
+          pendingFileErrors.size > 0 || (aggregateAttempted && !aggregateSucceeded)
+            ? englishFiles
+              ? 'File reading or statistics did not produce a valid receipt; a complete analysis is not verified.'
+              : '文件读取或统计尚未取得有效回执，不能宣告完整分析完成。'
+            : tableFacts.length > 0 && !knownStatistic
+              ? englishFiles
+                ? 'The analysis has no structured binding to the actual computed statistics.'
+                : '统计终稿缺少实际计算回执的结构字段，不能确认分析结果。'
+              : null;
+        if (args.status === 'completed' && !partialFileResult && fileGap) {
+          await rejected(typeof args.summary === 'string' ? args.summary : '', '', fileGap);
+          if (fileProofCorrected || concludeNow)
+            return { status: 'failed', reason: fileGap, failureSource: 'task', steps: step + 1 };
+          fileProofCorrected = true;
+          results.push(
+            toolResult(
+              call.id,
+              `${fileGap}请先修正文件/统计请求取得实际回执；统计结果需在fields提供原回执的name/value/fileId/tableFactId。无法取得时如实报告失败或部分完成，不要生成未计算的数字。`,
+              true,
+            ),
+          );
           staleTurn = true;
           continue;
         }
@@ -2639,11 +2681,24 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         continue;
       }
       if (call.name === 'analyze_task_table') {
+        const operation = args.mode === 'describe' ? 'describe' : 'aggregate';
+        if (operation === 'aggregate') aggregateAttempted = true;
         try {
           if (!input.analyzeTaskTable) throw new Error('当前环境没有任务表格统计能力。');
           const result = await input.analyzeTaskTable(taskTableRequestSchema.parse(args));
           if (input.signal?.aborted) return cancelled(step + 1);
-          tableFacts.push(...taskTableFacts(result));
+          const computedFacts = taskTableFacts(result);
+          const newFacts = computedFacts.some(
+            (value) => !tableFacts.some((prior) => prior.id === value.id),
+          );
+          tableFacts.push(...computedFacts);
+          if (result.mode === 'aggregate') {
+            const repaired = pendingFileErrors.delete('aggregate');
+            const described = pendingFileErrors.delete('describe');
+            if (!aggregateSucceeded || repaired || described || newFacts)
+              fileProofCorrected = false;
+            aggregateSucceeded = true;
+          } else if (pendingFileErrors.delete('describe')) fileProofCorrected = false;
           trace.push({ tool: 'analyze_task_table', ok: true });
           input.onStep?.({ index: step, tool: 'analyze_task_table', ok: true });
           results.push(
@@ -2653,6 +2708,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             ),
           );
         } catch (error) {
+          pendingFileErrors.add(operation);
           trace.push({ tool: 'analyze_task_table', ok: false });
           input.onStep?.({ index: step, tool: 'analyze_task_table', ok: false });
           results.push(
@@ -2667,6 +2723,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           const read = await input.readTaskFile(taskFileReadRequest(args));
           if (input.signal?.aborted) return cancelled(step + 1);
           fileMaterials.push({ fileId: read.fileId, text: read.text });
+          if (pendingFileErrors.delete('read')) fileProofCorrected = false;
           trace.push({ tool: 'read_task_file', ok: true });
           input.onStep?.({ index: step, tool: 'read_task_file', ok: true });
           results.push(
@@ -2676,6 +2733,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             ),
           );
         } catch (error) {
+          pendingFileErrors.add('read');
           trace.push({ tool: 'read_task_file', ok: false });
           input.onStep?.({ index: step, tool: 'read_task_file', ok: false });
           results.push(
