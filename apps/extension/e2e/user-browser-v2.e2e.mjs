@@ -127,7 +127,7 @@ test(
     await connect;
     assert.deepEqual(
       server.received.find((m) => m.type === 'client.hello').userBrowserProtocol,
-      { ...protocol, capabilities: [...protocol.capabilities, 'human_activity_v1'] },
+      { ...protocol, capabilities: [...protocol.capabilities, 'human_activity_v1', 'task_file_upload_v1'] },
     );
     const open = async (p) => {
       await p.bringToFront();

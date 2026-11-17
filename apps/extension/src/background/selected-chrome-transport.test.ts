@@ -53,6 +53,7 @@ function harness() {
     })),
     close: vi.fn<SelectedChromeBridge['close']>(async () => ({ ok: true })),
     stopTask: vi.fn<SelectedChromeBridge['stopTask']>(async () => {}),
+    stopUploadAdmission: vi.fn(),
   } satisfies SelectedChromeBridge;
   const ownership = createBrowserExecutionOwnership();
   const prepareLegacy = vi.fn(async () => {});
@@ -226,6 +227,49 @@ describe('selected Chrome transport lifecycle', () => {
     expect(h.bridge.open).not.toHaveBeenCalled();
     await expect(h.ownership.runLegacy(async () => 'legacy')).resolves.toBe('legacy');
   });
+
+  it.each(['stop', 'close'] as const)(
+    '%s stops file admission before draining an in-flight operation',
+    async (method) => {
+      const h = harness();
+      const opened = openedSession(
+        await h.transport.handle('task-a', command({ op: 'open', target })),
+      );
+      let finish!: () => void;
+      h.bridge.execute.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () =>
+              resolve({
+                ok: true,
+                sessionId: opened.sessionId,
+                observation: { tabId: 42 },
+                actionOutcome: 'applied',
+              });
+          }),
+      );
+      const act = h.transport.handle(
+        'task-a',
+        command({
+          op: 'act',
+          sessionId: opened.sessionId,
+          action: { kind: 'key', payload: { key: 'Enter' } },
+        }),
+      );
+      await vi.waitFor(() => expect(h.bridge.execute).toHaveBeenCalledTimes(1));
+      const stop =
+        method === 'stop'
+          ? h.transport.stopTask('task-a')
+          : h.transport.handle('task-a', command({ op: 'close', sessionId: opened.sessionId }));
+      try {
+        expect(h.bridge.stopUploadAdmission).toHaveBeenCalledWith('task-a');
+      } finally {
+        finish();
+        await act;
+        await stop;
+      }
+    },
+  );
 
   it('stop closes admission immediately and releases only after the real action settles', async () => {
     const h = harness();

@@ -33,7 +33,10 @@ export class TaskFileTransfer {
   constructor(
     private readonly options: {
       active: () => boolean;
-      deliver: (files: readonly VerifiedTaskFile[]) => Promise<BrowserUploadOutcome>;
+      deliver: (
+        files: readonly VerifiedTaskFile[],
+        transferId: string,
+      ) => Promise<BrowserUploadOutcome>;
       now?: () => number;
     },
   ) {}
@@ -186,6 +189,7 @@ export class TaskFileTransfer {
       const result = browserUploadOutcomeSchema.safeParse(
         await this.options.deliver(
           stage.files.map((file) => ({ ...file.metadata, bytes: file.bytes })),
+          stage.id,
         ),
       );
       outcome = result.success
@@ -197,7 +201,8 @@ export class TaskFileTransfer {
     try {
       this.assertActive();
     } catch {
-      outcome = { status: 'unknown', reason: 'scope_unavailable' };
+      if (outcome.status !== 'not_applied')
+        outcome = { status: 'unknown', reason: 'scope_unavailable' };
     }
     const receipt: BrowserUploadTransferReceipt = {
       ...outcome,

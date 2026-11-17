@@ -11,7 +11,11 @@
  * task; tab multiplexing comes with the Skill's own plan.
  */
 
-import type { UserBrowserActivity, UserBrowserBinding } from '@holaday/shared-types';
+import {
+  type UserBrowserActivity,
+  type UserBrowserBinding,
+  browserUploadManifestSchema,
+} from '@holaday/shared-types';
 import { type CrxApplication, type Locator, type Page, crx } from 'playwright-crx';
 import {
   DRIVER_ERRORS,
@@ -23,7 +27,9 @@ import {
 import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
 import { SelectedTargetResolver } from './selected-target.js';
+import type { NativeUploadPayload } from './selected-target.js';
 import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
+import type { VerifiedTaskFile } from './task-file-transfer.js';
 
 /**
  * Per-strategy failure record. Included in the DriverResult.data for
@@ -440,6 +446,85 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       return {
         status: 'error',
         error: { code: safeTargetError(error), message: 'Bound input was rejected or unconfirmed' },
+      };
+    }
+  }
+
+  async uploadBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    files: readonly VerifiedTaskFile[],
+    dispatchAllowed: () => boolean,
+  ): Promise<DriverResult> {
+    const expected = browserUploadManifestSchema.safeParse(action.payload?.files);
+    if (!this.targets || action.kind !== 'upload' || typeof dispatchAllowed !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound file channel unavailable' },
+      };
+    if (!dispatchAllowed())
+      return {
+        status: 'error',
+        error: { code: 'session_unavailable', message: 'File delivery stopped' },
+      };
+    if (
+      !expected.success ||
+      files.length !== expected.data.length ||
+      files.some((file, index) => {
+        const metadata = expected.data[index]!;
+        return (
+          !(file.bytes instanceof Uint8Array) ||
+          file.bytes.length !== metadata.sizeBytes ||
+          file.fileId !== metadata.fileId ||
+          file.name !== metadata.name ||
+          file.mimeType !== metadata.mimeType ||
+          file.sizeBytes !== metadata.sizeBytes ||
+          file.sha256 !== metadata.sha256
+        );
+      })
+    )
+      return {
+        status: 'error',
+        error: {
+          code: 'file_payload_invalid',
+          message: 'File manifest does not match staged bytes',
+        },
+      };
+    const payloads: NativeUploadPayload[] = [];
+    try {
+      for (const file of files) {
+        // CRX's public filesystem is in memory. Its read returns the same Buffer
+        // implementation as setInputFiles expects; no user disk path is used.
+        const path = `/holaday-upload-${crypto.randomUUID()}`;
+        try {
+          crx.fs.writeFileSync(path, file.bytes, { flag: 'wx' });
+          const buffer = crx.fs.readFileSync(path);
+          if (typeof buffer === 'string') throw new Error('invalid buffer');
+          payloads.push({ name: file.name, mimeType: file.mimeType, buffer });
+        } finally {
+          try {
+            crx.fs.unlinkSync(path);
+          } catch {
+            /* only this private virtual path */
+          }
+        }
+      }
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'file_payload_invalid', message: 'In-memory file payload unavailable' },
+      };
+    }
+    try {
+      await this.targets.execute(action, binding, payloads, dispatchAllowed);
+      return { status: 'ok' };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: {
+          code: safeTargetError(error),
+          message: 'Bound file input rejected or unconfirmed',
+        },
       };
     }
   }
@@ -1409,6 +1494,7 @@ function safeTargetError(error: unknown): string {
     'file_manifest_invalid',
     'file_payload_invalid',
     'file_target_forbidden',
+    'session_unavailable',
   ];
   return error instanceof Error && known.includes(error.message)
     ? error.message

@@ -1004,6 +1004,7 @@ export class SelectedTargetResolver {
     action: DriverAction,
     binding: UserBrowserBinding,
     uploadFiles?: readonly NativeUploadPayload[],
+    dispatchAllowed?: () => boolean,
   ): Promise<void> {
     const ticket = this.ticket;
     this.ticket = null;
@@ -1057,6 +1058,7 @@ export class SelectedTargetResolver {
           assertUploadTarget(fresh, action);
           if (canonical(fresh) !== expected) throw new Error('target_changed');
           await this.assertFresh(ticket.frame, binding.observationRevision);
+          if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
           try {
             await handle.setInputFiles(uploadFiles, { timeout: action.deadlineMs ?? 10_000 });
           } catch {

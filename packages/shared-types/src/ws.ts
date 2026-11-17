@@ -4,6 +4,7 @@ import {
   userBrowserBindingSchema,
   userBrowserProtocolSchema,
 } from './browser-user-contract.js';
+import { selectedChromeUploadCommandSchema } from './selected-chrome-upload.js';
 import { resilientSelectorSchema } from './selector.js';
 
 // Legacy lanes omit these fields. Core text publishers always send both;
@@ -91,6 +92,7 @@ const selectedChromeActionSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
+  ...selectedChromeUploadCommandSchema.options,
   z
     .object({
       op: z.literal('open'),

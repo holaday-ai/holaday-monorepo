@@ -1,6 +1,7 @@
 import type { DriverAction } from '@holaday/browser-driver';
 import type {
   SelectedChromeSessionCommand,
+  SelectedChromeUploadCommand,
   UserBrowserBinding,
   UserBrowserProtocol,
 } from '@holaday/shared-types';
@@ -36,6 +37,8 @@ export interface SelectedChromeBridge {
   ): Promise<SessionReply>;
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
   activity?(taskId: string, sessionId: string): Promise<SessionReply>;
+  upload?(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply>;
+  stopUploadAdmission?(taskId: string): void;
   execute(
     taskId: string,
     sessionId: string,
@@ -222,6 +225,7 @@ export function createSelectedChromeTransport(deps: {
 
     if (command.op === 'close') {
       entry.stopping = true;
+      deps.bridge.stopUploadAdmission?.(taskId);
       if (entry.operation) await entry.operation.catch(() => undefined);
       if (entry.closeCleanupFailed) {
         try {
@@ -262,6 +266,20 @@ export function createSelectedChromeTransport(deps: {
           : deps.bridge.observe(taskId, command.sessionId),
       );
     }
+
+    if (
+      command.op === 'upload_describe' ||
+      command.op === 'upload_begin' ||
+      command.op === 'upload_chunk' ||
+      command.op === 'upload_commit' ||
+      command.op === 'upload_abort'
+    )
+      return run(
+        entry,
+        () =>
+          deps.bridge.upload?.(taskId, command) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
 
     if (command.op === 'activity')
       return run(
@@ -321,6 +339,7 @@ export function createSelectedChromeTransport(deps: {
     const entry = active;
     if (!entry || entry.taskId !== taskId) return;
     entry.stopping = true;
+    deps.bridge.stopUploadAdmission?.(taskId);
     while (entry.operation) {
       const pending = entry.operation;
       await pending.catch(() => undefined);

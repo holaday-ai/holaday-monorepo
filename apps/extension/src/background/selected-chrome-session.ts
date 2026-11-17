@@ -1,12 +1,23 @@
-import type { DriverAction, DriverResult } from '@holaday/browser-driver';
 import {
+  type DriverAction,
+  type DriverResult,
+  TaskFileTransfer,
+  type VerifiedTaskFile,
+} from '@holaday/browser-driver';
+import {
+  type BrowserUploadOutcome,
+  type SelectedChromeUploadAction,
+  type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserBinding,
   type UserBrowserProtocol,
   type UserBrowserTargetDescription,
+  type UserBrowserUploadState,
   userBrowserActivitySchema,
+  userBrowserTargetDescriptionSchema,
 } from '@holaday/shared-types';
 
 export interface SelectedChromeDriver {
@@ -16,6 +27,12 @@ export interface SelectedChromeDriver {
   describeTarget?(action: DriverAction, revision: number): Promise<DriverResult>;
   executeBound?(action: DriverAction, binding: UserBrowserBinding): Promise<DriverResult>;
   readActivity?(): Promise<DriverResult>;
+  uploadBound?(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    files: readonly VerifiedTaskFile[],
+    dispatchAllowed: () => boolean,
+  ): Promise<DriverResult>;
   dispose(): Promise<void>;
 }
 
@@ -29,6 +46,7 @@ export type SessionReply =
       protocol?: UserBrowserProtocol;
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
       actionOutcome?: 'applied' | 'not_applied';
+      uploadState?: UserBrowserUploadState;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -47,6 +65,25 @@ interface Entry {
   tabClosed: boolean;
   v2: boolean;
   collaborationV2: boolean;
+  uploadsEnabled: boolean;
+  uploadsStopped: boolean;
+  uploadTransfer?: TaskFileTransfer;
+  uploadPrepared?: {
+    driver: SelectedChromeDriver;
+    tabId: number;
+    action: SelectedChromeUploadAction;
+    target: UserBrowserTargetDescription;
+  };
+  uploadBindings: Map<
+    string,
+    {
+      driver: SelectedChromeDriver;
+      tabId: number;
+      action: SelectedChromeUploadAction;
+      binding: UserBrowserBinding;
+    }
+  >;
+  uploadBegins: Map<string, { fingerprint: string; transferId: string }>;
   activityBaseline?: string;
   origins: readonly string[];
   tabs: Map<
@@ -73,6 +110,10 @@ const NOT_APPLIED = new Set([
   'capability_missing',
   'human_input_active',
   'activity_unavailable',
+  'file_manifest_invalid',
+  'file_payload_invalid',
+  'file_target_forbidden',
+  'session_unavailable',
 ]);
 
 /** One local Chrome execution seat; the native CRX driver owns selectors. */
@@ -115,6 +156,10 @@ export class SelectedChromeSession {
       collaborationV2: Boolean(
         input.protocol?.capabilities.includes(USER_BROWSER_ACTIVITY_CAPABILITY),
       ),
+      uploadsEnabled: false,
+      uploadsStopped: false,
+      uploadBindings: new Map(),
+      uploadBegins: new Map(),
       origins: input.grantedOrigins ?? [],
       tabs: new Map(),
     };
@@ -139,6 +184,10 @@ export class SelectedChromeSession {
         return { ok: false, error: 'capability_missing' };
       if (entry.collaborationV2 && !entry.driver.readActivity)
         return { ok: false, error: 'capability_missing' };
+      entry.uploadsEnabled = Boolean(
+        input.protocol?.capabilities.includes(USER_BROWSER_UPLOAD_CAPABILITY) &&
+          entry.driver.uploadBound,
+      );
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
         origin: entry.origins[0] ?? '',
@@ -223,6 +272,208 @@ export class SelectedChromeSession {
     if (activity.stamp !== entry.activityBaseline)
       return { ok: false, error: 'stale_observation', actionOutcome: 'not_applied' };
     return null;
+  }
+
+  private invalidateUploadTargets(entry: Entry): void {
+    entry.uploadPrepared = undefined;
+    for (const id of entry.uploadBindings.keys()) {
+      try {
+        if (entry.uploadTransfer?.abort(id) === false) continue;
+      } catch {
+        /* expired or already settled */
+      }
+      entry.uploadBindings.delete(id);
+    }
+  }
+
+  private async deliverUpload(
+    entry: Entry,
+    files: readonly VerifiedTaskFile[],
+    id: string,
+  ): Promise<BrowserUploadOutcome> {
+    const bound = entry.uploadBindings.get(id);
+    if (
+      !bound ||
+      !this.current(entry) ||
+      entry.uploadsStopped ||
+      entry.tabClosed ||
+      entry.quarantined ||
+      bound.driver !== entry.driver ||
+      bound.tabId !== entry.tabId ||
+      !bound.driver.uploadBound
+    )
+      return { status: 'not_applied', reason: 'target_changed' };
+    const native = await this.nativeGate(entry);
+    if (native && !native.ok) return { status: 'not_applied', reason: native.error };
+    if (!this.current(entry) || entry.driver !== bound.driver || entry.tabId !== bound.tabId)
+      return { status: 'not_applied', reason: 'session_unavailable' };
+    const result = await bound.driver.uploadBound(
+      bound.action,
+      bound.binding,
+      files,
+      () =>
+        this.current(entry) &&
+        !entry.uploadsStopped &&
+        !entry.tabClosed &&
+        !entry.quarantined &&
+        entry.driver === bound.driver &&
+        entry.tabId === bound.tabId,
+    );
+    if (result.status === 'ok') return { status: 'handed_to_page' };
+    const reason = result.error?.code ?? 'input_outcome_unknown';
+    return NOT_APPLIED.has(reason)
+      ? { status: 'not_applied', reason }
+      : { status: 'unknown', reason: 'input_outcome_unknown' };
+  }
+
+  async upload(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply> {
+    const entry = this.find(taskId, command.sessionId);
+    if (!entry) return { ok: false, error: 'session_unavailable' };
+    if (!entry.uploadsEnabled || !entry.driver?.uploadBound)
+      return { ok: false, error: 'capability_missing' };
+    if (entry.uploadsStopped) return { ok: false, error: 'session_unavailable' };
+    if (entry.pending) return { ok: false, error: 'browser_busy' };
+    if (entry.tabClosed) return { ok: false, error: 'tab_closed' };
+    if (entry.quarantined && command.op !== 'upload_commit')
+      return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
+    return this.track(
+      entry,
+      async () => {
+        if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
+        try {
+          if (command.op === 'upload_describe') {
+            if (!entry.ready) return { ok: false, error: 'observation_required' };
+            this.invalidateUploadTargets(entry);
+            const driver = entry.driver;
+            if (!driver?.describeTarget) return { ok: false, error: 'capability_missing' };
+            const result = await driver.describeTarget(command.action, command.observationRevision);
+            if (!this.current(entry) || driver !== entry.driver)
+              return { ok: false, error: 'session_unavailable' };
+            if (result.status !== 'ok')
+              return { ok: false, error: result.error?.code ?? 'target_unreadable' };
+            const target = userBrowserTargetDescriptionSchema.safeParse(result.data);
+            if (
+              !target.success ||
+              !target.data.fileInput ||
+              target.data.tabId !== entry.tabId ||
+              target.data.observationRevision !== command.observationRevision ||
+              !entry.origins.includes(target.data.origin)
+            )
+              return { ok: false, error: 'target_unreadable' };
+            entry.uploadPrepared = {
+              driver,
+              tabId: entry.tabId,
+              action: command.action,
+              target: target.data,
+            };
+            return { ok: true, sessionId: entry.id, target: target.data };
+          }
+          if (command.op === 'upload_begin') {
+            const fingerprint = JSON.stringify([command.action, command.binding]);
+            const previous = entry.uploadBegins.get(command.binding.token);
+            if (previous)
+              return previous.fingerprint === fingerprint
+                ? {
+                    ok: true,
+                    sessionId: entry.id,
+                    uploadState: { phase: 'begun', transferId: previous.transferId },
+                  }
+                : { ok: false, error: 'target_binding_required' };
+            const prepared = entry.uploadPrepared;
+            if (
+              !entry.ready ||
+              !prepared ||
+              prepared.driver !== entry.driver ||
+              prepared.tabId !== entry.tabId ||
+              prepared.target.token !== command.binding.token ||
+              prepared.target.observationRevision !== command.binding.observationRevision ||
+              JSON.stringify(prepared.action) !== JSON.stringify(command.action)
+            )
+              return { ok: false, error: 'target_binding_required' };
+            const native = await this.nativeGate(entry);
+            if (native) return native;
+            if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
+            entry.uploadTransfer ??= new TaskFileTransfer({
+              active: () => this.current(entry) && !entry.uploadsStopped && !entry.tabClosed,
+              deliver: (files, id) => this.deliverUpload(entry, files, id),
+            });
+            const { transferId } = entry.uploadTransfer.begin(command.action.payload.files);
+            entry.uploadBindings.set(transferId, {
+              driver: prepared.driver,
+              tabId: prepared.tabId,
+              action: command.action,
+              binding: command.binding,
+            });
+            entry.uploadBegins.set(command.binding.token, { fingerprint, transferId });
+            while (entry.uploadBegins.size > 8)
+              entry.uploadBegins.delete(entry.uploadBegins.keys().next().value!);
+            entry.uploadPrepared = undefined;
+            return { ok: true, sessionId: entry.id, uploadState: { phase: 'begun', transferId } };
+          }
+          if (!entry.uploadTransfer) return { ok: false, error: 'transfer_unavailable' };
+          if (command.op === 'upload_chunk') {
+            const { op: _op, sessionId: _session, ...part } = command;
+            const progress = entry.uploadTransfer.append(part);
+            return {
+              ok: true,
+              sessionId: entry.id,
+              uploadState: { phase: 'progress', ...progress },
+            };
+          }
+          if (command.op === 'upload_abort') {
+            if (!entry.uploadTransfer.abort(command.transferId))
+              return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
+            entry.uploadBindings.delete(command.transferId);
+            return {
+              ok: true,
+              sessionId: entry.id,
+              uploadState: { phase: 'aborted', transferId: command.transferId },
+            };
+          }
+          const receipt = await entry.uploadTransfer.commit(command.transferId);
+          entry.uploadBindings.delete(command.transferId);
+          if (!this.current(entry))
+            return {
+              ok: false,
+              error: 'session_stopped',
+              ...(receipt.status === 'not_applied'
+                ? { actionOutcome: 'not_applied' as const }
+                : { actionOutcome: 'unknown' as const }),
+            };
+          const observed = await this.observeEntry(entry);
+          if (receipt.status === 'unknown') {
+            entry.quarantined = true;
+            entry.ready = false;
+          }
+          return {
+            ...(observed.ok ? observed : { ok: true as const, sessionId: entry.id }),
+            uploadState: { phase: 'finished', receipt },
+          };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : '';
+          const known = [
+            'invalid_manifest',
+            'invalid_chunk',
+            'transfer_unavailable',
+            'transfer_busy',
+            'scope_unavailable',
+            'offset_mismatch',
+            'chunk_mismatch',
+            'file_incomplete',
+            'file_hash_mismatch',
+            'upload_outcome_unknown',
+          ];
+          if (known.includes(reason))
+            return {
+              ok: false,
+              error: reason,
+              ...(command.op === 'upload_commit' ? { actionOutcome: 'not_applied' as const } : {}),
+            };
+          throw error;
+        }
+      },
+      command.op === 'upload_commit',
+    );
   }
 
   async execute(
@@ -383,6 +634,15 @@ export class SelectedChromeSession {
   }
 
   /** Session-scoped close for a future authenticated command endpoint. */
+  /** Close only file admission synchronously; normal close still owns drain/detach. */
+  stopUploadAdmission(taskId: string): void {
+    const entry = this.entry;
+    if (!entry || entry.taskId !== taskId) return;
+    entry.uploadsStopped = true;
+    entry.uploadPrepared = undefined;
+    entry.uploadTransfer?.dispose();
+  }
+
   async close(taskId: string, sessionId: string): Promise<{ ok: boolean }> {
     if (!this.find(taskId, sessionId)) return { ok: false };
     await this.stopTask(taskId);
@@ -397,6 +657,7 @@ export class SelectedChromeSession {
     const entry = this.entry;
     if (!entry || entry.taskId !== taskId) return;
     entry.stopped = true;
+    this.stopUploadAdmission(taskId);
     await entry.pending;
     entry.disposal ??= Promise.resolve()
       .then(async () => {
@@ -424,6 +685,7 @@ export class SelectedChromeSession {
   }
 
   private async observeEntry(entry: Entry): Promise<SessionReply> {
+    this.invalidateUploadTargets(entry);
     entry.ready = false;
     if (!this.current(entry) || !entry.driver) return { ok: false, error: 'session_unavailable' };
     if (entry.tabClosed) return { ok: false, error: 'tab_closed' };
@@ -466,6 +728,7 @@ export class SelectedChromeSession {
                   capabilities: [
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(entry.collaborationV2 ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
+                    ...(entry.uploadsEnabled ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
                   ],
                 },
               }

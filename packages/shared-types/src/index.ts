@@ -22,3 +22,4 @@ export * from './reply-language.js';
 export * from './browser-task-mode.js';
 export * from './browser-launch-journal.js';
 export * from './browser-file-transfer.js';
+export * from './selected-chrome-upload.js';

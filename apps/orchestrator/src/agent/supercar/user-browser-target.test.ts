@@ -70,6 +70,26 @@ const uploadPage = (
   `<form id="upload-form" action="/receive?ticket=PRIVATE-731" method="post">${input}</form>${extra}<input id="notes"><script>document.querySelector('#report').onchange=async function(){document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);document.body.dataset.uploaded=await this.files[0].text();}</script>`;
 
 describe('native file input with the existing real target binding', () => {
+  it('rechecks dispatch admission after slow reads and hashing before selecting files', async () => {
+    await page.setContent(uploadPage());
+    const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+    await r.observe();
+    const f = uploadFixture();
+    const target = await r.describe(f.action, 1);
+    let allowed = true;
+    const pending = r.execute(
+      f.action,
+      { token: target.token, observationRevision: 1 },
+      f.payloads,
+      () => allowed,
+    );
+    allowed = false;
+    await expect(pending).rejects.toThrow('session_unavailable');
+    expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+    expect(
+      await page.locator('#report').evaluate((node) => (node as HTMLInputElement).files?.length),
+    ).toBe(0);
+  });
   it('binds a hidden actual file input and hands the exact in-memory bytes to it once', async () => {
     await page.setContent(uploadPage());
     const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
