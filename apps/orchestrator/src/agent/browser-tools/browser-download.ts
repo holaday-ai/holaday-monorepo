@@ -14,7 +14,7 @@ const ownedDownloads = new WeakMap<
   { owner: object; promise: Promise<BrowserDownloadReceipt> }
 >();
 const TASK_DOWNLOAD = Symbol('saved-owned-task-download');
-type TaskDownloadSource = Readonly<{
+export type TaskDownloadSource = Readonly<{
   taskId: string;
   origin: string;
   originBasis: 'download_url' | 'owning_page';
@@ -42,6 +42,7 @@ export async function persistTransferredTaskBrowserDownload(
       buffer: Buffer;
       sha256: string;
       mimetype?: string;
+      source?: TaskDownloadSource;
     }): Promise<BrowserDownloadReceipt>;
   },
 ): Promise<BrowserDownloadReceipt> {
@@ -62,6 +63,7 @@ export async function persistTransferredTaskBrowserDownload(
     buffer: file.buffer,
     sha256: metadata.sha256,
     mimetype: metadata.mimeType,
+    source: { taskId: options.taskId, origin: source.origin, originBasis: source.originBasis },
   });
   if (
     !receipt.fileId ||
@@ -129,8 +131,11 @@ export async function persistTaskBrowserDownload(
       /* Unavailable sources must not grant file-reading authority. */
     }
   }
+  if (taskId && !taskSource) throw new Error('download_source_unavailable');
   const receipt = await (sharedBrowserDownload(download, owner) ??
-    persistBrowserDownload(download, store));
+    persistBrowserDownload(download, (input) =>
+      store({ ...input, ...(taskSource ? { source: taskSource } : {}) }),
+    ));
   await publish?.(receipt);
   if (taskId) {
     if (!taskSource) throw new Error('download_source_unavailable');
@@ -145,6 +150,7 @@ export async function persistBrowserDownload(
     filename: string;
     buffer: Buffer;
     sha256: string;
+    source?: TaskDownloadSource;
   }) => Promise<BrowserDownloadReceipt>,
   maxBytes = MAX_DOWNLOAD_BYTES,
 ): Promise<BrowserDownloadReceipt> {

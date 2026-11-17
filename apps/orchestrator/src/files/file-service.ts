@@ -27,8 +27,17 @@ import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
-import { browserFileBytesMatch, browserFileSourceSchema } from './browser-file-origin.js';
-import { type BrowserOutputInput, persistBrowserOutput } from './browser-output.js';
+import {
+  browserFileBytesMatch,
+  browserFileOriginSchema,
+  browserFileSourceSchema,
+  taskBrowserFileOriginSchema,
+} from './browser-file-origin.js';
+import {
+  type BrowserOutputInput,
+  type TaskBrowserOutputInput,
+  persistBrowserOutput,
+} from './browser-output.js';
 import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
 import {
   R2StorageProvider,
@@ -862,6 +871,23 @@ export class FileService {
 
   /** A server-captured Home download; only this path may create a task-less output. */
   async storeBrowserOutput(opts: BrowserOutputInput): Promise<TaskFile> {
+    return this.persistOriginalBrowserOutput({
+      ...opts,
+      source: browserFileOriginSchema.parse(opts.source),
+    });
+  }
+
+  /** A trusted original task download always retains its real owning task and digest. */
+  async storeTaskBrowserOutput(opts: TaskBrowserOutputInput): Promise<TaskFile> {
+    return this.persistOriginalBrowserOutput({
+      ...opts,
+      source: taskBrowserFileOriginSchema.parse(opts.source),
+    });
+  }
+
+  private async persistOriginalBrowserOutput(
+    opts: BrowserOutputInput | TaskBrowserOutputInput,
+  ): Promise<TaskFile> {
     return persistBrowserOutput(
       {
         db: this.db,
@@ -884,7 +910,13 @@ export class FileService {
     const items = [];
     for (const row of rows) {
       const source = browserFileSourceSchema.safeParse(row.browserSource);
-      if (row.userId !== userIdInternal || row.kind === 'temp' || !source.success) continue;
+      if (
+        row.userId !== userIdInternal ||
+        row.kind === 'temp' ||
+        !source.success ||
+        source.data.kind !== 'personal_home'
+      )
+        continue;
       const live =
         row.status === 'active' && (!row.expiresAt || row.expiresAt.getTime() > Date.now());
       const meta = live

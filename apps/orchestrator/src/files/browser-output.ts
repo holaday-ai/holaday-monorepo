@@ -8,9 +8,10 @@ import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
 import {
   type BrowserFileOrigin,
+  type TaskBrowserFileOrigin,
   browserFileBytesMatch,
-  browserFileOriginSchema,
   browserFileSourceSchema,
+  storedBrowserFileOriginSchema,
 } from './browser-file-origin.js';
 import { MAX_DOWNLOAD_BYTES } from './download-manager.js';
 import type { StorageProvider } from './storage-provider.js';
@@ -23,6 +24,9 @@ export interface BrowserOutputInput {
   mimetype: string;
   buffer: Buffer;
 }
+export type TaskBrowserOutputInput = Omit<BrowserOutputInput, 'source'> & {
+  source: TaskBrowserFileOrigin;
+};
 
 /** The original id permits later owner-checked reconciliation; it is not a success receipt. */
 export class BrowserFileSaveUnconfirmed extends Error {
@@ -48,12 +52,15 @@ const DEFINITE_INSERT_REJECTIONS = new Set([
 /** Uses the existing file index/storage; only a verified Home origin permits a null task. */
 export async function persistBrowserOutput(
   deps: { db: DB; storage: StorageProvider; logger: Logger; expiresAt: Date },
-  input: BrowserOutputInput,
+  input: BrowserOutputInput | TaskBrowserOutputInput,
 ): Promise<TaskFile> {
-  const source = browserFileOriginSchema.parse(input.source);
-  if (source.sessionId !== `bhs_${input.userExternalId}`)
+  const source = storedBrowserFileOriginSchema.parse(input.source);
+  if (source.kind === 'personal_home' && source.sessionId !== `bhs_${input.userExternalId}`)
     throw new Error('browser_file_owner_mismatch');
-  if (!input.buffer.length || input.buffer.length > MAX_DOWNLOAD_BYTES)
+  if (
+    (!input.buffer.length && source.kind === 'personal_home') ||
+    input.buffer.length > MAX_DOWNLOAD_BYTES
+  )
     throw new Error('browser_file_size_invalid');
   if (
     !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(input.mimetype) ||
@@ -163,8 +170,13 @@ export async function persistBrowserOutput(
     row.sizeBytes === input.buffer.length &&
     storedSource.success &&
     storedSource.data.sha256 === browserSource.sha256 &&
-    storedSource.data.sessionId === source.sessionId &&
-    storedSource.data.instanceId === source.instanceId &&
+    storedSource.data.kind === source.kind &&
+    (source.kind === 'personal_home'
+      ? storedSource.data.kind === 'personal_home' &&
+        storedSource.data.sessionId === source.sessionId &&
+        storedSource.data.instanceId === source.instanceId
+      : storedSource.data.kind === 'task_download' &&
+        storedSource.data.originBasis === source.originBasis) &&
     storedSource.data.origin === source.origin &&
     storedSource.data.taskId === source.taskId &&
     row.expiresAt &&

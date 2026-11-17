@@ -6838,17 +6838,26 @@ export const tasksRouter = router({
                         },
                       }
                     : {}),
-                  async onBrowserDownload({ filename, buffer, sha256, mimetype }) {
+                  async onBrowserDownload({ filename, buffer, sha256, mimetype, source }) {
                     const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
                     if (taskInternalId == null) throw new Error('task row not found');
-                    const stored = await fileService.storeOutput({
+                    if (source && source.taskId !== taskId)
+                      throw new Error('download_task_mismatch');
+                    const output = {
                       userIdInternal: userRow.id,
                       userExternalId: ctx.userId,
                       taskIdInternal: taskInternalId,
                       filename,
                       mimetype: mimetype ?? 'application/octet-stream',
                       buffer,
-                    });
+                    };
+                    const stored =
+                      appEnv.BROWSER_TASK_FILES_V1 && source
+                        ? await fileService.storeTaskBrowserOutput({
+                            ...output,
+                            source: { version: 1, kind: 'task_download', ...source },
+                          })
+                        : await fileService.storeOutput(output);
                     const receipt = {
                       fileId: stored.externalId,
                       filename: stored.filename,

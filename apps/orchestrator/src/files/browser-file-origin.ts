@@ -24,9 +24,25 @@ export const browserFileOriginSchema = z
   .strict();
 
 export type BrowserFileOrigin = z.infer<typeof browserFileOriginSchema>;
-export const browserFileSourceSchema = browserFileOriginSchema.extend({
-  sha256: z.string().regex(/^[a-f0-9]{64}$/),
-});
+export const taskBrowserFileOriginSchema = z
+  .object({
+    version: z.literal(1),
+    kind: z.literal('task_download'),
+    taskId: z.string().min(1).max(32),
+    origin: browserFileOriginSchema.shape.origin,
+    originBasis: z.enum(['download_url', 'owning_page']),
+  })
+  .strict();
+export type TaskBrowserFileOrigin = z.infer<typeof taskBrowserFileOriginSchema>;
+export const storedBrowserFileOriginSchema = z.discriminatedUnion('kind', [
+  browserFileOriginSchema,
+  taskBrowserFileOriginSchema,
+]);
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const browserFileSourceSchema = z.discriminatedUnion('kind', [
+  browserFileOriginSchema.extend({ sha256: digest }),
+  taskBrowserFileOriginSchema.extend({ sha256: digest }),
+]);
 export type BrowserFileSource = z.infer<typeof browserFileSourceSchema>;
 
 export function browserFileBytesMatch(source: unknown, size: number, buffer: Buffer): boolean {

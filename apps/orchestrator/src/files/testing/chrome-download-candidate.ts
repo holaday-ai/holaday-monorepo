@@ -193,12 +193,14 @@ export async function runChromeDownloadCandidate(options: {
             park: async () => null,
           }
         : {}),
-      onBrowserDownload: async ({ filename, buffer, sha256, mimetype }) => {
+      onBrowserDownload: async ({ filename, buffer, sha256, mimetype, source }) => {
         stores++;
-        const row = await fixture.service.storeOutput({
+        if (!source || source.taskId !== options.taskId)
+          throw new Error('actual task download source missing');
+        const row = await fixture.service.storeTaskBrowserOutput({
           userIdInternal: 7,
           userExternalId: 'usr_alice',
-          taskIdInternal: 9,
+          source: { version: 1, kind: 'task_download', ...source },
           filename,
           mimetype: mimetype ?? 'application/octet-stream',
           buffer,

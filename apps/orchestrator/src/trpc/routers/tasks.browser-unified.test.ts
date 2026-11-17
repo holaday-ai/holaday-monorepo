@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { type Browser, type Page, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
@@ -494,6 +495,10 @@ it.each([
                 return [];
               },
             },
+      async transaction<T>(operation: (tx: unknown) => Promise<T>): Promise<T> {
+        if (!uploadFixture) throw new Error('No file transaction fixture');
+        return uploadFixture.db.transaction((tx) => operation(tx));
+      },
       update: () => ({ set: () => ({ where: async () => [] }) }),
     };
     const ctx = {
@@ -583,6 +588,14 @@ it.each([
           taskId: 91,
           kind: 'output',
           mimetype: 'application/octet-stream',
+          browserSource: {
+            version: 1,
+            kind: 'task_download',
+            taskId: result.taskId,
+            origin: 'https://fixture.browser.test',
+            originBasis: 'download_url',
+            sha256: createHash('sha256').update(downloadCsv).digest('hex'),
+          },
         });
         expect(await uploadFixture!.service.loadMany([downloadedFileId], 8)).toEqual([]);
         expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
