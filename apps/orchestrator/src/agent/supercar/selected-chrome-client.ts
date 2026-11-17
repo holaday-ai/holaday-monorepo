@@ -1,15 +1,24 @@
+import { createHash } from 'node:crypto';
 import {
+  BROWSER_UPLOAD_CHUNK_BYTES,
+  type BrowserUploadTransferReceipt,
   type SelectedChromeSessionCommand,
+  type SelectedChromeUploadAction,
+  type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserTargetDescription,
+  selectedChromeUploadActionSchema,
   userBrowserActivitySchema,
   userBrowserProtocolSchema,
   userBrowserTargetDescriptionSchema,
+  userBrowserUploadStateSchema,
 } from '@holaday/shared-types';
 import { z } from 'zod';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
+import type { BrowserUploadFile } from '../browser-tools/browser-upload-target.js';
 import type { BrowserCheckpoint, BrowserControl } from './browser-control.js';
 
 type Action = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
@@ -21,6 +30,7 @@ type Options = {
   control: BrowserControl;
   routingV2?: boolean;
   collaborationV2?: boolean;
+  taskFilesV1?: boolean;
   send: (userId: string, options: ExtensionToolCallOptions) => Promise<ExtensionToolCallOutcome>;
 };
 
@@ -76,6 +86,7 @@ export type SelectedChromeClientReply =
       closed?: true;
       target?: UserBrowserTargetDescription;
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
+      uploadReceipt?: BrowserUploadTransferReceipt;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -97,6 +108,10 @@ export class SelectedChromeClient {
     return this.routingV2 && this.options.collaborationV2 === true;
   }
   private taskTabs = new Set<number>();
+  private uploadNegotiated = false;
+  get fileUploadsEnabled(): boolean {
+    return this.routingV2 && this.options.taskFilesV1 === true && this.uploadNegotiated;
+  }
   get routingV2(): boolean {
     return this.options.routingV2 === true;
   }
@@ -136,6 +151,7 @@ export class SelectedChromeClient {
                   capabilities: [
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(this.nativeActivityEnabled ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
+                    ...(this.options.taskFilesV1 ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
                   ],
                 },
                 grantedOrigins: [...this.origins],
@@ -192,6 +208,25 @@ export class SelectedChromeClient {
   }
 
   async describe(action: Action, expectedRevision: number): Promise<SelectedChromeClientReply> {
+    return this.describeTarget({ op: 'describe', action }, expectedRevision);
+  }
+
+  async describeUpload(
+    action: SelectedChromeUploadAction,
+    expectedRevision: number,
+  ): Promise<SelectedChromeClientReply> {
+    if (!this.fileUploadsEnabled) return fail('capability_missing');
+    const parsed = selectedChromeUploadActionSchema.safeParse(action);
+    if (!parsed.success) return fail('file_manifest_invalid');
+    return this.describeTarget({ op: 'upload_describe', action: parsed.data }, expectedRevision);
+  }
+
+  private async describeTarget(
+    command:
+      | { op: 'describe'; action: Action }
+      | { op: 'upload_describe'; action: SelectedChromeUploadAction },
+    expectedRevision: number,
+  ): Promise<SelectedChromeClientReply> {
     if (!this.routingV2) return fail('capability_missing');
     if (!this.sessionId || this.closing) return fail('session_unavailable');
     if (this.pending) return fail('browser_busy');
@@ -204,9 +239,8 @@ export class SelectedChromeClient {
     return this.track(async () => {
       this.prepared = null;
       const outcome = await this.send({
-        op: 'describe',
+        ...command,
         sessionId: this.sessionId ?? '',
-        action,
         observationRevision: this.extensionRevision,
       });
       const parsed = z
@@ -225,13 +259,203 @@ export class SelectedChromeClient {
         parsed.data.sessionId !== this.sessionId ||
         target.tabId !== this.tabId ||
         target.observationRevision !== this.extensionRevision ||
+        (command.op === 'upload_describe' && !target.fileInput) ||
         !this.origins.includes(target.origin) ||
         this.closing ||
         !this.options.control.canAgentAct()
       )
         return fail('stale_observation');
-      this.prepared = { target, action: JSON.stringify(action), revision: expectedRevision };
+      this.prepared = {
+        target,
+        action: JSON.stringify(command.action),
+        revision: expectedRevision,
+      };
       return { ok: true, target };
+    });
+  }
+
+  /** Host-only byte source. The runner must resolve these from its original
+   * BrowserTaskFiles after the common disclosure gate; no model paths/bytes. */
+  async upload(
+    input: SelectedChromeUploadAction,
+    expectedRevision: number,
+    source: {
+      resolve: () => Promise<readonly BrowserUploadFile[]>;
+      current: () => Promise<boolean>;
+    },
+  ): Promise<SelectedChromeClientReply> {
+    if (!this.fileUploadsEnabled) return fail('capability_missing');
+    if (!this.sessionId || this.closing) return fail('session_unavailable');
+    if (this.pending) return fail('browser_busy');
+    if (
+      !this.ready ||
+      !this.options.control.canAgentAct() ||
+      expectedRevision !== this.revisionValue
+    )
+      return fail('replan_required');
+    const parsed = selectedChromeUploadActionSchema.safeParse(input);
+    if (!parsed.success) return fail('file_manifest_invalid');
+    const action = parsed.data;
+    const prepared = this.prepared;
+    if (
+      !prepared ||
+      prepared.revision !== expectedRevision ||
+      prepared.action !== JSON.stringify(action)
+    )
+      return fail('target_binding_required');
+    const sessionId = this.sessionId;
+    this.prepared = null;
+    this.ready = false;
+    return this.track(async () => {
+      const current = async () => {
+        try {
+          const admitted = () =>
+            !this.closing &&
+            this.sessionId === sessionId &&
+            this.options.control.canAgentAct() &&
+            expectedRevision === this.revisionValue;
+          return admitted() && (await source.current()) && admitted();
+        } catch {
+          return false;
+        }
+      };
+      let transferId: string | undefined;
+      let commitSent = false;
+      const abort = async () => {
+        if (transferId) await this.send({ op: 'upload_abort', sessionId, transferId });
+      };
+      const notApplied = (error: string): SelectedChromeClientReply => ({
+        ok: false,
+        error,
+        actionOutcome: 'not_applied',
+      });
+      const transmit = async (command: SelectedChromeUploadCommand) => {
+        let result = await this.send(command);
+        // Only a lost transport receipt is retried, using the exact same stage,
+        // offset and bytes or commit ID. A new target/selection is never inferred.
+        if (
+          !result.ok &&
+          result.result === undefined &&
+          !['target_required', 'invalid_session_command', 'target_extension_unavailable'].includes(
+            result.error?.code ?? '',
+          ) &&
+          (await current())
+        )
+          result = await this.send(command);
+        return result;
+      };
+      const readState = (result: ExtensionToolCallOutcome) => {
+        const parsed = z
+          .object({
+            ok: z.literal(true),
+            sessionId: z.literal(sessionId),
+            uploadState: userBrowserUploadStateSchema,
+          })
+          .safeParse(result.result);
+        return result.ok && parsed.success ? parsed.data.uploadState : null;
+      };
+      const matches = (files: readonly BrowserUploadFile[]) =>
+        files.length === action.payload.files.length &&
+        files.every((file, index) => {
+          const expected = action.payload.files[index]!;
+          return (
+            Buffer.isBuffer(file.buffer) &&
+            file.fileId === expected.fileId &&
+            file.name === expected.name &&
+            file.mimeType === expected.mimeType &&
+            file.buffer.length === expected.sizeBytes &&
+            createHash('sha256').update(file.buffer).digest('hex') === expected.sha256
+          );
+        });
+      try {
+        if (!(await current())) return notApplied('scope_unavailable');
+        const files = await source.resolve();
+        if (!(await current())) return notApplied('scope_unavailable');
+        if (!matches(files)) return notApplied('file_payload_invalid');
+        if (!(await current())) return notApplied('scope_unavailable');
+        const begun = readState(
+          await transmit({
+            op: 'upload_begin',
+            sessionId,
+            action,
+            binding: {
+              token: prepared.target.token,
+              observationRevision: prepared.target.observationRevision,
+            },
+          }),
+        );
+        if (begun?.phase !== 'begun') return notApplied('upload_staging_unconfirmed');
+        transferId = begun.transferId;
+        for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+          const file = files[fileIndex]!;
+          for (let offset = 0; offset < file.buffer.length; offset += BROWSER_UPLOAD_CHUNK_BYTES) {
+            if (!(await current())) {
+              await abort();
+              return notApplied('scope_unavailable');
+            }
+            const bytes = file.buffer.subarray(offset, offset + BROWSER_UPLOAD_CHUNK_BYTES);
+            const progress = readState(
+              await transmit({
+                op: 'upload_chunk',
+                sessionId,
+                transferId,
+                fileIndex,
+                offset,
+                data: bytes.toString('base64'),
+              }),
+            );
+            if (
+              progress?.phase !== 'progress' ||
+              progress.transferId !== transferId ||
+              progress.fileIndex !== fileIndex ||
+              progress.nextOffset !== offset + bytes.length
+            ) {
+              await abort();
+              return notApplied('upload_staging_unconfirmed');
+            }
+          }
+        }
+        if (!(await current())) {
+          await abort();
+          return notApplied('scope_unavailable');
+        }
+        if (!matches(await source.resolve())) {
+          await abort();
+          return notApplied('file_payload_invalid');
+        }
+        if (!(await current())) {
+          await abort();
+          return notApplied('scope_unavailable');
+        }
+        commitSent = true;
+        const result = await transmit({ op: 'upload_commit', sessionId, transferId });
+        const state = readState(result);
+        if (
+          state?.phase !== 'finished' ||
+          state.receipt.transferId !== transferId ||
+          JSON.stringify(state.receipt.files) !== JSON.stringify(action.payload.files)
+        ) {
+          const rejected = failureSchema.safeParse(result.result);
+          if (!result.ok && rejected.success && rejected.data.actionOutcome === 'not_applied')
+            return notApplied(rejected.data.error);
+          return this.uncertain('input_outcome_unknown', 'act');
+        }
+        if (!(await current())) return this.uncertain('input_outcome_unknown', 'act');
+        const receipt = state.receipt;
+        if (receipt.status === 'unknown') {
+          this.uncertain('input_outcome_unknown', 'act');
+          return { ok: true, uploadReceipt: receipt };
+        }
+        // Native delivery and subsequent observation are separate evidence.
+        // A missing observation requires re-read, never another upload.
+        const observed = successSchema.safeParse(result.result);
+        const fresh = observed.success ? this.accept(result, 'observe') : null;
+        return { ...(fresh?.ok ? fresh : { ok: true as const }), uploadReceipt: receipt };
+      } catch {
+        if (commitSent) return this.uncertain('input_outcome_unknown', 'act');
+        await abort();
+        return notApplied('file_unavailable');
+      }
     });
   }
   async tabs(
@@ -487,6 +711,8 @@ export class SelectedChromeClient {
       const protocol = userBrowserProtocolSchema.safeParse(
         (outcome.result as Record<string, unknown>).protocol,
       );
+      this.uploadNegotiated =
+        protocol.success && protocol.data.capabilities.includes(USER_BROWSER_UPLOAD_CAPABILITY);
       if (
         !protocol.success ||
         !reply.observation.observationRevision ||
