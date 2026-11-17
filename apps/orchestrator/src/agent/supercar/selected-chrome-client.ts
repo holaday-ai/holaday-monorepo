@@ -6,12 +6,15 @@ import {
   type SelectedChromeUploadAction,
   type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
+  USER_BROWSER_CHOOSER_CAPABILITY,
   USER_BROWSER_PROTOCOL,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
+  type UserBrowserChooserState,
   type UserBrowserTargetDescription,
   selectedChromeUploadActionSchema,
   userBrowserActivitySchema,
+  userBrowserChooserStateSchema,
   userBrowserProtocolSchema,
   userBrowserTargetDescriptionSchema,
   userBrowserUploadStateSchema,
@@ -87,6 +90,7 @@ export type SelectedChromeClientReply =
       target?: UserBrowserTargetDescription;
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
       uploadReceipt?: BrowserUploadTransferReceipt;
+      chooserState?: UserBrowserChooserState;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -100,6 +104,7 @@ export class SelectedChromeClient {
     target: UserBrowserTargetDescription;
     action: string;
     revision: number;
+    inputRevision: number;
   } | null = null;
   private nativeBaseline: string | null = null;
   private nativeSeen: string | null = null;
@@ -109,8 +114,12 @@ export class SelectedChromeClient {
   }
   private taskTabs = new Set<number>();
   private uploadNegotiated = false;
+  private chooserNegotiated = false;
   get fileUploadsEnabled(): boolean {
     return this.routingV2 && this.options.taskFilesV1 === true && this.uploadNegotiated;
+  }
+  get fileChoosersEnabled(): boolean {
+    return this.fileUploadsEnabled && this.chooserNegotiated;
   }
   get routingV2(): boolean {
     return this.options.routingV2 === true;
@@ -154,7 +163,9 @@ export class SelectedChromeClient {
                   capabilities: [
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(this.nativeActivityEnabled ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
-                    ...(this.options.taskFilesV1 ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
+                    ...(this.options.taskFilesV1
+                      ? [USER_BROWSER_UPLOAD_CAPABILITY, USER_BROWSER_CHOOSER_CAPABILITY]
+                      : []),
                   ],
                 },
                 grantedOrigins: [...this.origins],
@@ -214,6 +225,112 @@ export class SelectedChromeClient {
     return this.describeTarget({ op: 'describe', action }, expectedRevision);
   }
 
+  /** One prepared file-button click. A missing receipt is never retransmitted. */
+  async openFileChooser(
+    action: Action,
+    expectedRevision: number,
+  ): Promise<SelectedChromeClientReply> {
+    const notApplied = (error: string): SelectedChromeClientReply => ({
+      ok: false,
+      error,
+      actionOutcome: 'not_applied',
+    });
+    if (!this.fileChoosersEnabled) return notApplied('capability_missing');
+    if (action.kind !== 'click') return notApplied('unsupported_action');
+    if (!this.sessionId || this.closing) return notApplied('session_unavailable');
+    if (this.pending) return notApplied('browser_busy');
+    if (
+      !this.ready ||
+      !this.options.control.canAgentAct() ||
+      expectedRevision !== this.revisionValue
+    )
+      return notApplied('replan_required');
+    const click = action;
+    const sessionId = this.sessionId;
+    const inputRevision = this.options.control.inputRevision;
+    return this.track(async () => {
+      const current = () =>
+        !this.closing &&
+        this.sessionId === sessionId &&
+        this.options.control.canAgentAct() &&
+        this.revisionValue === expectedRevision &&
+        this.options.control.inputRevision === inputRevision;
+      const prepared = this.prepared;
+      this.prepared = null;
+      if (!current()) return notApplied('replan_required');
+      if (
+        !prepared ||
+        prepared.action !== JSON.stringify(click) ||
+        prepared.revision !== expectedRevision
+      )
+        return notApplied('target_binding_required');
+      if (prepared.inputRevision !== inputRevision) {
+        this.ready = false;
+        return notApplied('replan_required');
+      }
+      this.ready = false;
+      const outcome = await this.send({
+        op: 'chooser_open',
+        sessionId,
+        action: click,
+        binding: {
+          token: prepared.target.token,
+          observationRevision: prepared.target.observationRevision,
+        },
+      });
+      const rejected = failureSchema.safeParse(outcome.result);
+      if (
+        !outcome.ok &&
+        rejected.success &&
+        rejected.data.error === 'chooser_restore_unconfirmed'
+      ) {
+        this.options.control.close('input_outcome_unknown');
+        return { ...rejected.data, actionOutcome: rejected.data.actionOutcome ?? 'unknown' };
+      }
+      if (
+        !outcome.ok &&
+        outcome.result === undefined &&
+        !['target_required', 'invalid_session_command', 'target_extension_unavailable'].includes(
+          outcome.error?.code ?? '',
+        )
+      )
+        return this.uncertain('input_outcome_unknown', 'act');
+      if (!outcome.ok) return this.accept(outcome, 'act');
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.literal(sessionId),
+          chooserState: userBrowserChooserStateSchema,
+          actionOutcome: z.enum(['applied', 'not_applied']),
+          observation: observationSchema.optional(),
+        })
+        .safeParse(outcome.result);
+      if (!parsed.success || parsed.data.actionOutcome !== parsed.data.chooserState.clickOutcome)
+        return this.uncertain('invalid_receipt', 'act');
+      const state = parsed.data.chooserState;
+      if (!current())
+        return { ok: false, error: 'replan_required', actionOutcome: state.clickOutcome };
+      if (!parsed.data.observation)
+        return { ok: true, chooserState: state, actionOutcome: state.clickOutcome };
+      const fresh = this.accept(outcome, 'observe');
+      if (!fresh.ok) return { ...fresh, actionOutcome: fresh.actionOutcome ?? state.clickOutcome };
+      // accept() advances the client revision on a valid new observation.
+      if (
+        this.closing ||
+        !this.options.control.canAgentAct() ||
+        this.options.control.inputRevision !== inputRevision
+      ) {
+        this.ready = false;
+        return { ok: false, error: 'replan_required', actionOutcome: state.clickOutcome };
+      }
+      if (!this.fileChoosersEnabled) {
+        this.ready = false;
+        return { ok: false, error: 'capability_missing', actionOutcome: state.clickOutcome };
+      }
+      return { ...fresh, chooserState: state, actionOutcome: state.clickOutcome };
+    });
+  }
+
   async describeUpload(
     action: SelectedChromeUploadAction,
     expectedRevision: number,
@@ -221,6 +338,8 @@ export class SelectedChromeClient {
     if (!this.fileUploadsEnabled) return fail('capability_missing');
     const parsed = selectedChromeUploadActionSchema.safeParse(action);
     if (!parsed.success) return fail('file_manifest_invalid');
+    if (parsed.data.payload.chooserId && !this.fileChoosersEnabled)
+      return fail('capability_missing');
     return this.describeTarget({ op: 'upload_describe', action: parsed.data }, expectedRevision);
   }
 
@@ -272,6 +391,7 @@ export class SelectedChromeClient {
         target,
         action: JSON.stringify(command.action),
         revision: expectedRevision,
+        inputRevision: this.options.control.inputRevision,
       };
       return { ok: true, target };
     });
@@ -299,6 +419,7 @@ export class SelectedChromeClient {
     const parsed = selectedChromeUploadActionSchema.safeParse(input);
     if (!parsed.success) return fail('file_manifest_invalid');
     const action = parsed.data;
+    if (action.payload.chooserId && !this.fileChoosersEnabled) return fail('capability_missing');
     const prepared = this.prepared;
     if (
       !prepared ||
@@ -716,6 +837,8 @@ export class SelectedChromeClient {
       );
       this.uploadNegotiated =
         protocol.success && protocol.data.capabilities.includes(USER_BROWSER_UPLOAD_CAPABILITY);
+      this.chooserNegotiated =
+        protocol.success && protocol.data.capabilities.includes(USER_BROWSER_CHOOSER_CAPABILITY);
       if (
         !protocol.success ||
         !reply.observation.observationRevision ||

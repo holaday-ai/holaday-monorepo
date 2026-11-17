@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import type { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import {
+  type SelectedChromeSessionCommand,
   type SelectedChromeUploadCommand,
   USER_BROWSER_PROTOCOL,
   selectedChromeSessionCommandSchema,
+  selectedChromeUploadCommandSchema,
 } from '@holaday/shared-types';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +16,9 @@ import {
   SelectedChromeSession,
   type SessionReply,
 } from '../../../../extension/src/background/selected-chrome-session.js';
+import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
+import { BrowserControl } from './browser-control.js';
+import { SelectedChromeClient } from './selected-chrome-client.js';
 
 const boundary = vi.hoisted(() => ({ get: vi.fn(), files: new Map<string, Uint8Array>() }));
 // Only the CRX connection and its public virtual filesystem are substituted.
@@ -68,6 +73,7 @@ let cdp: CDPSession;
 let origin: string;
 let send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 const sessions: SelectedChromeSession[] = [];
+const clients: SelectedChromeClient[] = [];
 const auxiliaryPages: Page[] = [];
 const ok = (reply: SessionReply) => {
   if (!reply.ok) throw new Error(reply.error);
@@ -144,7 +150,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await page.goto(origin);
-  await page.setContent(fixture);
+  await page.setContent(`${fixture}<input id="notes">`);
   send = (method, params) => cdp.send(method as never, params as never);
   boundary.get.mockResolvedValue({
     on: () => {},
@@ -161,6 +167,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  for (const client of clients.splice(0)) await client.close();
   for (const session of sessions.splice(0)) await session.stopTask('task-a');
   for (const created of auxiliaryPages.splice(0)) await created.close();
   page.removeAllListeners('filechooser');
@@ -171,6 +178,229 @@ afterEach(async () => {
 afterAll(async () => {
   await browser?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+async function clientFixture(requested = true, supported = true) {
+  const session = new SelectedChromeSession({
+    owner: () => 'alice',
+    makeDriver: (tabId, options) =>
+      new PlaywrightCrxAdapter({
+        attachToTabId: tabId,
+        allowedOrigins: options?.origins,
+        userBrowserRoutingV2: options?.v2,
+      }),
+  });
+  sessions.push(session);
+  const control = new BrowserControl();
+  const commands: SelectedChromeSessionCommand[] = [];
+  const settings: {
+    dropReply?: boolean;
+    noObservation?: boolean;
+    wrongSession?: boolean;
+    onReply?: () => void | Promise<void>;
+  } = {};
+  const invoke = async (
+    _user: string,
+    input: ExtensionToolCallOptions,
+  ): Promise<ExtensionToolCallOutcome> => {
+    const command = selectedChromeSessionCommandSchema.parse(input.args?.session);
+    commands.push(command);
+    let result: unknown;
+    if (command.op === 'open')
+      result = await session.open({
+        taskId: 'task-a',
+        tabId: 731,
+        validate: async () => {},
+        protocol: command.protocol
+          ? {
+              ...command.protocol,
+              capabilities: command.protocol.capabilities.filter(
+                (value) => supported || value !== chooserCapability,
+              ),
+            }
+          : undefined,
+        grantedOrigins: command.grantedOrigins,
+      });
+    else if (command.op === 'describe')
+      result = await session.describe(
+        'task-a',
+        command.sessionId,
+        command.action,
+        command.observationRevision,
+      );
+    else if (command.op === 'chooser_open') {
+      result = await session.openChooser('task-a', command);
+      await settings.onReply?.();
+      if (settings.dropReply)
+        return { ok: false, error: { code: 'timeout', message: 'synthetic lost chooser receipt' } };
+      if (settings.noObservation && typeof result === 'object' && result) {
+        result = { ...result };
+        Reflect.deleteProperty(result as object, 'observation');
+      }
+      if (settings.wrongSession && typeof result === 'object' && result)
+        result = { ...result, sessionId: '33333333-3333-4333-8333-333333333333' };
+    } else if (command.op === 'observe')
+      result = await session.observe('task-a', command.sessionId);
+    else if (command.op === 'close')
+      result = { ...(await session.close('task-a', command.sessionId)), closed: true };
+    else if (command.op.startsWith('upload_'))
+      result = await session.upload('task-a', selectedChromeUploadCommandSchema.parse(command));
+    else throw new Error('unexpected chooser client fixture command');
+    return { ok: (result as { ok: boolean }).ok, result };
+  };
+  const client = new SelectedChromeClient({
+    userId: 'alice',
+    taskId: 'task-a',
+    extensionClientId: 'native-chrome',
+    routingV2: true,
+    taskFilesV1: requested,
+    control,
+    send: invoke,
+  });
+  clients.push(client);
+  expect(await client.open({ tabId: 731, expectedUrl: origin, selectionId: token })).toMatchObject({
+    ok: true,
+  });
+  return {
+    client,
+    control,
+    commands,
+    settings,
+    prepare: async () => {
+      expect(await client.describe(action, client.revision)).toMatchObject({ ok: true });
+      return client.revision;
+    },
+  };
+}
+
+describe('chooser client over the actual session and native browser input', () => {
+  it.each(['flag-off', 'old-extension'] as const)(
+    'keeps chooser unavailable with %s',
+    async (mode) => {
+      const f = await clientFixture(mode !== 'flag-off', mode !== 'old-extension');
+      expect(f.client.fileChoosersEnabled).toBe(false);
+      expect(await f.client.openFileChooser(action, f.client.revision)).toMatchObject({
+        ok: false,
+        error: 'capability_missing',
+        actionOutcome: 'not_applied',
+      });
+      expect(f.commands.filter((command) => command.op === 'chooser_open')).toHaveLength(0);
+      expect(f.client.fileUploadsEnabled).toBe(mode === 'old-extension');
+      expect(await page.locator('body').getAttribute('data-clicks')).toBeNull();
+    },
+  );
+  it('opens once with the exact prepared click and returns only a native chooser id', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    expect(f.client.fileChoosersEnabled).toBe(true);
+    const result = await f.client.openFileChooser(action, revision);
+    expect(result).toMatchObject({
+      ok: true,
+      actionOutcome: 'applied',
+      chooserState: { status: 'captured' },
+    });
+    expect(await f.client.openFileChooser(action, f.client.revision)).toMatchObject({
+      ok: false,
+      actionOutcome: 'not_applied',
+    });
+    expect(f.commands.filter((command) => command.op === 'chooser_open')).toHaveLength(1);
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+    expect(await page.locator('body').getAttribute('data-received')).toBeNull();
+  });
+  it('never repeats a chooser click after losing the applied native reply', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    f.settings.dropReply = true;
+    expect(await f.client.openFileChooser(action, revision)).toMatchObject({
+      ok: false,
+      error: 'input_outcome_unknown',
+      actionOutcome: 'unknown',
+    });
+    expect(f.control.canAgentAct()).toBe(false);
+    expect((await f.client.openFileChooser(action, f.client.revision)).ok).toBe(false);
+    expect(f.commands.filter((command) => command.op === 'chooser_open')).toHaveLength(1);
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+    expect(await f.client.close()).toMatchObject({ ok: true, closed: true });
+  });
+  it('requires a fresh observation before using a chooser whose click reply lacks observation', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    f.settings.noObservation = true;
+    const result = await f.client.openFileChooser(action, revision);
+    expect(result).toMatchObject({
+      ok: true,
+      actionOutcome: 'applied',
+      chooserState: { status: 'captured' },
+    });
+    if (!result.ok || result.chooserState?.status !== 'captured')
+      throw new Error('native chooser missing');
+    const upload = {
+      kind: 'upload' as const,
+      payload: { files, chooserId: result.chooserState.chooserId },
+    };
+    expect(await f.client.describeUpload(upload, f.client.revision)).toMatchObject({
+      ok: false,
+      error: 'replan_required',
+    });
+    expect(f.commands.filter((command) => command.op === 'upload_describe')).toHaveLength(0);
+    expect(await f.client.observe()).toMatchObject({ ok: true });
+    expect(await f.client.describeUpload(upload, f.client.revision)).toMatchObject({
+      ok: true,
+      target: { fileInput: { selectedCount: 0 } },
+    });
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+  });
+  it('does not publish an old chooser when the person actually types while its reply is in flight', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    f.settings.onReply = () =>
+      f.control.runHuman(() => page.locator('#notes').fill('human note 731'), 'insertText');
+    const result = await f.client.openFileChooser(action, revision);
+    expect(result).toMatchObject({ ok: false, error: 'replan_required', actionOutcome: 'applied' });
+    expect('chooserState' in result).toBe(false);
+    expect(await page.locator('#notes').inputValue()).toBe('human note 731');
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+  });
+  it('suppresses the chooser capability when close starts before the reply is accepted', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    let closed: Promise<unknown> | undefined;
+    f.settings.onReply = () => {
+      closed = f.client.close();
+    };
+    const result = await f.client.openFileChooser(action, revision);
+    expect(result).toMatchObject({ ok: false, actionOutcome: 'applied' });
+    expect('chooserState' in result).toBe(false);
+    expect(await closed).toMatchObject({ ok: true, closed: true });
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+  });
+  it('stops further control after unconfirmed interception restoration while preserving the applied click', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    send = async (method, params) => {
+      if (method === 'Page.setInterceptFileChooserDialog' && params?.enabled === false)
+        throw new Error('private restore reply');
+      return cdp.send(method as never, params as never);
+    };
+    expect(await f.client.openFileChooser(action, revision)).toMatchObject({
+      ok: false,
+      error: 'chooser_restore_unconfirmed',
+      actionOutcome: 'applied',
+    });
+    expect(f.control.canAgentAct()).toBe(false);
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+  });
+  it('rejects a chooser id attributed to another session even without observation', async () => {
+    const f = await clientFixture();
+    const revision = await f.prepare();
+    f.settings.noObservation = true;
+    f.settings.wrongSession = true;
+    const result = await f.client.openFileChooser(action, revision);
+    expect(result).toMatchObject({ ok: false, error: 'invalid_receipt', actionOutcome: 'unknown' });
+    expect('chooserState' in result).toBe(false);
+    expect(f.control.canAgentAct()).toBe(false);
+    expect(await page.locator('body').getAttribute('data-clicks')).toBe('1');
+  });
 });
 
 describe('optional native chooser session protocol with actual adapter and browser', () => {

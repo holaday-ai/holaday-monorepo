@@ -1,15 +1,23 @@
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { selectedChromeUploadCommandSchema } from '@holaday/shared-types';
+import {
+  type SelectedChromeSessionCommand,
+  selectedChromeUploadCommandSchema,
+} from '@holaday/shared-types';
 import type { CDPSession } from 'playwright';
 import { chromium } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
+import { NativeChooserCaptureError } from '../../../../../packages/browser-driver/src/native-file-chooser.js';
 import { SelectedTargetResolver } from '../../../../../packages/browser-driver/src/selected-target.js';
 import { SelectedChromeSession } from '../../../../extension/src/background/selected-chrome-session.js';
 import { createBrowserTaskFileScope } from '../../files/browser-task-file-scope.js';
 import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type { MessagesAdapter, NeutralMessagesRequest } from '../../llm/messages-adapter.js';
+import {
+  BrowserActionCaptureRecorder,
+  type CaptureSink,
+} from '../../playbook/evolution/capture-recorder.js';
 import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
 import { createBrowserUploadGate } from '../browser-tools/browser-upload-gate.js';
 import { BrowserControl } from './browser-control.js';
@@ -37,7 +45,15 @@ const sorted = (value: unknown): unknown =>
         )
       : value;
 
-async function fixture(clientTaskId = 'tsk_alice', open = true) {
+const fileButtonSelector = {
+  description: 'Choose report',
+  strategies: [{ kind: 'css' as const, value: '#choose' }],
+  scope: { timeoutMs: 2000 },
+  selfHeal: false,
+};
+const chooserPageHTML = (transactional = false) =>
+  `${transactional ? '<form action="/checkout" method="post"><input name="amount" type="number" value="731">' : ''}<button id="choose" type="${transactional ? 'submit' : 'button'}" onclick="event.preventDefault();document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1);const file=document.createElement('input');file.type='file';file.accept='.csv';file.onchange=async()=>{document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);document.querySelector('p').textContent=await file.files[0].text()};file.click()">${transactional ? '支付并继续' : 'Choose report'}</button>${transactional ? '</form>' : ''}<p></p>`;
+async function fixture(clientTaskId = 'tsk_alice', open = true, dynamic = false) {
   const disk = await browserOutputFixture();
   const row = await disk.service.storeUpload({
     userIdInternal: 7,
@@ -68,6 +84,7 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
   const browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
   const page = await browser.newPage();
   await page.goto(origin);
+  if (dynamic) await page.setContent(chooserPageHTML());
   const cdp: CDPSession = await page.context().newCDPSession(page);
   const native = new SelectedTargetResolver(page as never, 42, [origin], async (method, params) =>
     sorted(await cdp.send(method as never, params as never)),
@@ -123,11 +140,46 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
         }
       },
       execute: async () => ({ status: 'ok' }),
-      executeBound: async () => ({ status: 'ok' }),
-      dispose: async () => {},
+      executeBound: async (action, binding, allowed) => {
+        try {
+          await native.execute(action, binding, undefined, allowed);
+          return { status: 'ok' };
+        } catch (error) {
+          return {
+            status: 'error',
+            error: { code: (error as Error).message, message: 'native input rejected' },
+          };
+        }
+      },
+      ...(dynamic
+        ? {
+            captureFileChooserBound: async (action, binding, allowed, signal) => {
+              try {
+                return {
+                  status: 'ok' as const,
+                  data: await native.captureFileChooser(action, binding, allowed, signal),
+                };
+              } catch (error) {
+                const known = error instanceof NativeChooserCaptureError;
+                return {
+                  status: 'error' as const,
+                  error: { code: (error as Error).message, message: 'native chooser rejected' },
+                  data: {
+                    clickOutcome: known ? error.clickOutcome : 'not_applied',
+                    interceptionRestored: !known || error.message !== 'chooser_restore_unconfirmed',
+                  },
+                };
+              }
+            },
+          }
+        : {}),
+      dispose: async () => {
+        await native.dispose();
+      },
     }),
   });
   const control = new BrowserControl();
+  const commands: SelectedChromeSessionCommand[] = [];
   const client = new SelectedChromeClient({
     userId: 'usr_alice',
     taskId: clientTaskId,
@@ -138,6 +190,7 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
     send: async (_user, options) => {
       const command = options.args?.session;
       if (!command) throw new Error('missing command');
+      commands.push(command);
       const result =
         command.op === 'open'
           ? await session.open({
@@ -151,10 +204,26 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
             ? { ...(await session.close(options.taskId!, command.sessionId)), closed: true }
             : command.op === 'observe'
               ? await session.observe(options.taskId!, command.sessionId)
-              : await session.upload(
-                  options.taskId!,
-                  selectedChromeUploadCommandSchema.parse(command),
-                );
+              : command.op === 'describe'
+                ? await session.describe(
+                    options.taskId!,
+                    command.sessionId,
+                    command.action,
+                    command.observationRevision,
+                  )
+                : command.op === 'chooser_open'
+                  ? await session.openChooser(options.taskId!, command)
+                  : command.op === 'act'
+                    ? await session.execute(
+                        options.taskId!,
+                        command.sessionId,
+                        command.action,
+                        command.binding,
+                      )
+                    : await session.upload(
+                        options.taskId!,
+                        selectedChromeUploadCommandSchema.parse(command),
+                      );
       return { ok: result.ok, result };
     },
   });
@@ -172,6 +241,7 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
     scope,
     client,
     control,
+    commands,
     page,
     origin,
     prepare: () =>
@@ -192,6 +262,384 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
 }
 
 describe('scoped task files and shared disclosure gate on a real native target', () => {
+  it('keeps ordinary task capture and verified outcomes without a file scope', async () => {
+    const f = await fixture('tsk_alice', false, true);
+    await f.page.setContent(
+      '<button type="button" onclick="document.querySelector(\'p\').textContent=\'Report prepared\'">Prepare report</button><p></p>',
+    );
+    const rows: Array<Parameters<CaptureSink['create']>[0]> = [];
+    const outcomes: unknown[] = [];
+    const capture = new BrowserActionCaptureRecorder(
+      {
+        create: async (row) => {
+          rows.push(row);
+        },
+        setOutcome: async (_id, outcome) => {
+          outcomes.push(outcome);
+        },
+      },
+      { taskId: 9, executorSource: 'extension' },
+    );
+    const metadata: MessagesAdapter['metadata'] = {
+      provider: 'alibaba-model-studio',
+      model: 'synthetic',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      endpointKind: 'public',
+      protocol: 'messages',
+    };
+    let calls = 0;
+    const adapter: MessagesAdapter = {
+      metadata,
+      create: async () => {
+        const first = ++calls === 1;
+        return {
+          id: 'ordinary-capture',
+          metadata,
+          stopReason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: `ordinary-${calls}`,
+              name: first ? 'browser_act' : 'browser_finish',
+              input: first
+                ? {
+                    action: {
+                      kind: 'click',
+                      selector: {
+                        description: 'Prepare report',
+                        strategies: [{ kind: 'role', role: 'button', name: 'Prepare report' }],
+                      },
+                    },
+                  }
+                : {
+                    status: 'completed',
+                    summary: 'Report prepared',
+                    evidenceText: 'Report prepared',
+                  },
+            },
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    try {
+      const result = await runSelectedChromeTask({
+        taskId: 'tsk_alice',
+        intent: 'Prepare the report on this page',
+        messagesAdapter: adapter,
+        client: f.client,
+        control: f.control,
+        target: {
+          tabId: 42,
+          expectedUrl: f.origin,
+          selectionId: '22222222-2222-4222-8222-222222222222',
+        },
+        maxIterations: 3,
+        timeoutMs: 20_000,
+        capture,
+      });
+      expect(result.status, JSON.stringify(result)).toBe('completed');
+      expect(await f.page.locator('p').textContent()).toBe('Report prepared');
+      expect(rows.map((row) => row.stepType)).toEqual(['click']);
+      expect(rows[0]?.visibleText).toBe('Prepare report');
+      expect(outcomes).toEqual([{ finalUrl: f.origin, evidenceTexts: ['Report prepared'] }]);
+    } finally {
+      await f.close();
+    }
+  });
+  it('does not mark a partial ordinary-click trace as a reusable successful file workflow', async () => {
+    const f = await fixture('tsk_alice', false, true);
+    await f.page.locator('body').evaluate((body) => {
+      const button = document.createElement('button');
+      button.textContent = 'Prepare report';
+      button.onclick = () => {
+        document.body.dataset.prepared = '1';
+      };
+      body.append(button);
+    });
+    const rows: Array<Parameters<CaptureSink['create']>[0]> = [];
+    const outcomes: unknown[] = [];
+    const taskInternalId = f.taskRecords[0]!.id;
+    if (typeof taskInternalId !== 'number') throw new Error('Missing fixture task ID');
+    const recorder = new BrowserActionCaptureRecorder(
+      {
+        create: async (row) => {
+          rows.push(row);
+        },
+        setOutcome: async (_id, outcome) => {
+          outcomes.push(outcome);
+        },
+      },
+      { taskId: taskInternalId, executorSource: 'extension' },
+    );
+    let calls = 0;
+    const metadata: MessagesAdapter['metadata'] = {
+      provider: 'alibaba-model-studio',
+      model: 'synthetic',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      endpointKind: 'public',
+      protocol: 'messages',
+    };
+    const adapter: MessagesAdapter = {
+      metadata,
+      create: async (request) => {
+        calls++;
+        const chooserId = request.messages
+          .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+          .filter((block) => block.type === 'tool_result')
+          .map((block) => {
+            try {
+              return JSON.parse(String(block.content)) as {
+                chooserState?: { status: string; chooserId?: string };
+              };
+            } catch {
+              return {};
+            }
+          })
+          .find((receipt) => receipt.chooserState?.status === 'captured')?.chooserState?.chooserId;
+        const tool =
+          calls === 1
+            ? {
+                name: 'browser_act',
+                input: {
+                  action: {
+                    kind: 'click',
+                    selector: {
+                      description: 'Prepare report',
+                      strategies: [{ kind: 'role', role: 'button', name: 'Prepare report' }],
+                    },
+                  },
+                },
+              }
+            : calls === 2
+              ? {
+                  name: 'browser_open_file_chooser',
+                  input: {
+                    selector: {
+                      description: 'Choose report',
+                      strategies: [{ kind: 'role', role: 'button', name: 'Choose report' }],
+                    },
+                  },
+                }
+              : calls === 3
+                ? { name: 'browser_upload', input: { chooserId, fileIds: [f.row.externalId] } }
+                : {
+                    name: 'browser_finish',
+                    input: {
+                      status: 'completed',
+                      summary: '页面已展示 A-731,31',
+                      evidenceText: 'A-731,31',
+                    },
+                  };
+        return {
+          id: 'non-replayable-file-flow',
+          metadata,
+          stopReason: 'tool_use',
+          content: [{ type: 'tool_use', id: `capture-${calls}`, ...tool }],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    try {
+      const result = await runSelectedChromeTask({
+        taskId: 'tsk_alice',
+        intent: `把附件 report.csv 上传到 ${f.origin}，核对页面读到 A-731,31`,
+        browserTaskFiles: f.scope,
+        messagesAdapter: adapter,
+        client: f.client,
+        control: f.control,
+        target: {
+          tabId: 42,
+          expectedUrl: f.origin,
+          selectionId: '22222222-2222-4222-8222-222222222222',
+        },
+        maxIterations: 5,
+        timeoutMs: 20_000,
+        capture: recorder,
+      });
+      expect(result.status, JSON.stringify(result)).toBe('completed');
+      expect(await f.page.locator('p').textContent()).toBe(content);
+      // Successful-task discovery can ingest captures even without an outcome.
+      // A task file scope may also receive files later during clarification.
+      expect(rows).toEqual([]);
+      expect(outcomes).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+  it.each(['owned', 'disclosure-declined', 'transaction-declined', 'same-turn'] as const)(
+    'uses native chooser task files through the original gates (%s)',
+    async (mode) => {
+      const f = await fixture('tsk_alice', false, true);
+      if (mode === 'transaction-declined') await f.page.setContent(chooserPageHTML(true));
+      const requests: NeutralMessagesRequest[] = [];
+      const questions: string[] = [];
+      const metadata: MessagesAdapter['metadata'] = {
+        provider: 'alibaba-model-studio',
+        model: 'synthetic',
+        region: 'cn',
+        deploymentScope: 'china_mainland',
+        endpointKind: 'public',
+        protocol: 'messages',
+      };
+      const receipts = (request: NeutralMessagesRequest) =>
+        request.messages
+          .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+          .filter((block) => block.type === 'tool_result')
+          .map((block) => {
+            try {
+              return JSON.parse(String(block.content)) as {
+                chooserState?: { status: string; chooserId?: string };
+                error?: string;
+              };
+            } catch {
+              return {};
+            }
+          });
+      const adapter: MessagesAdapter = {
+        metadata,
+        create: async (request) => {
+          requests.push(request);
+          const first = requests.length === 1;
+          const chooser = receipts(request).find(
+            (receipt) => receipt.chooserState?.status === 'captured',
+          )?.chooserState?.chooserId;
+          let content: Array<{
+            type: 'tool_use';
+            id: string;
+            name: string;
+            input: Record<string, unknown>;
+          }>;
+          if (first) {
+            content = [
+              {
+                type: 'tool_use',
+                id: 'choose-1',
+                name: 'browser_open_file_chooser',
+                input: { selector: fileButtonSelector },
+              },
+            ];
+            if (mode === 'same-turn')
+              content.push({
+                type: 'tool_use',
+                id: 'upload-same-turn',
+                name: 'browser_upload',
+                input: {
+                  chooserId: '22222222-2222-4222-8222-222222222222',
+                  fileIds: [f.row.externalId],
+                },
+              });
+          } else if (requests.length === 2 && chooser && mode !== 'same-turn')
+            content = [
+              {
+                type: 'tool_use',
+                id: 'upload-2',
+                name: 'browser_upload',
+                input: { chooserId: chooser, fileIds: [f.row.externalId] },
+              },
+            ];
+          else
+            content = [
+              {
+                type: 'tool_use',
+                id: 'finish-3',
+                name: 'browser_finish',
+                input: {
+                  status: mode === 'same-turn' || !chooser ? 'failed' : 'completed',
+                  summary: '页面已展示 A-731,31',
+                  evidenceText: 'A-731,31',
+                },
+              },
+            ];
+          return {
+            id: 'native-chooser-task',
+            metadata,
+            stopReason: 'tool_use',
+            content,
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadInputTokens: null,
+              cacheCreationInputTokens: null,
+              complete: true,
+            },
+          };
+        },
+      };
+      try {
+        const outcome = await runSelectedChromeTask({
+          taskId: 'tsk_alice',
+          intent:
+            mode === 'disclosure-declined'
+              ? '读取并分析附件 report.csv'
+              : `把附件 report.csv 上传到 ${f.origin}，核对页面读到 A-731,31`,
+          browserTaskFiles: f.scope,
+          messagesAdapter: adapter,
+          client: f.client,
+          control: f.control,
+          target: {
+            tabId: 42,
+            expectedUrl: f.origin,
+            selectionId: '22222222-2222-4222-8222-222222222222',
+          },
+          maxIterations: 4,
+          timeoutMs: 20_000,
+          onAwaitingUser: async (event) => {
+            questions.push(event.question);
+            if (!supercarReply('tsk_alice', '不要执行'))
+              throw new Error('native confirmation missing');
+          },
+        });
+        expect(requests[0]?.tools?.some((tool) => tool.name === 'browser_open_file_chooser')).toBe(
+          true,
+        );
+        if (mode === 'owned') {
+          expect(outcome.status).toBe('completed');
+          expect(await f.page.locator('p').textContent()).toBe(content);
+          expect(await f.page.locator('body').getAttribute('data-effects')).toBe('1');
+          expect(questions).toHaveLength(0);
+        } else {
+          expect(outcome.status).not.toBe('completed');
+          expect(await f.page.locator('body').getAttribute('data-effects')).toBeNull();
+          if (mode === 'disclosure-declined') {
+            expect(questions).toHaveLength(1);
+            expect(questions[0]).toContain('report.csv');
+            expect(questions[0]).toContain(f.origin);
+          }
+        }
+        expect(await f.page.locator('body').getAttribute('data-clicks')).toBe(
+          mode === 'transaction-declined' ? null : '1',
+        );
+        if (mode === 'same-turn') {
+          expect(
+            requests.some((request) =>
+              receipts(request).some((receipt) => receipt.error === 'replan_required'),
+            ),
+          ).toBe(true);
+          expect(f.commands.filter((command) => command.op === 'upload_describe')).toHaveLength(0);
+        }
+        expect(f.commands.filter((command) => command.op === 'chooser_open')).toHaveLength(
+          mode === 'transaction-declined' ? 0 : 1,
+        );
+      } finally {
+        await f.close();
+      }
+    },
+  );
   it('admits a validated file supplied during a real Chrome clarification wait to the original task', async () => {
     const f = await fixture('tsk_alice', false);
     const scope = createBrowserTaskFileScope({

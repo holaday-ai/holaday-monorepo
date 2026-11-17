@@ -14,7 +14,8 @@ import { browserOutputFixture } from './browser-output-fixture.js';
  * and their consumers share one module graph. Only DB/auth/model/WS are doubles;
  * FileService, local bytes, sessions, gate, runner and extension are actual code. */
 export async function runChromeUploadCandidate(options: {
-  mode: 'owned' | 'declined' | 'unprovided' | 'full-budget';
+  mode: 'owned' | 'declined' | 'unprovided' | 'full-budget' | 'lost-chooser-reply';
+  targetKind?: 'selector' | 'chooser';
   taskId: string;
   origin: string;
   target: Extract<SelectedChromeSessionCommand, { op: 'open' }>['target'];
@@ -31,6 +32,7 @@ export async function runChromeUploadCandidate(options: {
     bytes[bytes.length - 1] = 90;
   }
   const expectedSHA256 = createHash('sha256').update(bytes).digest('hex');
+  let chooserRepliesLost = 0;
   fixture.taskRecords[0]!.externalId = options.taskId;
   try {
     const row = await fixture.service.storeUpload({
@@ -56,7 +58,17 @@ export async function runChromeUploadCandidate(options: {
       'usr_alice',
       options.taskId,
       { ...options.target, extensionClientId: 'e2e-active-extension' },
-      options.send,
+      async (user, input) => {
+        const result = await options.send(user, input);
+        if (options.mode === 'lost-chooser-reply' && input.args?.session?.op === 'chooser_open') {
+          chooserRepliesLost++;
+          return {
+            ok: false,
+            error: { code: 'timeout', message: 'synthetic lost chooser reply after native click' },
+          };
+        }
+        return result;
+      },
       undefined,
       { viewportV2: false, observationV2: false, replayV1: false, routingV2: true },
       { taskFilesV1: true },
@@ -80,6 +92,22 @@ export async function runChromeUploadCandidate(options: {
           maxModelRequestBytes,
           Buffer.byteLength(JSON.stringify(request)),
         );
+        const chooser = options.targetKind === 'chooser';
+        const opened = chooser && calls === 1;
+        const chooserId = request.messages
+          .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+          .filter((block) => block.type === 'tool_result')
+          .map((block) => {
+            try {
+              return JSON.parse(String(block.content)) as {
+                chooserState?: { status: string; chooserId?: string };
+              };
+            } catch {
+              return {};
+            }
+          })
+          .find((receipt) => receipt.chooserState?.status === 'captured')?.chooserState?.chooserId;
+        const uploading = chooser ? calls === 2 && Boolean(chooserId) : calls === 1;
         return {
           id: 'candidate-owned-file',
           metadata,
@@ -88,18 +116,32 @@ export async function runChromeUploadCandidate(options: {
             {
               type: 'tool_use',
               id: `tool-${calls}`,
-              name: calls === 1 ? 'browser_upload' : 'browser_finish',
-              input:
-                calls === 1
+              name: opened
+                ? 'browser_open_file_chooser'
+                : uploading
+                  ? 'browser_upload'
+                  : 'browser_finish',
+              input: opened
+                ? {
+                    selector: {
+                      description: 'Choose report',
+                      strategies: [{ kind: 'css', value: '#choose' }],
+                    },
+                  }
+                : uploading
                   ? {
-                      selector: {
-                        description: 'Report',
-                        strategies: [{ kind: 'css', value: '#report' }],
-                      },
+                      ...(chooser
+                        ? { chooserId }
+                        : {
+                            selector: {
+                              description: 'Report',
+                              strategies: [{ kind: 'css', value: '#report' }],
+                            },
+                          }),
                       fileIds: [row.externalId],
                     }
                   : {
-                      status: 'completed',
+                      status: chooser && !chooserId ? 'failed' : 'completed',
                       summary: '网站控件已读到 report.csv；未声称外部业务提交。',
                       evidenceText: 'Received report.csv',
                     },
@@ -144,6 +186,7 @@ export async function runChromeUploadCandidate(options: {
       questions,
       maxModelRequestBytes,
       modelRequests: calls,
+      chooserRepliesLost,
       closeConfirmed: Boolean(closed?.ok && closed.closed),
     };
   } finally {

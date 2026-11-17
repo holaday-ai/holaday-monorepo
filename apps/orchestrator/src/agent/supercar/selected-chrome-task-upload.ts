@@ -14,8 +14,7 @@ type Options = {
   files: BrowserTaskFiles;
   client: SelectedChromeClient;
   fileIds: readonly string[];
-  selector: ResilientSelector;
-};
+} & ({ selector: ResilientSelector; chooserId?: never } | { selector?: never; chooserId: string });
 const targetKey = (target: UserBrowserTargetDescription) =>
   JSON.stringify([
     target.tabId,
@@ -28,7 +27,7 @@ const targetKey = (target: UserBrowserTargetDescription) =>
     target.fileInput,
   ]);
 
-/** The model names task file IDs and a selector. This host capability derives
+/** The model names task file IDs and one native target. This host capability derives
  * the manifest from actual owned bytes and retains the original native target. */
 export class PreparedChromeUpload implements PreparedUploadForGate {
   private state: 'prepared' | 'approved' | 'delivering' | 'settled' | 'disposed' = 'prepared';
@@ -61,11 +60,14 @@ export class PreparedChromeUpload implements PreparedUploadForGate {
       !options.client.fileUploadsEnabled
     )
       throw new Error('当前任务没有可用的网页文件交付能力。');
+    if (options.chooserId !== undefined && !options.client.fileChoosersEnabled)
+      throw new Error('当前任务没有可用的原生文件选择器。');
     const actual = await options.files.resolve(options.taskId, options.fileIds);
     const action = selectedChromeUploadActionSchema.parse({
       kind: 'upload',
-      selector: options.selector,
+      ...(options.selector ? { selector: options.selector } : {}),
       payload: {
+        ...(options.chooserId !== undefined ? { chooserId: options.chooserId } : {}),
         files: actual.map((file) => ({
           fileId: file.fileId,
           name: file.name,

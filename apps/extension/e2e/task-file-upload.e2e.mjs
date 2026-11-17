@@ -135,11 +135,14 @@ async function fixture(
   accept = '.csv',
   openSession = true,
   extraCapabilities = [],
+  targetKind = 'selector',
 ) {
   const page = await context.newPage();
   await page.goto(`${server.origin}/page2.html`);
   await page.setContent(
-    `<!doctype html><title>File upload fixture</title><form action="/receive?ticket=PRIVATE-FIXTURE" method="post"><label>Report<input id="report" type="file" accept="${accept}" style="display:none"></label></form><p id="receipt"></p><script>document.querySelector('#report').onchange=async function(){document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);const bytes=new Uint8Array(await this.files[0].arrayBuffer());document.body.dataset.receivedBytes=String(bytes.length);document.body.dataset.lastByte=String(bytes[bytes.length-1]);document.body.dataset.sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');document.querySelector('#receipt').textContent='Received '+this.files[0].name+' with '+bytes.length+' verified bytes';}</script>`,
+    targetKind === 'chooser'
+      ? `<!doctype html><title>File upload fixture</title><button id="choose" type="button" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1);const file=document.createElement('input');file.type='file';file.accept='.csv';window.__candidateFile=file;file.onchange=async()=>{document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);const bytes=new Uint8Array(await file.files[0].arrayBuffer());document.body.dataset.receivedBytes=String(bytes.length);document.body.dataset.lastByte=String(bytes[bytes.length-1]);document.body.dataset.sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');document.querySelector('#receipt').textContent='Received '+file.files[0].name+' with '+bytes.length+' verified bytes';};file.click()">Choose report</button><p id="receipt"></p>`
+      : `<!doctype html><title>File upload fixture</title><form action="/receive?ticket=PRIVATE-FIXTURE" method="post"><label>Report<input id="report" type="file" accept="${accept}" style="display:none"></label></form><p id="receipt"></p><script>document.querySelector('#report').onchange=async function(){document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);const bytes=new Uint8Array(await this.files[0].arrayBuffer());document.body.dataset.receivedBytes=String(bytes.length);document.body.dataset.lastByte=String(bytes[bytes.length-1]);document.body.dataset.sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');document.querySelector('#receipt').textContent='Received '+this.files[0].name+' with '+bytes.length+' verified bytes';}</script>`,
   );
   await page.bringToFront();
   const tabs = successful(await server.call(taskId, 'tabs')).tabs;
@@ -416,86 +419,111 @@ test('actual repository extension file channel', { timeout: 180_000 }, async (t)
       .href,
     import.meta.url,
   );
-  for (const mode of ['owned', 'declined', 'unprovided', 'full-budget']) {
-    await t.test(`current server runner and actual loaded extension (${mode})`, async () => {
-      const f = await fixture(true, '.csv', false);
-      const commands = [];
-      try {
-        const result = await host.runChromeUploadCandidate({
-          mode,
-          taskId,
-          target: f.target,
-          origin: server.origin,
-          send: async (_user, options) => {
-            commands.push(options.args?.session?.op);
-            return server.call(options.taskId, options.kind, options.args);
-          },
-        });
-        assert.equal(result.closeConfirmed, true);
-        if (mode === 'owned' || mode === 'full-budget') {
-          assert.equal(result.outcome.status, 'completed', JSON.stringify(result.outcome));
-          await f.page.waitForFunction(
-            (hash) => document.body.dataset.sha === hash,
-            result.expectedSHA256,
+  const hostCases = ['owned', 'declined', 'unprovided', 'full-budget']
+    .map((mode) => ({ mode, targetKind: 'selector' }))
+    .concat(
+      ['owned', 'declined', 'unprovided', 'full-budget', 'lost-chooser-reply'].map((mode) => ({
+        mode,
+        targetKind: 'chooser',
+      })),
+    );
+  for (const { mode, targetKind } of hostCases) {
+    await t.test(
+      `current server runner and actual loaded extension (${targetKind}/${mode})`,
+      async () => {
+        const f = await fixture(true, '.csv', false, [], targetKind);
+        const commands = [];
+        try {
+          const result = await host.runChromeUploadCandidate({
+            mode,
+            targetKind,
+            taskId,
+            target: f.target,
+            origin: server.origin,
+            send: async (_user, options) => {
+              commands.push(options.args?.session?.op);
+              return server.call(options.taskId, options.kind, options.args);
+            },
+          });
+          assert.equal(result.closeConfirmed, true);
+          if (mode === 'owned' || mode === 'full-budget') {
+            assert.equal(result.outcome.status, 'completed', JSON.stringify(result.outcome));
+            await f.page.waitForFunction(
+              (hash) => document.body.dataset.sha === hash,
+              result.expectedSHA256,
+            );
+            assert.equal(
+              await f.page.locator('body').getAttribute('data-received-bytes'),
+              String(result.sizeBytes),
+            );
+            assert.equal(
+              await f.page.locator('body').getAttribute('data-last-byte'),
+              String(result.lastByte),
+            );
+            assert.equal(await f.page.locator('body').getAttribute('data-effects'), '1');
+            assert.ok(commands.includes('upload_commit'));
+            assert.deepEqual(result.questions, []);
+          } else {
+            assert.notEqual(result.outcome.status, 'completed');
+            assert.equal(await f.page.locator('body').getAttribute('data-effects'), null);
+            assert.equal(commands.includes('upload_begin'), false);
+            if (mode === 'declined') {
+              assert.equal(result.questions.length, 1);
+              assert.ok(result.questions[0].includes('report.csv'));
+            } else if (mode === 'unprovided') assert.deepEqual(result.admittedFileIds, []);
+            else if (mode === 'lost-chooser-reply') {
+              assert.equal(result.chooserRepliesLost, 1);
+              assert.equal(result.modelRequests, 1);
+            }
+          }
+          assert.ok(result.maxModelRequestBytes < 100_000);
+          assert.equal(commands.filter((op) => op === 'close').length, 1);
+          const normalInput = await f.user.locator('#query').inputValue();
+          const activeAfter = await worker.evaluate(
+            async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
           );
-          assert.equal(
-            await f.page.locator('body').getAttribute('data-received-bytes'),
-            String(result.sizeBytes),
+          assert.equal(normalInput, 'keep normal browsing 731');
+          assert.equal(activeAfter, f.active);
+          const actualFile = await f.page.evaluate(
+            (kind) => ({
+              count:
+                (kind === 'chooser' ? window.__candidateFile : document.querySelector('#report'))
+                  ?.files?.length ?? 0,
+              sha256: document.body.dataset.sha ?? null,
+              sizeBytes: document.body.dataset.receivedBytes ?? null,
+              lastByte: document.body.dataset.lastByte ?? null,
+              effects: document.body.dataset.effects ?? null,
+              visibleReceipt: document.querySelector('#receipt').textContent,
+            }),
+            targetKind,
           );
-          assert.equal(
-            await f.page.locator('body').getAttribute('data-last-byte'),
-            String(result.lastByte),
-          );
-          assert.equal(await f.page.locator('body').getAttribute('data-effects'), '1');
-          assert.ok(commands.includes('upload_commit'));
-          assert.deepEqual(result.questions, []);
-        } else {
-          assert.notEqual(result.outcome.status, 'completed');
-          assert.equal(await f.page.locator('body').getAttribute('data-effects'), null);
-          assert.equal(commands.includes('upload_begin'), false);
-          if (mode === 'declined') {
-            assert.equal(result.questions.length, 1);
-            assert.ok(result.questions[0].includes('report.csv'));
-          } else assert.deepEqual(result.admittedFileIds, []);
+          if (targetKind === 'chooser') {
+            assert.equal(await f.page.locator('body').getAttribute('data-clicks'), '1');
+            assert.equal(commands.filter((op) => op === 'chooser_open').length, 1);
+          }
+          assert.equal(actualFile.count, mode === 'owned' || mode === 'full-budget' ? 1 : 0);
+          const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+          if (artifacts)
+            writeFileSync(
+              join(artifacts, `server-${targetKind === 'chooser' ? 'chooser-' : ''}${mode}.json`),
+              JSON.stringify(
+                {
+                  ...result,
+                  commands,
+                  actualFile,
+                  normalTab: { before: f.active, after: activeAfter, input: normalInput },
+                  chromium: context.browser()?.version(),
+                  normalTabUntouched: true,
+                },
+                null,
+                2,
+              ),
+            );
+        } finally {
+          await f.close();
         }
-        assert.ok(result.maxModelRequestBytes < 100_000);
-        assert.equal(commands.filter((op) => op === 'close').length, 1);
-        const normalInput = await f.user.locator('#query').inputValue();
-        const activeAfter = await worker.evaluate(
-          async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
-        );
-        assert.equal(normalInput, 'keep normal browsing 731');
-        assert.equal(activeAfter, f.active);
-        const actualFile = await f.page.locator('#report').evaluate((node) => ({
-          count: node.files.length,
-          sha256: document.body.dataset.sha ?? null,
-          sizeBytes: document.body.dataset.receivedBytes ?? null,
-          lastByte: document.body.dataset.lastByte ?? null,
-          effects: document.body.dataset.effects ?? null,
-          visibleReceipt: document.querySelector('#receipt').textContent,
-        }));
-        assert.equal(actualFile.count, mode === 'owned' || mode === 'full-budget' ? 1 : 0);
-        const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR;
-        if (artifacts)
-          writeFileSync(
-            join(artifacts, `server-${mode}.json`),
-            JSON.stringify(
-              {
-                ...result,
-                commands,
-                actualFile,
-                normalTab: { before: f.active, after: activeAfter, input: normalInput },
-                chromium: context.browser()?.version(),
-                normalTabUntouched: true,
-              },
-              null,
-              2,
-            ),
-          );
-      } finally {
-        await f.close();
-      }
-    });
+      },
+    );
   }
   await t.test(
     'bound ordinary inputs still use the current driver and preserve the user tab',
