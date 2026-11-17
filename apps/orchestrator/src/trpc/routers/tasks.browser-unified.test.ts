@@ -18,6 +18,7 @@ import { reloadFeatureFlagsForTest } from '../../execution/feature-flags.js';
 import { _resetSharedStorageProviderForTesting } from '../../files/storage-provider.js';
 import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import * as messages from '../../llm/messages-adapter.js';
+import * as responses from '../../llm/responses-adapter.js';
 import { QuotaService } from '../../quota/quota-service.js';
 import * as extensionWs from '../../ws/server.js';
 import type { Context } from '../context.js';
@@ -87,9 +88,12 @@ it.each([
   'tool-block',
   'file-upload',
   'file-upload-reply',
+  'file-upload-manual-data',
 ] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
+    const manualData = scenario === 'file-upload-manual-data';
+    const withReply = scenario === 'file-upload-reply' || manualData;
     const uploadFixture = scenario.startsWith('file-upload')
       ? await browserOutputFixture()
       : undefined;
@@ -100,21 +104,22 @@ it.each([
       ? await uploadFixture.service.storeUpload({
           userIdInternal: 7,
           userExternalId: 'usr_alice',
-          filename: scenario === 'file-upload-reply' ? 'notes.csv' : 'report.csv',
+          filename: withReply ? 'notes.csv' : 'report.csv',
+          mimetype: 'text/csv',
+          buffer: Buffer.from(
+            manualData ? 'scope,note\ncompleted-only,INITIAL-531\n' : 'sku,qty\nA-731,31\n',
+          ),
+        })
+      : undefined;
+    const replyFile = withReply
+      ? await uploadFixture!.service.storeUpload({
+          userIdInternal: 7,
+          userExternalId: 'usr_alice',
+          filename: 'report.csv',
           mimetype: 'text/csv',
           buffer: Buffer.from('sku,qty\nA-731,31\n'),
         })
       : undefined;
-    const replyFile =
-      scenario === 'file-upload-reply'
-        ? await uploadFixture!.service.storeUpload({
-            userIdInternal: 7,
-            userExternalId: 'usr_alice',
-            filename: 'report.csv',
-            mimetype: 'text/csv',
-            buffer: Buffer.from('sku,qty\nA-731,31\n'),
-          })
-        : undefined;
     if (uploadFixture) {
       vi.stubEnv('STORAGE_PROVIDER', 'local');
       vi.stubEnv('HOLADAY_FILES_ROOT', uploadFixture.root);
@@ -127,8 +132,9 @@ it.each([
       QWEN_CORE_ALLOWLIST: fixtureExternalId,
       BROWSER_TASK_FILES_V1: Boolean(uploadFixture),
       QWEN_CORE_ROLLOUT_MODE: 'synthetic',
-      QWEN_CORE_ENABLED_LANES: 'browser',
+      QWEN_CORE_ENABLED_LANES: manualData ? 'browser,generate' : 'browser',
       QWEN_MESSAGES_ADAPTER_ENABLED: true,
+      ...(manualData ? { QWEN_RESPONSES_ADAPTER_ENABLED: true } : {}),
       DASHSCOPE_CN_API_KEY: 'synthetic-cn',
       DASHSCOPE_API_KEY: '',
     });
@@ -154,7 +160,7 @@ it.each([
           result: { executionMode: 'browser' },
         });
       });
-    if (scenario === 'file-upload-reply') {
+    if (withReply) {
       vi.spyOn(TaskRepository.prototype, 'persistAwaitingUser').mockImplementation(
         async (input) => {
           const row = uploadFixture!.taskRecords.find(
@@ -194,6 +200,32 @@ it.each([
       protocol: 'messages',
     } as const;
     const requests: messages.NeutralMessagesRequest[] = [];
+    const generationRequests: responses.NeutralResponsesRequest[] = [];
+    if (manualData)
+      vi.spyOn(responses, 'createQwenResponsesAdapter').mockImplementation(() => {
+        const generateMetadata = {
+          ...metadata,
+          model: 'qwen-generate-fixture',
+          protocol: 'responses' as const,
+        };
+        return {
+          metadata: generateMetadata,
+          async stream(request, options) {
+            generationRequests.push(request);
+            const text =
+              '用户数据摘要：GMV100、订单20、ROI5。CSV 报表 A-731 数量31，初始备注 INITIAL-531 保留。';
+            options?.onTextDelta?.(text);
+            return {
+              id: 'response-generate',
+              metadata: generateMetadata,
+              status: 'completed',
+              text,
+              sources: [],
+              usage: { inputTokens: 10, outputTokens: 10 },
+            };
+          },
+        };
+      });
     // LLM-RETRY-1: a timed-out call is retried; turns count answered calls only.
     let answered = 0;
     vi.spyOn(messages, 'createQwenMessagesAdapter').mockImplementation(() => ({
@@ -211,8 +243,16 @@ it.each([
           expect.arrayContaining(['snapshot', 'click', 'finish']),
         );
         expect(request.toolChoice).toEqual({ type: 'any' });
-        const content: Block[] =
-          scenario === 'file-upload-reply'
+        const content: Block[] = manualData
+          ? turn === 1
+            ? [toolUse('s1', 'snapshot', {})]
+            : [
+                toolUse('h1', 'request_human', {
+                  reason: 'clarification',
+                  message: '请补充报表数据和附件',
+                }),
+              ]
+          : scenario === 'file-upload-reply'
             ? turn === 1
               ? [toolUse('s1', 'snapshot', {})]
               : turn === 2
@@ -305,6 +345,15 @@ it.each([
       }),
     );
     await page.goto('https://fixture.browser.test/');
+    const replyImage = manualData
+      ? await uploadFixture!.service.storeUpload({
+          userIdInternal: 7,
+          userExternalId: 'usr_alice',
+          filename: 'chart.png',
+          mimetype: 'image/png',
+          buffer: await page.screenshot({ type: 'png' }),
+        })
+      : undefined;
     const executor = {
       getPage: async () => page,
       resetPageForTask: async () => {},
@@ -401,9 +450,11 @@ it.each([
     try {
       const result = await tasksRouter.createCaller(ctx).create({
         // Executor path under test; an explicit order/login need would route to the user's Chrome.
-        intent: uploadFixture
-          ? '把附件 report.csv 上传到 fixture.browser.test 的文件控件'
-          : '打开详情页并点击保存',
+        intent: manualData
+          ? '打开报表页面读取数据并整理分析，无法读取时使用我补充的数据'
+          : uploadFixture
+            ? '把附件 report.csv 上传到 fixture.browser.test 的文件控件'
+            : '打开详情页并点击保存',
         ...(inputFile ? { fileIds: [inputFile.externalId] } : {}),
         mode: 'auto',
         expertMode: 'normal',
@@ -417,8 +468,10 @@ it.each([
         replying = true;
         const reply = await tasksRouter.createCaller(ctx).reply({
           taskId: result.taskId,
-          message: '这是要上传的 report.csv，请继续',
-          fileIds: [replyFile.externalId],
+          message: manualData
+            ? '数据如下：GMV100，订单20，ROI5，请结合附件写分析'
+            : '这是要上传的 report.csv，请继续',
+          fileIds: [replyFile.externalId, ...(replyImage ? [replyImage.externalId] : [])],
         });
         expect(reply).toMatchObject({ ok: true, state: 'resumed' });
       }
@@ -429,6 +482,22 @@ it.each([
         outcome,
         requests: requests.length,
       });
+      if (manualData) {
+        expect(outcome, diagnostics).toMatchObject({
+          status: 'completed',
+          metadata: { finalExecutionMode: 'generate' },
+        });
+        if (outcome?.status !== 'completed') throw new Error(diagnostics);
+        expect(outcome.summary).toContain('A-731');
+        expect(generationRequests).toHaveLength(1);
+        expect(JSON.stringify(generationRequests[0])).toContain('INITIAL-531');
+        expect(JSON.stringify(generationRequests[0])).toContain('A-731,31');
+        expect(JSON.stringify(generationRequests[0])).toContain('input_image');
+        expect(requests).toHaveLength(2);
+        expect(await page.locator('#status').textContent()).toBe('草稿');
+        expect(consume).toHaveBeenCalledTimes(1);
+        return;
+      }
       if (uploadFixture) {
         expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
         expect(await page.locator('#status').textContent()).toContain('A-731,31');

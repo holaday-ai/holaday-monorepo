@@ -26,9 +26,13 @@ vi.mock('../supercar/agent-loop.js', async (importOriginal) => ({
   runSupercarTask: legacy.run,
 }));
 
-const { hasParkedSupercarHandle, runSupercarTask, supercarAbort, supercarReply } = await import(
-  '../supercar/qwen-only-agent-loop.js'
-);
+const {
+  hasParkedSupercarHandle,
+  runSupercarTask,
+  supercarAbort,
+  supercarReply,
+  supercarHandoffToGenerate,
+} = await import('../supercar/qwen-only-agent-loop.js');
 const { classifyRuntimeAction } = await import('../supercar/runtime-action-policy.js');
 
 const PAGE = `<!doctype html><title>合成商城</title><label>关键词 <input /></label>
@@ -465,6 +469,150 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     },
     30_000,
   );
+  it.each([false, true])(
+    'hands accepted manual data and all reply materials to generation without another browser action (cancel=%s)',
+    async (cancel) => {
+      const taskId = `t_manual_data_${cancel}`;
+      const c = await uploadFixture(taskId, false);
+      const image = await parseFileForPrompt(
+        await c.page.screenshot({ type: 'png' }),
+        'chart.png',
+        'image/png',
+      );
+      const csv = await parseFileForPrompt(c.loaded[0]!.buffer, 'report.csv', 'text/csv');
+      let calls = 0;
+      const running = runSupercarTask({
+        taskId,
+        intent: '读取报表并分析，无法读取时使用我提供的数据',
+        executor: { getPage: async () => c.page } as never,
+        browserTaskFiles: c.scope,
+        messagesAdapter: scripted([
+          () => {
+            calls++;
+            return [call('request_human', { reason: 'clarification', message: '请先补充备注' })];
+          },
+          () => {
+            calls++;
+            return [
+              call('request_human', { reason: 'clarification', message: '请补充数据和报表附件' }),
+            ];
+          },
+        ]),
+      });
+      try {
+        await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+        expect(
+          supercarReply(taskId, '先补充说明', [
+            { type: 'text', text: '第一组备注：统计口径为已完成订单' },
+          ]),
+        ).toBe(true);
+        await vi.waitFor(() => {
+          expect(calls).toBe(2);
+          expect(hasParkedSupercarHandle(taskId)).toBe(true);
+        });
+        expect(
+          supercarHandoffToGenerate(
+            taskId,
+            '数据如下：GMV 100，订单 20，ROI 5',
+            [...csv.blocks, ...image.blocks],
+            BrowserTaskFiles.validatedReferences(c.loaded, 7),
+          ),
+        ).toBe(true);
+        if (cancel) expect(supercarAbort(taskId)).toBe(true);
+        const outcome = await running;
+        if (cancel) expect(outcome.status).toBe('cancelled');
+        else {
+          expect(outcome.status).toBe('handoff_to_generate');
+          expect(outcome.question).toContain('GMV 100');
+          expect(JSON.stringify(outcome.handoffAttachments)).toContain('第一组备注');
+          expect(JSON.stringify(outcome.handoffAttachments)).toContain('A-731,31');
+          expect(
+            outcome.handoffAttachments?.some(
+              (block) =>
+                block.type === 'image' &&
+                'source' in block &&
+                'media_type' in block.source &&
+                block.source.media_type === 'image/png',
+            ),
+          ).toBe(true);
+          expect(JSON.stringify(outcome.handoffAttachments)).not.toContain(
+            '本任务明确提供的文件标识',
+          );
+        }
+        expect(calls).toBe(2);
+        expect(await c.page.locator('#received').textContent()).toBe('');
+      } finally {
+        supercarAbort(taskId);
+        await running;
+        await c.cleanup();
+      }
+    },
+  );
+  it('reports an explicitly cancelled reading task as cancelled at its data park', async () => {
+    const taskId = 't_read_cancel_at_park';
+    const c = await uploadFixture(taskId, false);
+    const running = runSupercarTask({
+      taskId,
+      intent: '阅读这一页并总结',
+      executor: { getPage: async () => c.page } as never,
+      messagesAdapter: scripted([
+        () => [call('request_human', { reason: 'clarification', message: '请补充数据' })],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      expect(supercarAbort(taskId)).toBe(true);
+      expect((await running).status).toBe('cancelled');
+    } finally {
+      supercarAbort(taskId);
+      await running;
+      await c.cleanup();
+    }
+  });
+  it('retains the original manual-data park when image validation fails and admits no rejected file refs', async () => {
+    const taskId = 't_manual_data_budget';
+    const c = await uploadFixture(taskId, false);
+    const running = runSupercarTask({
+      taskId,
+      intent: '分析用户补充的数据',
+      executor: { getPage: async () => c.page } as never,
+      browserTaskFiles: c.scope,
+      messagesAdapter: scripted([
+        () => [call('request_human', { reason: 'clarification', message: '请提供报表' })],
+      ]),
+    });
+    try {
+      await vi.waitFor(() => expect(hasParkedSupercarHandle(taskId)).toBe(true));
+      expect(
+        supercarHandoffToGenerate(
+          taskId,
+          '数据如下',
+          [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(4_000_001) },
+            },
+          ],
+          BrowserTaskFiles.validatedReferences(c.loaded, 7),
+        ),
+      ).toBe(true);
+      expect(hasParkedSupercarHandle(taskId)).toBe(true);
+      expect(c.scope.references()).toEqual([]);
+      expect(
+        supercarHandoffToGenerate(
+          taskId,
+          '数据如下：订单 20',
+          [{ type: 'text', text: 'A-731,31' }],
+          BrowserTaskFiles.validatedReferences(c.loaded, 7),
+        ),
+      ).toBe(true);
+      expect((await running).status).toBe('handoff_to_generate');
+    } finally {
+      supercarAbort(taskId);
+      await running;
+      await c.cleanup();
+    }
+  });
   it('asks with concrete files and destination; file text cannot confirm disclosure', async () => {
     const taskId = 't_upload_proposal';
     const c = await uploadFixture(taskId);

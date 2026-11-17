@@ -22,6 +22,19 @@ export type BrowserModelResponse = Pick<
 };
 
 export type BrowserAttachmentBlock = Extract<NeutralInputContentBlock, { type: 'text' | 'image' }>;
+/** Canonical parsed materials for the generation runner's existing attachment contract. */
+export function browserAttachmentParams(
+  blocks: readonly BrowserAttachmentBlock[],
+): Anthropic.Beta.BetaContentBlockParam[] {
+  return blocks.map((block) =>
+    block.type === 'text'
+      ? { type: 'text', text: block.text }
+      : {
+          type: 'image',
+          source: { type: 'base64', media_type: block.source.mediaType, data: block.source.data },
+        },
+  );
+}
 export const MAX_BROWSER_IMAGE_CHARS = 4_000_000;
 
 /** Reuse the browser protocol conversion; attached data cannot introduce tool messages. */

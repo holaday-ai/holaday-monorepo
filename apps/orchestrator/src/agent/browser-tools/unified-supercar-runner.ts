@@ -19,7 +19,11 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from '../supercar/browser-control.js';
-import { MAX_BROWSER_IMAGE_CHARS, browserAttachmentBlocks } from '../supercar/browser-messages.js';
+import {
+  MAX_BROWSER_IMAGE_CHARS,
+  browserAttachmentBlocks,
+  browserAttachmentParams,
+} from '../supercar/browser-messages.js';
 import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
@@ -66,7 +70,7 @@ const BROWSER_KEEP_ALIVE_MS = 30_000;
 const CANCEL_POLL_MS = 2_000;
 
 interface ParkedTask {
-  resolve: (reply: UnifiedHumanReply | null) => void;
+  resolve: (reply: (UnifiedHumanReply & { handoffToGenerate?: true }) | null) => void;
   acceptAttachments: (
     blocks: ReturnType<typeof browserAttachmentBlocks>,
     files?: readonly ValidatedBrowserTaskFile[],
@@ -86,6 +90,23 @@ export function unifiedSupercarReply(
   attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
   files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
+  return deliverUnifiedReply(taskId, message, attachments, files, false);
+}
+export function unifiedSupercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
+  return deliverUnifiedReply(taskId, message, attachments, files, true);
+}
+function deliverUnifiedReply(
+  taskId: string,
+  message: string,
+  attachments: Readonly<NonNullable<RunSupercarOptions['attachments']>> | undefined,
+  files: readonly ValidatedBrowserTaskFile[] | undefined,
+  handoffToGenerate: boolean,
+): boolean {
   const task = parked.get(taskId);
   if (!task) return false;
   let blocks: ReturnType<typeof browserAttachmentBlocks>;
@@ -97,7 +118,11 @@ export function unifiedSupercarReply(
     return true;
   }
   parked.delete(taskId);
-  task.resolve({ message, attachments: [...blocks, ...task.fileIndex()] });
+  task.resolve({
+    message,
+    attachments: [...blocks, ...task.fileIndex()],
+    ...(handoffToGenerate ? { handoffToGenerate: true as const } : {}),
+  });
   return true;
 }
 
@@ -116,7 +141,7 @@ export function unifiedSupercarAbort(taskId: string): boolean {
   if (!controller && !task) return false;
   parked.delete(taskId);
   task?.resolve(null);
-  controller?.abort();
+  controller?.abort('user_cancelled');
   return true;
 }
 
@@ -241,6 +266,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  const replyMaterials: NonNullable<RunSupercarOptions['attachments']> = [];
+  let generateHandoff: {
+    message: string;
+    attachments: NonNullable<RunSupercarOptions['attachments']>;
+  } | null = null;
   let attachmentImageChars = attachments.reduce(
     (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
     0,
@@ -404,7 +434,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     : opts.timeoutMs;
   let activeRemaining = budgetMs;
   let activeSince = Date.now();
-  let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  let timeout = activeRemaining
+    ? setTimeout(() => controller.abort('time_budget'), activeRemaining)
+    : undefined;
   // Waiting for the user never counts against the budget (captcha, login, a
   // confirmation — every awaiting_user wait). Nested waits suspend once.
   let suspended = 0;
@@ -426,7 +458,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     if (suspended === 0 || --suspended > 0) return;
     activeSince = Date.now();
     if (activeRemaining !== undefined && !controller.signal.aborted)
-      timeout = setTimeout(() => controller.abort(), activeRemaining);
+      timeout = setTimeout(() => controller.abort('time_budget'), activeRemaining);
   };
   let binding: { control: BrowserControl; finish: () => void } | undefined;
   let control = opts.browserControl;
@@ -442,7 +474,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   const cancelPoll = setInterval(() => {
     void Promise.resolve(opts.isTaskCancelled?.())
       .then((cancelled) => {
-        if (cancelled) controller.abort();
+        if (cancelled) controller.abort('user_cancelled');
       })
       .catch(() => {});
   }, CANCEL_POLL_MS);
@@ -592,6 +624,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
             )
               opts.browserTaskFiles.admitReferences(files);
             attachmentImageChars += chars;
+            replyMaterials.push(...browserAttachmentParams(blocks));
             return true;
           },
           fileIndex: () =>
@@ -616,7 +649,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           resolve: (value) => {
             clearTimeout(timer);
             if (watch) clearInterval(watch);
-            resolve(value);
+            if (value?.handoffToGenerate) {
+              generateHandoff = { message: value.message, attachments: [...replyMaterials] };
+              resolve(null);
+            } else resolve(value);
           },
           abort: () => {
             if (watch) clearInterval(watch);
@@ -1226,6 +1262,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       requestHuman: async ({ reason, message }) =>
         (await parkForReply(message, awaitingKindFor(reason))) ?? false,
     });
+    if (controller.signal.aborted && controller.signal.reason === 'user_cancelled')
+      return { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
     const stoppedAtEnd = sessionStopped();
     if (stoppedAtEnd && outcome.status !== 'cancelled')
       return {
@@ -1234,6 +1272,40 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         iterations: outcome.steps,
         toolsUsed: [...toolsUsed],
       };
+    if (generateHandoff) {
+      const handoff = generateHandoff as {
+        message: string;
+        attachments: NonNullable<RunSupercarOptions['attachments']>;
+      };
+      const cancelled = await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true);
+      if (cancelled || controller.signal.aborted)
+        return {
+          status:
+            !cancelled && controller.signal.reason === 'time_budget' ? 'timeout' : 'cancelled',
+          iterations: outcome.steps,
+          toolsUsed: [...toolsUsed],
+        };
+      if (
+        env.BROWSER_TASK_FILES_V1 &&
+        opts.browserTaskFiles &&
+        !(await opts.browserTaskFiles.isActive().catch(() => false))
+      )
+        return {
+          status: 'failed',
+          reason: '任务或账号已不可用，未转交资料。',
+          iterations: outcome.steps,
+          toolsUsed: [...toolsUsed],
+        };
+      if (controller.signal.aborted || sessionStopped())
+        return { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
+      return {
+        status: 'handoff_to_generate',
+        question: handoff.message,
+        handoffAttachments: handoff.attachments,
+        iterations: outcome.steps,
+        toolsUsed: [...toolsUsed],
+      };
+    }
     switch (outcome.status) {
       case 'completed':
         await safe(() =>
@@ -1274,7 +1346,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
       case 'cancelled': {
         const timedOut =
-          controller.signal.aborted && Boolean(budgetMs) && !(await opts.isTaskCancelled?.());
+          controller.signal.aborted &&
+          controller.signal.reason === 'time_budget' &&
+          !(await opts.isTaskCancelled?.());
         // Out of time during the remediation turn: deliver the held answer for
         // verification (it explains what is missing) instead of a bare timeout.
         if (timedOut && outcome.heldAnswer) {

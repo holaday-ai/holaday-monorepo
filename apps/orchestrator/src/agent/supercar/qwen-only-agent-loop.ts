@@ -19,16 +19,28 @@ import {
   runUnifiedSupercarTask,
   unifiedParkedIntent,
   unifiedSupercarAbort,
+  unifiedSupercarHandoffToGenerate,
   unifiedSupercarReply,
 } from '../browser-tools/unified-supercar-runner.js';
 import {
   hasParkedSupercarHandle as hasParkedLegacyHandle,
   supercarAbort as legacyAbort,
+  supercarHandoffToGenerate as legacyHandoff,
   supercarHandleOriginalIntent as legacyOriginalIntent,
   supercarReply as legacyReply,
 } from './agent-loop.js';
 
-export { supercarHandoffToGenerate } from './agent-loop.js';
+export function supercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
+  return (
+    unifiedSupercarHandoffToGenerate(taskId, message, attachments, files) ||
+    legacyHandoff(taskId, message, attachments)
+  );
+}
 
 /** BROWSER_EXECUTOR: 'unified' (default, batch-04 tools) | 'legacy' (coordinate protocol, rollback). */
 export function browserExecutorMode(): 'legacy' | 'unified' {

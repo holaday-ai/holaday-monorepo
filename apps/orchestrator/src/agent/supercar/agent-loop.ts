@@ -572,6 +572,8 @@ export type SupercarStatus =
  */
 export interface SupercarOutcome {
   status: SupercarStatus;
+  /** Parsed reply materials retained when the browser phase yields to generation. */
+  handoffAttachments?: RunSupercarOptions['attachments'];
   /** Populated on status=completed — the model's final markdown report. */
   summary?: string;
   /** Populated on awaiting_user — the question the model asked the user. */
@@ -1168,6 +1170,7 @@ interface RunHandle {
    * reply was text-only (the original behaviour).
    */
   pendingAttachmentBlocks: ReadonlyArray<{ type: string }> | null;
+  replyAttachmentHistory: NonNullable<RunSupercarOptions['attachments']>;
 }
 
 const handles = new Map<string, RunHandle>();
@@ -1187,6 +1190,7 @@ export function createExternalBrowserPark(options: {
     handoffMessage: null,
     originalIntent: options.intent,
     pendingAttachmentBlocks: null,
+    replyAttachmentHistory: [],
   };
   if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
   handles.set(options.taskId, handle);
@@ -1237,12 +1241,13 @@ export function createExternalBrowserPark(options: {
 export function supercarReply(
   taskId: string,
   message: string,
-  attachmentBlocks?: ReadonlyArray<{ type: string }>,
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
   if (attachmentBlocks && attachmentBlocks.length > 0) {
     handle.pendingAttachmentBlocks = attachmentBlocks;
+    handle.replyAttachmentHistory.push(...attachmentBlocks);
   }
   const resolve = handle.resolveReply;
   handle.resolveReply = null;
@@ -1273,10 +1278,15 @@ export function hasParkedSupercarHandle(taskId: string): boolean {
  * cancelled. Returns true if the handoff was accepted (handle exists +
  * is parked); false if the task isn't currently parked.
  */
-export function supercarHandoffToGenerate(taskId: string, message: string): boolean {
+export function supercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
   handle.handoffMessage = message;
+  if (attachmentBlocks?.length) handle.replyAttachmentHistory.push(...attachmentBlocks);
   const resolve = handle.resolveReply;
   handle.resolveReply = null;
   resolve(message);
@@ -1326,6 +1336,7 @@ export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutco
     handoffMessage: null,
     originalIntent: opts.intent,
     pendingAttachmentBlocks: null,
+    replyAttachmentHistory: [],
     abort: () => {
       lifecycle.cancelled = true;
       lifecycle.modelAbort.abort();
@@ -1943,6 +1954,7 @@ async function runSupercarTaskInternal(
       return {
         status: 'handoff_to_generate',
         question: handoffMsg,
+        handoffAttachments: [...handle.replyAttachmentHistory],
         iterations: iteration,
         toolsUsed: Array.from(toolsUsed),
       };
@@ -2858,6 +2870,7 @@ async function runSupercarTaskInternal(
             return {
               status: 'handoff_to_generate',
               question: handoffMsg,
+              handoffAttachments: [...handle.replyAttachmentHistory],
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
             };

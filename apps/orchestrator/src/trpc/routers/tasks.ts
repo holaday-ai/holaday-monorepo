@@ -7865,6 +7865,10 @@ export const tasksRouter = router({
                       // re-charge — same task, same id, just a different runner.
                       if (outcome.status === 'handoff_to_generate') {
                         const userManualData = outcome.question ?? '';
+                        const handoffAttachments = [
+                          ...attachmentBlocks,
+                          ...(outcome.handoffAttachments ?? []),
+                        ];
                         const combinedIntent = [
                           input.intent,
                           userManualData ? `\n\n[用户提供的数据]\n${userManualData}` : '',
@@ -7903,8 +7907,8 @@ export const tasksRouter = router({
                                 responsesAdapter: handoffGenerateResponsesAdapter,
                                 firecrawl: ctx.firecrawl ?? null,
                                 logger: ctx.logger,
-                                ...(attachmentBlocks.length > 0
-                                  ? { attachments: attachmentBlocks }
+                                ...(handoffAttachments.length > 0
+                                  ? { attachments: handoffAttachments }
                                   : {}),
                                 onStreamDelta: (delta) => {
                                   try {
@@ -11397,7 +11401,12 @@ export const tasksRouter = router({
 
         const delivered =
           replyKind === 'manual_data'
-            ? supercarHandoffToGenerate(input.taskId, input.message)
+            ? supercarHandoffToGenerate(
+                input.taskId,
+                input.message,
+                replyAttachmentBlocks,
+                replyFileReferences,
+              )
             : supercarReply(
                 input.taskId,
                 input.message,
