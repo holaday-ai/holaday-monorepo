@@ -433,14 +433,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       };
     }
   }
-  async executeBound(action: DriverAction, binding: UserBrowserBinding): Promise<DriverResult> {
+  async executeBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed?: () => boolean,
+  ): Promise<DriverResult> {
     if (!this.targets)
       return {
         status: 'error',
         error: { code: 'capability_missing', message: 'Real targets unavailable' },
       };
     try {
-      await this.targets.execute(action, binding);
+      await this.targets.execute(action, binding, undefined, dispatchAllowed);
       return { status: 'ok' };
     } catch (error) {
       return {

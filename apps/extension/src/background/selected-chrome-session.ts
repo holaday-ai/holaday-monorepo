@@ -25,7 +25,11 @@ export interface SelectedChromeDriver {
   observeCurrentPage(): Promise<DriverResult>;
   execute(action: DriverAction): Promise<DriverResult>;
   describeTarget?(action: DriverAction, revision: number): Promise<DriverResult>;
-  executeBound?(action: DriverAction, binding: UserBrowserBinding): Promise<DriverResult>;
+  executeBound?(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed?: () => boolean,
+  ): Promise<DriverResult>;
   readActivity?(): Promise<DriverResult>;
   uploadBound?(
     action: DriverAction,
@@ -489,6 +493,8 @@ export class SelectedChromeSession {
     if (entry.pending) return { ok: false, error: 'browser_busy' };
     if (entry.tabClosed) return { ok: false, error: 'tab_closed', actionOutcome: 'not_applied' };
     if (!entry.ready) return { ok: false, error: 'observation_required' };
+    if (entry.uploadsStopped && BOUND_KINDS.has(action.kind))
+      return { ok: false, error: 'session_unavailable', actionOutcome: 'not_applied' };
     if (entry.v2 && BOUND_KINDS.has(action.kind) && !binding)
       return { ok: false, error: 'target_binding_required', actionOutcome: 'not_applied' };
     if (
@@ -508,12 +514,30 @@ export class SelectedChromeSession {
           return { ok: false, error: 'session_unavailable', actionOutcome: 'not_applied' };
         const native = await this.nativeGate(entry);
         if (native) return native;
+        if (
+          !this.current(entry) ||
+          !entry.driver ||
+          (entry.uploadsStopped && BOUND_KINDS.has(action.kind))
+        )
+          return { ok: false, error: 'session_unavailable', actionOutcome: 'not_applied' };
+        const driver = entry.driver;
+        const tabId = entry.tabId;
         let result: DriverResult;
         try {
           result =
-            entry.v2 && BOUND_KINDS.has(action.kind) && binding && entry.driver.executeBound
-              ? await entry.driver.executeBound(action, binding)
-              : await entry.driver.execute(action);
+            entry.v2 && BOUND_KINDS.has(action.kind) && binding && driver.executeBound
+              ? await driver.executeBound(
+                  action,
+                  binding,
+                  () =>
+                    this.current(entry) &&
+                    !entry.uploadsStopped &&
+                    !entry.tabClosed &&
+                    !entry.quarantined &&
+                    entry.driver === driver &&
+                    entry.tabId === tabId,
+                )
+              : await driver.execute(action);
         } catch (error) {
           if (action.kind === 'wait')
             return { ok: false, error: 'wait_failed', actionOutcome: 'not_applied' };
@@ -634,7 +658,8 @@ export class SelectedChromeSession {
   }
 
   /** Session-scoped close for a future authenticated command endpoint. */
-  /** Close only file admission synchronously; normal close still owns drain/detach. */
+  /** The transport's synchronous close fence stops file staging and final bound
+   * native dispatch. Normal close still owns operation drain and detach. */
   stopUploadAdmission(taskId: string): void {
     const entry = this.entry;
     if (!entry || entry.taskId !== taskId) return;

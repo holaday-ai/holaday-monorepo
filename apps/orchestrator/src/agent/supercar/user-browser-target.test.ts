@@ -1,8 +1,19 @@
+/// <reference path="../../../../../packages/browser-driver/node_modules/@types/chrome/index.d.ts" />
+// The native adapter test uses the driver's declared Chrome API types, while
+// the orchestrator otherwise compiles with Node ambient types only.
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+import { userBrowserTargetDescriptionSchema } from '@holaday/shared-types';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlaywrightCrxAdapter } from '../../../../../packages/browser-driver/src/crx-adapter.js';
 import { SelectedTargetResolver } from '../../../../../packages/browser-driver/src/selected-target.js';
+const crxBoundary = vi.hoisted(() => ({ get: vi.fn() }));
+// Mock the driver's dependency link, which may differ from the orchestrator's
+// resolution in a recovery worktree with an isolated SDK patch.
+vi.mock('../../../../../packages/browser-driver/node_modules/playwright-crx', () => ({
+  crx: { get: crxBoundary.get },
+}));
 let browser: Browser;
 let page: Page;
 let origin: string;
@@ -70,6 +81,85 @@ const uploadPage = (
   `<form id="upload-form" action="/receive?ticket=PRIVATE-731" method="post">${input}</form>${extra}<input id="notes"><script>document.querySelector('#report').onchange=async function(){document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);document.body.dataset.uploaded=await this.files[0].text();}</script>`;
 
 describe('native file input with the existing real target binding', () => {
+  it('keeps the session cancellation closure through the actual CRX adapter to a native click', async () => {
+    await page.setContent(
+      '<button id="go" onclick="document.body.dataset.effects=\'1\'">Run</button>',
+    );
+    crxBoundary.get.mockResolvedValue({
+      on: () => {},
+      off: () => {},
+      attach: async () => page,
+      detach: async () => {},
+    });
+    vi.stubGlobal('chrome', {
+      debugger: {
+        sendCommand: async (_target: unknown, method: string, params?: Record<string, unknown>) =>
+          cdp(method, params),
+      },
+    });
+    const adapter = new PlaywrightCrxAdapter({
+      attachToTabId: 3,
+      allowedOrigins: [origin],
+      userBrowserRoutingV2: true,
+    });
+    try {
+      expect(await adapter.attachExistingTab()).toMatchObject({ status: 'ok' });
+      expect(await adapter.observeCurrentPage()).toMatchObject({ status: 'ok' });
+      const action = { kind: 'click' as const, selector: selector('#go') };
+      const described = await adapter.describeTarget(action, 1);
+      expect(described.status).toBe('ok');
+      const target = userBrowserTargetDescriptionSchema.parse(described.data);
+      let allowed = true;
+      const pending = adapter.executeBound(
+        action,
+        { token: target.token, observationRevision: target.observationRevision },
+        () => allowed,
+      );
+      allowed = false;
+      expect(await pending).toMatchObject({
+        status: 'error',
+        error: { code: 'session_unavailable' },
+      });
+      expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+    } finally {
+      await adapter.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+  it.each(['click', 'type', 'key', 'select'] as const)(
+    'rechecks final dispatch admission after slow native target reads for %s',
+    async (kind) => {
+      await page.setContent(
+        '<input id="text"><select id="choice"><option>A</option><option>B</option></select><button id="go" onclick="document.body.dataset.effects=\'1\'">Run</button>',
+      );
+      if (kind === 'key') await page.locator('#go').focus();
+      const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+      await r.observe();
+      const action =
+        kind === 'key'
+          ? { kind, payload: { key: 'Enter' } }
+          : kind === 'click'
+            ? { kind, selector: selector('#go') }
+            : {
+                kind,
+                selector: selector(kind === 'type' ? '#text' : '#choice'),
+                payload: { text: kind === 'type' ? 'prepared731' : 'B' },
+              };
+      const target = await r.describe(action, 1);
+      let allowed = true;
+      const pending = r.execute(
+        action,
+        { token: target.token, observationRevision: 1 },
+        undefined,
+        () => allowed,
+      );
+      allowed = false;
+      await expect(pending).rejects.toThrow('session_unavailable');
+      expect(await page.locator('#text').inputValue()).toBe('');
+      expect(await page.locator('#choice').inputValue()).toBe('A');
+      expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+    },
+  );
   it('rechecks dispatch admission after slow reads and hashing before selecting files', async () => {
     await page.setContent(uploadPage());
     const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);

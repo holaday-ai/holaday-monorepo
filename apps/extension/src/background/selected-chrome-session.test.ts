@@ -1,6 +1,7 @@
 import type { DriverAction, DriverResult } from '@holaday/browser-driver';
+import { USER_BROWSER_PROTOCOL, type UserBrowserBinding } from '@holaday/shared-types';
 import { describe, expect, it, vi } from 'vitest';
-import { SelectedChromeSession } from './selected-chrome-session.js';
+import { type SelectedChromeDriver, SelectedChromeSession } from './selected-chrome-session.js';
 
 function harness() {
   let owner: string | null = 'account-a';
@@ -57,6 +58,76 @@ function harness() {
 }
 
 describe('selected Chrome execution session', () => {
+  it('closes final bound input admission while native preparation is still pending', async () => {
+    let started!: () => void;
+    let release!: () => void;
+    let effects = 0;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const resumed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const driver: SelectedChromeDriver = {
+      attachExistingTab: async () => ({ status: 'ok', data: { tabId: 42 } }),
+      observeCurrentPage: async () => ({
+        status: 'ok',
+        data: {
+          tabId: 42,
+          origin: 'https://work.example',
+          title: 'Report',
+          bodyText: 'Draft',
+          ariaSnapshot: '',
+          truncated: false,
+          observationRevision: 1,
+        },
+      }),
+      describeTarget: async () => ({ status: 'error' }),
+      execute: async () => ({ status: 'ok' }),
+      executeBound: async (
+        _action: DriverAction,
+        _binding: UserBrowserBinding,
+        guard?: () => boolean,
+      ): Promise<DriverResult> => {
+        started();
+        await resumed;
+        if (guard?.() === false)
+          return {
+            status: 'error',
+            error: { code: 'session_unavailable', message: 'stopped before dispatch' },
+          };
+        effects++;
+        return { status: 'ok' };
+      },
+      dispose: async () => {},
+    };
+    const session = new SelectedChromeSession({ makeDriver: () => driver, owner: () => 'alice' });
+    const opened = await session.open({
+      taskId: 'task-a',
+      tabId: 42,
+      validate: async () => {},
+      protocol: { ...USER_BROWSER_PROTOCOL, capabilities: [...USER_BROWSER_PROTOCOL.capabilities] },
+      grantedOrigins: ['https://work.example'],
+    });
+    if (!opened.ok) throw new Error('open failed');
+    const pending = session.execute(
+      'task-a',
+      opened.sessionId,
+      { kind: 'key', payload: { key: 'Enter' } },
+      { token: crypto.randomUUID(), observationRevision: 1 },
+    );
+    await entered;
+    try {
+      session.stopUploadAdmission('task-a');
+      release();
+      expect(await pending).toMatchObject({ ok: false, actionOutcome: 'not_applied' });
+      expect(effects).toBe(0);
+    } finally {
+      release();
+      await pending;
+      await session.stopTask('task-a');
+    }
+  });
   it('keeps a failed detach seat closed to actions but allows cleanup retry', async () => {
     const h = harness();
     const opened = await h.open();
@@ -225,26 +296,37 @@ describe('selected Chrome execution session', () => {
     const opened = await h.open();
     if (!opened.ok) throw new Error('open failed');
     let finish!: (value: DriverResult) => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
     h.driver.execute.mockImplementation(
       () =>
         new Promise((resolve) => {
           finish = resolve;
+          started();
         }),
     );
     const action = h.session.execute('task-a', opened.sessionId, {
       kind: 'key',
       payload: { key: 'Enter' },
     });
-    await Promise.resolve(); // The native input has actually begun.
+    await entered;
     const stopped = h.session.stopTask('task-a');
-    expect(await h.session.execute('task-a', opened.sessionId, { kind: 'key' })).toMatchObject({
-      ok: false,
-    });
-    expect(h.driver.dispose).not.toHaveBeenCalled();
-    finish({ status: 'ok' });
-    await action;
-    await stopped;
-    expect(h.driver.dispose).toHaveBeenCalledTimes(1);
+    try {
+      expect(await h.session.execute('task-a', opened.sessionId, { kind: 'key' })).toMatchObject({
+        ok: false,
+      });
+      expect(h.driver.dispose).not.toHaveBeenCalled();
+      finish({ status: 'ok' });
+      await action;
+      await stopped;
+      expect(h.driver.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      finish({ status: 'ok' });
+      await action;
+      await stopped;
+    }
   });
 
   it('does not replay an input after an uncertain driver failure', async () => {

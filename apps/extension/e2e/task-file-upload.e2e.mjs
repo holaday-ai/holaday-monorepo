@@ -316,6 +316,62 @@ test('actual repository extension file channel', { timeout: 180_000 }, async (t)
       }
     });
   }
+  await t.test(
+    'bound ordinary inputs still use the current driver and preserve the user tab',
+    async () => {
+      const f = await fixture();
+      try {
+        await f.page.setContent(
+          '<input id="notes"><select id="choice"><option>A</option><option>B</option></select><button id="go" onclick="document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1)">Run</button>',
+        );
+        let observation = successful(
+          await call({ op: 'observe', sessionId: f.sessionId }),
+        ).observation;
+        const selector = (value) => ({
+          description: 'Input fixture',
+          strategies: [{ kind: 'css', value }],
+        });
+        const actions = [
+          { kind: 'type', selector: selector('#notes'), payload: { text: 'native731' } },
+          { kind: 'select', selector: selector('#choice'), payload: { text: 'B' } },
+          { kind: 'click', selector: selector('#go') },
+          { kind: 'key', payload: { key: 'Enter' } },
+        ];
+        for (const action of actions) {
+          const target = successful(
+            await call({
+              op: 'describe',
+              sessionId: f.sessionId,
+              action,
+              observationRevision: observation.observationRevision,
+            }),
+          ).target;
+          const result = successful(
+            await call({
+              op: 'act',
+              sessionId: f.sessionId,
+              action,
+              binding: { token: target.token, observationRevision: target.observationRevision },
+            }),
+          );
+          assert.equal(result.actionOutcome, 'applied');
+          observation = result.observation;
+        }
+        assert.equal(await f.page.locator('#notes').inputValue(), 'native731');
+        assert.equal(await f.page.locator('#choice').inputValue(), 'B');
+        assert.equal(await f.page.locator('body').getAttribute('data-effects'), '2');
+        assert.equal(await f.user.locator('#query').inputValue(), 'keep normal browsing 731');
+        assert.equal(
+          await worker.evaluate(
+            async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+          ),
+          f.active,
+        );
+      } finally {
+        await f.close();
+      }
+    },
+  );
   await t.test('bound exact bytes, deduplication and background task target', async () => {
     const f = await fixture();
     try {

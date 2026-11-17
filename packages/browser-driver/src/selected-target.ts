@@ -1075,6 +1075,7 @@ export class SelectedTargetResolver {
           if (hit.frame !== ticket.frame || canonical(hit.signals) !== expected)
             throw new Error('target_changed');
           await this.assertFresh(ticket.frame, binding.observationRevision);
+          if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
           await this.page.mouse.click(point.x, point.y);
           break;
         }
@@ -1084,6 +1085,7 @@ export class SelectedTargetResolver {
           if (focus.frame !== ticket.frame || canonical(focus.signals) !== expected)
             throw new Error('target_changed');
           await this.assertFresh(ticket.frame, binding.observationRevision);
+          if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
           await this.page.keyboard.press(String(action.payload?.key ?? ''));
           break;
         }
@@ -1096,6 +1098,7 @@ export class SelectedTargetResolver {
             throw new Error('target_changed');
           if (action.kind === 'type') {
             await this.assertFresh(ticket.frame, binding.observationRevision);
+            if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
             await handle.fill(String(action.payload?.text ?? ''), { timeout });
             break;
           }
@@ -1110,6 +1113,7 @@ export class SelectedTargetResolver {
           );
           if (matching.length !== 1 || !matching[0]) throw new Error('target_ambiguous');
           await this.assertFresh(ticket.frame, binding.observationRevision);
+          if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
           await handle.selectOption(matching[0], { timeout });
           break;
         }
