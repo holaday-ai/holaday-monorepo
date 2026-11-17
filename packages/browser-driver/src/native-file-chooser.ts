@@ -30,6 +30,8 @@ export type NativeChooserCaptureResult =
 export async function captureNativeFileChooser(
   page: Page,
   options: {
+    /** Final async target checks run after interception is acknowledged. */
+    prepare?: () => Promise<void>;
     click: () => Promise<void>;
     current: () => boolean;
     intercept: (enabled: boolean) => Promise<void>;
@@ -77,6 +79,7 @@ export async function captureNativeFileChooser(
   let restoration: Promise<void> | undefined;
   let restoreFailed = false;
   let operationError: NativeChooserCaptureError | undefined;
+  let preparing = false;
   const dispose = async (chooser: FileChooser) => {
     try {
       await chooser.element().dispose();
@@ -135,6 +138,11 @@ export async function captureNativeFileChooser(
     options.signal?.addEventListener('abort', abort, { once: true });
     await enable;
     if (current() && !expired && !released) {
+      preparing = true;
+      await options.prepare?.();
+      preparing = false;
+    }
+    if (current() && !expired && !released) {
       started = true;
       await options.click();
       clicked = true;
@@ -142,7 +150,11 @@ export async function captureNativeFileChooser(
     }
   } catch {
     operationError = new NativeChooserCaptureError(
-      started ? 'input_outcome_unknown' : 'chooser_interception_unavailable',
+      started
+        ? 'input_outcome_unknown'
+        : preparing
+          ? 'chooser_target_unavailable'
+          : 'chooser_interception_unavailable',
       started ? 'unknown' : 'not_applied',
     );
   } finally {

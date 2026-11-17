@@ -10,6 +10,10 @@ import {
 } from '@holaday/shared-types';
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
+import {
+  type NativeChooserCaptureResult,
+  captureNativeFileChooser,
+} from './native-file-chooser.js';
 import { type LocatorSpec, buildSelectorPlan } from './selector-plan.js';
 
 type DocumentVersion = {
@@ -21,6 +25,19 @@ type DocumentVersion = {
   composing: boolean;
   interrupted: boolean;
 };
+type NativeChooserIdentity = {
+  document?: string;
+  owned: boolean;
+  connected: boolean;
+  file: boolean;
+};
+const readChooserIdentity = (node: Element): NativeChooserIdentity => ({
+  document: (window as typeof window & { __holadayV2Document?: { document: string } })
+    .__holadayV2Document?.document,
+  owned: node.ownerDocument === document,
+  connected: node.isConnected,
+  file: node.tagName === 'INPUT' && (node as HTMLInputElement).type === 'file',
+});
 // Executed in the document. No values, cookies, storage or network data leave it.
 const readVersion = (collaborationV2 = false): DocumentVersion => {
   const win = window as typeof window & {
@@ -190,13 +207,15 @@ const readVersion = (collaborationV2 = false): DocumentVersion => {
 };
 const readElement = async (
   node: Element,
-  includeFileInput = false,
+  options: boolean | { fileInput: true; nativeChooser: true; documentOrigin: string } = false,
 ): Promise<
   Pick<
     UserBrowserTargetDescription,
     'elementId' | 'objectDigest' | 'element' | 'form' | 'fileInput'
   >
 > => {
+  const includeFileInput = options === true || typeof options === 'object';
+  const nativeChooser = typeof options === 'object' && options.nativeChooser;
   const selector =
     'button,a[href],input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=option],[role=tab],[onclick]';
   let el = node;
@@ -221,11 +240,18 @@ const readElement = async (
   let fileInput: UserBrowserTargetDescription['fileInput'];
   let selection: unknown;
   if (includeFileInput && el.tagName === 'INPUT' && input.type === 'file') {
-    if (!el.isConnected || input.accept.length > 1200) throw new Error('file_target_forbidden');
+    if ((!el.isConnected && !nativeChooser) || input.accept.length > 1200)
+      throw new Error('file_target_forbidden');
     let formOrigin: string | null = null;
     try {
+      const raw = (owner as HTMLFormElement | null)?.action || el.ownerDocument.URL;
+      // An orphan input inside srcdoc/blank belongs to the actual granted
+      // frame's inherited origin. Do not infer it from page-authored <base>
+      // or window properties. A form with an unknown action remains denied.
       const destination = new URL(
-        (owner as HTMLFormElement | null)?.action || el.ownerDocument.URL,
+        !owner && typeof options === 'object' && /^(about:blank|about:srcdoc)$/.test(raw)
+          ? options.documentOrigin
+          : raw,
       );
       if (/^https?:$/.test(destination.protocol) && !destination.username && !destination.password)
         formOrigin = destination.origin;
@@ -435,9 +461,18 @@ const withLogin = (signals: Signals, login: LoginContext | null | undefined): Si
   },
 });
 /** A field's own read (type / select / freshness), with its login context. */
-const readField = async (handle: ElementHandle<Element>, upload = false): Promise<Signals> =>
+const readField = async (
+  handle: ElementHandle<Element>,
+  upload = false,
+  nativeChooserOrigin?: string,
+): Promise<Signals> =>
   withLogin(
-    (await handle.evaluate(readElement, upload)) as Signals,
+    (await handle.evaluate(
+      readElement,
+      upload && nativeChooserOrigin
+        ? { fileInput: true, nativeChooser: true, documentOrigin: nativeChooserOrigin }
+        : upload,
+    )) as Signals,
     await handle.evaluate(readLoginContext, false),
   );
 /**
@@ -495,8 +530,27 @@ interface Ticket {
   action: string;
   handle: ElementHandle<Element> | null;
   frame: Frame;
+  nativeChooserId?: string;
   /** Clicks: the exact point described and later clicked, and the selected node. */
   point?: { x: number; y: number; selectedId: string };
+}
+export type SelectedNativeChooserResult =
+  | Exclude<NativeChooserCaptureResult, { status: 'captured' }>
+  | { status: 'captured'; clickOutcome: 'applied'; chooserId: string }
+  | { status: 'clicked'; clickOutcome: 'applied'; reason: 'chooser_unavailable' };
+interface HeldNativeChooser {
+  id: string;
+  handle: ElementHandle<Element>;
+  frame: Frame;
+  document: string;
+  rootDocument: string;
+  origin: string;
+  context: string;
+  connected: boolean;
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
+  navigated: (frame: Frame) => void;
+  closed: () => void;
 }
 type NativeRelay = {
   receiver: ((frame: Frame, value: unknown) => void) | null;
@@ -555,6 +609,7 @@ export class SelectedTargetResolver {
   private documents = new Map<Frame, DocumentVersion>();
   private frames = new WeakMap<Frame, string>();
   private ticket: Ticket | null = null;
+  private chooser: HeldNativeChooser | null = null;
   private nativeFrames = new Map<string, DocumentVersion>();
   private nativeInterrupted = false;
   private nativeEvents = new Map<string, Omit<DocumentVersion, 'epoch'>>();
@@ -642,6 +697,7 @@ export class SelectedTargetResolver {
     this.revision++;
   }
   async dispose(): Promise<void> {
+    await this.clearNativeChooser();
     if (this.nativeRelay?.receiver === this.receiveNativeActivity) this.nativeRelay.receiver = null;
     this.nativeRelay = null;
     this.nativeEvents.clear();
@@ -728,7 +784,77 @@ export class SelectedTargetResolver {
   private async clearTicket(): Promise<void> {
     const ticket = this.ticket;
     this.ticket = null;
-    await ticket?.handle?.dispose().catch(() => undefined);
+    if (!ticket?.nativeChooserId) await ticket?.handle?.dispose().catch(() => undefined);
+  }
+  private async clearNativeChooser(id?: string): Promise<void> {
+    const held = this.chooser;
+    if (!held || (id && held.id !== id)) return;
+    this.chooser = null;
+    clearTimeout(held.timer);
+    // These only invalidate the retained handle; interception has already been
+    // released. Always discard handle authority even if the page has closed.
+    for (const detach of [
+      () => this.page.off('framenavigated', held.navigated),
+      () => this.page.off('framedetached', held.navigated),
+      () => this.page.off('close', held.closed),
+    ]) {
+      try {
+        detach();
+      } catch {
+        /* closed connection */
+      }
+    }
+    await held.handle.dispose().catch(() => undefined);
+  }
+  private nativeChooserCurrent(id: string): boolean {
+    const held = this.chooser;
+    if (!held || held.id !== id || Date.now() >= held.expiresAt) return false;
+    try {
+      return (
+        this.page.frames().includes(held.frame) &&
+        this.origin(held.frame) === held.origin &&
+        canonical(this.pageContext(held.frame)) === held.context
+      );
+    } catch {
+      return false;
+    }
+  }
+  private async requireNativeChooser(id: unknown): Promise<HeldNativeChooser> {
+    const held = this.chooser;
+    if (!held || id !== held.id) throw new Error('file_target_forbidden');
+    try {
+      if (!this.nativeChooserCurrent(held.id)) throw new Error();
+      const root = await this.page
+        .mainFrame()
+        .evaluate<DocumentVersion, boolean>(readVersion, this.collaborationV2);
+      const version = await held.frame.evaluate<DocumentVersion, boolean>(
+        readVersion,
+        this.collaborationV2,
+      );
+      const nativeOrigin = await held.handle.evaluate<string>(() => window.origin);
+      // Native chooser handles live in the SDK utility world. Adopt the same
+      // actual node into its owner's main world to compare document identity.
+      const identity = await held.frame.evaluate<NativeChooserIdentity, ElementHandle<Element>>(
+        readChooserIdentity,
+        held.handle,
+      );
+      if (
+        this.chooser !== held ||
+        !this.nativeChooserCurrent(held.id) ||
+        nativeOrigin !== held.origin ||
+        root.document !== held.rootDocument ||
+        version.document !== held.document ||
+        identity.document !== held.document ||
+        !identity.owned ||
+        !identity.file ||
+        identity.connected !== held.connected
+      )
+        throw new Error();
+      return held;
+    } catch {
+      await this.clearNativeChooser(held.id);
+      throw new Error('file_target_forbidden');
+    }
   }
   private async assertFresh(frame: Frame, expected: number): Promise<void> {
     this.origin(this.page.mainFrame());
@@ -918,8 +1044,13 @@ export class SelectedTargetResolver {
   }
   private async resolve(
     action: DriverAction,
-  ): Promise<{ handle: ElementHandle<Element>; frame: Frame }> {
+  ): Promise<{ handle: ElementHandle<Element>; frame: Frame; nativeChooserId?: string }> {
     if (action.kind === 'key') throw new Error('target_missing');
+    if (action.kind === 'upload' && action.payload && 'chooserId' in action.payload) {
+      if (action.selector) throw new Error('file_target_forbidden');
+      const held = await this.requireNativeChooser(action.payload.chooserId);
+      return { handle: held.handle, frame: held.frame, nativeChooserId: held.id };
+    }
     if (!action.selector) throw new Error('target_missing');
     const plan = buildSelectorPlan(action.selector);
     for (const spec of plan.attempts) {
@@ -951,6 +1082,7 @@ export class SelectedTargetResolver {
   async describe(action: DriverAction, expected: number): Promise<UserBrowserTargetDescription> {
     await this.clearTicket();
     let handle: ElementHandle<Element> | null = null;
+    let nativeChooserId: string | undefined;
     try {
       let frame: Frame;
       let signals: Signals;
@@ -961,6 +1093,7 @@ export class SelectedTargetResolver {
       } else {
         const resolved = await this.resolve(action);
         handle = resolved.handle;
+        nativeChooserId = resolved.nativeChooserId;
         frame = resolved.frame;
         await this.assertFresh(frame, expected);
         if (action.kind !== 'upload' && !(await handle.isVisible()))
@@ -974,7 +1107,12 @@ export class SelectedTargetResolver {
           if (hit.frame !== frame) throw new Error('target_obscured');
           signals = hit.signals;
           point = { ...at, selectedId };
-        } else signals = await readField(handle, action.kind === 'upload');
+        } else
+          signals = await readField(
+            handle,
+            action.kind === 'upload',
+            nativeChooserId ? this.origin(frame) : undefined,
+          );
         if (action.kind === 'upload') assertUploadTarget(signals, action);
       }
       let frameId = this.frames.get(frame);
@@ -993,10 +1131,18 @@ export class SelectedTargetResolver {
         page: this.pageContext(frame),
       };
       await this.assertFresh(frame, expected);
-      this.ticket = { target, action: JSON.stringify(action), handle, frame, point };
+      this.ticket = {
+        target,
+        action: JSON.stringify(action),
+        handle,
+        frame,
+        point,
+        nativeChooserId,
+      };
       return target;
     } catch (error) {
-      await handle?.dispose();
+      if (nativeChooserId) await this.clearNativeChooser(nativeChooserId);
+      else await handle?.dispose();
       throw error;
     }
   }
@@ -1006,6 +1152,117 @@ export class SelectedTargetResolver {
     uploadFiles?: readonly NativeUploadPayload[],
     dispatchAllowed?: () => boolean,
   ): Promise<void> {
+    await this.executeInternal(action, binding, uploadFiles, dispatchAllowed);
+  }
+  /** Only the explicit file-button operation calls this. Ordinary clicks never
+   * install a filechooser listener. The same ticket/hit test protects both. */
+  async captureFileChooser(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<SelectedNativeChooserResult> {
+    if (action.kind !== 'click' || typeof dispatchAllowed !== 'function')
+      throw new Error('capability_missing');
+    const captured: { result?: NativeChooserCaptureResult } = {};
+    await this.executeInternal(
+      action,
+      binding,
+      undefined,
+      dispatchAllowed,
+      async (prepare, click) => {
+        await this.clearNativeChooser();
+        captured.result = await captureNativeFileChooser(this.page, {
+          prepare,
+          click,
+          current: dispatchAllowed,
+          signal,
+          intercept: async (enabled) => {
+            await this.cdp('Page.setInterceptFileChooserDialog', { enabled });
+          },
+        });
+      },
+    );
+    const result = captured.result;
+    if (!result) throw new Error('capability_missing');
+    if (result.status !== 'captured') return result;
+    const handle = result.chooser.element() as ElementHandle<Element>;
+    try {
+      if (result.chooser.page() !== this.page || !dispatchAllowed() || signal?.aborted)
+        throw new Error();
+      const frame = await handle.ownerFrame();
+      if (!frame || !this.page.frames().includes(frame)) throw new Error();
+      const original = this.documents.get(frame);
+      const originalRoot = this.documents.get(this.page.mainFrame());
+      if (!original || !originalRoot) throw new Error();
+      const origin = this.origin(frame);
+      // The pinned CRX SDK creates native chooser handles in its utility world.
+      // Its untouched Window.origin distinguishes opaque sandboxed srcdoc from
+      // a genuinely inherited origin; a page's main-world override cannot grant it.
+      if ((await handle.evaluate(() => window.origin)) !== origin) throw new Error();
+      const version = await frame.evaluate<DocumentVersion, boolean>(
+        readVersion,
+        this.collaborationV2,
+      );
+      const root = await this.page
+        .mainFrame()
+        .evaluate<DocumentVersion, boolean>(readVersion, this.collaborationV2);
+      const identity = await frame.evaluate<NativeChooserIdentity, ElementHandle<Element>>(
+        readChooserIdentity,
+        handle,
+      );
+      if (
+        !dispatchAllowed() ||
+        signal?.aborted ||
+        version.document !== original.document ||
+        root.document !== originalRoot.document ||
+        identity.document !== version.document ||
+        !identity.owned ||
+        !identity.file
+      )
+        throw new Error();
+      const id = crypto.randomUUID();
+      const navigated = (changed: Frame) => {
+        if (changed === frame || changed === this.page.mainFrame())
+          void this.clearNativeChooser(id);
+      };
+      const closed = () => {
+        void this.clearNativeChooser(id);
+      };
+      this.chooser = {
+        id,
+        handle,
+        frame,
+        document: version.document,
+        rootDocument: root.document,
+        origin,
+        context: canonical(this.pageContext(frame)),
+        connected: identity.connected,
+        expiresAt: Date.now() + 120_000,
+        timer: setTimeout(closed, 120_000),
+        navigated,
+        closed,
+      };
+      this.page.on('framenavigated', navigated);
+      this.page.on('framedetached', navigated);
+      this.page.on('close', closed);
+      return { status: 'captured', clickOutcome: 'applied', chooserId: id };
+    } catch {
+      await this.clearNativeChooser();
+      await handle.dispose().catch(() => undefined);
+      return { status: 'clicked', clickOutcome: 'applied', reason: 'chooser_unavailable' };
+    }
+  }
+  private async executeInternal(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    uploadFiles?: readonly NativeUploadPayload[],
+    dispatchAllowed?: () => boolean,
+    nativeChooserClick?: (
+      prepare: () => Promise<void>,
+      click: () => Promise<void>,
+    ) => Promise<void>,
+  ): Promise<void> {
     const ticket = this.ticket;
     this.ticket = null;
     if (
@@ -1014,7 +1271,8 @@ export class SelectedTargetResolver {
       ticket.target.observationRevision !== binding.observationRevision ||
       ticket.action !== JSON.stringify(action)
     ) {
-      await ticket?.handle?.dispose();
+      if (ticket?.nativeChooserId) await this.clearNativeChooser(ticket.nativeChooserId);
+      else await ticket?.handle?.dispose();
       throw new Error('target_binding_required');
     }
     const expected = canonical({
@@ -1054,11 +1312,19 @@ export class SelectedTargetResolver {
             )
               throw new Error('file_payload_invalid');
           }
-          const fresh = await readField(handle, true);
+          if (ticket.nativeChooserId) await this.requireNativeChooser(ticket.nativeChooserId);
+          const fresh = await readField(
+            handle,
+            true,
+            ticket.nativeChooserId ? this.origin(ticket.frame) : undefined,
+          );
           assertUploadTarget(fresh, action);
           if (canonical(fresh) !== expected) throw new Error('target_changed');
+          if (ticket.nativeChooserId) await this.requireNativeChooser(ticket.nativeChooserId);
           await this.assertFresh(ticket.frame, binding.observationRevision);
           if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
+          if (ticket.nativeChooserId && !this.nativeChooserCurrent(ticket.nativeChooserId))
+            throw new Error('file_target_forbidden');
           try {
             await handle.setInputFiles(uploadFiles, { timeout: action.deadlineMs ?? 10_000 });
           } catch {
@@ -1071,12 +1337,21 @@ export class SelectedTargetResolver {
           if (!point) throw new Error('target_binding_required');
           // Re-hit-test the very point that will be clicked: same node, same
           // semantics, still inside the selected element.
-          const hit = await this.readAt(point, point.selectedId);
-          if (hit.frame !== ticket.frame || canonical(hit.signals) !== expected)
-            throw new Error('target_changed');
-          await this.assertFresh(ticket.frame, binding.observationRevision);
-          if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
-          await this.page.mouse.click(point.x, point.y);
+          const prepare = async () => {
+            const hit = await this.readAt(point, point.selectedId);
+            if (hit.frame !== ticket.frame || canonical(hit.signals) !== expected)
+              throw new Error('target_changed');
+            await this.assertFresh(ticket.frame, binding.observationRevision);
+            if (canonical(this.pageContext(ticket.frame)) !== canonical(ticket.target.page))
+              throw new Error('target_changed');
+            if (dispatchAllowed && !dispatchAllowed()) throw new Error('session_unavailable');
+          };
+          const click = () => this.page.mouse.click(point.x, point.y);
+          if (nativeChooserClick) await nativeChooserClick(prepare, click);
+          else {
+            await prepare();
+            await click();
+          }
           break;
         }
         case 'key': {
@@ -1121,7 +1396,8 @@ export class SelectedTargetResolver {
           throw new Error('unsupported_action');
       }
     } finally {
-      await ticket.handle?.dispose();
+      if (ticket.nativeChooserId) await this.clearNativeChooser(ticket.nativeChooserId);
+      else await ticket.handle?.dispose();
     }
   }
   async scroll(deltaX: number, deltaY: number): Promise<void> {

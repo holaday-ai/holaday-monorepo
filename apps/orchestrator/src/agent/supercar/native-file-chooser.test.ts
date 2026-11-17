@@ -42,6 +42,54 @@ const dynamic = (connected: boolean) =>
   `<button id="choose" onclick="const file=document.createElement('input');file.type='file';file.accept='.csv';${connected ? 'document.body.append(file);' : ''}file.onchange=async()=>document.body.dataset.received=await file.files[0].text();file.click()">Choose report</button>`;
 
 describe('temporary native file chooser capture around one owned click', () => {
+  it('checks the target after interception acknowledgement and before any native click', async () => {
+    await page.setContent('<button onclick="document.body.dataset.effect=\'1\'">Run</button>');
+    await expect(
+      capture({
+        prepare: async () => {
+          throw new Error('private changed target');
+        },
+        click: () => page.locator('button').click(),
+        current: () => true,
+        timeoutMs: 100,
+      }),
+    ).rejects.toMatchObject({ message: 'chooser_target_unavailable', clickOutcome: 'not_applied' });
+    expect(page.listenerCount('filechooser')).toBe(0);
+    expect(await page.locator('body').getAttribute('data-effect')).toBeNull();
+  });
+  it('releases interception on cancellation during final target preparation and never clicks', async () => {
+    await page.setContent('<button onclick="document.body.dataset.effect=\'1\'">Run</button>');
+    let entered!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const controller = new AbortController();
+    const pending = capture({
+      prepare: async () => {
+        entered();
+        await released;
+      },
+      click: () => page.locator('button').click(),
+      current: () => true,
+      signal: controller.signal,
+      timeoutMs: 1000,
+    });
+    await started;
+    try {
+      controller.abort();
+      await vi.waitFor(() => expect(page.listenerCount('filechooser')).toBe(0));
+      resume();
+      expect(await pending).toMatchObject({ status: 'not_applied', reason: 'scope_unavailable' });
+      expect(await page.locator('body').getAttribute('data-effect')).toBeNull();
+    } finally {
+      resume();
+      await pending;
+    }
+  });
   it.each(['missing', 'invalid', 'throws'])(
     'refuses capture when runtime listener inspection is %s',
     async (mode) => {
