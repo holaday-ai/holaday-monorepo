@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const USER_BROWSER_ACTIVITY_CAPABILITY = 'human_activity_v1' as const;
 export const USER_BROWSER_UPLOAD_CAPABILITY = 'task_file_upload_v1' as const;
 export const USER_BROWSER_CHOOSER_CAPABILITY = 'task_file_chooser_v1' as const;
+export const USER_BROWSER_DOWNLOAD_CAPABILITY = 'task_file_download_v1' as const;
 export const userBrowserActivitySchema = z
   .object({
     tabId: z.number().int().nonnegative(),

@@ -5,7 +5,7 @@ export const BROWSER_UPLOAD_CHUNK_BYTES = 256 * 1024;
 export const BROWSER_UPLOAD_IDLE_MS = 120_000;
 export const BROWSER_UPLOAD_LIFETIME_MS = 600_000;
 
-const uploadFileSchema = z
+export const browserUploadFileSchema = z
   .object({
     fileId: z
       .string()
@@ -34,7 +34,7 @@ const uploadFileSchema = z
   .strict();
 
 export const browserUploadManifestSchema = z
-  .array(uploadFileSchema)
+  .array(browserUploadFileSchema)
   .min(1)
   .max(5)
   .refine((files) => new Set(files.map((file) => file.fileId)).size === files.length)

@@ -24,3 +24,4 @@ export * from './browser-launch-journal.js';
 export * from './browser-file-transfer.js';
 export * from './selected-chrome-upload.js';
 export * from './selected-chrome-chooser.js';
+export * from './selected-chrome-download.js';

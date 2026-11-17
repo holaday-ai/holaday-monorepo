@@ -753,6 +753,7 @@ export interface RunSupercarOptions {
     filename: string;
     buffer: Buffer;
     sha256: string;
+    mimetype?: string;
   }) => Promise<BrowserDownloadReceipt>;
   /** Publish both newly persisted and already-owned Home download receipts to this task. */
   onBrowserDownloadSaved?: (receipt: BrowserDownloadReceipt) => void | Promise<void>;

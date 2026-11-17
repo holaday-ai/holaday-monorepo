@@ -6838,7 +6838,7 @@ export const tasksRouter = router({
                         },
                       }
                     : {}),
-                  async onBrowserDownload({ filename, buffer, sha256 }) {
+                  async onBrowserDownload({ filename, buffer, sha256, mimetype }) {
                     const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
                     if (taskInternalId == null) throw new Error('task row not found');
                     const stored = await fileService.storeOutput({
@@ -6846,7 +6846,7 @@ export const tasksRouter = router({
                       userExternalId: ctx.userId,
                       taskIdInternal: taskInternalId,
                       filename,
-                      mimetype: 'application/octet-stream',
+                      mimetype: mimetype ?? 'application/octet-stream',
                       buffer,
                     });
                     const receipt = {
@@ -7563,6 +7563,8 @@ export const tasksRouter = router({
                     onThinking: supercarArgs.onThinking,
                     createFileFormats: supercarArgs.createFileFormats,
                     onCreateFile: supercarArgs.onCreateFile,
+                    onBrowserDownload: supercarArgs.onBrowserDownload,
+                    onBrowserDownloadSaved: supercarArgs.onBrowserDownloadSaved,
                     onBeforeAction: supercarArgs.onBeforeAction,
                     logger: ctx.logger,
                     onAwaitingUser: supercarArgs.onAwaitingUser,

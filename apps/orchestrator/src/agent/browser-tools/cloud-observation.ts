@@ -25,7 +25,7 @@ import {
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const SENSITIVE_URL_PARAMETER =
-  /^(?:ticket|token|access_token|id_token|refresh_token|auth|authorization|sig|sign|signature|secret|password|api_key|apikey|auth_key|session_token|session_id|cookie)$/i;
+  /^(?:ticket|token|access_token|id_token|refresh_token|auth|authorization|sig|sign|signature|secret|password|api_key|apikey|auth_key|session_token|session_id|cookie|x[-_](?:amz|goog)[-_](?:signature|credential|security[-_]token))$/i;
 /** Model-facing copy only; raw accessible addresses stay in host-only evidence. */
 export function safeObservationUrl(value: string, base?: string): string {
   try {

@@ -638,6 +638,7 @@ export class SelectedTargetResolver {
   private downloadActive = false;
   private downloadUncertain = false;
   private downloadSetupUncertain = false;
+  private downloadInputTracking = false;
   private downloads: NativeDownloadCaptureController | null = null;
   private blobLease: NativeBlobSources | null = null;
   private download: HeldNativeDownload | null = null;
@@ -759,7 +760,7 @@ export class SelectedTargetResolver {
     if (this.nativeRelay?.receiver === this.receiveNativeActivity) this.nativeRelay.receiver = null;
     this.nativeRelay = null;
     this.nativeEvents.clear();
-    if (this.collaborationV2) {
+    if (this.collaborationV2 || this.downloadInputTracking) {
       for (const frame of this.documents.keys()) {
         try {
           this.origin(frame);
@@ -1355,6 +1356,7 @@ export class SelectedTargetResolver {
     };
     const current = () => !this.disposed && !signal?.aborted && dispatchAllowed();
     let result: NativeDownloadCaptureResult | undefined;
+    let finalInputCheck: (() => Promise<void>) | undefined;
     this.downloadActive = true;
     try {
       await this.executeInternal(
@@ -1363,6 +1365,41 @@ export class SelectedTargetResolver {
         undefined,
         dispatchAllowed,
         async (prepare, click) => {
+          this.downloadInputTracking = true;
+          const rootFrame = this.page.mainFrame();
+          const rootInput = await rootFrame.evaluate<DocumentVersion, boolean>(readVersion, true);
+          const frameInput =
+            ticket.frame === rootFrame
+              ? rootInput
+              : await ticket.frame.evaluate<DocumentVersion, boolean>(readVersion, true);
+          const checkInput = async (applied: boolean) => {
+            const rootNow = await rootFrame.evaluate<DocumentVersion, boolean>(readVersion, true);
+            const frameNow =
+              ticket.frame === rootFrame
+                ? rootNow
+                : await ticket.frame.evaluate<DocumentVersion, boolean>(readVersion, true);
+            // One native mouse click sends its own down/up. A later trusted
+            // key, pointer, input, composition or scroll belongs to a changed
+            // interaction context, not authority over another exported file.
+            if (
+              !current() ||
+              rootNow.document !== context.rootDocument ||
+              frameNow.document !== context.document ||
+              rootNow.input !== rootInput.input + (applied && ticket.frame === rootFrame ? 2 : 0) ||
+              frameNow.input !== frameInput.input + (applied ? 2 : 0) ||
+              rootNow.keys ||
+              rootNow.pointers ||
+              rootNow.composing ||
+              rootNow.interrupted ||
+              frameNow.keys ||
+              frameNow.pointers ||
+              frameNow.composing ||
+              frameNow.interrupted
+            )
+              throw new Error('scope_unavailable');
+          };
+          await checkInput(false);
+          finalInputCheck = () => checkInput(true);
           await this.readAt(ticket.point!, ticket.point!.selectedId, async (target) => {
             if (
               target.frame !== ticket.frame ||
@@ -1406,11 +1443,18 @@ export class SelectedTargetResolver {
               frameId: target.frameId,
               origin: context.origin,
               current,
-              prepare,
+              prepare: async () => {
+                await checkInput(false);
+                await prepare();
+              },
               click,
               signal,
               blobs: this.blobLease ?? undefined,
-              finalCheck: () => this.assertDownloadDocument(context, current),
+              totalMs: 55_000,
+              finalCheck: async () => {
+                await this.assertDownloadDocument(context, current);
+                await finalInputCheck!();
+              },
             });
           });
         },
@@ -1429,6 +1473,7 @@ export class SelectedTargetResolver {
       if (result.status !== 'captured') return result;
       try {
         await this.assertDownloadDocument(context, current);
+        await finalInputCheck!();
         const metadata = result.file.metadata();
         const source = result.file.source();
         const id = crypto.randomUUID();

@@ -7,21 +7,27 @@ import {
 import {
   type BrowserUploadOutcome,
   type SelectedChromeChooserCommand,
+  type SelectedChromeDownloadCommand,
   type SelectedChromeUploadAction,
   type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_CHOOSER_CAPABILITY,
+  USER_BROWSER_DOWNLOAD_CAPABILITY,
   USER_BROWSER_PROTOCOL,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserBinding,
   type UserBrowserChooserState,
+  type UserBrowserDownloadChunk,
+  type UserBrowserDownloadState,
   type UserBrowserProtocol,
   type UserBrowserTargetDescription,
   type UserBrowserUploadState,
+  selectedChromeDownloadCommandSchema,
   userBrowserActivitySchema,
   userBrowserChooserFailureSchema,
   userBrowserChooserStateSchema,
+  userBrowserDownloadStateSchema,
   userBrowserTargetDescriptionSchema,
 } from '@holaday/shared-types';
 
@@ -42,6 +48,19 @@ export interface SelectedChromeDriver {
     dispatchAllowed: () => boolean,
     signal?: AbortSignal,
   ): Promise<DriverResult>;
+  captureDownloadBound?(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult>;
+  readDownloadChunk?(
+    id: string,
+    offset: number,
+    length: number,
+    current: () => boolean,
+  ): Promise<DriverResult>;
+  releaseDownload?(id: string): void;
   uploadBound?(
     action: DriverAction,
     binding: UserBrowserBinding,
@@ -63,6 +82,9 @@ export type SessionReply =
       actionOutcome?: 'applied' | 'not_applied';
       uploadState?: UserBrowserUploadState;
       chooserState?: UserBrowserChooserState;
+      downloadState?: UserBrowserDownloadState;
+      downloadChunk?: UserBrowserDownloadChunk;
+      downloadReleased?: string;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -83,6 +105,16 @@ interface Entry {
   collaborationV2: boolean;
   uploadsEnabled: boolean;
   choosersEnabled: boolean;
+  downloadsEnabled: boolean;
+  downloadAbort?: AbortController;
+  download?: {
+    id: string;
+    driver: SelectedChromeDriver;
+    tabId: number;
+    sizeBytes: number;
+    expiresAt: number;
+  };
+  releasedDownloads: string[];
   chooserAbort?: AbortController;
   uploadsStopped: boolean;
   uploadTransfer?: TaskFileTransfer;
@@ -177,6 +209,8 @@ export class SelectedChromeSession {
       ),
       uploadsEnabled: false,
       choosersEnabled: false,
+      downloadsEnabled: false,
+      releasedDownloads: [],
       uploadsStopped: false,
       uploadBindings: new Map(),
       uploadBegins: new Map(),
@@ -213,6 +247,12 @@ export class SelectedChromeSession {
           input.protocol?.capabilities.includes(USER_BROWSER_CHOOSER_CAPABILITY) &&
           entry.driver.captureFileChooserBound,
       );
+      entry.downloadsEnabled = Boolean(
+        input.protocol?.capabilities.includes(USER_BROWSER_DOWNLOAD_CAPABILITY) &&
+          entry.driver.captureDownloadBound &&
+          entry.driver.readDownloadChunk &&
+          entry.driver.releaseDownload,
+      );
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
         origin: entry.origins[0] ?? '',
@@ -248,6 +288,8 @@ export class SelectedChromeSession {
     if (this.entry && this.entry.tabId === tabId) {
       this.entry.tabClosed = true;
       this.entry.chooserAbort?.abort();
+      this.entry.downloadAbort?.abort();
+      this.clearDownload(this.entry);
     }
   }
 
@@ -604,6 +646,185 @@ export class SelectedChromeSession {
     );
   }
 
+  private clearDownload(entry: Entry): boolean {
+    const held = entry.download;
+    if (!held) return true;
+    try {
+      held.driver.releaseDownload?.(held.id);
+      entry.download = undefined;
+      return true;
+    } catch {
+      entry.quarantined = true;
+      entry.ready = false;
+      return false;
+    }
+  }
+
+  private rememberDownloadRelease(entry: Entry, id: string): void {
+    if (entry.releasedDownloads.includes(id)) return;
+    entry.releasedDownloads.push(id);
+    if (entry.releasedDownloads.length > 8) entry.releasedDownloads.shift();
+  }
+
+  async download(taskId: string, input: SelectedChromeDownloadCommand): Promise<SessionReply> {
+    const parsedCommand = selectedChromeDownloadCommandSchema.safeParse(input);
+    const refused = (error: string): SessionReply => ({
+      ok: false,
+      error,
+      ...(input.op === 'download_open' ? { actionOutcome: 'not_applied' as const } : {}),
+    });
+    if (!parsedCommand.success) return refused('invalid_session_command');
+    const command = parsedCommand.data;
+    const entry = this.find(taskId, command.sessionId);
+    if (!entry) return refused('session_unavailable');
+    if (
+      !entry.downloadsEnabled ||
+      !entry.driver?.captureDownloadBound ||
+      !entry.driver.readDownloadChunk ||
+      !entry.driver.releaseDownload
+    )
+      return refused('capability_missing');
+    if (entry.pending) return refused('browser_busy');
+    if (entry.uploadsStopped) return refused('session_unavailable');
+    if (entry.tabClosed) return refused('tab_closed');
+    if (entry.quarantined)
+      return {
+        ok: false,
+        error: 'input_outcome_unknown',
+        ...(command.op === 'download_open' ? { actionOutcome: 'unknown' as const } : {}),
+      };
+    if (entry.download && Date.now() >= entry.download.expiresAt) {
+      const id = entry.download.id;
+      if (!this.clearDownload(entry)) return refused('session_unavailable');
+      this.rememberDownloadRelease(entry, id);
+    }
+    if (command.op === 'download_open' && !entry.ready) return refused('observation_required');
+    if (command.op === 'download_open' && entry.download) return refused('browser_busy');
+    return this.track(
+      entry,
+      async () => {
+        const driver = entry.driver;
+        const tabId = entry.tabId;
+        const current = () =>
+          this.current(entry) &&
+          !entry.uploadsStopped &&
+          !entry.tabClosed &&
+          !entry.quarantined &&
+          entry.driver === driver &&
+          entry.tabId === tabId;
+        if (!current() || !driver) return refused('session_unavailable');
+        if (command.op === 'download_release') {
+          if (entry.releasedDownloads.includes(command.downloadId))
+            return { ok: true, sessionId: entry.id, downloadReleased: command.downloadId };
+          if (entry.download?.id !== command.downloadId) return refused('download_unavailable');
+          if (!this.clearDownload(entry)) return refused('download_unavailable');
+          this.rememberDownloadRelease(entry, command.downloadId);
+          return { ok: true, sessionId: entry.id, downloadReleased: command.downloadId };
+        }
+        if (command.op === 'download_read') {
+          const held = entry.download;
+          if (
+            !held ||
+            held.id !== command.downloadId ||
+            held.driver !== driver ||
+            held.tabId !== tabId ||
+            command.offset > held.sizeBytes
+          )
+            return refused('download_unavailable');
+          const allowed = () => current() && entry.download === held && Date.now() < held.expiresAt;
+          const result = await driver.readDownloadChunk!(
+            held.id,
+            command.offset,
+            command.length,
+            allowed,
+          );
+          const bytes = (result.data as { bytes?: unknown } | undefined)?.bytes;
+          if (!(bytes instanceof Uint8Array)) return refused('download_unavailable');
+          try {
+            if (!allowed()) return refused('session_unavailable');
+            if (
+              result.status !== 'ok' ||
+              bytes.length !== Math.min(command.length, held.sizeBytes - command.offset)
+            )
+              return refused('download_unavailable');
+            let binary = '';
+            for (let offset = 0; offset < bytes.length; offset += 8192)
+              binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+            return {
+              ok: true,
+              sessionId: entry.id,
+              downloadChunk: {
+                downloadId: held.id,
+                offset: command.offset,
+                data: btoa(binary),
+                eof: command.offset + bytes.length === held.sizeBytes,
+              },
+            };
+          } finally {
+            bytes.fill(0);
+          }
+        }
+        const native = await this.nativeGate(entry);
+        if (native) return native;
+        if (!current()) return refused('session_unavailable');
+        this.invalidateUploadTargets(entry);
+        entry.ready = false;
+        const abort = new AbortController();
+        entry.downloadAbort = abort;
+        let result: DriverResult;
+        try {
+          result = await driver.captureDownloadBound!(
+            command.action,
+            command.binding,
+            current,
+            abort.signal,
+          );
+        } finally {
+          if (entry.downloadAbort === abort) entry.downloadAbort = undefined;
+        }
+        if (result.status !== 'ok') {
+          const failure = userBrowserChooserFailureSchema.safeParse(result.data);
+          const actionOutcome = failure.success ? failure.data.clickOutcome : 'unknown';
+          if (!failure.success || !failure.data.interceptionRestored || actionOutcome === 'unknown')
+            entry.quarantined = true;
+          return { ok: false, error: result.error?.code ?? 'input_outcome_unknown', actionOutcome };
+        }
+        const parsed = userBrowserDownloadStateSchema.safeParse(result.data);
+        if (
+          !parsed.success ||
+          (parsed.data.status === 'captured' && !entry.origins.includes(parsed.data.source.origin))
+        ) {
+          entry.quarantined = true;
+          return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
+        }
+        const state = parsed.data;
+        if (!current()) {
+          if (state.status === 'captured') driver.releaseDownload!(state.downloadId);
+          return { ok: false, error: 'session_stopped', actionOutcome: state.clickOutcome };
+        }
+        if (state.status === 'captured')
+          entry.download = {
+            id: state.downloadId,
+            driver,
+            tabId,
+            sizeBytes: state.metadata.sizeBytes,
+            expiresAt: Date.now() + 120_000,
+          };
+        const observed = await this.observeEntry(entry);
+        if (!current()) {
+          this.clearDownload(entry);
+          return { ok: false, error: 'session_stopped', actionOutcome: state.clickOutcome };
+        }
+        return {
+          ...(observed.ok ? observed : { ok: true as const, sessionId: entry.id }),
+          downloadState: state,
+          actionOutcome: state.clickOutcome,
+        };
+      },
+      command.op === 'download_open',
+    );
+  }
+
   async openChooser(taskId: string, command: SelectedChromeChooserCommand): Promise<SessionReply> {
     const entry = this.find(taskId, command.sessionId);
     const refused = (error: string): SessionReply => ({
@@ -740,6 +961,8 @@ export class SelectedChromeSession {
       const tab = entry.tabs.get(tabId);
       if (!tab) return { ok: false, error: 'task_tab_required' };
       await entry.driver?.dispose();
+      if (entry.download) this.rememberDownloadRelease(entry, entry.download.id);
+      entry.download = undefined;
       if (!this.current(entry)) return { ok: false, error: 'session_unavailable' };
       tab.driver = this.deps.makeDriver(tabId, {
         v2: true,
@@ -769,6 +992,8 @@ export class SelectedChromeSession {
     if (!entry || entry.taskId !== taskId) return;
     entry.uploadsStopped = true;
     entry.chooserAbort?.abort();
+    entry.downloadAbort?.abort();
+    this.clearDownload(entry);
     entry.uploadPrepared = undefined;
     entry.uploadTransfer?.dispose();
   }
@@ -860,6 +1085,7 @@ export class SelectedChromeSession {
                     ...(entry.collaborationV2 ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
                     ...(entry.uploadsEnabled ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
                     ...(entry.choosersEnabled ? [USER_BROWSER_CHOOSER_CAPABILITY] : []),
+                    ...(entry.downloadsEnabled ? [USER_BROWSER_DOWNLOAD_CAPABILITY] : []),
                   ],
                 },
               }

@@ -33,6 +33,9 @@ const server = createServer(async (request, response) => {
       path: request.url,
       body: Buffer.concat(chunks).toString(),
     });
+    if (request.url.includes('late-headers'))
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    if (response.destroyed) return;
     response.setHeader(
       'Content-Type',
       request.url.includes('invalid-mime') ? 'invalid' : 'text/csv',
@@ -126,6 +129,16 @@ const options = () => ({
 });
 
 describe('original native download bytes around one owned click', () => {
+  it('keeps the original owned request when its headers arrive after new-request capture expires', async () => {
+    await fixture('<a id="export" href="/export?late-headers">Export report</a>');
+    const result = await controller().capture({ ...options(), captureMs: 50, totalMs: 1500 });
+    expect(result.status).toBe('captured');
+    if (result.status === 'captured') {
+      files.push(result.file);
+      expect(Buffer.from(result.file.read(0, 24))).toEqual(bytes);
+    }
+    expect(requests).toHaveLength(1);
+  });
   it('waits for the matching native completion after the action capture window ends', async () => {
     await fixture('<a id="export" href="/export">Export report</a>');
     const timers: Array<ReturnType<typeof setTimeout>> = [];

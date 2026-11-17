@@ -58,6 +58,7 @@ export function createSelectedChromeBridge() {
     execute: session.execute.bind(session),
     upload: session.upload.bind(session),
     openChooser: session.openChooser.bind(session),
+    download: session.download.bind(session),
     stopUploadAdmission: session.stopUploadAdmission.bind(session),
     close: session.close.bind(session),
     // Trusted lifecycle hook only; do not dispatch a client-supplied stop here.

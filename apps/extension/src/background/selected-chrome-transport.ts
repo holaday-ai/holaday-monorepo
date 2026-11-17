@@ -1,5 +1,6 @@
 import type { DriverAction } from '@holaday/browser-driver';
 import type {
+  SelectedChromeDownloadCommand,
   SelectedChromeSessionCommand,
   SelectedChromeUploadCommand,
   UserBrowserBinding,
@@ -38,6 +39,7 @@ export interface SelectedChromeBridge {
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
   activity?(taskId: string, sessionId: string): Promise<SessionReply>;
   upload?(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply>;
+  download?(taskId: string, command: SelectedChromeDownloadCommand): Promise<SessionReply>;
   openChooser?(
     taskId: string,
     command: Extract<SelectedChromeSessionCommand, { op: 'chooser_open' }>,
@@ -223,7 +225,7 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(['act', 'chooser_open'].includes(command.op)
+        ...(['act', 'chooser_open', 'download_open'].includes(command.op)
           ? { actionOutcome: 'not_applied' as const }
           : {}),
       };
@@ -261,7 +263,7 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(['act', 'chooser_open'].includes(command.op)
+        ...(['act', 'chooser_open', 'download_open'].includes(command.op)
           ? { actionOutcome: 'not_applied' as const }
           : {}),
       };
@@ -274,6 +276,14 @@ export function createSelectedChromeTransport(deps: {
           : deps.bridge.observe(taskId, command.sessionId),
       );
     }
+
+    if (command.op === 'download_read' || command.op === 'download_release')
+      return run(
+        entry,
+        () =>
+          deps.bridge.download?.(taskId, command) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
 
     if (
       command.op === 'upload_describe' ||
@@ -324,6 +334,12 @@ export function createSelectedChromeTransport(deps: {
         };
       }
       try {
+        if (command.op === 'download_open')
+          return await (deps.bridge.download?.(taskId, command) ?? {
+            ok: false,
+            error: 'capability_missing',
+            actionOutcome: 'not_applied',
+          });
         if (command.op === 'chooser_open')
           return await (deps.bridge.openChooser?.(taskId, command) ?? {
             ok: false,

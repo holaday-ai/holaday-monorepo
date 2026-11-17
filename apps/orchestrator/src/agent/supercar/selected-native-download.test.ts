@@ -104,6 +104,22 @@ afterAll(async () => {
 });
 
 describe('original downloads through the bound selected target', () => {
+  it('does not attribute another native file to the task when the person acts in the task document', async () => {
+    await page.setContent(
+      `<button id="export">Export report</button><button id="human">My other file</button><script>function makeFile(text,name){const link=document.createElement('a');link.href=window.URL.createObjectURL(new Blob([text],{type:'text/csv'}));link.download=name;link.click();}document.querySelector('#export').onclick=()=>{document.body.dataset.clicks='1';};document.querySelector('#human').onclick=()=>makeFile('HUMAN-PRIVATE-731','human.csv');</script>`,
+    );
+    const value = resolver();
+    const pending = value.captureDownload(click, await prepare(value), () => live);
+    await page.waitForFunction(() => document.body.dataset.clicks === '1');
+    await page.locator('#human').click();
+    const result = await pending;
+    expect(result).toMatchObject({
+      status: 'clicked',
+      clickOutcome: 'applied',
+      reason: 'scope_unavailable',
+    });
+    expect('downloadId' in result).toBe(false);
+  });
   it('retains a driver with lost Blob installation and restoration receipts until the actual page closes', async () => {
     await page.setContent(blobFixture);
     let installed = false;

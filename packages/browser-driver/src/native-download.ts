@@ -142,7 +142,7 @@ export class NativeDownloadCaptureController {
     let receipt: Receipt | undefined;
     let bodyFailure: string | undefined;
     let totalBytes = 0;
-    const requests = new Map<string, { url: string; method: string }>();
+    const requests = new Map<string, { url: string; method: string; pending: boolean }>();
     const bodies: NetworkBody[] = [];
     const jobs = new Set<Promise<void>>();
     let notify: (() => void) | undefined;
@@ -293,6 +293,10 @@ export class NativeDownloadCaptureController {
           | Array<{ name: string; value: string }>
           | undefined;
         const status = params.responseStatusCode;
+        if (request) {
+          request.pending = false;
+          wake();
+        }
         const attachment =
           Array.isArray(headers) &&
           headers.some(
@@ -304,7 +308,6 @@ export class NativeDownloadCaptureController {
         if (
           retired ||
           !started ||
-          expired ||
           !current() ||
           !request ||
           request.url !== requestData?.url ||
@@ -359,6 +362,7 @@ export class NativeDownloadCaptureController {
         if (
           !expired &&
           current() &&
+          ['Document', 'Other'].includes(String(params.type)) &&
           params.frameId === options.frameId &&
           typeof params.requestId === 'string' &&
           typeof request?.url === 'string' &&
@@ -367,7 +371,11 @@ export class NativeDownloadCaptureController {
           sameOrigin(request.url, options.origin) &&
           requests.size < 64
         )
-          requests.set(params.requestId, { url: request.url, method: request.method });
+          requests.set(params.requestId, {
+            url: request.url,
+            method: request.method,
+            pending: true,
+          });
         return;
       }
       if (
@@ -493,6 +501,7 @@ export class NativeDownloadCaptureController {
               expired &&
               !jobs.size &&
               !receipt &&
+              ![...requests.values()].some((request) => request.pending) &&
               !bodies.some((body) => body.settled && body.buffer)
             )
           )

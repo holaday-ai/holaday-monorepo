@@ -7,14 +7,18 @@ import {
   type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_CHOOSER_CAPABILITY,
+  USER_BROWSER_DOWNLOAD_CAPABILITY,
   USER_BROWSER_PROTOCOL,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserChooserState,
+  type UserBrowserDownloadState,
   type UserBrowserTargetDescription,
   selectedChromeUploadActionSchema,
   userBrowserActivitySchema,
   userBrowserChooserStateSchema,
+  userBrowserDownloadChunkSchema,
+  userBrowserDownloadStateSchema,
   userBrowserProtocolSchema,
   userBrowserTargetDescriptionSchema,
   userBrowserUploadStateSchema,
@@ -91,8 +95,16 @@ export type SelectedChromeClientReply =
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
       uploadReceipt?: BrowserUploadTransferReceipt;
       chooserState?: UserBrowserChooserState;
+      downloadState?: UserBrowserDownloadState;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
+
+type CapturedDownload = Extract<UserBrowserDownloadState, { status: 'captured' }>;
+export interface SelectedChromeDownloadFile {
+  metadata: CapturedDownload['metadata'];
+  source: CapturedDownload['source'];
+  buffer: Buffer;
+}
 
 /** A browser port, not a fake Playwright Page. Runner checkpoints before
  * planning and carries revision into execute to invalidate pre-handback plans. */
@@ -115,6 +127,16 @@ export class SelectedChromeClient {
   private taskTabs = new Set<number>();
   private uploadNegotiated = false;
   private chooserNegotiated = false;
+  private downloadNegotiated = false;
+  private download: {
+    state: CapturedDownload;
+    sessionId: string;
+    tabId: number;
+    inputRevision: number;
+  } | null = null;
+  get fileDownloadsEnabled(): boolean {
+    return this.routingV2 && this.options.taskFilesV1 === true && this.downloadNegotiated;
+  }
   get fileUploadsEnabled(): boolean {
     return this.routingV2 && this.options.taskFilesV1 === true && this.uploadNegotiated;
   }
@@ -164,7 +186,11 @@ export class SelectedChromeClient {
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(this.nativeActivityEnabled ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
                     ...(this.options.taskFilesV1
-                      ? [USER_BROWSER_UPLOAD_CAPABILITY, USER_BROWSER_CHOOSER_CAPABILITY]
+                      ? [
+                          USER_BROWSER_UPLOAD_CAPABILITY,
+                          USER_BROWSER_CHOOSER_CAPABILITY,
+                          USER_BROWSER_DOWNLOAD_CAPABILITY,
+                        ]
                       : []),
                   ],
                 },
@@ -328,6 +354,232 @@ export class SelectedChromeClient {
         return { ok: false, error: 'capability_missing', actionOutcome: state.clickOutcome };
       }
       return { ...fresh, chooserState: state, actionOutcome: state.clickOutcome };
+    });
+  }
+
+  /** One prepared file-button click. A missing receipt is never retransmitted. */
+  async openFileDownload(
+    action: Action,
+    expectedRevision: number,
+  ): Promise<SelectedChromeClientReply> {
+    const notApplied = (error: string): SelectedChromeClientReply => ({
+      ok: false,
+      error,
+      actionOutcome: 'not_applied',
+    });
+    if (!this.fileDownloadsEnabled) return notApplied('capability_missing');
+    if (action.kind !== 'click') return notApplied('unsupported_action');
+    if (!this.sessionId || this.closing) return notApplied('session_unavailable');
+    if (this.pending) return notApplied('browser_busy');
+    if (
+      !this.ready ||
+      !this.options.control.canAgentAct() ||
+      expectedRevision !== this.revisionValue
+    )
+      return notApplied('replan_required');
+    if (this.download) return notApplied('browser_busy');
+    const click = action;
+    const sessionId = this.sessionId;
+    const inputRevision = this.options.control.inputRevision;
+    return this.track(async () => {
+      const current = () =>
+        !this.closing &&
+        this.sessionId === sessionId &&
+        this.options.control.canAgentAct() &&
+        this.revisionValue === expectedRevision &&
+        this.options.control.inputRevision === inputRevision;
+      const prepared = this.prepared;
+      this.prepared = null;
+      if (!current()) return notApplied('replan_required');
+      if (
+        !prepared ||
+        prepared.action !== JSON.stringify(click) ||
+        prepared.revision !== expectedRevision
+      )
+        return notApplied('target_binding_required');
+      if (prepared.inputRevision !== inputRevision) {
+        this.ready = false;
+        return notApplied('replan_required');
+      }
+      this.ready = false;
+      const outcome = await this.send({
+        op: 'download_open',
+        sessionId,
+        action: click,
+        binding: {
+          token: prepared.target.token,
+          observationRevision: prepared.target.observationRevision,
+        },
+      });
+      const rejected = failureSchema.safeParse(outcome.result);
+      if (
+        !outcome.ok &&
+        rejected.success &&
+        rejected.data.error === 'download_restore_unconfirmed'
+      ) {
+        this.options.control.close('input_outcome_unknown');
+        return { ...rejected.data, actionOutcome: rejected.data.actionOutcome ?? 'unknown' };
+      }
+      if (
+        !outcome.ok &&
+        outcome.result === undefined &&
+        !['target_required', 'invalid_session_command', 'target_extension_unavailable'].includes(
+          outcome.error?.code ?? '',
+        )
+      )
+        return this.uncertain('input_outcome_unknown', 'act');
+      if (!outcome.ok) return this.accept(outcome, 'act');
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.literal(sessionId),
+          downloadState: userBrowserDownloadStateSchema,
+          actionOutcome: z.enum(['applied', 'not_applied']),
+          observation: observationSchema.optional(),
+        })
+        .safeParse(outcome.result);
+      if (!parsed.success || parsed.data.actionOutcome !== parsed.data.downloadState.clickOutcome)
+        return this.uncertain('invalid_receipt', 'act');
+      const state = parsed.data.downloadState;
+      if (state.status === 'captured' && !this.origins.includes(state.source.origin))
+        return this.uncertain('invalid_receipt', 'act');
+      const retain = () => {
+        if (state.status === 'captured' && this.tabId !== null)
+          this.download = {
+            state: structuredClone(state),
+            sessionId,
+            tabId: this.tabId,
+            inputRevision,
+          };
+      };
+      if (!current())
+        return { ok: false, error: 'replan_required', actionOutcome: state.clickOutcome };
+      if (!parsed.data.observation) {
+        retain();
+        return { ok: true, downloadState: state, actionOutcome: state.clickOutcome };
+      }
+      const fresh = this.accept(outcome, 'observe');
+      if (!fresh.ok) return { ...fresh, actionOutcome: fresh.actionOutcome ?? state.clickOutcome };
+      // accept() advances the client revision on a valid new observation.
+      if (
+        this.closing ||
+        !this.options.control.canAgentAct() ||
+        this.options.control.inputRevision !== inputRevision
+      ) {
+        this.ready = false;
+        return { ok: false, error: 'replan_required', actionOutcome: state.clickOutcome };
+      }
+      if (!this.fileDownloadsEnabled) {
+        this.ready = false;
+        return { ok: false, error: 'capability_missing', actionOutcome: state.clickOutcome };
+      }
+      retain();
+      return { ...fresh, downloadState: state, actionOutcome: state.clickOutcome };
+    });
+  }
+
+  /** No raw bytes enter a model/tool reply. The task's trusted receiver owns this
+   * buffer, validates its storage receipt, and then releases this native source. */
+  async readDownload(
+    id: string,
+  ): Promise<{ ok: true; file: SelectedChromeDownloadFile } | { ok: false; error: string }> {
+    const held = this.download;
+    if (!held || held.state.downloadId !== id || !this.fileDownloadsEnabled)
+      return { ok: false, error: 'download_unavailable' };
+    if (this.pending) return { ok: false, error: 'browser_busy' };
+    const current = () =>
+      !this.closing &&
+      this.download === held &&
+      this.sessionId === held.sessionId &&
+      this.tabId === held.tabId &&
+      this.options.control.canAgentAct() &&
+      this.options.control.inputRevision === held.inputRevision;
+    if (!current()) return { ok: false, error: 'replan_required' };
+    let file: SelectedChromeDownloadFile | undefined;
+    const result = await this.track(async () => {
+      const buffer = Buffer.alloc(held.state.metadata.sizeBytes);
+      try {
+        let offset = 0;
+        do {
+          if (!current()) return fail('replan_required');
+          const command = {
+            op: 'download_read' as const,
+            sessionId: held.sessionId,
+            downloadId: id,
+            offset,
+            length: BROWSER_UPLOAD_CHUNK_BYTES,
+          };
+          let outcome = await this.send(command);
+          if (!outcome.ok && outcome.result === undefined && current())
+            outcome = await this.send(command);
+          if (!current()) return fail('replan_required');
+          const parsed = z
+            .object({
+              ok: z.literal(true),
+              sessionId: z.literal(held.sessionId),
+              downloadChunk: userBrowserDownloadChunkSchema,
+            })
+            .safeParse(outcome.result);
+          if (!outcome.ok || !parsed.success) return fail('download_unavailable');
+          const chunk = parsed.data.downloadChunk;
+          if (chunk.downloadId !== id || chunk.offset !== offset)
+            return fail('download_invalid_chunk');
+          const bytes = Buffer.from(chunk.data, 'base64');
+          try {
+            if (
+              bytes.toString('base64') !== chunk.data ||
+              bytes.length !== Math.min(BROWSER_UPLOAD_CHUNK_BYTES, buffer.length - offset) ||
+              chunk.eof !== (offset + bytes.length === buffer.length)
+            )
+              return fail('download_invalid_chunk');
+            bytes.copy(buffer, offset);
+            offset += bytes.length;
+          } finally {
+            bytes.fill(0);
+          }
+        } while (offset < buffer.length);
+        if (createHash('sha256').update(buffer).digest('hex') !== held.state.metadata.sha256)
+          return fail('download_digest_mismatch');
+        if (!current()) return fail('replan_required');
+        file = { metadata: { ...held.state.metadata }, source: { ...held.state.source }, buffer };
+        return { ok: true };
+      } finally {
+        if (!file) buffer.fill(0);
+      }
+    });
+    if (!result.ok || !file)
+      return { ok: false, error: result.ok ? 'download_unavailable' : result.error };
+    if (!current()) {
+      file.buffer.fill(0);
+      return { ok: false, error: 'replan_required' };
+    }
+    return { ok: true, file };
+  }
+
+  async releaseDownload(id: string): Promise<SelectedChromeClientReply> {
+    const held = this.download;
+    if (!held || held.state.downloadId !== id || this.closing || !this.sessionId)
+      return fail('download_unavailable');
+    if (this.pending) return fail('browser_busy');
+    return this.track(async () => {
+      const command = {
+        op: 'download_release' as const,
+        sessionId: held.sessionId,
+        downloadId: id,
+      };
+      let outcome = await this.send(command);
+      if (!outcome.ok && outcome.result === undefined && !this.closing)
+        outcome = await this.send(command);
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.literal(held.sessionId),
+          downloadReleased: z.literal(id),
+        })
+        .safeParse(outcome.result);
+      if (!outcome.ok || !parsed.success) return fail('download_release_unconfirmed');
+      if (this.download === held) this.download = null;
+      return { ok: true };
     });
   }
 
@@ -762,6 +1014,7 @@ export class SelectedChromeClient {
         extensionClientId: this.options.extensionClientId,
         kind: 'session',
         args: { session: command },
+        ...(command.op === 'download_open' ? { timeoutMs: 60_000 } : {}),
       });
     } catch {
       return { ok: false, error: { code: 'transport_failed', message: 'Chrome transport failed' } };
@@ -839,6 +1092,8 @@ export class SelectedChromeClient {
         protocol.success && protocol.data.capabilities.includes(USER_BROWSER_UPLOAD_CAPABILITY);
       this.chooserNegotiated =
         protocol.success && protocol.data.capabilities.includes(USER_BROWSER_CHOOSER_CAPABILITY);
+      this.downloadNegotiated =
+        protocol.success && protocol.data.capabilities.includes(USER_BROWSER_DOWNLOAD_CAPABILITY);
       if (
         !protocol.success ||
         !reply.observation.observationRevision ||

@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { browserDownloadMetadataSchema, browserDownloadSourceSchema } from '@holaday/shared-types';
 import type { Download } from 'playwright';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
+import type { SelectedChromeDownloadFile } from '../supercar/selected-chrome-client.js';
 import type { BrowserDownloadReceipt } from './playwright-unified-executor.js';
 
 /** One physical download has one persistence owner, even when a task also awaits its event. */
@@ -26,6 +28,61 @@ export function taskBrowserDownloadSource(
     TASK_DOWNLOAD
   ];
   return source?.taskId === taskId ? source : null;
+}
+
+/** Trusted server port only: bytes already read from one authenticated task's
+ * native source, never a model-supplied address, file ID, or synthetic Page. */
+export async function persistTransferredTaskBrowserDownload(
+  file: SelectedChromeDownloadFile,
+  options: {
+    taskId: string;
+    current(): Promise<boolean>;
+    store(input: {
+      filename: string;
+      buffer: Buffer;
+      sha256: string;
+      mimetype?: string;
+    }): Promise<BrowserDownloadReceipt>;
+  },
+): Promise<BrowserDownloadReceipt> {
+  const metadata = browserDownloadMetadataSchema.parse(file.metadata);
+  const source = browserDownloadSourceSchema.parse(file.source);
+  if (
+    !options.taskId ||
+    !(file.buffer instanceof Uint8Array) ||
+    file.buffer.length !== metadata.sizeBytes ||
+    createHash('sha256').update(file.buffer).digest('hex') !== metadata.sha256 ||
+    !(await options.current())
+  )
+    throw new Error('download_unavailable');
+  // Exactly one write. An absent/invalid write receipt never retries the click
+  // or storage; the caller retains an unknown result for reconciliation.
+  const receipt = await options.store({
+    filename: metadata.filename,
+    buffer: file.buffer,
+    sha256: metadata.sha256,
+    mimetype: metadata.mimeType,
+  });
+  if (
+    !receipt.fileId ||
+    receipt.filename !== metadata.filename ||
+    receipt.sizeBytes !== metadata.sizeBytes ||
+    receipt.sha256 !== metadata.sha256 ||
+    receipt.mimetype !== metadata.mimeType ||
+    receipt.downloadUrl !== `/api/files/${receipt.fileId}/download` ||
+    !receipt.expiresAt ||
+    !Number.isFinite(Date.parse(receipt.expiresAt)) ||
+    !(await options.current())
+  )
+    throw new Error('download_receipt_unconfirmed');
+  return Object.freeze({
+    ...receipt,
+    [TASK_DOWNLOAD]: Object.freeze({
+      taskId: options.taskId,
+      origin: source.origin,
+      originBasis: source.originBasis,
+    }),
+  });
 }
 export function sharedBrowserDownload(
   download: Download,
