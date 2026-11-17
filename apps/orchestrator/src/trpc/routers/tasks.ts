@@ -11162,6 +11162,7 @@ export const tasksRouter = router({
             executionRevision: tasksTable.executionRevision,
             coreRecordVersion: tasksTable.coreRecordVersion,
             awaitingQuestion: tasksTable.awaitingQuestion,
+            awaitingKind: tasksTable.awaitingKind,
             roleId: tasksTable.roleId,
           })
           .from(tasksTable)
@@ -11292,8 +11293,8 @@ export const tasksRouter = router({
           }
         }
         // F1 — classify the user's reply intent. Four buckets:
-        //   manual_data     — user pasted metrics / "数据如下" / numeric
-        //                     blob; supercar should hand off to generate.
+        //   manual_data     — user explicitly replaces browser work with
+        //                     analysis of supplied materials.
         //   login_completed — user finished a manual login or captcha
         //                     ("扫完了" / "登录好了"); continue browser.
         //   still_awaiting  — user said "等一下 / 稍等 / wait"; keep
@@ -11302,7 +11303,9 @@ export const tasksRouter = router({
         // The classifier is intentionally conservative (favors `default`)
         // — false-handoff aborts a working browser session, so we only
         // hand off when the message is unambiguously self-sufficient.
-        const replyKind = classifyReplyIntent(input.message);
+        const replyKind = classifyReplyIntent(input.message, {
+          awaitingKind: taskRow.awaitingKind,
+        });
         ctx.logger.info(
           { taskId: input.taskId, replyKind, msgLen: input.message.length },
           'reply: classified',
@@ -11622,14 +11625,9 @@ export const tasksRouter = router({
         //      runner will either complete (report) or park again with
         //      a new intake question (the model decides).
         //
-        // Short-circuit: if the user clearly pasted metrics/data
-        // (`replyKind === 'manual_data'`) we skip the workflow re-run
-        // and go straight to generate. The classifier is conservative,
-        // so a `manual_data` verdict means there are unambiguous numeric
-        // figures or "数据如下" markers — no need to ask whether the
-        // user actually wants the browser path. Avoids edge cases where
-        // a paste happens to contain platform keywords ("罗盘 GMV 156k
-        // UV 28k") and would otherwise trip the browser-handoff branch.
+        // An explicit user instruction to replace browser work with supplied
+        // material analysis skips the workflow reroute. Pasted values alone stay
+        // in the current task; they do not imply giving up website work.
         // A saved legacy choice may refresh its missing inputs, but later text
         // must not introduce a legacy workflow that was never selected.
         const newWorkflow =
@@ -12986,31 +12984,37 @@ export function normalizeReplyAwaitingKindForBroadcast(
 }
 
 /**
- * F1 — classify a `tasks.reply` body so the handler picks the right
- * resume path:
- *   manual_data     — user pasted metrics, table-shaped data, or said
- *                     "数据如下" / "我直接给你数据". Supercar should
- *                     hand off to generate; trying to keep driving the
- *                     browser is wasted work and often loops on a
- *                     login page the user has explicitly opted out of.
- *   login_completed — user finished a manual login / captcha so
- *                     supercar should keep driving the browser. Today
- *                     this returns the same code path as `default`,
- *                     but the explicit bucket lets us tune the prompt
- *                     or telemetry separately later.
- *   default         — anything else; let supercar continue.
- *
- * Conservative: false-positives abort a working browser session, so
- * we only flag manual_data when the message has structural signals
- * (≥ 3 numerical figures, OR `key: value` lines, OR an explicit
- * "数据如下" / "I'll provide data" phrase). Casual replies stay default.
+ * Route a reply without treating supplied material as a new task. Numeric or
+ * key:value text stays in the current browser loop. A direct replacement
+ * instruction may hand analysis to generate while preserving the original task
+ * and its materials. Action/permission decisions retain their own gate.
  */
 export function classifyReplyIntent(
   message: string,
+  context?: { awaitingKind?: string | null },
 ): 'manual_data' | 'login_completed' | 'still_awaiting' | 'default' {
   const trimmed = message.trim();
   if (!trimmed) return 'default';
   const lower = trimmed.toLowerCase();
+
+  // Supplying numbers, form fields or attachments does not replace the user's
+  // browser goal. Only a direct instruction to stop browser work AND analyze
+  // supplied material can take this automatic off-ramp. Keep quoted material
+  // out by requiring that instruction at the start of the reply.
+  const replaceWithAnalysis =
+    /^(?:请)?(?:不用|不要|别|停止|跳过|无需|无须)(?:再|继续)?(?:登录|登陆|操作(?:网页|网站|浏览器)|浏览(?:网页|网站)|读取(?:网页|网站|后台)|访问(?:网页|网站|后台))\s*[,，。;；]?\s*(?:请)?(?:只|仅)?(?:用|使用|根据|基于|结合)(?:我(?:提供|上传|补充|发)的)?(?:数据|表格|文件|附件)(?:和(?:数据|表格|文件|附件))*\s*(?:做|写|进行|完成|来)?(?:分析|复盘|统计|总结|汇总)/u.test(
+      trimmed,
+    ) ||
+    /^(?:please\s+)?(?:stop\s+browsing|skip\s+(?:the\s+)?login|(?:do\s+not|don't)\s+(?:continue\s+)?(?:browsing|log\s+in))[\s.,;:]*(?:and\s+)?(?:please\s+)?(?:use\s+(?:my\s+|the\s+)?(?:uploaded\s+|supplied\s+|attached\s+)?(?:data|files?|attachments?|table)\s+(?:to\s+)?(?:analy[sz]e|summari[sz]e|calculate)\b|(?:analy[sz]e|summari[sz]e|calculate)\s+(?:my\s+|the\s+)?(?:uploaded\s+|supplied\s+|attached\s+)?(?:data|files?|attachments?|table)\b)/i.test(
+      trimmed,
+    );
+  if (replaceWithAnalysis) {
+    // Action/permission/quote replies belong to their existing decision gate.
+    // A material reply must never approve or silently discard that decision.
+    return context && !['clarification', 'login', 'captcha'].includes(context.awaitingKind ?? '')
+      ? 'default'
+      : 'manual_data';
+  }
 
   // Fix 2 — still-awaiting tells. User is mid-login / mid-captcha and
   // typing "等一下 / 稍等 / wait" to ask the system to keep waiting.
@@ -13034,18 +13038,6 @@ export function classifyReplyIntent(
     }
   }
 
-  // Strong manual-data tells. The phrase patterns are a high-precision
-  // signal — users typing "数据如下" or "I'll give you the numbers"
-  // almost never mean "keep driving the browser".
-  const MANUAL_DATA_PHRASES: readonly RegExp[] = [
-    /数据如下|以下是数据|这些(?:是|就是)数据|我(?:直接|手动)?(?:给|提供|发)(?:你)?数据/u,
-    /用我(?:上传|提供|发)的(?:数据|表格|文件|附件)/u,
-    /(?:不(?:用|要)|跳过|别)(?:登录|登陆)|(?:不要|别)(?:打开|访问)(?:网站|页面|后台)/u,
-    /\bhere(?:'s|\s+is)\s+the\s+(?:data|numbers|metrics)/i,
-    /\bi(?:'ll)?\s+(?:provide|give|paste)\s+(?:the\s+)?(?:data|numbers)/i,
-  ];
-  if (MANUAL_DATA_PHRASES.some((re) => re.test(trimmed))) return 'manual_data';
-
   // Login-completed tells. Conservative — the message has to be short
   // and unambiguously about login state, not a long answer that
   // happens to mention "登录".
@@ -13059,18 +13051,6 @@ export function classifyReplyIntent(
       return 'login_completed';
     }
   }
-
-  // Structural manual-data signal: ≥ 3 distinct numeric figures (with
-  // unit / separator hints to dodge the "1, 2, 3 step list" false-fire),
-  // OR multiple `key: value` lines.
-  const NUMERIC_WITH_HINT =
-    /(?:¥|\$|€|£|RMB|usd)\s*[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s*(?:%|元|万|亿|人民币)|[\d,]+(?:\.\d+)?(?=\s*(?:GMV|UV|ROI|GPM|UV价值|订单|转化|消耗|分|%))/giu;
-  const numericHits = trimmed.match(NUMERIC_WITH_HINT);
-  if (numericHits && numericHits.length >= 3) return 'manual_data';
-
-  const KV_LINE = /^[一-龥A-Za-z0-9 \t（）()\-_/]+\s*[：:][^\n]+$/u;
-  const kvLines = trimmed.split('\n').filter((l) => KV_LINE.test(l.trim())).length;
-  if (kvLines >= 2) return 'manual_data';
 
   return 'default';
 }

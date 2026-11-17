@@ -88,6 +88,7 @@ it.each([
   'tool-block',
   'file-upload',
   'file-upload-reply',
+  'file-upload-reply-numeric',
   'file-upload-manual-data',
   'file-download-read',
   'file-download-table',
@@ -95,12 +96,13 @@ it.each([
   'unified executor through tasks.create: %s',
   async (scenario) => {
     const manualData = scenario === 'file-upload-manual-data';
+    const numericReply = scenario === 'file-upload-reply-numeric';
     const tableAnalysis = scenario === 'file-download-table';
     const downloading = scenario.startsWith('file-download');
     const downloadCsv = tableAnalysis
       ? `channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`
       : 'sku,qty\nAPI-DOWN-731,31\n';
-    const withReply = scenario === 'file-upload-reply' || manualData;
+    const withReply = scenario === 'file-upload-reply' || numericReply || manualData;
     const uploadFixture = scenario.startsWith('file-') ? await browserOutputFixture() : undefined;
     let replying = false;
     const fixtureUserId = uploadFixture ? 7 : 41;
@@ -317,7 +319,7 @@ it.each([
                     message: '请补充报表数据和附件',
                   }),
                 ]
-            : scenario === 'file-upload-reply'
+            : scenario === 'file-upload-reply' || numericReply
               ? turn === 1
                 ? [toolUse('s1', 'snapshot', {})]
                 : turn === 2
@@ -552,8 +554,10 @@ it.each([
         const reply = await tasksRouter.createCaller(ctx).reply({
           taskId: result.taskId,
           message: manualData
-            ? '数据如下：GMV100，订单20，ROI5，请结合附件写分析'
-            : '这是要上传的 report.csv，请继续',
+            ? '不要继续操作网页，只用我提供的数据和附件写分析。GMV100，订单20，ROI5。'
+            : numericReply
+              ? '姓名：张三\n出发日期：2026-11-20\n人数：3\n继续上传 report.csv'
+              : '这是要上传的 report.csv，请继续',
           fileIds: [replyFile.externalId, ...(replyImage ? [replyImage.externalId] : [])],
         });
         expect(reply).toMatchObject({ ok: true, state: 'resumed' });
@@ -612,6 +616,7 @@ it.each([
       }
       if (uploadFixture) {
         expect(outcome, diagnostics).toMatchObject({ status: 'completed' });
+        expect(generationRequests).toHaveLength(0);
         expect(await page.locator('#status').textContent()).toContain('A-731,31');
         expect(JSON.stringify(requests[0]?.messages)).toContain(inputFile!.externalId);
         if (replyFile)
