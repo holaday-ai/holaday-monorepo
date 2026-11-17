@@ -18,6 +18,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const server = new MockOrchestrator();
 const taskId = 'e2e-owned-file-task';
 const uploadCapability = 'task_file_upload_v1';
+const chooserCapability = 'task_file_chooser_v1';
 const protocol = {
   version: 2,
   capabilitiesVersion: 1,
@@ -29,6 +30,7 @@ const protocol = {
     'select',
     'task_tabs',
     uploadCapability,
+    chooserCapability,
   ],
 };
 let workDir;
@@ -128,7 +130,12 @@ after(async () => {
   if (workDir) rmSync(workDir, { recursive: true, force: true });
 });
 
-async function fixture(enabled = true, accept = '.csv', openSession = true) {
+async function fixture(
+  enabled = true,
+  accept = '.csv',
+  openSession = true,
+  extraCapabilities = [],
+) {
   const page = await context.newPage();
   await page.goto(`${server.origin}/page2.html`);
   await page.setContent(
@@ -149,7 +156,7 @@ async function fixture(enabled = true, accept = '.csv', openSession = true) {
           op: 'open',
           target,
           protocol: enabled
-            ? protocol
+            ? { ...protocol, capabilities: [...protocol.capabilities, ...extraCapabilities] }
             : {
                 ...protocol,
                 capabilities: protocol.capabilities.filter((value) => value !== uploadCapability),
@@ -181,14 +188,16 @@ async function fixture(enabled = true, accept = '.csv', openSession = true) {
   };
 }
 
-async function prepare(f, bytes, name = 'report.csv', mimeType = 'text/csv') {
+async function prepare(f, bytes, name = 'report.csv', mimeType = 'text/csv', chooserId) {
   const files = [
     { fileId: 'file_731', name, mimeType, sizeBytes: bytes.length, sha256: sha(bytes) },
   ];
   const action = {
     kind: 'upload',
-    selector: { description: 'Report', strategies: [{ kind: 'css', value: '#report' }] },
-    payload: { files },
+    ...(!chooserId
+      ? { selector: { description: 'Report', strategies: [{ kind: 'css', value: '#report' }] } }
+      : {}),
+    payload: { files, ...(chooserId ? { chooserId } : {}) },
   };
   const target = successful(
     await call({
@@ -209,7 +218,7 @@ async function prepare(f, bytes, name = 'report.csv', mimeType = 'text/csv') {
   const state = successful(await call(begin)).uploadState;
   assert.equal(state.phase, 'begun');
   assert.deepEqual(successful(await call(begin)).uploadState, state);
-  return { transferId: state.transferId, files };
+  return { transferId: state.transferId, files, target };
 }
 async function sendBytes(f, transferId, bytes) {
   for (let offset = 0; offset < bytes.length; offset += 256 * 1024) {
@@ -230,6 +239,178 @@ async function sendBytes(f, transferId, bytes) {
 }
 
 test('actual repository extension file channel', { timeout: 180_000 }, async (t) => {
+  for (const mode of ['detached', 'connected', 'child-frame', 'opaque-frame']) {
+    await t.test(`actual CRX native chooser handle (${mode})`, async () => {
+      const f = await fixture(
+        true,
+        '.csv',
+        true,
+        mode === 'connected' ? ['human_activity_v1'] : [],
+      );
+      try {
+        const nativePage = (id = 'choose') =>
+          `<button id="${id}" type="button" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1);const file=document.createElement('input');file.type='file';file.accept='.csv';${mode === 'connected' ? 'document.body.append(file);' : ''}file.onchange=async()=>{document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);const bytes=new Uint8Array(await file.files[0].arrayBuffer());document.body.dataset.sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');document.body.dataset.received=await file.files[0].text()};file.click()">Choose report</button>`;
+        if (mode === 'child-frame' || mode === 'opaque-frame') {
+          await f.page.setContent(
+            mode === 'child-frame'
+              ? '<button id="choose" type="button" onclick="frames[0].document.querySelector(\'button\').click()">Choose report</button><iframe></iframe>'
+              : '<iframe sandbox="allow-scripts"></iframe>',
+          );
+          await f.page.locator('iframe').evaluate(
+            (el, html) => {
+              el.srcdoc = html;
+            },
+            nativePage(mode === 'child-frame' ? 'child-choose' : 'choose'),
+          );
+          await f.page.frameLocator('iframe').locator('button').waitFor();
+        } else await f.page.setContent(nativePage());
+        const observed = successful(
+          await call({ op: 'observe', sessionId: f.sessionId }),
+        ).observation;
+        const action = {
+          kind: 'click',
+          selector: {
+            description: 'Choose report',
+            strategies: [{ kind: 'css', value: '#choose' }],
+          },
+        };
+        const described = await call({
+          op: 'describe',
+          sessionId: f.sessionId,
+          action,
+          observationRevision: observed.observationRevision,
+        });
+        if (mode === 'opaque-frame' && !described.ok) {
+          assert.equal(described.result.error, 'target_obscured');
+          assert.equal(
+            await f.page.frameLocator('iframe').locator('body').getAttribute('data-clicks'),
+            null,
+          );
+          assert.equal(
+            await f.page.frameLocator('iframe').locator('body').getAttribute('data-effects'),
+            null,
+          );
+          const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+          if (artifacts)
+            writeFileSync(
+              join(artifacts, 'chooser-opaque-frame.json'),
+              JSON.stringify(
+                {
+                  stage: 'description',
+                  error: described.result.error,
+                  actualClicks: 0,
+                  fileChanges: 0,
+                  chromium: context.browser()?.version(),
+                },
+                null,
+                2,
+              ),
+            );
+          return;
+        }
+        const target = successful(described).target;
+        const captured = successful(
+          await call({
+            op: 'chooser_open',
+            sessionId: f.sessionId,
+            action,
+            binding: { token: target.token, observationRevision: target.observationRevision },
+          }),
+        );
+        assert.equal(captured.actionOutcome, 'applied');
+        if (mode === 'opaque-frame') {
+          assert.deepEqual(captured.chooserState, {
+            status: 'clicked',
+            clickOutcome: 'applied',
+            reason: 'chooser_unavailable',
+          });
+          assert.equal(
+            await f.page.frameLocator('iframe').locator('body').getAttribute('data-clicks'),
+            '1',
+          );
+          assert.equal(
+            await f.page.frameLocator('iframe').locator('body').getAttribute('data-effects'),
+            null,
+          );
+          const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+          if (artifacts)
+            writeFileSync(
+              join(artifacts, 'chooser-opaque-frame.json'),
+              JSON.stringify(
+                {
+                  state: captured.chooserState,
+                  actualClicks: 1,
+                  fileChanges: 0,
+                  chromium: context.browser()?.version(),
+                },
+                null,
+                2,
+              ),
+            );
+          return;
+        }
+        assert.equal(captured.chooserState.status, 'captured');
+        const bytes = Buffer.from('sku,qty\nA-731,31\n');
+        const p = await prepare(
+          { ...f, revision: captured.observation.observationRevision },
+          bytes,
+          'report.csv',
+          'text/csv',
+          captured.chooserState.chooserId,
+        );
+        if (mode === 'child-frame') assert.notEqual(p.target.frameId, target.frameId);
+        await sendBytes(f, p.transferId, bytes);
+        const result = successful(
+          await call({ op: 'upload_commit', sessionId: f.sessionId, transferId: p.transferId }),
+        );
+        assert.equal(result.uploadState.receipt.status, 'handed_to_page');
+        const child = mode === 'child-frame';
+        await f.page.waitForFunction(
+          ({ hash, child }) => {
+            const doc = child ? frames[0].document : document;
+            return doc.body.dataset.sha === hash;
+          },
+          { hash: sha(bytes), child },
+        );
+        const actual = await f.page.evaluate((child) => {
+          const doc = child ? frames[0].document : document;
+          return {
+            received: doc.body.dataset.received,
+            effects: doc.body.dataset.effects,
+            clicks: doc.body.dataset.clicks,
+          };
+        }, child);
+        assert.equal(actual.received, 'sku,qty\nA-731,31\n');
+        assert.equal(actual.effects, '1');
+        assert.equal(actual.clicks, '1');
+        assert.equal(await f.user.locator('#query').inputValue(), 'keep normal browsing 731');
+        assert.equal(
+          await worker.evaluate(
+            async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+          ),
+          f.active,
+        );
+        const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+        if (artifacts)
+          writeFileSync(
+            join(artifacts, `chooser-${mode}.json`),
+            JSON.stringify(
+              {
+                actual,
+                nativeTarget: p.target,
+                clickTarget: target,
+                normalTabUntouched: true,
+                chromium: context.browser()?.version(),
+              },
+              null,
+              2,
+            ),
+          );
+      } finally {
+        await f.close();
+      }
+    });
+  }
   const host = await tsImport(
     new URL('../../orchestrator/src/files/testing/chrome-upload-candidate.ts', import.meta.url)
       .href,

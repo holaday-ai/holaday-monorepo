@@ -1,5 +1,6 @@
 import {
   USER_BROWSER_ACTIVITY_CAPABILITY,
+  USER_BROWSER_CHOOSER_CAPABILITY,
   USER_BROWSER_PROTOCOL,
   USER_BROWSER_UPLOAD_CAPABILITY,
 } from '@holaday/shared-types';
@@ -543,6 +544,7 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
           ...USER_BROWSER_PROTOCOL.capabilities,
           USER_BROWSER_ACTIVITY_CAPABILITY,
           USER_BROWSER_UPLOAD_CAPABILITY,
+          USER_BROWSER_CHOOSER_CAPABILITY,
         ],
       },
     });

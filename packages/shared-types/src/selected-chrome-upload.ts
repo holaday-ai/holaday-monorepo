@@ -8,14 +8,30 @@ import {
 import { userBrowserBindingSchema } from './browser-user-contract.js';
 import { resilientSelectorSchema } from './selector.js';
 
-export const selectedChromeUploadActionSchema = z
+const selectedUploadBySelector = z
   .object({
     kind: z.literal('upload'),
     selector: resilientSelectorSchema,
-    payload: z.object({ files: browserUploadManifestSchema }).strict(),
+    payload: z
+      .object({ files: browserUploadManifestSchema, chooserId: z.never().optional() })
+      .strict(),
     deadlineMs: z.number().int().min(1).max(30_000).optional(),
   })
   .strict();
+const selectedUploadByChooser = z
+  .object({
+    kind: z.literal('upload'),
+    selector: z.never().optional(),
+    payload: z
+      .object({ files: browserUploadManifestSchema, chooserId: z.string().uuid() })
+      .strict(),
+    deadlineMs: z.number().int().min(1).max(30_000).optional(),
+  })
+  .strict();
+export const selectedChromeUploadActionSchema = z.union([
+  selectedUploadBySelector,
+  selectedUploadByChooser,
+]);
 export type SelectedChromeUploadAction = z.infer<typeof selectedChromeUploadActionSchema>;
 
 export const selectedChromeUploadCommandSchema = z.discriminatedUnion('op', [

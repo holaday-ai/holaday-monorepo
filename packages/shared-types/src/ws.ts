@@ -4,6 +4,7 @@ import {
   userBrowserBindingSchema,
   userBrowserProtocolSchema,
 } from './browser-user-contract.js';
+import { selectedChromeChooserCommandSchema } from './selected-chrome-chooser.js';
 import { selectedChromeUploadCommandSchema } from './selected-chrome-upload.js';
 import { resilientSelectorSchema } from './selector.js';
 
@@ -93,6 +94,7 @@ const selectedChromeActionSchema = z.discriminatedUnion('kind', [
 
 export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
   ...selectedChromeUploadCommandSchema.options,
+  selectedChromeChooserCommandSchema,
   z
     .object({
       op: z.literal('open'),

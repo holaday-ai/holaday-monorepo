@@ -6,17 +6,22 @@ import {
 } from '@holaday/browser-driver';
 import {
   type BrowserUploadOutcome,
+  type SelectedChromeChooserCommand,
   type SelectedChromeUploadAction,
   type SelectedChromeUploadCommand,
   USER_BROWSER_ACTIVITY_CAPABILITY,
+  USER_BROWSER_CHOOSER_CAPABILITY,
   USER_BROWSER_PROTOCOL,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserBinding,
+  type UserBrowserChooserState,
   type UserBrowserProtocol,
   type UserBrowserTargetDescription,
   type UserBrowserUploadState,
   userBrowserActivitySchema,
+  userBrowserChooserFailureSchema,
+  userBrowserChooserStateSchema,
   userBrowserTargetDescriptionSchema,
 } from '@holaday/shared-types';
 
@@ -31,6 +36,12 @@ export interface SelectedChromeDriver {
     dispatchAllowed?: () => boolean,
   ): Promise<DriverResult>;
   readActivity?(): Promise<DriverResult>;
+  captureFileChooserBound?(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult>;
   uploadBound?(
     action: DriverAction,
     binding: UserBrowserBinding,
@@ -51,6 +62,7 @@ export type SessionReply =
       tabs?: Array<{ tabId: number; origin: string; ownership: 'selected' | 'task' }>;
       actionOutcome?: 'applied' | 'not_applied';
       uploadState?: UserBrowserUploadState;
+      chooserState?: UserBrowserChooserState;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -70,6 +82,8 @@ interface Entry {
   v2: boolean;
   collaborationV2: boolean;
   uploadsEnabled: boolean;
+  choosersEnabled: boolean;
+  chooserAbort?: AbortController;
   uploadsStopped: boolean;
   uploadTransfer?: TaskFileTransfer;
   uploadPrepared?: {
@@ -110,6 +124,7 @@ const NOT_APPLIED = new Set([
   'target_ambiguous',
   'target_missing',
   'target_unreadable',
+  'target_obscured',
   'origin_grant_required',
   'capability_missing',
   'human_input_active',
@@ -161,6 +176,7 @@ export class SelectedChromeSession {
         input.protocol?.capabilities.includes(USER_BROWSER_ACTIVITY_CAPABILITY),
       ),
       uploadsEnabled: false,
+      choosersEnabled: false,
       uploadsStopped: false,
       uploadBindings: new Map(),
       uploadBegins: new Map(),
@@ -191,6 +207,11 @@ export class SelectedChromeSession {
       entry.uploadsEnabled = Boolean(
         input.protocol?.capabilities.includes(USER_BROWSER_UPLOAD_CAPABILITY) &&
           entry.driver.uploadBound,
+      );
+      entry.choosersEnabled = Boolean(
+        entry.uploadsEnabled &&
+          input.protocol?.capabilities.includes(USER_BROWSER_CHOOSER_CAPABILITY) &&
+          entry.driver.captureFileChooserBound,
       );
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
@@ -224,7 +245,10 @@ export class SelectedChromeSession {
 
   /** Called from chrome.tabs.onRemoved: later actions fail fast with tab_closed. */
   markTabClosed(tabId: number): void {
-    if (this.entry && this.entry.tabId === tabId) this.entry.tabClosed = true;
+    if (this.entry && this.entry.tabId === tabId) {
+      this.entry.tabClosed = true;
+      this.entry.chooserAbort?.abort();
+    }
   }
 
   async observe(taskId: string, sessionId: string): Promise<SessionReply> {
@@ -334,6 +358,8 @@ export class SelectedChromeSession {
     const entry = this.find(taskId, command.sessionId);
     if (!entry) return { ok: false, error: 'session_unavailable' };
     if (!entry.uploadsEnabled || !entry.driver?.uploadBound)
+      return { ok: false, error: 'capability_missing' };
+    if ('action' in command && command.action.payload.chooserId && !entry.choosersEnabled)
       return { ok: false, error: 'capability_missing' };
     if (entry.uploadsStopped) return { ok: false, error: 'session_unavailable' };
     if (entry.pending) return { ok: false, error: 'browser_busy' };
@@ -578,6 +604,82 @@ export class SelectedChromeSession {
     );
   }
 
+  async openChooser(taskId: string, command: SelectedChromeChooserCommand): Promise<SessionReply> {
+    const entry = this.find(taskId, command.sessionId);
+    const refused = (error: string): SessionReply => ({
+      ok: false,
+      error,
+      actionOutcome: 'not_applied',
+    });
+    if (!entry) return refused('session_unavailable');
+    if (!entry.choosersEnabled || !entry.driver?.captureFileChooserBound)
+      return refused('capability_missing');
+    if (entry.quarantined)
+      return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
+    if (entry.pending) return refused('browser_busy');
+    if (entry.uploadsStopped) return refused('session_unavailable');
+    if (entry.tabClosed) return refused('tab_closed');
+    if (!entry.ready) return refused('observation_required');
+    return this.track(
+      entry,
+      async () => {
+        const driver = entry.driver;
+        const tabId = entry.tabId;
+        const current = () =>
+          this.current(entry) &&
+          !entry.uploadsStopped &&
+          !entry.tabClosed &&
+          !entry.quarantined &&
+          entry.driver === driver &&
+          entry.tabId === tabId;
+        if (!current() || !driver?.captureFileChooserBound) return refused('session_unavailable');
+        const native = await this.nativeGate(entry);
+        if (native) return native;
+        if (!current()) return refused('session_unavailable');
+        this.invalidateUploadTargets(entry);
+        const abort = new AbortController();
+        entry.chooserAbort = abort;
+        let result: DriverResult;
+        try {
+          result = await driver.captureFileChooserBound(
+            command.action,
+            command.binding,
+            current,
+            abort.signal,
+          );
+        } finally {
+          if (entry.chooserAbort === abort) entry.chooserAbort = undefined;
+        }
+        if (result.status !== 'ok') {
+          const parsed = userBrowserChooserFailureSchema.safeParse(result.data);
+          const actionOutcome = parsed.success ? parsed.data.clickOutcome : 'unknown';
+          if (!parsed.success || !parsed.data.interceptionRestored || actionOutcome === 'unknown') {
+            entry.quarantined = true;
+            entry.ready = false;
+          }
+          return { ok: false, error: result.error?.code ?? 'input_outcome_unknown', actionOutcome };
+        }
+        const parsed = userBrowserChooserStateSchema.safeParse(result.data);
+        if (!parsed.success) {
+          entry.quarantined = true;
+          entry.ready = false;
+          return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
+        }
+        if (!current())
+          return { ok: false, error: 'session_stopped', actionOutcome: parsed.data.clickOutcome };
+        const observed = await this.observeEntry(entry);
+        if (!current())
+          return { ok: false, error: 'session_stopped', actionOutcome: parsed.data.clickOutcome };
+        return {
+          ...(observed.ok ? observed : { ok: true as const, sessionId: entry.id }),
+          chooserState: parsed.data,
+          actionOutcome: parsed.data.clickOutcome,
+        };
+      },
+      true,
+    );
+  }
+
   async describe(
     taskId: string,
     sessionId: string,
@@ -607,6 +709,8 @@ export class SelectedChromeSession {
   ): Promise<SessionReply> {
     const entry = this.find(taskId, sessionId);
     if (!entry) return { ok: false, error: 'session_unavailable' };
+    if (entry.quarantined)
+      return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
     if (!entry.v2) return { ok: false, error: 'capability_missing' };
     if (entry.pending) return { ok: false, error: 'browser_busy' };
     return this.track(entry, async () => {
@@ -664,6 +768,7 @@ export class SelectedChromeSession {
     const entry = this.entry;
     if (!entry || entry.taskId !== taskId) return;
     entry.uploadsStopped = true;
+    entry.chooserAbort?.abort();
     entry.uploadPrepared = undefined;
     entry.uploadTransfer?.dispose();
   }
@@ -754,6 +859,7 @@ export class SelectedChromeSession {
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(entry.collaborationV2 ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
                     ...(entry.uploadsEnabled ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
+                    ...(entry.choosersEnabled ? [USER_BROWSER_CHOOSER_CAPABILITY] : []),
                   ],
                 },
               }

@@ -24,6 +24,7 @@ import {
   type HolaDayBrowserDriver,
   driverError,
 } from './driver.js';
+import { NativeChooserCaptureError } from './native-file-chooser.js';
 import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
 import { SelectedTargetResolver } from './selected-target.js';
@@ -528,6 +529,56 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         error: {
           code: safeTargetError(error),
           message: 'Bound file input rejected or unconfirmed',
+        },
+      };
+    }
+  }
+
+  async captureFileChooserBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult> {
+    if (!this.targets || action.kind !== 'click' || typeof dispatchAllowed !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound file chooser unavailable' },
+        data: { clickOutcome: 'not_applied', interceptionRestored: true },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: await this.targets.captureFileChooser(action, binding, dispatchAllowed, signal),
+      };
+    } catch (error) {
+      const chooserError = error instanceof NativeChooserCaptureError;
+      const reason =
+        chooserError &&
+        [
+          'invalid_chooser_timeout',
+          'chooser_listener_state_unavailable',
+          'chooser_capture_busy',
+          'chooser_interception_unavailable',
+          'chooser_target_unavailable',
+          'chooser_restore_unconfirmed',
+          'input_outcome_unknown',
+        ].includes(error.message)
+          ? error.message
+          : safeTargetError(error);
+      const clickOutcome = chooserError
+        ? error.clickOutcome
+        : reason === 'input_outcome_unknown'
+          ? 'unknown'
+          : 'not_applied';
+      return {
+        status: 'error',
+        error: { code: reason, message: 'File-button input was rejected or unconfirmed' },
+        data: {
+          clickOutcome,
+          interceptionRestored:
+            reason !== 'chooser_restore_unconfirmed' &&
+            (chooserError || clickOutcome === 'not_applied'),
         },
       };
     }
@@ -1492,6 +1543,7 @@ function safeTargetError(error: unknown): string {
     'target_ambiguous',
     'target_missing',
     'target_unreadable',
+    'target_obscured',
     'origin_grant_required',
     'unsupported_action',
     'human_input_active',

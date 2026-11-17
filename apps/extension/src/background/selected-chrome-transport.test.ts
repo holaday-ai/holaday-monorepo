@@ -51,6 +51,11 @@ function harness() {
       observation: { tabId: 42, bodyText: 'Saved' },
       actionOutcome: 'applied' as const,
     })),
+    openChooser: vi.fn<NonNullable<SelectedChromeBridge['openChooser']>>(async () => ({
+      ok: false,
+      error: 'capability_missing',
+      actionOutcome: 'not_applied',
+    })),
     close: vi.fn<SelectedChromeBridge['close']>(async () => ({ ok: true })),
     stopTask: vi.fn<SelectedChromeBridge['stopTask']>(async () => {}),
     stopUploadAdmission: vi.fn(),
@@ -130,6 +135,34 @@ describe('selected Chrome command schema', () => {
 });
 
 describe('selected Chrome transport lifecycle', () => {
+  it('classifies an asynchronous chooser bridge failure as unknown without retrying the input', async () => {
+    const h = harness();
+    const opened = openedSession(
+      await h.transport.handle('task-a', command({ op: 'open', target })),
+    );
+    let effects = 0;
+    h.bridge.openChooser.mockImplementationOnce(async () => {
+      effects++;
+      throw new Error('private acknowledgement');
+    });
+    const result = await h.transport.handle(
+      'task-a',
+      command({
+        op: 'chooser_open',
+        sessionId: opened.sessionId,
+        action: { kind: 'click', selector },
+        binding: { token: opened.sessionId, observationRevision: 1 },
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'input_outcome_unknown',
+      actionOutcome: 'unknown',
+    });
+    expect(effects).toBe(1);
+    expect(JSON.stringify(result)).not.toContain('private acknowledgement');
+    await h.transport.stopTask('task-a');
+  });
   it.each([null, 'owner-b'])(
     'stops the old owner on auth change to %s and waits for detach',
     async (nextOwner) => {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 /** Optional extension ability; keep the six mandatory v2 capabilities compatible. */
 export const USER_BROWSER_ACTIVITY_CAPABILITY = 'human_activity_v1' as const;
 export const USER_BROWSER_UPLOAD_CAPABILITY = 'task_file_upload_v1' as const;
+export const USER_BROWSER_CHOOSER_CAPABILITY = 'task_file_chooser_v1' as const;
 export const userBrowserActivitySchema = z
   .object({
     tabId: z.number().int().nonnegative(),

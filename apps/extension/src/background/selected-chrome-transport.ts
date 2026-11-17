@@ -38,6 +38,10 @@ export interface SelectedChromeBridge {
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
   activity?(taskId: string, sessionId: string): Promise<SessionReply>;
   upload?(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply>;
+  openChooser?(
+    taskId: string,
+    command: Extract<SelectedChromeSessionCommand, { op: 'chooser_open' }>,
+  ): Promise<SessionReply>;
   stopUploadAdmission?(taskId: string): void;
   execute(
     taskId: string,
@@ -219,7 +223,9 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(command.op === 'act' ? { actionOutcome: 'not_applied' as const } : {}),
+        ...(['act', 'chooser_open'].includes(command.op)
+          ? { actionOutcome: 'not_applied' as const }
+          : {}),
       };
     }
 
@@ -255,7 +261,9 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(command.op === 'act' ? { actionOutcome: 'not_applied' as const } : {}),
+        ...(['act', 'chooser_open'].includes(command.op)
+          ? { actionOutcome: 'not_applied' as const }
+          : {}),
       };
     }
 
@@ -316,6 +324,12 @@ export function createSelectedChromeTransport(deps: {
         };
       }
       try {
+        if (command.op === 'chooser_open')
+          return await (deps.bridge.openChooser?.(taskId, command) ?? {
+            ok: false,
+            error: 'capability_missing',
+            actionOutcome: 'not_applied',
+          });
         return await deps.bridge.execute(
           taskId,
           command.sessionId,
