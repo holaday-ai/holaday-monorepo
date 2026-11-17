@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SelectedTargetResolver } from '../../../../../packages/browser-driver/src/selected-target.js';
 let browser: Browser;
 let page: Page;
@@ -43,6 +44,145 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await page.goto(origin);
+});
+afterEach(() => vi.restoreAllMocks());
+
+const uploadFixture = (text = 'sku,qty\nA-731,31\n') => {
+  const buffer = Buffer.from(text);
+  const files = [
+    {
+      fileId: 'file_731',
+      name: 'report.csv',
+      mimeType: 'text/csv',
+      sizeBytes: buffer.length,
+      sha256: createHash('sha256').update(buffer).digest('hex'),
+    },
+  ];
+  return {
+    action: { kind: 'upload' as const, selector: selector('#report'), payload: { files } },
+    payloads: [{ name: 'report.csv', mimeType: 'text/csv', buffer }],
+  };
+};
+const uploadPage = (
+  input = '<input id="report" type="file" accept=".csv" style="display:none">',
+  extra = '',
+) =>
+  `<form id="upload-form" action="/receive?ticket=PRIVATE-731" method="post">${input}</form>${extra}<input id="notes"><script>document.querySelector('#report').onchange=async function(){document.body.dataset.effects=String(Number(document.body.dataset.effects||0)+1);document.body.dataset.uploaded=await this.files[0].text();}</script>`;
+
+describe('native file input with the existing real target binding', () => {
+  it('binds a hidden actual file input and hands the exact in-memory bytes to it once', async () => {
+    await page.setContent(uploadPage());
+    const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+    await r.observe();
+    const f = uploadFixture();
+    const target = await r.describe(f.action, 1);
+    expect(target.fileInput).toEqual({
+      accept: '.csv',
+      multiple: false,
+      disabled: false,
+      directory: false,
+      credentialForm: false,
+      formOrigin: origin,
+      formMethod: 'post',
+      selectedCount: 0,
+    });
+    expect(JSON.stringify(target)).not.toContain('PRIVATE-731');
+    const binding = { token: target.token, observationRevision: 1 };
+    await r.execute(f.action, binding, f.payloads);
+    await page.waitForFunction(() => document.body.dataset.uploaded === 'sku,qty\nA-731,31\n');
+    expect(await page.locator('body').getAttribute('data-effects')).toBe('1');
+    await expect(r.execute(f.action, binding, f.payloads)).rejects.toThrow(
+      'target_binding_required',
+    );
+    expect(await page.locator('body').getAttribute('data-effects')).toBe('1');
+  });
+
+  it.each(['replace', 'accept', 'destination', 'history', 'human-input'])(
+    'rejects %s during byte transfer without selecting files',
+    async (change) => {
+      await page.setContent(uploadPage());
+      const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+      await r.observe();
+      const f = uploadFixture();
+      const target = await r.describe(f.action, 1);
+      if (change === 'replace')
+        await page.locator('#report').evaluate((node) => {
+          node.replaceWith(node.cloneNode());
+        });
+      else if (change === 'accept')
+        await page.locator('#report').evaluate((node) => node.setAttribute('accept', '.png'));
+      else if (change === 'destination')
+        await page.locator('form').evaluate((node) => node.setAttribute('action', '/other'));
+      else if (change === 'history')
+        await page.evaluate(() => history.pushState(null, '', '/other'));
+      else await page.locator('#notes').pressSequentially('human input');
+      await expect(
+        r.execute(f.action, { token: target.token, observationRevision: 1 }, f.payloads),
+      ).rejects.toThrow(/stale_observation|target_changed/);
+      expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+      expect(
+        await page.locator('#report').evaluate((node) => (node as HTMLInputElement).files?.length),
+      ).toBe(0);
+    },
+  );
+
+  it.each([
+    ['disabled', '<input id="report" type="file" disabled>', ''],
+    ['directory', '<input id="report" type="file" webkitdirectory>', ''],
+    ['accept mismatch', '<input id="report" type="file" accept=".png">', ''],
+    ['non-file', '<input id="report" type="text">', ''],
+    [
+      'credential form',
+      '<input id="report" type="file">',
+      '<input type="password" form="upload-form">',
+    ],
+  ])('refuses a %s before any file delivery', async (_label, input, extra) => {
+    await page.setContent(uploadPage(input, extra));
+    const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+    await r.observe();
+    await expect(r.describe(uploadFixture().action, 1)).rejects.toThrow('file_target_forbidden');
+    expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+  });
+
+  it('does not let different byte payload metadata use the prepared manifest', async () => {
+    await page.setContent(uploadPage());
+    const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+    await r.observe();
+    const f = uploadFixture();
+    const target = await r.describe(f.action, 1);
+    await expect(
+      r.execute(f.action, { token: target.token, observationRevision: 1 }, [
+        { ...f.payloads[0]!, buffer: Buffer.from('sku,qty\nB-731,31\n') },
+      ]),
+    ).rejects.toThrow('file_payload_invalid');
+    expect(await page.locator('body').getAttribute('data-effects')).toBeNull();
+  });
+
+  it('does not label a lost native acknowledgement as not-applied or repeat the file selection', async () => {
+    await page.setContent(uploadPage());
+    const handle = (await page.locator('#report').elementHandle())!;
+    const original = handle.setInputFiles;
+    const prototype = Object.getPrototypeOf(handle) as Pick<typeof handle, 'setInputFiles'>;
+    vi.spyOn(prototype, 'setInputFiles').mockImplementation(async function (
+      this: unknown,
+      ...args: Parameters<typeof original>
+    ) {
+      await original.apply(this as typeof handle, args);
+      throw new Error('native acknowledgement lost');
+    });
+    const r = new SelectedTargetResolver(page as never, 3, [origin], cdp);
+    await r.observe();
+    const f = uploadFixture();
+    const target = await r.describe(f.action, 1);
+    const binding = { token: target.token, observationRevision: 1 };
+    await expect(r.execute(f.action, binding, f.payloads)).rejects.toThrow('input_outcome_unknown');
+    expect(await page.locator('body').getAttribute('data-effects')).toBe('1');
+    await expect(r.execute(f.action, binding, f.payloads)).rejects.toThrow(
+      'target_binding_required',
+    );
+    expect(await page.locator('body').getAttribute('data-effects')).toBe('1');
+    await handle.dispose();
+  });
 });
 describe('real target tickets in Chromium', () => {
   it('reads actual text/form, never the model hint; consumes once', async () => {

@@ -4,6 +4,7 @@ import {
   type UserBrowserBinding,
   type UserBrowserElementSignals,
   type UserBrowserTargetDescription,
+  browserUploadManifestSchema,
   nativeDocumentActivitySchema,
   readLoginContext,
 } from '@holaday/shared-types';
@@ -189,8 +190,12 @@ const readVersion = (collaborationV2 = false): DocumentVersion => {
 };
 const readElement = async (
   node: Element,
+  includeFileInput = false,
 ): Promise<
-  Pick<UserBrowserTargetDescription, 'elementId' | 'objectDigest' | 'element' | 'form'>
+  Pick<
+    UserBrowserTargetDescription,
+    'elementId' | 'objectDigest' | 'element' | 'form' | 'fileInput'
+  >
 > => {
   const selector =
     'button,a[href],input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=option],[role=tab],[onclick]';
@@ -213,6 +218,43 @@ const readElement = async (
   }
   const input = el as HTMLInputElement;
   const owner = input.form ?? el.closest('form');
+  let fileInput: UserBrowserTargetDescription['fileInput'];
+  let selection: unknown;
+  if (includeFileInput && el.tagName === 'INPUT' && input.type === 'file') {
+    if (!el.isConnected || input.accept.length > 1200) throw new Error('file_target_forbidden');
+    let formOrigin: string | null = null;
+    try {
+      const destination = new URL(
+        (owner as HTMLFormElement | null)?.action || el.ownerDocument.URL,
+      );
+      if (/^https?:$/.test(destination.protocol) && !destination.username && !destination.password)
+        formOrigin = destination.origin;
+    } catch {
+      /* Unknown destinations remain unknown to the host. */
+    }
+    fileInput = {
+      accept: input.accept,
+      multiple: input.multiple,
+      disabled: input.disabled || input.matches(':disabled'),
+      directory: input.webkitdirectory,
+      credentialForm: Array.from((owner as HTMLFormElement | null)?.elements ?? []).some(
+        (field) =>
+          field.tagName === 'INPUT' &&
+          ((field as HTMLInputElement).type === 'password' ||
+            field.getAttribute('autocomplete') === 'one-time-code'),
+      ),
+      formOrigin,
+      formMethod: (owner as HTMLFormElement | null)?.method || 'get',
+      selectedCount: input.files?.length ?? 0,
+    };
+    // Bind a human's current selection without exposing its names or contents.
+    selection = Array.from(input.files ?? []).map((file) => [
+      file.name,
+      file.type,
+      file.size,
+      file.lastModified,
+    ]);
+  }
   const link = el.closest('a[href]') as HTMLAnchorElement | null;
   const objects = JSON.stringify([
     link?.href,
@@ -226,6 +268,7 @@ const readElement = async (
       control.getAttribute('formaction'),
       control.getAttribute('formmethod'),
     ]),
+    ...(includeFileInput ? [fileInput, selection] : []),
   ]);
   // Only an opaque digest leaves the page; URL query credentials never enter the model.
   const objectDigest = Array.from(
@@ -274,7 +317,8 @@ const readElement = async (
     tagName: tag,
   };
   const form = (el as HTMLInputElement).form ?? el.closest('form');
-  if (!form) return { elementId, objectDigest, element, form: null };
+  if (!form)
+    return { elementId, objectDigest, element, form: null, ...(fileInput ? { fileInput } : {}) };
   const allFields = Array.from((form as HTMLFormElement).elements).filter((field) =>
     /^(INPUT|TEXTAREA|SELECT)$/.test(field.tagName),
   );
@@ -324,6 +368,7 @@ const readElement = async (
     elementId,
     objectDigest,
     element,
+    ...(fileInput ? { fileInput } : {}),
     form: {
       action: action.href.slice(0, 1200),
       method,
@@ -373,7 +418,7 @@ const nodeId = (node: Element): string => {
 };
 type Signals = Pick<
   UserBrowserTargetDescription,
-  'elementId' | 'objectDigest' | 'element' | 'form'
+  'elementId' | 'objectDigest' | 'element' | 'form' | 'fileInput'
 >;
 /**
  * FIX-36 复审 #1: whether the target is a login field or a login / authorize control,
@@ -390,9 +435,9 @@ const withLogin = (signals: Signals, login: LoginContext | null | undefined): Si
   },
 });
 /** A field's own read (type / select / freshness), with its login context. */
-const readField = async (handle: ElementHandle<Element>): Promise<Signals> =>
+const readField = async (handle: ElementHandle<Element>, upload = false): Promise<Signals> =>
   withLogin(
-    (await handle.evaluate(readElement)) as Signals,
+    (await handle.evaluate(readElement, upload)) as Signals,
     await handle.evaluate(readLoginContext, false),
   );
 /**
@@ -458,6 +503,51 @@ type NativeRelay = {
   ready: Promise<void>;
 };
 const nativeRelays = new WeakMap<Page, NativeRelay>();
+
+export interface NativeUploadPayload {
+  name: string;
+  mimeType: string;
+  buffer: Buffer;
+}
+function uploadManifest(action: DriverAction) {
+  const parsed = browserUploadManifestSchema.safeParse(action.payload?.files);
+  if (!parsed.success) throw new Error('file_manifest_invalid');
+  return parsed.data;
+}
+function assertUploadTarget(signals: Signals, action: DriverAction): void {
+  const target = signals.fileInput;
+  const files = uploadManifest(action);
+  if (
+    !target ||
+    target.disabled ||
+    target.directory ||
+    target.credentialForm ||
+    !target.formOrigin ||
+    (!target.multiple && files.length !== 1) ||
+    signals.element.loginField ||
+    signals.element.loginControl ||
+    signals.element.loginBlock
+  )
+    throw new Error('file_target_forbidden');
+  const tokens = target.accept
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    tokens.length &&
+    files.some(
+      (file) =>
+        !tokens.some((token) =>
+          token.startsWith('.')
+            ? file.name.toLowerCase().endsWith(token)
+            : token.endsWith('/*')
+              ? file.mimeType.toLowerCase().startsWith(token.slice(0, -1))
+              : file.mimeType.toLowerCase() === token,
+        ),
+    )
+  )
+    throw new Error('file_target_forbidden');
+}
 
 /** One selected page; no selector healing or first-match execution in v2. */
 export class SelectedTargetResolver {
@@ -873,7 +963,8 @@ export class SelectedTargetResolver {
         handle = resolved.handle;
         frame = resolved.frame;
         await this.assertFresh(frame, expected);
-        if (!(await handle.isVisible())) throw new Error('target_unreadable');
+        if (action.kind !== 'upload' && !(await handle.isVisible()))
+          throw new Error('target_unreadable');
         if (action.kind === 'click') {
           // Describe what the click will actually hit, not the selector's node:
           // a shadow host's inner payment button is the real target.
@@ -883,7 +974,8 @@ export class SelectedTargetResolver {
           if (hit.frame !== frame) throw new Error('target_obscured');
           signals = hit.signals;
           point = { ...at, selectedId };
-        } else signals = await readField(handle);
+        } else signals = await readField(handle, action.kind === 'upload');
+        if (action.kind === 'upload') assertUploadTarget(signals, action);
       }
       let frameId = this.frames.get(frame);
       if (!frameId) {
@@ -908,7 +1000,11 @@ export class SelectedTargetResolver {
       throw error;
     }
   }
-  async execute(action: DriverAction, binding: UserBrowserBinding): Promise<void> {
+  async execute(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    uploadFiles?: readonly NativeUploadPayload[],
+  ): Promise<void> {
     const ticket = this.ticket;
     this.ticket = null;
     if (
@@ -925,6 +1021,7 @@ export class SelectedTargetResolver {
       objectDigest: ticket.target.objectDigest,
       element: ticket.target.element,
       form: ticket.target.form,
+      ...(action.kind === 'upload' ? { fileInput: ticket.target.fileInput } : {}),
     });
     try {
       await this.assertFresh(ticket.frame, binding.observationRevision);
@@ -934,6 +1031,39 @@ export class SelectedTargetResolver {
         throw new Error('target_changed');
       const timeout = action.deadlineMs ?? 2000;
       switch (action.kind) {
+        case 'upload': {
+          const handle = ticket.handle;
+          const files = uploadManifest(action);
+          if (!handle || !uploadFiles || uploadFiles.length !== files.length)
+            throw new Error('file_payload_invalid');
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i]!;
+            const payload = uploadFiles[i]!;
+            if (
+              payload.name !== file.name ||
+              payload.mimeType !== file.mimeType ||
+              !(payload.buffer instanceof Uint8Array) ||
+              payload.buffer.length !== file.sizeBytes
+            )
+              throw new Error('file_payload_invalid');
+            const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', payload.buffer));
+            if (
+              Array.from(digest, (value) => value.toString(16).padStart(2, '0')).join('') !==
+              file.sha256
+            )
+              throw new Error('file_payload_invalid');
+          }
+          const fresh = await readField(handle, true);
+          assertUploadTarget(fresh, action);
+          if (canonical(fresh) !== expected) throw new Error('target_changed');
+          await this.assertFresh(ticket.frame, binding.observationRevision);
+          try {
+            await handle.setInputFiles(uploadFiles, { timeout: action.deadlineMs ?? 10_000 });
+          } catch {
+            throw new Error('input_outcome_unknown');
+          }
+          break;
+        }
         case 'click': {
           const point = ticket.point;
           if (!point) throw new Error('target_binding_required');

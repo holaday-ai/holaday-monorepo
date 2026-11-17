@@ -344,7 +344,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
-    if (this.targets && ['click', 'type', 'key', 'select'].includes(action.kind))
+    if (this.targets && ['click', 'type', 'key', 'select', 'upload'].includes(action.kind))
       return {
         status: 'error',
         error: { code: 'target_binding_required', message: 'Bound target required' },
@@ -1406,6 +1406,9 @@ function safeTargetError(error: unknown): string {
     'origin_grant_required',
     'unsupported_action',
     'human_input_active',
+    'file_manifest_invalid',
+    'file_payload_invalid',
+    'file_target_forbidden',
   ];
   return error instanceof Error && known.includes(error.message)
     ? error.message

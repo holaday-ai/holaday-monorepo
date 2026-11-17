@@ -87,6 +87,21 @@ export const userBrowserTargetDescriptionSchema = z
     observationRevision: z.number().int().positive(),
     capturedAt: z.number().int().positive(),
     element: userBrowserElementSignalsSchema,
+    /** Present only for the opt-in bound file-delivery path. No local paths or
+     * names of files already selected by the human leave the document. */
+    fileInput: z
+      .object({
+        accept: z.string().max(1200),
+        multiple: z.boolean(),
+        disabled: z.boolean(),
+        directory: z.boolean(),
+        credentialForm: z.boolean(),
+        formOrigin: exactWebOriginSchema.nullable(),
+        formMethod: z.string().max(16),
+        selectedCount: z.number().int().nonnegative().max(10000),
+      })
+      .strict()
+      .optional(),
     /** The tab's current document, read by the extension (never the model):
      * origin + path only — query and hash values never leave the page — and
      * whether the full address (including query/hash) is a transaction page. */
