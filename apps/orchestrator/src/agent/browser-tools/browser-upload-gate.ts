@@ -1,9 +1,19 @@
 import type { PreparedBrowserUpload } from './browser-upload-target.js';
 import {
+  type RuntimeActionDescriptor,
+  type UnifiedActionDescription,
   type UnifiedActionGateOptions,
   createDescriptionActionGate,
 } from './unified-action-gate.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
+
+/** Shared disclosure policy for a native handle or an extension-bound target. */
+export interface PreparedUploadForGate {
+  readonly description: PreparedBrowserUpload['description'] & { selectedCount?: number };
+  runtimeAction(): RuntimeActionDescriptor;
+  isCurrent(): Promise<boolean>;
+  hostBinding(): NonNullable<UnifiedActionDescription['bindings']>[number];
+}
 
 export const uploadForbidden = (intent: string) =>
   /(?:不要|不得|禁止|勿|不许|不能)[^,，;；。\n]{0,8}(?:上传|导入)|\b(?:do not|don't|never)\s+(?:\w+\s+){0,2}(?:upload|import)\b|\bwithout\s+(?:uploading|importing)\b/i.test(
@@ -73,14 +83,14 @@ export function explicitlyRequestsUpload(
 }
 
 export function createBrowserUploadGate(
-  prepared: PreparedBrowserUpload,
+  prepared: PreparedUploadForGate,
   options: Omit<UnifiedActionGateOptions, 'page' | 'labelForRef'> & {
     materials?: readonly { fileId: string; name: string }[];
   },
 ) {
   const target = prepared.description;
   const intent = options.userIntent ?? '';
-  const question = `将 ${target.files.map((file) => file.name).join('、')} 交给 ${target.origin}${target.formOrigin !== target.origin ? `（表单接收站点 ${target.formOrigin}）` : ''} 的文件控件？选定后网站可能立即接收这些文件。`;
+  const question = `将 ${target.files.map((file) => file.name).join('、')} 交给 ${target.origin}${target.formOrigin !== target.origin ? `（表单接收站点 ${target.formOrigin}）` : ''} 的文件控件？${target.selectedCount ? `这会替换控件里已选的 ${target.selectedCount} 个文件。` : ''}选定后网站可能立即接收这些文件。`;
   const gate = createDescriptionActionGate<UnifiedBrowserAction>({
     ...options,
     pageUrl: () => target.origin,
@@ -93,11 +103,12 @@ export function createBrowserUploadGate(
       const verdict = await options.onBeforeAction(descriptor);
       if (!verdict.allowed)
         return verdict.requiresConfirmation ? { ...verdict, question } : verdict;
+      if (target.selectedCount) return { allowed: false, requiresConfirmation: true, question };
       return explicitlyRequestsUpload(
         intent,
         target,
         options.materials,
-        prepared.runtimeAction().pageUrl,
+        prepared.runtimeAction().pageUrl ?? target.origin,
       )
         ? verdict
         : { allowed: false, requiresConfirmation: true, question };

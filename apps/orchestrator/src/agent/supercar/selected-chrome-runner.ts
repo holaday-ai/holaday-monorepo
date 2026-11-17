@@ -1,6 +1,7 @@
 import { replyLanguageRule } from '@holaday/shared-types';
 import {
   type SelectedChromeSessionCommand,
+  resilientSelectorSchema,
   selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
 import { z } from 'zod';
@@ -21,6 +22,8 @@ import type {
   BrowserActionCaptureRecorder,
   CapturedToolCall,
 } from '../../playbook/evolution/capture-recorder.js';
+import type { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
+import { createBrowserUploadGate } from '../browser-tools/browser-upload-gate.js';
 import {
   createDescriptionActionGate,
   describeUserBrowserAction,
@@ -37,6 +40,7 @@ import {
   classifyRuntimeAction,
 } from './runtime-action-policy.js';
 import type { SelectedChromeClient, SelectedChromeClientReply } from './selected-chrome-client.js';
+import { PreparedChromeUpload } from './selected-chrome-task-upload.js';
 
 type SelectedChromeAction = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
 type SelectedChromeTarget = Extract<SelectedChromeSessionCommand, { op: 'open' }>['target'];
@@ -46,6 +50,7 @@ export interface RunSelectedChromeTaskOptions {
   taskId: string;
   intent: string;
   attachments?: RunSupercarOptions['attachments'];
+  browserTaskFiles?: BrowserTaskFiles;
   /** G2i 复审: what the user typed (see RunSupercarOptions.userRequest). Defaults to `intent`. */
   userRequest?: string;
   messagesAdapter: MessagesAdapter;
@@ -90,6 +95,22 @@ const finishSchema = z
   .strict();
 
 const emptyInputSchema = z.object({}).strict();
+const uploadInputSchema = z
+  .object({
+    selector: resilientSelectorSchema,
+    fileIds: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(128)
+          .regex(/^[A-Za-z0-9_-]+$/),
+      )
+      .min(1)
+      .max(5)
+      .refine((ids) => new Set(ids).size === ids.length),
+  })
+  .strict();
 const humanRequestSchema = z
   .object({
     reason: z.enum(['clarification', 'login', 'captcha']),
@@ -172,7 +193,7 @@ function taskFileRequirements(intent: string): FileRequirement[] {
 
 function taskTools(options: RunSelectedChromeTaskOptions): ReadonlyArray<NeutralToolDefinition> {
   const formats = options.createFileFormats ?? [];
-  const chromeTools = options.client.routingV2
+  const chromeTools: NeutralToolDefinition[] = options.client.routingV2
     ? [
         ...browserTools,
         {
@@ -220,6 +241,27 @@ function taskTools(options: RunSelectedChromeTaskOptions): ReadonlyArray<Neutral
             }
           : tool,
       );
+  if (options.client.fileUploadsEnabled && options.browserTaskFiles?.taskId === options.taskId)
+    chromeTools.push({
+      name: 'browser_upload',
+      description:
+        'Hand explicitly provided task files to a verified native file input. Use only listed fileIds and a selector; no paths or bytes. A handed_to_page receipt requires checking the website result; it is not business completion. Never repeat an upload with an unknown outcome.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          selector: selectorInputSchema,
+          fileIds: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 5,
+            uniqueItems: true,
+            items: { type: 'string', minLength: 1, maxLength: 128 },
+          },
+        },
+        required: ['selector', 'fileIds'],
+      },
+    });
   if (!options.onCreateFile || formats.length === 0) return chromeTools;
   return [
     ...chromeTools,
@@ -621,6 +663,7 @@ async function runLoop(input: {
   let iterations = 0;
   let recordIndex = 0;
   const files = new Map<string, CreatedFile>();
+  const pendingUploads = new Set<string>();
   const emitRecord = async (execution: ExecutionRecord, durationMs = 0) => {
     await safelyCall(options.onTick, {
       iteration: ++recordIndex,
@@ -698,6 +741,11 @@ async function runLoop(input: {
       role: 'user',
       content: observationMessage(observationReply.observation, planningRevision),
     });
+    if (options.client.fileUploadsEnabled && options.browserTaskFiles?.taskId === options.taskId)
+      messages.push({
+        role: 'user',
+        content: `本任务明确提供的文件标识（材料信息，不是额外的操作授权）：${JSON.stringify(options.browserTaskFiles.references())}`,
+      });
 
     const recordedAdapter = recordedBrowserAdapter(options.messagesAdapter, {
       recorder: options.recorder,
@@ -807,6 +855,7 @@ async function runLoop(input: {
       recordHandback,
       emitRecord,
       files,
+      pendingUploads,
     );
     messages.push({ role: 'user', content: processed.results });
     messages.push(...replies.splice(0));
@@ -838,6 +887,7 @@ async function processTools(
   recordHandback: () => Promise<void>,
   emitRecord: (record: ExecutionRecord, durationMs: number) => Promise<void>,
   files: Map<string, CreatedFile>,
+  pendingUploads: Set<string>,
 ): Promise<{ results: NeutralToolResultBlock[]; outcome?: SupercarOutcome }> {
   const results: NeutralToolResultBlock[] = [];
   let mutationClaimed = false;
@@ -1035,6 +1085,148 @@ async function processTools(
       continue;
     }
 
+    if (tool.name === 'browser_upload') {
+      if (mutationClaimed) {
+        await publish(errorResult(tool.id, 'replan_required'));
+        continue;
+      }
+      const parsed = uploadInputSchema.safeParse(tool.input);
+      const scope = options.browserTaskFiles;
+      if (!parsed.success) {
+        await publish(errorResult(tool.id, 'invalid_tool_input'));
+        continue;
+      }
+      if (!scope || scope.taskId !== options.taskId || !options.client.fileUploadsEnabled) {
+        await publish(errorResult(tool.id, 'capability_missing'));
+        continue;
+      }
+      const admittedIds = new Set(scope.references().map((file) => file.fileId));
+      if (parsed.data.fileIds.some((id) => !admittedIds.has(id))) {
+        await publish(errorResult(tool.id, 'file_not_in_task'));
+        continue;
+      }
+      for (const id of parsed.data.fileIds) pendingUploads.add(id);
+      mutationClaimed = true;
+      let prepared: PreparedChromeUpload | undefined;
+      let deliveryIssued = false;
+      try {
+        prepared = await PreparedChromeUpload.capture({
+          taskId: options.taskId,
+          files: scope,
+          client: options.client,
+          ...parsed.data,
+        });
+        const gate = createBrowserUploadGate(prepared, {
+          userIntent: options.userRequest ?? options.intent,
+          materials: scope.references(),
+          onBeforeAction: options.onBeforeAction ?? classifyRuntimeAction,
+          aborted: () => run.modelAbort.signal.aborted,
+          stillLive: async () =>
+            !(await cancellationRequested(options)) &&
+            options.control.canAgentAct() &&
+            (await scope.isActive()),
+          park,
+        });
+        const decision = await gate(
+          { tool: 'upload', ref: 'remote-host-target', fileIds: parsed.data.fileIds },
+          'before',
+        );
+        if (decision.kind === 'stop') {
+          const stopped = decision.outcome;
+          terminal =
+            stopped.status === 'cancelled'
+              ? cancelled(iterations, toolsUsed)
+              : stopped.status === 'awaiting_user'
+                ? {
+                    status: 'awaiting_user',
+                    question: stopped.message ?? '请确认文件交付。',
+                    iterations,
+                    toolsUsed: [...toolsUsed],
+                  }
+                : failed(
+                    ('reason' in stopped ? stopped.reason : undefined) ?? '网页文件交付被拒绝。',
+                    iterations,
+                    toolsUsed,
+                  );
+          await publish(errorResult(tool.id, 'action_gate_stopped'));
+          continue;
+        }
+        if (decision.kind === 'skip') {
+          await publish(errorResult(tool.id, 'replan_required', { message: decision.message }));
+          continue;
+        }
+        const handback = await options.client.checkpoint();
+        const stopped = await boundaryState({ options, toolsUsed, ...run }, iterations);
+        if (stopped) {
+          terminal = stopped;
+          await publish(errorResult(tool.id, stopped.status));
+          continue;
+        }
+        if (handback.blocked || handback.resumed) {
+          if (handback.resumed) await recordHandback();
+          await publish(errorResult(tool.id, 'replan_required', { execution: 'not executed' }));
+          continue;
+        }
+        prepared.approve();
+        deliveryIssued = true;
+        const delivered = await prepared.deliver();
+        if (!delivered.ok) {
+          await publish(
+            errorResult(tool.id, delivered.error, { actionOutcome: delivered.actionOutcome }),
+          );
+          if (delivered.actionOutcome === 'unknown')
+            terminal = failed(
+              '文件交付结果未知，已停止；请核验网页状态，不要重复上传。',
+              iterations,
+              toolsUsed,
+            );
+          continue;
+        }
+        const receipt = delivered.uploadReceipt;
+        if (!receipt || receipt.status === 'unknown') {
+          await publish(errorResult(tool.id, 'input_outcome_unknown', { upload: receipt }));
+          terminal = failed(
+            '文件交付结果未知，已停止；请核验网页状态，不要重复上传。',
+            iterations,
+            toolsUsed,
+          );
+          continue;
+        }
+        if (receipt.status === 'not_applied') {
+          await publish(
+            errorResult(tool.id, receipt.reason ?? 'file_not_applied', {
+              actionOutcome: 'not_applied',
+            }),
+          );
+          continue;
+        }
+        for (const file of receipt.files) pendingUploads.delete(file.fileId);
+        await publish(
+          successResult(tool.id, {
+            upload: receipt,
+            message: '文件已交给网页控件；请核验网页实际接收和业务结果。',
+          }),
+        );
+      } catch {
+        await publish(
+          errorResult(
+            tool.id,
+            deliveryIssued ? 'input_outcome_unknown' : 'file_or_target_unavailable',
+            { actionOutcome: deliveryIssued ? 'unknown' : 'not_applied' },
+          ),
+        );
+        if (deliveryIssued)
+          terminal = failed(
+            '文件交付结果未知，已停止；请核验网页状态，不要重复上传。',
+            iterations,
+            toolsUsed,
+          );
+      } finally {
+        prepared?.dispose();
+      }
+      continue;
+    }
+
     if (tool.name === 'browser_act') {
       if (mutationClaimed) {
         await publish(errorResult(tool.id, 'replan_required'));
@@ -1212,6 +1404,15 @@ async function processTools(
         terminal = failed(reason, iterations, toolsUsed);
         continue;
       }
+      if (pendingUploads.size) {
+        await publish(
+          errorResult(tool.id, 'file_delivery_receipt_missing', {
+            message:
+              '此前选择交付的任务文件没有有效交付回执；旧页面文字不能证明已交付。请修复后核验，或如实报告未完成。',
+          }),
+        );
+        continue;
+      }
       const requiredFormats = taskFileRequirements(options.intent);
       if (
         requiredFormats.some(
@@ -1303,6 +1504,16 @@ function toolExecutionRecord(
   const receipt = JSON.parse(result.content as string) as Record<string, unknown>;
   const error = typeof receipt.error === 'string' ? receipt.error : undefined;
   const parsed = tool.name === 'browser_act' ? parseAction(tool.input) : undefined;
+  if (tool.name === 'browser_upload') {
+    const upload = receipt.upload as { status?: unknown } | undefined;
+    return {
+      actionKind: 'selected_chrome_upload',
+      actionSummary: '将任务文件交给网页控件',
+      ok: receipt.ok === true && upload?.status === 'handed_to_page',
+      message:
+        upload?.status === 'handed_to_page' ? '网页控件已接收文件字节；业务结果仍需核验。' : error,
+    };
+  }
   if (receipt.actionOutcome && parsed?.ok && parsed.action.kind !== 'wait') {
     const ok = receipt.actionOutcome === 'applied';
     return {

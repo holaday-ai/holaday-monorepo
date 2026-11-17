@@ -130,6 +130,9 @@ export class SelectedChromeClient {
   get revision(): number {
     return this.revisionValue;
   }
+  get taskId(): string {
+    return this.options.taskId;
+  }
 
   async open(target: Target): Promise<SelectedChromeClientReply> {
     if (this.sessionId || this.openSent || this.pending || this.closing)
