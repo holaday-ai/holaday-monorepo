@@ -24,6 +24,7 @@ import {
   type HolaDayBrowserDriver,
   driverError,
 } from './driver.js';
+import { NativeDownloadCaptureError } from './native-download.js';
 import { NativeChooserCaptureError } from './native-file-chooser.js';
 import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
@@ -176,6 +177,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
+    if (this.targets?.stopped || this.targets?.busy)
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab control is unavailable');
 
     const existingPage = this.getLivePage();
     try {
@@ -194,7 +197,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
           `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
         );
       }
-      if (this.opts.userBrowserRoutingV2)
+      if (this.opts.userBrowserRoutingV2 && !this.targets)
         this.targets = new SelectedTargetResolver(
           page,
           requestedTabId,
@@ -207,6 +210,22 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
               params,
             ) as Promise<unknown>,
           this.opts.collaborationV2,
+          {
+            subscribe: (listener) => {
+              const onEvent = (
+                source: chrome.debugger.Debuggee & { sessionId?: string },
+                method: string,
+                params?: object,
+              ) => {
+                // Child protocol sessions and other tabs have no authority over
+                // this task's native response/receipt correlation.
+                if (source.tabId === requestedTabId && !source.sessionId)
+                  listener(method, (params ?? {}) as Record<string, unknown>);
+              };
+              chrome.debugger.onEvent.addListener(onEvent);
+              return () => chrome.debugger.onEvent.removeListener(onEvent);
+            },
+          },
         );
       return { status: 'ok', data: { tabId: requestedTabId } };
     } catch (err) {
@@ -338,6 +357,16 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   async execute(action: DriverAction): Promise<DriverResult> {
+    if (this.opts.attachToTabId !== null && this.selectedDisposeRequested)
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
+    if (this.targets?.stopped || this.targets?.busy)
+      return {
+        status: 'error',
+        error: {
+          code: this.targets.stopped ? 'session_unavailable' : 'browser_busy',
+          message: 'Bound browser control is unavailable',
+        },
+      };
     if (this.opts.collaborationV2) {
       try {
         await this.targets?.assertNativeIdle();
@@ -347,9 +376,6 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
           error: { code: safeTargetError(error), message: 'Native input is still active' },
         };
       }
-    }
-    if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
-      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
     if (this.targets && ['click', 'type', 'key', 'select', 'upload'].includes(action.kind))
       return {
@@ -600,7 +626,77 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     }
   }
 
+  /** Dormant until an explicit file operation is negotiated by the session. */
+  async captureDownloadBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult> {
+    if (
+      !this.targets ||
+      this.selectedDisposeRequested ||
+      action.kind !== 'click' ||
+      typeof dispatchAllowed !== 'function'
+    )
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound download unavailable' },
+        data: { clickOutcome: 'not_applied', interceptionRestored: true },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: await this.targets.captureDownload(action, binding, dispatchAllowed, signal),
+      };
+    } catch (error) {
+      const native = error instanceof NativeDownloadCaptureError;
+      const code = native ? error.message : safeTargetError(error);
+      const clickOutcome = native
+        ? error.clickOutcome
+        : code === 'input_outcome_unknown'
+          ? 'unknown'
+          : 'not_applied';
+      return {
+        status: 'error',
+        error: { code, message: 'Original download rejected or unconfirmed' },
+        data: {
+          clickOutcome,
+          interceptionRestored:
+            code !== 'download_restore_unconfirmed' && (native || clickOutcome === 'not_applied'),
+        },
+      };
+    }
+  }
+  async readDownloadChunk(
+    id: string,
+    offset: number,
+    length: number,
+    current: () => boolean,
+  ): Promise<DriverResult> {
+    if (!this.targets || this.selectedDisposeRequested || typeof current !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'download_unavailable', message: 'Original file unavailable' },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: { bytes: await this.targets.readDownloadChunk(id, offset, length, current) },
+      };
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'download_unavailable', message: 'Original file unavailable' },
+      };
+    }
+  }
+  releaseDownload(id: string): void {
+    this.targets?.releaseDownload(id);
+  }
+
   async dispose(): Promise<void> {
+    if (this.opts.attachToTabId !== null) this.selectedDisposeRequested = true;
     await this.targets?.dispose();
     this.targets = null;
     if (this.opts.attachToTabId !== null) {
@@ -1551,6 +1647,7 @@ function safeTargetError(error: unknown): string {
     'file_payload_invalid',
     'file_target_forbidden',
     'session_unavailable',
+    'browser_busy',
   ];
   return error instanceof Error && known.includes(error.message)
     ? error.message

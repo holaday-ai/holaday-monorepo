@@ -10,6 +10,14 @@ import {
 } from '@holaday/shared-types';
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
+import { type NativeBlobSources, captureNativeBlobSources } from './native-blob-source.js';
+import {
+  NativeDownloadCaptureController,
+  NativeDownloadCaptureError,
+  type NativeDownloadCaptureResult,
+  type NativeDownloadEvent,
+  type NativeDownloadFile,
+} from './native-download.js';
 import {
   type NativeChooserCaptureResult,
   captureNativeFileChooser,
@@ -538,6 +546,27 @@ export type SelectedNativeChooserResult =
   | Exclude<NativeChooserCaptureResult, { status: 'captured' }>
   | { status: 'captured'; clickOutcome: 'applied'; chooserId: string }
   | { status: 'clicked'; clickOutcome: 'applied'; reason: 'chooser_unavailable' };
+export type SelectedNativeDownloadResult =
+  | Exclude<NativeDownloadCaptureResult, { status: 'captured' }>
+  | {
+      status: 'captured';
+      clickOutcome: 'applied';
+      downloadId: string;
+      metadata: ReturnType<NativeDownloadFile['metadata']>;
+      source: ReturnType<NativeDownloadFile['source']>;
+    };
+interface HeldNativeDownload {
+  id: string;
+  file: NativeDownloadFile;
+  frame: Frame;
+  document: string;
+  rootDocument: string;
+  origin: string;
+  current: () => boolean;
+  timer: ReturnType<typeof setTimeout>;
+  navigated: (frame: Frame) => void;
+  closed: () => void;
+}
 interface HeldNativeChooser {
   id: string;
   handle: ElementHandle<Element>;
@@ -605,6 +634,13 @@ function assertUploadTarget(signals: Signals, action: DriverAction): void {
 
 /** One selected page; no selector healing or first-match execution in v2. */
 export class SelectedTargetResolver {
+  private disposed = false;
+  private downloadActive = false;
+  private downloadUncertain = false;
+  private downloadSetupUncertain = false;
+  private downloads: NativeDownloadCaptureController | null = null;
+  private blobLease: NativeBlobSources | null = null;
+  private download: HeldNativeDownload | null = null;
   private revision = 0;
   private documents = new Map<Frame, DocumentVersion>();
   private frames = new WeakMap<Frame, string>();
@@ -656,7 +692,18 @@ export class SelectedTargetResolver {
     private readonly origins: readonly string[],
     private readonly cdp: SelectedTabCdp,
     private readonly collaborationV2 = false,
+    private readonly downloadEvents?: { subscribe(listener: NativeDownloadEvent): () => void },
   ) {}
+  get stopped(): boolean {
+    return this.disposed || this.downloadUncertain || !!this.downloads?.stopped;
+  }
+  get busy(): boolean {
+    return this.downloadActive;
+  }
+  private assertAvailable(allowDownload = false): void {
+    if (this.stopped) throw new Error('session_unavailable');
+    if (this.downloadActive && !allowDownload) throw new Error('browser_busy');
+  }
   get observationRevision(): number {
     return this.revision;
   }
@@ -679,6 +726,7 @@ export class SelectedTargetResolver {
     }
   }
   async observe(): Promise<void> {
+    this.assertAvailable();
     this.origin(this.page.mainFrame());
     await this.ensureNativeRelay();
     if (this.collaborationV2) await this.activity();
@@ -697,6 +745,16 @@ export class SelectedTargetResolver {
     this.revision++;
   }
   async dispose(): Promise<void> {
+    this.disposed = true;
+    this.releaseDownload();
+    // A failed installation has no returned source lease to retry. Keep the
+    // exact driver quarantined until its real page closes; a missing receipt
+    // alone does not prove that the old document's temporary hook is gone.
+    if (this.downloadSetupUncertain && !this.page.isClosed())
+      throw new NativeDownloadCaptureError('download_restore_unconfirmed', 'not_applied');
+    await this.downloads?.dispose();
+    await this.blobLease?.dispose();
+    this.blobLease = null;
     await this.clearNativeChooser();
     if (this.nativeRelay?.receiver === this.receiveNativeActivity) this.nativeRelay.receiver = null;
     this.nativeRelay = null;
@@ -725,6 +783,7 @@ export class SelectedTargetResolver {
     for (const frame of this.documents.keys()) await this.assertFresh(frame, this.revision);
   }
   async activity(): Promise<UserBrowserActivity> {
+    this.assertAvailable();
     this.origin(this.page.mainFrame());
     const versions: DocumentVersion[] = [];
     for (const frame of this.page.frames().slice(0, 20)) {
@@ -892,6 +951,7 @@ export class SelectedTargetResolver {
         return id;
       });
     } catch (error) {
+      if (error instanceof NativeDownloadCaptureError) throw error;
       const code = error instanceof Error ? error.message : '';
       if (/^(?:target_[a-z_]+|stale_observation|origin_grant_required)$/.test(code)) throw error;
       throw new Error('target_unreadable');
@@ -930,6 +990,12 @@ export class SelectedTargetResolver {
   private async readAt(
     point: { x: number; y: number },
     selectedId: string,
+    visit?: (target: {
+      frame: Frame;
+      signals: Signals;
+      frameId: string;
+      objectId: string;
+    }) => Promise<void>,
   ): Promise<{ frame: Frame; signals: Signals }> {
     return this.withObjects(async (track) => {
       const hit = (await this.cdp('DOM.getNodeForLocation', {
@@ -937,7 +1003,7 @@ export class SelectedTargetResolver {
         y: point.y,
         includeUserAgentShadowDOM: false,
         ignorePointerEventsNone: false,
-      })) as { backendNodeId?: number };
+      })) as { backendNodeId?: number; frameId?: string };
       const resolved = (await this.cdp('DOM.resolveNode', {
         backendNodeId: hit.backendNodeId,
       })) as { object?: { objectId?: string } };
@@ -955,7 +1021,15 @@ export class SelectedTargetResolver {
       if (!value.inside || !value.read) throw new Error('target_obscured');
       // What a click inside it would hit is unknown: the user decides.
       if (value.opaque) throw new Error('target_unreadable');
-      return { frame: this.frameFor(value.document), signals: withLogin(value.read, value.login) };
+      const target = {
+        frame: this.frameFor(value.document),
+        signals: withLogin(value.read, value.login),
+      };
+      if (visit) {
+        if (!hit.frameId) throw new Error('target_unreadable');
+        await visit({ ...target, frameId: hit.frameId, objectId: resolved.object.objectId });
+      }
+      return target;
     });
   }
   /**
@@ -1080,6 +1154,7 @@ export class SelectedTargetResolver {
     throw new Error('target_missing');
   }
   async describe(action: DriverAction, expected: number): Promise<UserBrowserTargetDescription> {
+    this.assertAvailable();
     await this.clearTicket();
     let handle: ElementHandle<Element> | null = null;
     let nativeChooserId: string | undefined;
@@ -1162,6 +1237,7 @@ export class SelectedTargetResolver {
     dispatchAllowed: () => boolean,
     signal?: AbortSignal,
   ): Promise<SelectedNativeChooserResult> {
+    this.assertAvailable();
     if (action.kind !== 'click' || typeof dispatchAllowed !== 'function')
       throw new Error('capability_missing');
     const captured: { result?: NativeChooserCaptureResult } = {};
@@ -1253,6 +1329,217 @@ export class SelectedTargetResolver {
       return { status: 'clicked', clickOutcome: 'applied', reason: 'chooser_unavailable' };
     }
   }
+  /** Explicit download only. The same ticket and final native hit-test protect
+   * the original click; no address is re-fetched to manufacture a file. */
+  async captureDownload(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<SelectedNativeDownloadResult> {
+    this.assertAvailable();
+    if (!this.downloadEvents || action.kind !== 'click' || typeof dispatchAllowed !== 'function')
+      throw new Error('capability_missing');
+    if (this.download && !this.download.file.alive) this.releaseDownload();
+    if (this.download) throw new Error('browser_busy');
+    const ticket = this.ticket;
+    if (!ticket?.point) throw new Error('target_binding_required');
+    const original = this.documents.get(ticket.frame);
+    const root = this.documents.get(this.page.mainFrame());
+    if (!original || !root) throw new Error('stale_observation');
+    const context = {
+      frame: ticket.frame,
+      document: original.document,
+      rootDocument: root.document,
+      origin: this.origin(ticket.frame),
+    };
+    const current = () => !this.disposed && !signal?.aborted && dispatchAllowed();
+    let result: NativeDownloadCaptureResult | undefined;
+    this.downloadActive = true;
+    try {
+      await this.executeInternal(
+        action,
+        binding,
+        undefined,
+        dispatchAllowed,
+        async (prepare, click) => {
+          await this.readAt(ticket.point!, ticket.point!.selectedId, async (target) => {
+            if (
+              target.frame !== ticket.frame ||
+              canonical(target.signals) !==
+                canonical({
+                  elementId: ticket.target.elementId,
+                  objectDigest: ticket.target.objectDigest,
+                  element: ticket.target.element,
+                  form: ticket.target.form,
+                })
+            )
+              throw new Error('target_changed');
+            try {
+              this.blobLease = await captureNativeBlobSources({
+                owner: this.page,
+                frameId: target.frameId,
+                nodeObjectId: target.objectId,
+                origin: context.origin,
+                cdp: this.cdp,
+                current,
+                signal,
+                timeoutMs: 5000,
+              });
+            } catch (error) {
+              if (error instanceof Error && error.message === 'blob_capture_restore_unconfirmed') {
+                this.downloadUncertain = true;
+                this.downloadSetupUncertain = true;
+                throw new NativeDownloadCaptureError('download_restore_unconfirmed', 'not_applied');
+              }
+              // A site's custom platform API cannot supply Blob bytes. Network
+              // and data downloads may still use actual native download receipts.
+              if (!(error instanceof Error) || error.message !== 'blob_api_unavailable')
+                throw error;
+            }
+            this.downloads ??= new NativeDownloadCaptureController({
+              owner: this.page,
+              send: this.cdp,
+              subscribe: (listener) => this.downloadEvents!.subscribe(listener),
+            });
+            result = await this.downloads.capture({
+              frameId: target.frameId,
+              origin: context.origin,
+              current,
+              prepare,
+              click,
+              signal,
+              blobs: this.blobLease ?? undefined,
+              finalCheck: () => this.assertDownloadDocument(context, current),
+            });
+          });
+        },
+      );
+      if (!result) throw new Error('capability_missing');
+      if (this.blobLease) {
+        try {
+          await this.blobLease.dispose();
+          this.blobLease = null;
+        } catch {
+          this.downloadUncertain = true;
+          if (result.status === 'captured') result.file.dispose();
+          throw new NativeDownloadCaptureError('download_restore_unconfirmed', result.clickOutcome);
+        }
+      }
+      if (result.status !== 'captured') return result;
+      try {
+        await this.assertDownloadDocument(context, current);
+        const metadata = result.file.metadata();
+        const source = result.file.source();
+        const id = crypto.randomUUID();
+        const navigated = (frame: Frame) => {
+          if (frame === context.frame || frame === this.page.mainFrame()) this.releaseDownload(id);
+        };
+        const closed = () => this.releaseDownload(id);
+        this.download = {
+          ...context,
+          id,
+          file: result.file,
+          current,
+          timer: setTimeout(closed, 120_000),
+          navigated,
+          closed,
+        };
+        this.page.on('framenavigated', navigated);
+        this.page.on('framedetached', navigated);
+        this.page.on('close', closed);
+        return { status: 'captured', clickOutcome: 'applied', downloadId: id, metadata, source };
+      } catch {
+        result.file.dispose();
+        return { status: 'clicked', clickOutcome: 'applied', reason: 'scope_unavailable' };
+      }
+    } catch (error) {
+      if (this.blobLease && !this.downloads?.stopped) {
+        try {
+          await this.blobLease.dispose();
+          this.blobLease = null;
+        } catch {
+          this.downloadUncertain = true;
+          if (result?.status === 'captured') result.file.dispose();
+          throw new NativeDownloadCaptureError(
+            'download_restore_unconfirmed',
+            result?.clickOutcome ??
+              (error instanceof NativeDownloadCaptureError ? error.clickOutcome : 'not_applied'),
+          );
+        }
+      }
+      throw error;
+    } finally {
+      this.downloadActive = false;
+    }
+  }
+  private async assertDownloadDocument(
+    held: Pick<HeldNativeDownload, 'frame' | 'origin' | 'document' | 'rootDocument'>,
+    current: () => boolean,
+  ): Promise<void> {
+    const check = () => {
+      if (
+        !current() ||
+        !this.page.frames().includes(held.frame) ||
+        this.origin(held.frame) !== held.origin
+      )
+        throw new Error('download_unavailable');
+      this.origin(this.page.mainFrame());
+    };
+    check();
+    const root = await this.page
+      .mainFrame()
+      .evaluate<DocumentVersion, boolean>(readVersion, this.collaborationV2);
+    const version = await held.frame.evaluate<DocumentVersion, boolean>(
+      readVersion,
+      this.collaborationV2,
+    );
+    check();
+    if (root.document !== held.rootDocument || version.document !== held.document)
+      throw new Error('download_unavailable');
+  }
+  async readDownloadChunk(
+    id: string,
+    offset: number,
+    length: number,
+    current: () => boolean,
+  ): Promise<Uint8Array> {
+    this.assertAvailable();
+    const held = this.download;
+    if (!held || held.id !== id || typeof current !== 'function')
+      throw new Error('download_unavailable');
+    try {
+      const allowed = () => this.download === held && !this.disposed && current() && held.current();
+      await this.assertDownloadDocument(held, allowed);
+      const bytes = held.file.read(offset, length);
+      if (!allowed()) {
+        bytes.fill(0);
+        throw new Error('download_unavailable');
+      }
+      return bytes;
+    } catch {
+      this.releaseDownload(id);
+      throw new Error('download_unavailable');
+    }
+  }
+  releaseDownload(id?: string): void {
+    const held = this.download;
+    if (!held || (id !== undefined && held.id !== id)) return;
+    this.download = null;
+    clearTimeout(held.timer);
+    held.file.dispose();
+    for (const detach of [
+      () => this.page.off('framenavigated', held.navigated),
+      () => this.page.off('framedetached', held.navigated),
+      () => this.page.off('close', held.closed),
+    ]) {
+      try {
+        detach();
+      } catch {
+        /* the owned page may already be detached */
+      }
+    }
+  }
   private async executeInternal(
     action: DriverAction,
     binding: UserBrowserBinding,
@@ -1263,6 +1550,7 @@ export class SelectedTargetResolver {
       click: () => Promise<void>,
     ) => Promise<void>,
   ): Promise<void> {
+    this.assertAvailable(!!nativeChooserClick);
     const ticket = this.ticket;
     this.ticket = null;
     if (
@@ -1401,6 +1689,7 @@ export class SelectedTargetResolver {
     }
   }
   async scroll(deltaX: number, deltaY: number): Promise<void> {
+    this.assertAvailable();
     this.origin(this.page.mainFrame());
     await this.page.mouse.wheel(deltaX, deltaY);
   }
