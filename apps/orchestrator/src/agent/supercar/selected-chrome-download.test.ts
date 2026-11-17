@@ -15,10 +15,13 @@ import {
   SelectedChromeSession,
   type SessionReply,
 } from '../../../../extension/src/background/selected-chrome-session.js';
+import { env } from '../../config/env.js';
 import { createBrowserTaskFileScope } from '../../files/browser-task-file-scope.js';
 import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
+import { renderFile } from '../../files/writers.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
+import type { TableAggregate } from '../browser-tools/browser-task-table.js';
 import { BrowserControl } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
 import { runSelectedChromeTask } from './selected-chrome-runner.js';
@@ -454,9 +457,13 @@ describe('optional original-download session capability', () => {
 });
 
 describe('task download tool uses the shared action gate and actual file service', () => {
-  it.each(['saved', 'store-unknown', 'permission-denied'])(
+  it.each(['saved', 'analyzed', 'store-unknown', 'permission-denied'])(
     'keeps truthful file delivery when %s',
     async (mode) => {
+      const priorFlag = env.BROWSER_TASK_FILES_V1;
+      if (mode === 'analyzed') env.BROWSER_TASK_FILES_V1 = true;
+      let table: TableAggregate | undefined;
+      let generatedId: string | undefined;
       await page.goto(
         `${origin}/?ticket=PRIVATE-DOWNLOAD-731&range=7&X-Amz-Signature=PRIVATE-DOWNLOAD-731`,
       );
@@ -498,6 +505,51 @@ describe('task download tool uses the shared action gate and actual file service
           offered = request.tools?.some((tool) => tool.name === 'browser_download_file') ?? false;
           expect(offered).toBe(true);
           const first = ++calls === 1;
+          let name = first ? 'browser_download_file' : 'browser_finish';
+          let input: Record<string, unknown> = first
+            ? { selector: action.selector }
+            : { status: 'completed', summary: '已下载 report.csv', evidenceText: 'Export report' };
+          if (mode === 'analyzed' && !first) {
+            expect(request.tools?.map((tool) => tool.name)).toContain('read_task_file');
+            const fileId = scope.references()[0]!.fileId;
+            if (calls === 2) {
+              name = 'read_task_file';
+              input = { fileId };
+            } else if (calls === 3) {
+              const text = JSON.stringify(request.messages);
+              expect(text).toContain('ORIGINAL-731');
+              name = 'analyze_task_table';
+              input = { fileId, mode: 'aggregate', metrics: [{ op: 'sum', column: 'B' }] };
+            } else if (calls === 4) {
+              const last = request.messages
+                .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+                .filter((block) => block.type === 'tool_result')
+                .at(-1);
+              if (!last || last.type !== 'tool_result' || typeof last.content !== 'string')
+                throw new Error('no table receipt');
+              table = JSON.parse(last.content) as TableAggregate;
+              expect(table.overall[0]?.value).toBe('31');
+              expect(table.complete).toBe(true);
+              name = 'create_file';
+              input = {
+                filename: 'analysis.csv',
+                format: 'csv',
+                content: `metric,value\nquantity,${table.overall[0]!.value}\n`,
+              };
+            } else {
+              input = {
+                status: 'completed',
+                summary: '已读取原报表、核对统计并交付分析文件。',
+                evidenceText: 'Export report',
+                fields: table!.overall.map((metric) => ({
+                  name: metric.name,
+                  value: metric.value,
+                  fileId,
+                  tableFactId: metric.id,
+                })),
+              };
+            }
+          }
           return {
             id: `download-${calls}`,
             metadata,
@@ -506,14 +558,8 @@ describe('task download tool uses the shared action gate and actual file service
               {
                 type: 'tool_use',
                 id: `download-tool-${calls}`,
-                name: first ? 'browser_download_file' : 'browser_finish',
-                input: first
-                  ? { selector: action.selector }
-                  : {
-                      status: 'completed',
-                      summary: '已下载 report.csv',
-                      evidenceText: 'Export report',
-                    },
+                name,
+                input,
               },
             ],
             usage: {
@@ -529,14 +575,43 @@ describe('task download tool uses the shared action gate and actual file service
       try {
         const result = await runSelectedChromeTask({
           taskId: 'task-download',
-          intent: '导出 report.csv 并交给我',
+          intent:
+            mode === 'analyzed'
+              ? '导出 report.csv，读取并统计，再生成 analysis.csv 交给我'
+              : '导出 report.csv 并交给我',
           messagesAdapter: adapter,
           client: h.client,
           control: h.control,
           target: { tabId: 731, expectedUrl: origin, selectionId: token },
           browserTaskFiles: scope,
-          maxIterations: 3,
+          maxIterations: mode === 'analyzed' ? 6 : 3,
           timeoutMs: 10000,
+          ...(mode === 'analyzed'
+            ? {
+                createFileFormats: ['csv'],
+                onCreateFile: async ({
+                  filename,
+                  content,
+                }: { filename: string; content: string }) => {
+                  const rendered = await renderFile('csv', content);
+                  const row = await disk.service.storeOutput({
+                    userIdInternal: 7,
+                    userExternalId: 'usr_alice',
+                    taskIdInternal: 11,
+                    filename,
+                    mimetype: rendered.mimetype,
+                    buffer: rendered.buffer,
+                  });
+                  generatedId = row.externalId;
+                  return {
+                    fileId: row.externalId,
+                    filename: row.filename,
+                    size: row.sizeBytes,
+                    downloadUrl: `/api/files/${row.externalId}/download`,
+                  };
+                },
+              }
+            : {}),
           ...(mode === 'permission-denied'
             ? {
                 onBeforeAction: async () => ({
@@ -581,7 +656,7 @@ describe('task download tool uses the shared action gate and actual file service
         expect(await page.locator('body').getAttribute('data-clicks')).toBe(
           mode === 'permission-denied' ? null : '1',
         );
-        if (mode === 'saved') {
+        if (mode === 'saved' || mode === 'analyzed') {
           expect(result.status, JSON.stringify(result)).toBe('completed');
           expect(published).toHaveLength(1);
           const loaded = await disk.service.loadMany([published[0]!.fileId], 7);
@@ -592,6 +667,17 @@ describe('task download tool uses the shared action gate and actual file service
             kind: 'browser_download',
             origin,
           });
+          if (mode === 'analyzed') {
+            expect(generatedId).toBeDefined();
+            const output = await disk.service.loadMany([generatedId!], 7);
+            expect(
+              output[0]!.buffer
+                .toString()
+                .replace(/^\uFEFF/, '')
+                .replace(/\r\n/g, '\n'),
+            ).toBe('metric,value\nquantity,31\n');
+            if (result.status === 'completed') expect(result.summary).toContain(generatedId!);
+          }
         } else {
           expect(result.status).not.toBe('completed');
           expect(published).toHaveLength(0);
@@ -600,6 +686,7 @@ describe('task download tool uses the shared action gate and actual file service
           mode === 'permission-denied' ? 0 : 1,
         );
       } finally {
+        env.BROWSER_TASK_FILES_V1 = priorFlag;
         await rm(disk.root, { recursive: true, force: true });
       }
     },
