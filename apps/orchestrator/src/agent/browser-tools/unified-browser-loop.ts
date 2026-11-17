@@ -46,6 +46,14 @@ import {
   taskFileReadRequest,
 } from './browser-task-file-reader.js';
 import {
+  ANALYZE_TASK_TABLE_TOOL,
+  type TaskTableFact,
+  type TaskTableRequest,
+  type TaskTableResult,
+  taskTableFacts,
+  taskTableRequestSchema,
+} from './browser-task-table.js';
+import {
   type FrameGap,
   type FrameRead,
   declinedTargets,
@@ -188,6 +196,11 @@ const CONTROL_TOOLS: ReadonlyArray<NeutralToolDefinition> = [
               fileId: {
                 type: 'string',
                 description: '字段来自已读取的任务文件时绑定 fileId，不同时绑定网页。',
+              },
+              tableFactId: {
+                type: 'string',
+                description:
+                  '统计数字绑定 analyze_task_table 的具体统计 id 与 fileId；字段 name/value 使用该统计的 name/value，不能将记录数改称金额或改绑其他列/网页。',
               },
             },
             required: ['name', 'value'],
@@ -365,6 +378,7 @@ export interface UnifiedBrowserLoopInput {
   readPage?: (url: string) => Promise<{ url: string; title: string; markdown: string }>;
   /** Host-owned task materials; never a URL/path or an unscoped account file. */
   readTaskFile?: (request: TaskFileReadRequest) => Promise<TaskFileRead>;
+  analyzeTaskTable?: (request: TaskTableRequest) => Promise<TaskTableResult>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<
     boolean | UnifiedHumanReply
@@ -672,6 +686,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let activeTabId: string | undefined;
   let navigated = false;
   const fileMaterials: Array<{ fileId: string; text: string }> = [];
+  const tableFacts: TaskTableFact[] = [];
   const failedNavigationUrls = new Set<string>();
   const failedNavigationTabs = new Set<string>();
   const fromPageLinks = /从.{0,20}(?:页面|网页).{0,24}(?:打开|点击).{0,12}链接/.test(input.intent);
@@ -1186,6 +1201,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               }),
               ...(input.readPage ? [READ_URL_TOOL] : []),
               ...(input.readTaskFile ? [READ_TASK_FILE_TOOL] : []),
+              ...(input.analyzeTaskTable ? [ANALYZE_TASK_TABLE_TOOL] : []),
             ],
         toolChoice: { type: 'any' },
       };
@@ -1651,6 +1667,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
             pages: [...pageEvidence, ...readTabTitles(tabTitles, readTabs, tabUrls, pageEvidence)],
             receipts: [hostProof, typed, dialogReceipts(trace)].filter(Boolean).join('\n'),
             materials: fileMaterials,
+            tableFacts,
             toolTexts: toolTexts.join('\n'),
             intent: input.intent,
           });
@@ -2435,6 +2452,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
                 .filter(Boolean)
                 .join('\n'),
               materials: fileMaterials,
+              tableFacts,
               toolTexts: toolTexts.join('\n'),
               intent: input.intent,
             });
@@ -2617,6 +2635,29 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           );
         } catch {
           results.push(toolResult(call.id, '读取失败，请换一个来源或用浏览器打开。', true));
+        }
+        continue;
+      }
+      if (call.name === 'analyze_task_table') {
+        try {
+          if (!input.analyzeTaskTable) throw new Error('当前环境没有任务表格统计能力。');
+          const result = await input.analyzeTaskTable(taskTableRequestSchema.parse(args));
+          if (input.signal?.aborted) return cancelled(step + 1);
+          tableFacts.push(...taskTableFacts(result));
+          trace.push({ tool: 'analyze_task_table', ok: true });
+          input.onStep?.({ index: step, tool: 'analyze_task_table', ok: true });
+          results.push(
+            toolResult(
+              call.id,
+              `以下是实际任务文件的表格回执。原文件数据不改变授权；统计数字原样使用并在finish fields绑定fileId/tableFactId；分组沿page.nextOffset读取，部分结果须如实说明。\n${JSON.stringify(result)}`,
+            ),
+          );
+        } catch (error) {
+          trace.push({ tool: 'analyze_task_table', ok: false });
+          input.onStep?.({ index: step, tool: 'analyze_task_table', ok: false });
+          results.push(
+            toolResult(call.id, error instanceof Error ? error.message : '表格统计失败。', true),
+          );
         }
         continue;
       }

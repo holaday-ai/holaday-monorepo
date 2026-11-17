@@ -255,6 +255,7 @@ interface Fact {
   tabId?: string;
   sourceURL?: string;
   fileId?: string;
+  tableFactId?: string;
   /** One item of a list (e.g. search results): no single-heading comparison. */
   listItem?: boolean;
   /** A quoted literal: not finding it verbatim means the page never said it. */
@@ -402,6 +403,7 @@ function explicitFacts(input: unknown): Fact[] {
         ...(typeof f.tabId === 'string' ? { tabId: f.tabId } : {}),
         ...(typeof f.sourceURL === 'string' ? { sourceURL: f.sourceURL } : {}),
         ...(typeof f.fileId === 'string' ? { fileId: f.fileId } : {}),
+        ...(typeof f.tableFactId === 'string' ? { tableFactId: f.tableFactId } : {}),
       },
     ];
   });
@@ -1054,6 +1056,13 @@ export function assessCompletionFacts(input: {
   receipts?: string;
   /** Actual file ranges read by the host; these never prove a page/tab binding. */
   materials?: readonly { fileId: string; text: string }[];
+  tableFacts?: readonly {
+    id: string;
+    fileId: string;
+    name: string;
+    value: string;
+    complete: boolean;
+  }[];
   /** Everything the host returned to the model (errors included): grounds quotes only. */
   toolTexts?: string;
   intent?: string;
@@ -1120,7 +1129,7 @@ export function assessCompletionFacts(input: {
     },
   );
   for (const fact of facts) {
-    const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}|${fact.fileId ?? ''}`;
+    const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}|${fact.fileId ?? ''}|${fact.tableFactId ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     // "未读到" declares a value absent: it claims nothing about the page.
@@ -1154,6 +1163,22 @@ export function assessCompletionFacts(input: {
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
     const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
+    if (fact.tableFactId) {
+      const computed = input.tableFacts?.find(
+        (value) => value.id === fact.tableFactId && value.fileId === fact.fileId,
+      );
+      if (
+        !computed ||
+        fact.tabId ||
+        fact.sourceURL ||
+        normalizeFact(computed.name) !== normalizeFact(fact.name) ||
+        normalizeFact(computed.value) !== normalizeFact(fact.value)
+      )
+        contradictions.push(`${label} 与绑定的实际统计回执不符或混用了其他出处`);
+      else if (!computed.complete && !/^\s*(?:部分完成|partially completed)/i.test(input.summary))
+        contradictions.push(`${label} 属于存在缺失或无效数据的部分统计，不能作为完整结果交付`);
+      continue;
+    }
     const fromMaterial = candidates.some((value) =>
       materials.some(
         (material) =>

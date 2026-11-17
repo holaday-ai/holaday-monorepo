@@ -151,8 +151,13 @@ export class BrowserTaskFileReader {
       throw new Error('文件无法读取、已失效或不在本任务材料范围内，尚未完成分析。');
     }
   }
-  incomplete(): boolean {
-    return this.failed.size > 0 || [...this.reads.values()].some((read) => !read.coverage.complete);
+  incomplete(analyzedFiles: ReadonlySet<string> = new Set()): boolean {
+    return (
+      this.failed.size > 0 ||
+      [...this.reads.values()].some(
+        (read) => !read.coverage.complete && !analyzedFiles.has(read.fileId),
+      )
+    );
   }
   coverageNote(english = false): string {
     const rows = [...this.reads.values()].map((read) => {

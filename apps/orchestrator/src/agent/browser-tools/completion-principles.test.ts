@@ -59,6 +59,24 @@ describe('normalization', () => {
 });
 
 describe('fact assessment', () => {
+  it('does not relabel a bound row count as an amount total even if the value is a real computed number', () => {
+    const result = assessCompletionFacts({
+      summary: '完整统计',
+      fields: [
+        {
+          name: 'amount [B] 合计',
+          value: '10001',
+          fileId: 'file_report',
+          tableFactId: 'tbf_count',
+        },
+      ],
+      pages: [],
+      tableFacts: [
+        { id: 'tbf_count', fileId: 'file_report', name: '记录数', value: '10001', complete: true },
+      ],
+    });
+    expect(result.contradictions.length).toBeGreaterThan(0);
+  });
   it('grounds actual file fields without using file contents to prove a bound or unread webpage', () => {
     const materials = [{ fileId: 'file_report', text: 'sku,qty\nTAIL-731,31\n' }];
     expect(

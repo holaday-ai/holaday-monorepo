@@ -33,6 +33,7 @@ import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
 import { BrowserTaskFileReader } from './browser-task-file-reader.js';
 import type { ValidatedBrowserTaskFile } from './browser-task-files.js';
+import { BrowserTaskTable } from './browser-task-table.js';
 import { browserToolError } from './browser-tool-error.js';
 import { createBrowserUploadGate } from './browser-upload-gate.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
@@ -309,6 +310,16 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
       ? new BrowserTaskFileReader(opts.browserTaskFiles)
       : undefined;
+  const fileTables = fileReader ? new BrowserTaskTable(opts.browserTaskFiles!) : undefined;
+  const fileWorkIncomplete = () =>
+    Boolean(fileReader?.incomplete(fileTables?.completeFiles()) || fileTables?.incomplete());
+  const fileWorkNote = () =>
+    [
+      fileReader?.coverageNote(isEnglishIntent(opts.intent)),
+      fileTables?.coverageNote(isEnglishIntent(opts.intent)),
+    ]
+      .filter(Boolean)
+      .join('\n');
   let fileReadCorrection = false;
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);
@@ -1055,6 +1066,66 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
+      ...(fileTables
+        ? {
+            analyzeTaskTable: async (request: Parameters<BrowserTaskTable['run']>[0]) => {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务表格统计已停止。');
+              toolsUsed.add('analyze_task_table');
+              const result = await fileTables.run(request, controller.signal);
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务表格统计已停止。');
+              const evidence = {
+                fileId: result.fileId,
+                sha256: result.sha256,
+                scope: result.scope,
+                columns: result.columns,
+                ...(result.mode === 'aggregate'
+                  ? {
+                      analysisId: result.analysisId,
+                      overall: result.overall,
+                      groups: result.groups,
+                      page: result.page,
+                      complete: result.complete,
+                    }
+                  : {}),
+              };
+              await safe(() =>
+                opts.onEvidence?.({
+                  fact: JSON.stringify(evidence),
+                  sourceType: 'tool_result',
+                  sourceDetail: `task-file:${result.fileId}`,
+                  confidence: 'extracted',
+                }),
+              );
+              await safe(() =>
+                opts.onTick?.({
+                  iteration: ++iteration,
+                  execution: {
+                    actionKind: 'analyze_task_table',
+                    actionSummary:
+                      result.mode === 'aggregate'
+                        ? `已统计CSV：扫描${result.scope.scannedRows}条，匹配${result.scope.matchedRows}条`
+                        : `已读取CSV结构：${result.columns.length}列、${result.scope.scannedRows}条数据`,
+                    ok: true,
+                    message: JSON.stringify(evidence),
+                  },
+                  toolsInTurn: [],
+                  textPreamble: '',
+                  apiLatencyMs: 0,
+                }),
+              );
+              if (
+                !env.BROWSER_TASK_FILES_V1 ||
+                controller.signal.aborted ||
+                sessionStopped() ||
+                !(await opts.browserTaskFiles!.isActive())
+              )
+                throw new Error('任务表格统计已停止。');
+              return result;
+            },
+          }
+        : {}),
       ...(fileReader
         ? {
             readTaskFile: async (request: Parameters<BrowserTaskFileReader['read']>[0]) => {
@@ -1299,10 +1370,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           };
         if (
           answer.status === 'completed' &&
-          fileReader?.incomplete() &&
+          fileWorkIncomplete() &&
           !/^\s*(?:部分完成|partially completed)/i.test(answer.summary)
         ) {
-          const message = `尚未读取完整的请求文件，不能宣告全量分析完成。请继续 read_task_file 的 nextOffset，或以“部分完成”开头明确说明只读取了哪些范围。\n${fileReader.coverageNote(isEnglishIntent(opts.intent))}`;
+          const message = `尚未读取完整的请求文件，或统计存在未返回分组/缺失/无效值，不能宣告全量分析完成。请继续 read_task_file 的 nextOffset 或 analyze_task_table 的 page.nextOffset；无法补齐时以“部分完成”开头说明实际范围。\n${fileWorkNote()}`;
           if (fileReadCorrection)
             return { kind: 'stop', outcome: { status: 'failed', reason: message, steps: 0 } };
           fileReadCorrection = true;
@@ -1381,15 +1452,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return {
           status: 'completed',
           summary: withAlternateNotice(
-            [outcome.summary, fileReader?.coverageNote(isEnglishIntent(opts.intent))]
-              .filter(Boolean)
-              .join('\n\n'),
+            [outcome.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
           ),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
           ...(outcome.partial
             ? { partial: outcome.partial }
-            : fileReader?.incomplete()
+            : fileWorkIncomplete()
               ? {
                   partial: {
                     found: 0,
@@ -1430,7 +1499,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         if (
           timedOut &&
           outcome.heldAnswer &&
-          !fileReader?.incomplete() &&
+          !fileWorkIncomplete() &&
           (!fileReader || env.BROWSER_TASK_FILES_V1)
         ) {
           await safe(() =>
@@ -1444,9 +1513,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           return {
             status: 'completed',
             summary: withAlternateNotice(
-              [outcome.heldAnswer.summary, fileReader?.coverageNote(isEnglishIntent(opts.intent))]
-                .filter(Boolean)
-                .join('\n\n'),
+              [outcome.heldAnswer.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
             ),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],

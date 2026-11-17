@@ -90,11 +90,16 @@ it.each([
   'file-upload-reply',
   'file-upload-manual-data',
   'file-download-read',
+  'file-download-table',
 ] as const)(
   'unified executor through tasks.create: %s',
   async (scenario) => {
     const manualData = scenario === 'file-upload-manual-data';
-    const downloading = scenario === 'file-download-read';
+    const tableAnalysis = scenario === 'file-download-table';
+    const downloading = scenario.startsWith('file-download');
+    const downloadCsv = tableAnalysis
+      ? `channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`
+      : 'sku,qty\nAPI-DOWN-731,31\n';
     const withReply = scenario === 'file-upload-reply' || manualData;
     const uploadFixture = scenario.startsWith('file-') ? await browserOutputFixture() : undefined;
     let replying = false;
@@ -267,13 +272,40 @@ it.each([
                       : undefined;
                     downloadedFileId =
                       result?.type === 'tool_result' ? JSON.parse(result.content).fileId : '';
-                    return [toolUse('r1', 'read_task_file', { fileId: downloadedFileId })];
+                    return [
+                      toolUse(
+                        'r1',
+                        tableAnalysis ? 'analyze_task_table' : 'read_task_file',
+                        tableAnalysis
+                          ? {
+                              fileId: downloadedFileId,
+                              mode: 'aggregate',
+                              metrics: [{ op: 'count_rows' }, { op: 'sum', column: 'B' }],
+                            }
+                          : { fileId: downloadedFileId },
+                      ),
+                    ];
                   })()
                 : [
                     toolUse('f1', 'finish', {
                       status: 'completed',
-                      summary: '导出文件 report.csv 中的 SKU 为 API-DOWN-731，数量31。',
-                      fields: [{ name: 'SKU', value: 'API-DOWN-731', fileId: downloadedFileId }],
+                      summary: tableAnalysis
+                        ? '导出报表共10001条记录，金额合计1099.9。'
+                        : '导出文件 report.csv 中的 SKU 为 API-DOWN-731，数量31。',
+                      fields: tableAnalysis
+                        ? [
+                            {
+                              name: 'amount [B] 合计',
+                              value: '1099.9',
+                              fileId: downloadedFileId,
+                              tableFactId: [
+                                ...JSON.stringify(request.messages.at(-1)).matchAll(
+                                  /tbf_[a-f0-9]{32}/g,
+                                ),
+                              ].map((match) => match[0])[1],
+                            },
+                          ]
+                        : [{ name: 'SKU', value: 'API-DOWN-731', fileId: downloadedFileId }],
                     }),
                   ]
           : manualData
@@ -384,7 +416,7 @@ it.each([
         route.fulfill({
           contentType: 'text/csv',
           headers: { 'content-disposition': 'attachment; filename="report.csv"' },
-          body: 'sku,qty\nAPI-DOWN-731,31\n',
+          body: downloadCsv,
         }),
       );
     await page.goto('https://fixture.browser.test/');
@@ -498,7 +530,9 @@ it.each([
       const result = await tasksRouter.createCaller(ctx).create({
         // Executor path under test; an explicit order/login need would route to the user's Chrome.
         intent: downloading
-          ? '下载本站报表并读取整个导出文件，报告其中的SKU和数量'
+          ? tableAnalysis
+            ? '下载本站CSV报表，统计全部数据记录数及金额合计'
+            : '下载本站报表并读取整个导出文件，报告其中的SKU和数量'
           : manualData
             ? '打开报表页面读取数据并整理分析，无法读取时使用我补充的数据'
             : uploadFixture
@@ -535,22 +569,29 @@ it.each([
       if (downloading) {
         expect(outcome, diagnostics).toMatchObject({
           status: 'completed',
-          summary: expect.stringContaining('API-DOWN-731'),
+          summary: expect.stringContaining(tableAnalysis ? '1099.9' : 'API-DOWN-731'),
         });
         expect(JSON.stringify(outcome)).toContain(downloadedFileId);
         expect(JSON.stringify(outcome)).toContain('网站导出范围尚未核实');
         const [stored] = await uploadFixture!.service.loadMany([downloadedFileId], 7);
-        expect(stored?.buffer.toString()).toBe('sku,qty\nAPI-DOWN-731,31\n');
+        expect(stored?.buffer.toString()).toBe(downloadCsv);
         expect(stored?.row).toMatchObject({
           taskId: 91,
           kind: 'output',
           mimetype: 'application/octet-stream',
         });
         expect(await uploadFixture!.service.loadMany([downloadedFileId], 8)).toEqual([]);
-        expect(JSON.stringify(requests.at(-1)?.messages)).toContain('API-DOWN-731');
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
+          tableAnalysis ? '1099.9' : 'API-DOWN-731',
+        );
         expect(await page.locator('#status').textContent()).toBe('草稿');
         expect(consume).toHaveBeenCalledTimes(1);
         expect(requests).toHaveLength(4);
+        if (tableAnalysis)
+          await vi.waitFor(() => {
+            expect(JSON.stringify(stepRecords)).toContain('analyze_task_table');
+            expect(JSON.stringify(stepRecords)).toContain('1099.9');
+          });
         return;
       }
       if (manualData) {

@@ -489,6 +489,107 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       await c.cleanup();
     }
   });
+  it('analyzes an actual saved CSV and rejects a final statistic that differs from its bound computation', async () => {
+    const c = await uploadFixture('t_download_table', false);
+    const csv = `channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`;
+    await c.page.route('https://fixture.browser.test/export.csv', (route) =>
+      route.fulfill({
+        contentType: 'text/csv',
+        headers: { 'content-disposition': 'attachment; filename="report.csv"' },
+        body: csv,
+      }),
+    );
+    await c.page.setContent('<a href="/export.csv">Export report</a>');
+    let fileId = '';
+    let sumFactId = '';
+    const requests: NeutralMessagesRequest[] = [];
+    const final = (value: string) =>
+      call('finish', {
+        status: 'completed',
+        summary: `导出报表共10001条记录，金额合计${value}。`,
+        fields: [{ name: 'amount [B] 合计', value, fileId, tableFactId: sumFactId }],
+      });
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_download_table',
+        intent: '下载本站CSV报表，统计全部记录的金额合计和记录数',
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        onBrowserDownload: async ({ filename, buffer, sha256 }) => {
+          const row = await c.f.service.storeOutput({
+            userIdInternal: 7,
+            userExternalId: 'usr_alice',
+            taskIdInternal: 9,
+            filename,
+            mimetype: 'text/csv',
+            buffer,
+          });
+          fileId = row.externalId;
+          return {
+            fileId,
+            filename: row.filename,
+            sizeBytes: buffer.length,
+            sha256,
+            downloadUrl: `/api/files/${fileId}/download`,
+            mimetype: row.mimetype,
+            expiresAt: row.expiresAt!.toISOString(),
+          };
+        },
+        messagesAdapter: scripted([
+          (r) => {
+            requests.push(r);
+            return [call('snapshot', {})];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('download', { ref: refIn(r, /link.*Export report/) })];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('read_task_file', { fileId, offset: 0, maxChars: 32 })];
+          },
+          (r) => {
+            requests.push(r);
+            return [call('analyze_task_table', { fileId, mode: 'describe' })];
+          },
+          (r) => {
+            requests.push(r);
+            return [
+              call('analyze_task_table', {
+                fileId,
+                mode: 'aggregate',
+                metrics: [{ op: 'count_rows' }, { op: 'sum', column: 'B' }],
+              }),
+            ];
+          },
+          (r) => {
+            requests.push(r);
+            const text = JSON.stringify(r.messages.at(-1));
+            sumFactId =
+              [...text.matchAll(/tbf_[a-f0-9]{32}/g)].map((match) => match[0])[1] ?? 'missing';
+            return [final('1099.8')];
+          },
+          (r) => {
+            requests.push(r);
+            return [final('1099.9')];
+          },
+        ]),
+      });
+      expect(outcome.status, JSON.stringify(outcome)).toBe('completed');
+      expect(outcome.summary).toContain('1099.9');
+      expect(outcome.summary).not.toContain('1099.8');
+      expect(JSON.stringify(requests[6]?.messages.at(-1))).toContain('统计');
+      expect(requests).toHaveLength(7);
+      expect(outcome.toolsUsed).toContain('analyze_task_table');
+      expect(outcome.partial).toBeUndefined();
+      expect(outcome.summary).toContain('32/');
+      expect(outcome.summary).toContain('10001');
+      expect(outcome.summary).toContain('网站导出范围尚未核实');
+      expect(await c.page.locator('input').count()).toBe(0);
+    } finally {
+      await c.cleanup();
+    }
+  }, 30_000);
   it.each([false, true])(
     'autonomously delivers task bytes to an actual detached native chooser (v2=%s)',
     async (collaborationV2) => {
