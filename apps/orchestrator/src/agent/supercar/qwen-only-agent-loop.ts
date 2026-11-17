@@ -39,7 +39,7 @@ export function supercarHandoffToGenerate(
 ): boolean {
   return (
     unifiedSupercarHandoffToGenerate(taskId, message, attachments, files) ||
-    legacyHandoff(taskId, message, attachments)
+    legacyHandoff(taskId, message, attachments, files)
   );
 }
 
@@ -56,7 +56,7 @@ export function supercarReply(
 ): boolean {
   return (
     unifiedSupercarReply(taskId, message, attachmentBlocks, files) ||
-    legacyReply(taskId, message, attachmentBlocks)
+    legacyReply(taskId, message, attachmentBlocks, files)
   );
 }
 

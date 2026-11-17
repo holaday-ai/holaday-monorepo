@@ -5,6 +5,7 @@ import { createExternalBrowserPark } from '../../agent/supercar/agent-loop.js';
 import { supercarReply } from '../../agent/supercar/qwen-only-agent-loop.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { env } from '../../config/env.js';
+import { createBrowserTaskFileScope } from '../../files/browser-task-file-scope.js';
 import { _resetSharedStorageProviderForTesting } from '../../files/storage-provider.js';
 import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type { Context } from '../context.js';
@@ -17,6 +18,94 @@ afterEach(() => {
   vi.restoreAllMocks();
   _resetSharedStorageProviderForTesting();
 });
+
+it.each([false, true])(
+  'keeps actual reply file authority in the same task before releasing the wait (changed=%s)',
+  async (changed) => {
+    const f = await browserOutputFixture();
+    vi.stubEnv('HOLADAY_FILES_ROOT', f.root);
+    vi.stubEnv('STORAGE_PROVIDER', 'local');
+    _resetSharedStorageProviderForTesting();
+    Object.assign(env, { AGENT_MODE: 'legacy', BROWSER_TASK_FILES_V1: true });
+    const row = f.taskRecords[0]!;
+    Object.assign(row, {
+      status: 'awaiting_user',
+      intent: '请处理网页报告',
+      executionId: null,
+      executionRevision: 0,
+      coreRecordVersion: 0,
+      awaitingKind: 'clarification',
+      awaitingQuestion: '请提供报告',
+      result: { executionMode: 'browser' },
+    });
+    const scope = createBrowserTaskFileScope({
+      db: f.db,
+      files: f.service,
+      taskId: 'tsk_alice',
+      userId: 7,
+      origin: 'user',
+      inputs: [],
+    });
+    const file = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'report.csv',
+      mimetype: 'text/csv',
+      buffer: Buffer.from('sku,qty\nA-731,31\n'),
+    });
+    if (changed) {
+      scope.admitValidated(await f.service.loadMany([file.externalId], 7));
+      f.records.find((item) => item.externalId === file.externalId)!.filename = 'changed.csv';
+    }
+    const mark = vi
+      .spyOn(TaskRepository.prototype, 'markAwaitingReplyResumed')
+      .mockImplementation(async () => {
+        row.status = 'executing';
+        return { persisted: true };
+      });
+    const parking = createExternalBrowserPark({
+      taskId: 'tsk_alice',
+      intent: '处理网页报告',
+      browserTaskFiles: scope,
+      aborted: () => false,
+    });
+    const pending = parking.park('请提供报告', 'clarification');
+    try {
+      const caller = tasksRouter.createCaller({
+        db: f.db,
+        userId: 'usr_alice',
+        taskOrigin: 'user',
+        logger: pino({ level: 'silent' }),
+        req: {},
+        res: {},
+        planner: {},
+        browserPool: null,
+      } as unknown as Context);
+      const reply = caller.reply({
+        taskId: 'tsk_alice',
+        message: '报告已提供',
+        fileIds: [file.externalId],
+      });
+      if (changed) {
+        await expect(reply).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+        expect(mark).not.toHaveBeenCalled();
+        expect(row.status).toBe('awaiting_user');
+        expect(scope.references()).toMatchObject([{ fileId: file.externalId, name: 'report.csv' }]);
+      } else {
+        expect(await reply).toMatchObject({ ok: true, state: 'resumed' });
+        expect(await pending).toBe('报告已提供');
+        expect(scope.references()).toMatchObject([{ fileId: file.externalId, name: 'report.csv' }]);
+        expect((await scope.resolve('tsk_alice', [file.externalId]))[0]!.buffer.toString()).toBe(
+          'sku,qty\nA-731,31\n',
+        );
+      }
+    } finally {
+      parking.close();
+      await pending;
+      await rm(f.root, { recursive: true, force: true });
+    }
+  },
+);
 
 it('rejects oversized Chrome reply material before releasing the persisted task wait', async () => {
   const f = await browserOutputFixture();

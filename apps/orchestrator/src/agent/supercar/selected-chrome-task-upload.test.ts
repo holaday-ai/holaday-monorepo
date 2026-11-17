@@ -13,6 +13,7 @@ import type { MessagesAdapter, NeutralMessagesRequest } from '../../llm/messages
 import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
 import { createBrowserUploadGate } from '../browser-tools/browser-upload-gate.js';
 import { BrowserControl } from './browser-control.js';
+import { supercarReply } from './qwen-only-agent-loop.js';
 import { classifyRuntimeAction } from './runtime-action-policy.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
 import { runSelectedChromeTask } from './selected-chrome-runner.js';
@@ -191,6 +192,94 @@ async function fixture(clientTaskId = 'tsk_alice', open = true) {
 }
 
 describe('scoped task files and shared disclosure gate on a real native target', () => {
+  it('admits a validated file supplied during a real Chrome clarification wait to the original task', async () => {
+    const f = await fixture('tsk_alice', false);
+    const scope = createBrowserTaskFileScope({
+      db: f.db,
+      files: f.service,
+      taskId: 'tsk_alice',
+      userId: 7,
+      origin: 'user',
+      inputs: [],
+    });
+    const references = BrowserTaskFiles.validatedReferences(
+      await f.service.loadMany([f.row.externalId], 7),
+      7,
+    );
+    let calls = 0;
+    const metadata: MessagesAdapter['metadata'] = {
+      provider: 'alibaba-model-studio',
+      model: 'synthetic',
+      region: 'cn',
+      deploymentScope: 'china_mainland',
+      endpointKind: 'public',
+      protocol: 'messages',
+    };
+    const adapter: MessagesAdapter = {
+      metadata,
+      create: async (request) => {
+        calls++;
+        if (calls > 1) expect(JSON.stringify(request)).toContain(f.row.externalId);
+        return {
+          id: 'local-reply-file',
+          metadata,
+          stopReason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: `tool-${calls}`,
+              name:
+                calls === 1 ? 'request_human' : calls === 2 ? 'browser_upload' : 'browser_finish',
+              input:
+                calls === 1
+                  ? { reason: 'clarification', message: '请提供 report.csv' }
+                  : calls === 2
+                    ? { selector, fileIds: [f.row.externalId] }
+                    : {
+                        status: 'completed',
+                        summary: '页面已展示 A-731,31',
+                        evidenceText: 'A-731,31',
+                      },
+            },
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    try {
+      const outcome = await runSelectedChromeTask({
+        taskId: 'tsk_alice',
+        intent: `把附件 report.csv 上传到 ${f.origin}，核对页面读到 A-731,31`,
+        browserTaskFiles: scope,
+        messagesAdapter: adapter,
+        client: f.client,
+        control: f.control,
+        target: {
+          tabId: 42,
+          expectedUrl: f.origin,
+          selectionId: '22222222-2222-4222-8222-222222222222',
+        },
+        maxIterations: 4,
+        timeoutMs: 20_000,
+        onAwaitingUser: async (event) => {
+          expect(event.awaitingKind).toBe('clarification');
+          expect(supercarReply('tsk_alice', 'report.csv已提供', [], references)).toBe(true);
+        },
+      });
+      expect(outcome).toMatchObject({ status: 'completed' });
+      expect(scope.references()).toMatchObject([{ fileId: f.row.externalId }]);
+      await vi.waitFor(async () => expect(await f.page.locator('p').textContent()).toBe(content));
+      expect(await f.page.locator('body').getAttribute('data-effects')).toBe('1');
+    } finally {
+      await f.close();
+    }
+  });
   it('cannot finish from old page text after an admitted file was rejected by the native target', async () => {
     const f = await fixture('tsk_alice', false);
     await f.page.locator('#report').evaluate((node) => {

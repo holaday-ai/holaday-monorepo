@@ -115,6 +115,14 @@ export class BrowserTaskFiles {
     });
   }
   admitReferences(files: readonly ValidatedBrowserTaskFile[]): void {
+    for (const reference of this.checkedReferences(files))
+      this.inputs.set(reference.fileId, reference);
+  }
+  /** A reply preflight validates authority without changing the task's materials. */
+  validateReferences(files: readonly ValidatedBrowserTaskFile[]): void {
+    this.checkedReferences(files);
+  }
+  private checkedReferences(files: readonly ValidatedBrowserTaskFile[]): Reference[] {
     const references: Reference[] = [];
     for (const file of files) {
       if (
@@ -135,7 +143,7 @@ export class BrowserTaskFiles {
         throw new Error('已选附件内容发生变化，请重新提交材料。');
       references.push(reference);
     }
-    for (const reference of references) this.inputs.set(reference.fileId, reference);
+    return references;
   }
   async resolve(taskId: string, ids: readonly string[]): Promise<BrowserUploadFile[]> {
     if (

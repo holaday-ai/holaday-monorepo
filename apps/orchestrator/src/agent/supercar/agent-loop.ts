@@ -1,5 +1,6 @@
 import { replyLanguageRule } from '@holaday/shared-types';
 import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
+import type { ValidatedBrowserTaskFile } from '../browser-tools/browser-task-files.js';
 import type { BrowserDownloadReceipt } from '../browser-tools/playwright-unified-executor.js';
 /**
  * Supercar agent loop.
@@ -1175,7 +1176,11 @@ interface RunHandle {
    */
   pendingAttachmentBlocks: ReadonlyArray<{ type: string }> | null;
   replyAttachmentHistory: NonNullable<RunSupercarOptions['attachments']>;
-  validateReply?: (blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>) => void;
+  validateReply?: (
+    blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+    files?: readonly ValidatedBrowserTaskFile[],
+  ) => void;
+  admitReplyFiles?: (files: readonly ValidatedBrowserTaskFile[]) => void;
   canHandoff?: () => boolean;
 }
 
@@ -1186,12 +1191,13 @@ export function validateExternalBrowserReply(
   taskId: string,
   blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
   handoff = false,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): void {
   const handle = handles.get(taskId);
   if (!handle?.validateReply) return;
   if (!handle.resolveReply || (handoff && handle.canHandoff && !handle.canHandoff()))
     throw new Error('Browser reply is not accepted in the current wait');
-  handle.validateReply(blocks);
+  handle.validateReply(blocks, files);
 }
 
 /** Register a non-cloud browser lane with the existing task reply lifecycle. */
@@ -1203,7 +1209,10 @@ export function createExternalBrowserPark(options: {
   aborted: () => boolean;
   timeoutMs?: number;
   attachments?: RunSupercarOptions['attachments'];
+  browserTaskFiles?: RunSupercarOptions['browserTaskFiles'];
 }) {
+  if (options.browserTaskFiles && options.browserTaskFiles.taskId !== options.taskId)
+    throw new Error('browser_task_file_scope_mismatch');
   let parkedKind: SupercarAwaitingKind | null = null;
   const handle: RunHandle = {
     resolveReply: null,
@@ -1212,13 +1221,15 @@ export function createExternalBrowserPark(options: {
     originalIntent: options.intent,
     pendingAttachmentBlocks: null,
     replyAttachmentHistory: [],
-    validateReply: (blocks) => {
+    validateReply: (blocks, files) => {
       browserAttachmentBlocks([
         ...(options.attachments ?? []),
         ...handle.replyAttachmentHistory,
         ...blocks,
       ]);
+      options.browserTaskFiles?.validateReferences(files ?? []);
     },
+    admitReplyFiles: (files) => options.browserTaskFiles?.admitReferences(files),
     canHandoff: () =>
       parkedKind !== null && ['clarification', 'login', 'captcha'].includes(parkedKind),
   };
@@ -1289,11 +1300,13 @@ export function supercarReply(
   taskId: string,
   message: string,
   attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
   try {
-    handle.validateReply?.(attachmentBlocks ?? []);
+    handle.validateReply?.(attachmentBlocks ?? [], files);
+    handle.admitReplyFiles?.(files ?? []);
   } catch {
     return false;
   }
@@ -1334,12 +1347,14 @@ export function supercarHandoffToGenerate(
   taskId: string,
   message: string,
   attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
   if (handle.canHandoff && !handle.canHandoff()) return false;
   try {
-    handle.validateReply?.(attachmentBlocks ?? []);
+    handle.validateReply?.(attachmentBlocks ?? [], files);
+    handle.admitReplyFiles?.(files ?? []);
   } catch {
     return false;
   }

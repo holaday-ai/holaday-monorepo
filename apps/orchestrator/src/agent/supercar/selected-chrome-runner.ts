@@ -523,6 +523,7 @@ export async function runSelectedChromeTask(
           taskId: options.taskId,
           intent: options.intent,
           attachments: options.attachments,
+          browserTaskFiles: options.browserTaskFiles,
           signal: modelAbort.signal,
           onAwaitingUser: options.onAwaitingUser,
           aborted: () => modelAbort.signal.aborted,

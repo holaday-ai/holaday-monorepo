@@ -7550,6 +7550,7 @@ export const tasksRouter = router({
                     intent: effectiveIntent,
                     userRequest: parentUserContext + input.intent,
                     attachments: supercarArgs.attachments,
+                    browserTaskFiles: supercarArgs.browserTaskFiles,
                     messagesAdapter: browserMessagesAdapter,
                     client: session.client,
                     control: session.control,
@@ -9064,6 +9065,7 @@ export const tasksRouter = router({
                   sendExtensionToolCall,
                   ctx.localChromeReservation,
                   taskBrowserCapabilities,
+                  { taskFilesV1: appEnv.BROWSER_TASK_FILES_V1 },
                 );
                 try {
                   await dispatchToBrave(executionContext);
@@ -11390,6 +11392,7 @@ export const tasksRouter = router({
               input.taskId,
               replyAttachmentBlocks,
               replyKind === 'manual_data',
+              replyFileReferences,
             );
           } catch {
             throw new TRPCError({

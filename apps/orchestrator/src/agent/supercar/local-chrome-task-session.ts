@@ -56,6 +56,7 @@ export class LocalChromeTaskSessions {
     send: Send,
     ticket?: LocalChromeReservation,
     capabilities: BrowserCapabilities = Object.freeze(browserCapabilities(userId)),
+    options: { taskFilesV1?: boolean } = {},
   ): Session {
     if (this.get(userId, taskId)) throw new Error('chrome_task_exists');
     const reservation = ticket ?? this.reserve(userId, selection);
@@ -75,6 +76,7 @@ export class LocalChromeTaskSessions {
       control,
       routingV2: capabilities.routingV2,
       collaborationV2: capabilities.collaborationV2,
+      taskFilesV1: options.taskFilesV1 === true,
       send,
     });
     const session = {
