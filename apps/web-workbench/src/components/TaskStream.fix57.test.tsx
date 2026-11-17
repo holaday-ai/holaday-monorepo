@@ -133,3 +133,53 @@ it('while running: one live status line from the steps, not a stack of tool rows
   expect(screen.getByTestId('live-status-line').textContent).toContain('在读东方财富的内容…');
   expect(screen.queryByText(/snapshot|navigate/)).toBeNull();
 });
+
+function terminalFileCase({ unavailable = false, sameFilename = false } = {}) {
+  const payload = {
+    fileId: 'file_shared',
+    filename: 'report.csv',
+    size: 35,
+    downloadUrl: '/api/files/file_shared/download',
+  };
+  const other = {
+    ...payload,
+    fileId: 'file_other',
+    filename: sameFilename ? 'report.csv' : 'analysis.csv',
+    downloadUrl: '/api/files/file_other/download',
+  };
+  const fenced = (file: typeof payload) =>
+    ['```holaday-file', JSON.stringify(file), '```'].join('\n');
+  show({
+    taskId: 'tsk_files',
+    intent: '导出报表并分析',
+    status: 'completed',
+    resultText: ['已完成。', fenced(payload), fenced(other)].join('\n\n'),
+    attachments: [
+      {
+        fileId: payload.fileId,
+        filename: payload.filename,
+        sizeBytes: payload.size,
+        downloadUrl: payload.downloadUrl,
+        mimetype: 'text/csv',
+        kind: 'csv',
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        ...(unavailable ? { availability: 'unavailable' } : {}),
+      },
+    ],
+  });
+}
+it('terminal file cards render one copy of a file returned in both summary and host attachments', () => {
+  terminalFileCase();
+  expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: /analysis\.csv/ })).toHaveLength(1);
+});
+it('terminal file cards keep host unavailability authoritative over an old inline download', () => {
+  terminalFileCase({ unavailable: true });
+  const buttons = screen.getAllByRole('button', { name: /report\.csv/ });
+  expect(buttons).toHaveLength(1);
+  expect(buttons[0]?.hasAttribute('disabled')).toBe(true);
+});
+it('terminal file cards keep different file ids even when their filenames match', () => {
+  terminalFileCase({ sameFilename: true });
+  expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(2);
+});

@@ -2300,8 +2300,12 @@ function TerminalSummary({
   // Phase 5a — ScheduledTaskDialog visibility (set by 设为定时 button).
   const [scheduleDialogOpen, setScheduleDialogOpen] = React.useState(false);
   const md = React.useMemo(
-    () => makeMarkdownComponents({ onExternalClick: (href) => setPendingLink(href) }),
-    [],
+    () =>
+      makeMarkdownComponents({
+        onExternalClick: (href) => setPendingLink(href),
+        attachmentFileIds: new Set(attachments?.map((attachment) => attachment.fileId)),
+      }),
+    [attachments],
   );
   // Three terminal states share the same shell — markdown body,
   // optional model line, inline copy/share footer, optional URL row.
@@ -2900,6 +2904,7 @@ function ExternalLinkConfirm({
  */
 function makeMarkdownComponents(opts: {
   onExternalClick?: (href: string) => void;
+  attachmentFileIds?: ReadonlySet<string>;
 }): Components {
   return {
     a: ({ href, children, ...rest }) => {
@@ -2986,7 +2991,11 @@ function makeMarkdownComponents(opts: {
             ? children
             : '';
         const payload = parseHoladayFilePayload(raw);
-        if (payload) return <FileDownloadCard payload={payload} />;
+        if (payload) {
+          // Host attachment metadata owns availability after hydration/history reload.
+          if (opts.attachmentFileIds?.has(payload.fileId)) return null;
+          return <FileDownloadCard payload={payload} />;
+        }
       }
       return (
         <code
