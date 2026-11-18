@@ -1,6 +1,6 @@
 # Browser Vault：AWS KMS 接线与验收
 
-当前授权是准备代码、配置和最小权限方案，不包含创建账号、密钥、IAM 权限或收费资源，也不包含上线。以下模板不能直接当成已批准的生产配置。
+初始授权是准备代码、配置和最小权限方案。用户随后本人完成AWS登录，并单独批准在us-east-2创建1把测试密钥；该密钥已创建且启用，精确引用保存在本机恢复记录。此授权不包含新增IAM/访问密钥、实际加解密验收或上线。以下模板不能直接当成已批准的生产配置。
 
 ## 服务端配置
 
@@ -22,7 +22,7 @@ KMS 仅处理 32 字节随机 DEK。远端 context 为 `application=holaday-brow
 
 ## 真实资源验收顺序
 
-1. 用户登录已有 AWS 账号；只读确定可复用的区域、完整 ARN、对称密钥状态和预期运行身份。没有资源就记录缺项，不自动创建或购买。
+1. 用户登录已有 AWS 账号；只读确定可复用的区域、完整 ARN、对称密钥状态和预期运行身份。没有资源就记录缺项；除用户已单独批准的这一把测试key，不自动创建或购买。
 2. 在隔离验收环境，由用户管理现有专用 profile。记录非秘密的资源引用与身份来源，凭据不进证据文件。使用候选的 Node 22.23.3、锁文件和匹配的构建产物。
 3. 先对实际 `AwsKmsKeyProvider.assertReady()` 做 DescribeKey 验证。生产启动路径的错误配置/权限拒绝仍需在隔离实例验证，不能对现网做故障注入。
 4. 获准调用后，进程 A 使用实际 `seal` 和真实 provider 封装固定的合成内容，文件以 0600、独占创建保存；只写 Envelope 与合成 context，不保存 DEK、凭据或真实账号。进程 A 正常退出。
@@ -30,6 +30,18 @@ KMS 仅处理 32 字节随机 DEK。远端 context 为 `application=holaday-brow
 6. 依次核对错误 owner/origin/grant/purpose/version/access、未声明旧 key、被篡改密文均拒绝，之后再次正常解封确认可用。拒绝结果只证明拒绝边界；需要指定 AWS 拒绝原因时另看授权的服务审计记录，不能由统一错误文本猜测原因。
 7. 以真实已授权的不同身份验证权限拒绝；没有第二身份时保留未验，不修改 IAM 或假造另一 profile。SDK transport/credential 失败不能冒充身份隔离通过。
 8. 真实站点主体核对后，才进行云端保存、重建、到期、撤销、换账号和迟到保存验收。登录和验证码由用户操作，不复制日常 Chrome profile。
+
+### CloudShell 合成验收入口（运行待单独批准）
+
+`scripts/browser-vault-kms-synthetic.mjs` 提供 describe、seal、open 三步；必须显式传入 `--allow-synthetic-kms`，固定Node22.23.3。只处理程序内部生成的合成内容，不接受真实Cookie/账号或任意明文输入。seal独占创建0600收据；open拒绝非私有、符号/硬链接、超32KiB、来源/key不匹配或同进程收据。错误上下文、未知key版本和篡改封装共8类拒绝后再次正常解封，避免空泛的“全拒绝”被当成通过。
+
+已准备的私有CloudShell包绑定本次单把测试key，使用当前控制台会话的临时凭据，通过专用profile的`credential_process`在SDK子进程内调用AWS CLI凭据解析。凭据不打印、不下载、不写入包或收据；不创建IAM/访问密钥。SDK、锁文件、两份运行时模块与验收程序均记录hash；SDK及依赖由当前锁文件的307个输入打包，外部导入仅Node内置模块，不需要云端临时安装npm依赖。Node缺失时只从官方地址下载固定版本并核对官方SHA256。
+
+运行包最多11次合成加解密尝试、3次DescribeKey，SDK不重试；持久执行标记和独占收据防止失败/未知结果后自动重跑。临时profile只含配置引用，SDK捕获凭据进程stdout；不要在终端单独执行凭据导出命令来展示输出。返回的是摘要、独立PID、合成密文及hash，不含凭据。
+
+这验证实际KeyProvider的真实云加解封和跨进程边界；当前控制台临时权限并不等于生产最小权限身份。另一IAM主体拒绝、真实账号/站点及物理设备仍分别待验。每个拒绝仅记录provider/envelope拒绝，未读取服务审计记录时不声称特定AWS错误原因。
+
+本地8项操作入口测试与实际打包provider的双OS进程mock验证已经通过；它们的AWS调用为0。包生成不代表获准运行，CloudShell启动/上传与真实调用在用户单独确认后执行。CloudShell无额外服务费，数据传输及KMS调用按官方规则计费；基础密钥费用仍单独存在。
 
 实际加解密调用可能计费；本轮只准备，不执行上述收费验收。AWS 官方标准客户密钥基础标价为每把每月 1 美元，调用另计；复用已有 key 与新建 key 的费用不同，以账号实际账单为准。免费账号计划可用于验证，官方支持服务包含 KMS，但计划会在6个月或额度耗尽时结束；长期依赖的正式密钥在接线前需确认持续可用的账号方案，不能把免费API额度当成密钥永久免费。
 
@@ -51,4 +63,6 @@ KMS 仅处理 32 字节随机 DEK。远端 context 为 `application=holaday-brow
 - [Encrypt](https://docs.aws.amazon.com/kms/latest/APIReference/API_Encrypt.html) / [Decrypt](https://docs.aws.amazon.com/kms/latest/APIReference/API_Decrypt.html)
 - [Encryption context](https://docs.aws.amazon.com/kms/latest/developerguide/encrypt_context.html) / [KMS 条件键](https://docs.aws.amazon.com/kms/latest/developerguide/conditions-kms.html)
 - [AWS KMS 定价](https://aws.amazon.com/kms/pricing/)
+- [CloudShell 临时身份](https://docs.aws.amazon.com/cloudshell/latest/userguide/cloudshell-security-faqs.html) / [CloudShell 定价](https://aws.amazon.com/cloudshell/pricing/)
+- [AWS CLI process 凭据](https://docs.aws.amazon.com/cli/latest/reference/configure/export-credentials.html)
 - [免费计划支持服务](https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.html) / [账号计划与到期](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html)

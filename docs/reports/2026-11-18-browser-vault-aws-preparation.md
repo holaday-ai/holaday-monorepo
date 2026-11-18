@@ -1,10 +1,14 @@
 # PR360 后续：AWS KMS 软件准备与待验清单
 
-运行时源码锚点：`2f22be1dc0a49a3874cbabba651d5eb40b3d2795`，基于 PR360 合并提交 `91ba3cd6b7b208231f60265a7bb805ae7a5af2cf`。本轮完成软件接线、生产只读盘点、MySQL8.0.46隔离验证和合成测试表准备。真实 AWS 资源、站点主体、账号及物理设备验收仍未完成；不是上线许可。
+运行时源码锚点：`2f22be1dc0a49a3874cbabba651d5eb40b3d2795`，基于 PR360 合并提交 `91ba3cd6b7b208231f60265a7bb805ae7a5af2cf`。本轮完成软件接线、生产只读盘点、MySQL8.0.46隔离验证和合成测试表准备。真实 AWS 服务接线、站点主体、账号及物理设备验收仍未完成；不是上线许可。
 
 评审入口：[草稿PR #361](https://github.com/holaday-ai/holaday-monorepo/pull/361)，目标`claude/capability-recovery`。分支已正常推送，maintainer编辑授权为false；本轮仅完成作者串行复核，未提交独立审查或GitHub Approve，尚未授权合并此PR。
 
 机器摘要见 [evidence/browser-vault-aws-preparation-20261118.json](evidence/browser-vault-aws-preparation-20261118.json)；配置与最小权限方案见 [操作说明](../operations/browser-vault-aws-kms.md)。原 PR360 的合并、审查及检查证据保持历史身份。
+
+后续资源更新：用户本人完成AWS登录，us-east-2原客户key为0；随后单独批准创建1把`alias/holaday-browser-vault-test`测试密钥，已单次创建并核对Enabled、单区域及ARN。没有新增IAM/访问密钥、没有真实加解密，也未接生产。精确引用和截图留本机恢复目录，初始机器摘要仍保留其生成时状态。
+
+合成验收入口现已准备：8项本地操作测试及实际打包provider两个OS进程mock通过，真实AWS调用0。私有包仅绑定上述测试key，最多11次合成加解密尝试/3次DescribeKey，使用CloudShell现有短期身份；运行需另行批准，生产运行身份与另一IAM主体拒绝仍未验。未更改2f22be1d运行时字节，因此不重复无差异后端构建或原137项测试。
 
 ## 本次实现与检查
 
