@@ -34,6 +34,10 @@ import { browserOutputFixture } from '../../files/testing/browser-output-fixture
 import { createHttpApp } from '../../http.js';
 import * as messages from '../../llm/messages-adapter.js';
 import { QuotaService } from '../../quota/quota-service.js';
+import {
+  type IsolatedMysqlProbe,
+  openIsolatedMysqlProbe,
+} from '../../testing/isolated-mysql-probe.js';
 import * as extensionWs from '../../ws/server.js';
 
 const boundary = vi.hoisted(() => ({ current: null as DB | null }));
@@ -77,6 +81,8 @@ const hash = (buffer: Uint8Array) => createHash('sha256').update(buffer).digest(
 const originalEnv = { ...env };
 let context: BrowserContext | undefined;
 let webSockets: WebSocketServer | undefined;
+const realSql = process.env.HOLADAY_SQL_PERSISTENCE_PROBE === '1';
+let sqlProbe: IsolatedMysqlProbe | undefined;
 let predicateDb: DatabaseSync | undefined;
 let bridge: Bridge | undefined;
 let temp: string | undefined;
@@ -91,51 +97,55 @@ async function listen(server: Server) {
   return `http://127.0.0.1:${address.port}`;
 }
 afterAll(async () => {
-  releaseExport?.();
-  if (context && process.env.HOLADAY_E2E_ARTIFACT_DIR) {
-    const evidence = process.env.HOLADAY_E2E_ARTIFACT_DIR;
-    const pages = context.pages().slice(-3);
-    await writeFile(
-      join(evidence, 'last-pages.json'),
-      JSON.stringify(
-        await Promise.all(
-          pages.map(async (page) => ({
-            url: page.url(),
-            body: await page
-              .locator('body')
-              .innerText()
-              .catch(() => '')
-              .then((text) => text.slice(0, 5000)),
-          })),
+  try {
+    releaseExport?.();
+    if (context && process.env.HOLADAY_E2E_ARTIFACT_DIR) {
+      const evidence = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+      const pages = context.pages().slice(-3);
+      await writeFile(
+        join(evidence, 'last-pages.json'),
+        JSON.stringify(
+          await Promise.all(
+            pages.map(async (page) => ({
+              url: page.url(),
+              body: await page
+                .locator('body')
+                .innerText()
+                .catch(() => '')
+                .then((text) => text.slice(0, 5000)),
+            })),
+          ),
+          null,
+          2,
         ),
-        null,
-        2,
-      ),
-    );
-    await pages
-      .find((page) => page.url().includes('/?task=') || page.url().endsWith('/history'))
-      ?.screenshot({ path: join(evidence, 'last-page.png'), fullPage: true })
-      .catch(() => {});
+      );
+      await pages
+        .find((page) => page.url().includes('/?task=') || page.url().endsWith('/history'))
+        ?.screenshot({ path: join(evidence, 'last-page.png'), fullPage: true })
+        .catch(() => {});
+    }
+    await context?.close();
+    for (const socket of webSockets?.clients ?? []) socket.terminate();
+    if (webSockets) await new Promise<void>((resolve) => webSockets!.close(() => resolve()));
+    predicateDb?.close();
+    await bridge?.stop();
+    for (const server of servers)
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    if (temp) await rm(temp, { recursive: true, force: true });
+    if (filesRoot) await rm(filesRoot, { recursive: true, force: true });
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    Object.assign(env, originalEnv);
+    reloadFeatureFlagsForTest();
+  } finally {
+    await sqlProbe?.close();
   }
-  await context?.close();
-  for (const socket of webSockets?.clients ?? []) socket.terminate();
-  if (webSockets) await new Promise<void>((resolve) => webSockets!.close(() => resolve()));
-  predicateDb?.close();
-  await bridge?.stop();
-  for (const server of servers)
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
-  if (temp) await rm(temp, { recursive: true, force: true });
-  if (filesRoot) await rm(filesRoot, { recursive: true, force: true });
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-  Object.assign(env, originalEnv);
-  reloadFeatureFlagsForTest();
 });
 
-it.runIf(isBuiltin('node:sqlite'))(
-  'requires native SQLite: submits a plugin report from the full App Composer and restores both files through task history after reload',
+it.runIf(realSql || isBuiltin('node:sqlite'))(
+  'requires native SQLite or explicit MySQL opt-in: submits a plugin report from the full App Composer and restores both files through task history after reload',
   async () => {
     temp = await realpath(await mkdtemp(join(tmpdir(), 'ba-formal-chrome-file-')));
     const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR ?? join(temp, 'artifacts');
@@ -162,10 +172,12 @@ it.runIf(isBuiltin('node:sqlite'))(
         historyFile,
         JSON.stringify(fixture.taskRecords.filter((row) => 'intent' in row)),
       );
-    const NativeDatabase: new (path: string) => DatabaseSync = createRequire(import.meta.url)(
-      'node:sqlite',
-    ).DatabaseSync;
-    predicateDb = new NativeDatabase(':memory:');
+    if (!realSql) {
+      const NativeDatabase: new (path: string) => DatabaseSync = createRequire(import.meta.url)(
+        'node:sqlite',
+      ).DatabaseSync;
+      predicateDb = new NativeDatabase(':memory:');
+    }
     const dialect = new MySqlDialect();
     const scalar = (value: unknown): string | number | null =>
       value == null
@@ -307,7 +319,7 @@ it.runIf(isBuiltin('node:sqlite'))(
     // Keep the real fixed Drizzle prepare/execute and original-driver ownership
     // checks. Only the MySQL socket receipt is synthetic, not the auth gate.
     const userDatabase = drizzle(mysql as unknown as Connection);
-    const database = {
+    let database = {
       select(projection: Record<string, unknown> = {}) {
         return {
           from(table: unknown) {
@@ -373,6 +385,23 @@ it.runIf(isBuiltin('node:sqlite'))(
       transaction: <T>(action: (tx: DB) => Promise<T>) =>
         fixture.db.transaction(() => action(database as unknown as DB)),
     } as unknown as DB;
+    if (realSql) {
+      sqlProbe = await openIsolatedMysqlProbe({
+        allTableStructures: true,
+        artifactPath: join(artifacts, 'mysql-evidence.json'),
+      });
+      database = sqlProbe.db;
+      await database.insert(users).values({
+        id: 7,
+        externalId: 'usr_alice',
+        email: 'alice@example.test',
+        passwordHash: 'synthetic-only',
+        plan: 'pro',
+        modelDataRegion: 'cn',
+      });
+    }
+    const readFileRecords = async (): Promise<Array<Record<string, unknown>>> =>
+      sqlProbe ? database.select().from(taskFiles) : fixture.records;
     boundary.current = database;
     vi.spyOn(storage, 'getSharedStorageProvider').mockReturnValue(fixture.storage);
     Object.assign(env, {
@@ -410,28 +439,37 @@ it.runIf(isBuiltin('node:sqlite'))(
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async (state, input) => {
-      Object.assign(fixture.taskRecords[0]!, {
-        externalId: state.taskId,
-        status: state.status,
-        userId: 7,
-        origin: 'user',
-        intent: input.intent,
-        title: null,
-        sourceContext: input.sourceContext,
-        result: null,
-        plan: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        projectId: null,
+    if (!realSql) {
+      vi.spyOn(TaskRepository.prototype, 'insertTask').mockImplementation(async (state, input) => {
+        Object.assign(fixture.taskRecords[0]!, {
+          externalId: state.taskId,
+          status: state.status,
+          userId: 7,
+          origin: 'user',
+          intent: input.intent,
+          title: null,
+          sourceContext: input.sourceContext,
+          result: null,
+          plan: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          projectId: null,
+        });
+        saveHistory();
       });
-      saveHistory();
-    });
-    vi.spyOn(TaskRepository.prototype, 'isTaskCancelled').mockResolvedValue(false);
+      vi.spyOn(TaskRepository.prototype, 'isTaskCancelled').mockResolvedValue(false);
+    }
     let result: { status: string; summary?: string; reason?: string } | undefined;
-    const terminal = vi
-      .spyOn(TaskRepository.prototype, 'persistVisionOutcome')
-      .mockImplementation(async (_state, outcome) => {
+    const persistOutcome = TaskRepository.prototype.persistVisionOutcome;
+    const terminal = vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome');
+    if (realSql) {
+      terminal.mockImplementation(async function (this: TaskRepository, taskId, outcome) {
+        const receipt = await persistOutcome.call(this, taskId, outcome);
+        if (receipt.persisted) result = outcome;
+        return receipt;
+      });
+    } else {
+      terminal.mockImplementation(async (_state, outcome) => {
         result = outcome;
         Object.assign(fixture.taskRecords[0]!, {
           status: outcome.status,
@@ -442,6 +480,7 @@ it.runIf(isBuiltin('node:sqlite'))(
         saveHistory();
         return { persisted: true };
       });
+    }
     vi.spyOn(extensionWs, 'broadcastToUser').mockImplementation((_user, message) => {
       let count = 0;
       for (const socket of webSockets?.clients ?? [])
@@ -489,7 +528,7 @@ it.runIf(isBuiltin('node:sqlite'))(
             expect.arrayContaining(['read_task_file', 'analyze_task_table', 'create_file']),
           );
           originalFileId ??= String(
-            fixture.records.find((file) => file.filename === 'report.csv')!.externalId,
+            (await readFileRecords()).find((file) => file.filename === 'report.csv')!.externalId,
           );
           if (turn === 2) {
             name = 'read_task_file';
@@ -713,25 +752,60 @@ it.runIf(isBuiltin('node:sqlite'))(
     );
     const worker: Worker =
       context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
-    const connected = bridge.waitForConnection(1, 15_000);
+    const bootStarted = performance.now();
+    // A worker target may exist before its execution context can answer evaluation.
+    // Keep that startup budget separate from the actual network handshake budget.
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Extension worker readiness timed out')),
+        45_000,
+      );
+      void worker
+        .evaluate(() => chrome.runtime.id)
+        .then(
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          (error: unknown) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        );
+    });
+    const workerReadyMs = Math.round(performance.now() - bootStarted);
+    const handshakeStarted = performance.now();
+    // Clean install clears auth asynchronously. Re-seed one stable token only when absent;
+    // changing it every pass restarts an in-flight WS preflight on slower launches.
+    const connected = bridge.waitForConnection(1, 20_000).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
     for (
       let i = 0;
       i < 20 && !bridge.received.some((message) => message.type === 'client.hello');
       i++
     ) {
-      await worker.evaluate(
-        async (seed) => chrome.storage.local.set({ 'holaday.access_token': seed }),
-        `e2e-synthetic-file-token-000${i}`,
-      );
+      await worker.evaluate(async (seed) => {
+        const stored = await chrome.storage.local.get('holaday.access_token');
+        if (stored['holaday.access_token'] !== seed)
+          await chrome.storage.local.set({ 'holaday.access_token': seed });
+      }, 'e2e-synthetic-file-token-0001');
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     try {
-      await connected;
+      const connection = await connected;
+      if (!connection.ok) throw connection.error;
     } finally {
       await writeFile(
         join(artifacts, 'extension-boot.json'),
         JSON.stringify(
-          { messages: bridge.received.map((message) => message.type), logs: bootLogs },
+          {
+            workerReadyMs,
+            handshakeMs: Math.round(performance.now() - handshakeStarted),
+            messages: bridge.received.map((message) => message.type),
+            logs: bootLogs,
+          },
           null,
           2,
         ),
@@ -828,9 +902,32 @@ it.runIf(isBuiltin('node:sqlite'))(
     });
     await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
     expect(consume).toHaveBeenCalledTimes(1);
+    if (sqlProbe) {
+      idempotencyRows.push(...(await database.select().from(webhookIdempotency)));
+      await sqlProbe.reconnect((fresh) => {
+        database = fresh;
+        boundary.current = fresh;
+      });
+      const savedHistory = await database.select().from(tasks);
+      expect(savedHistory).toHaveLength(1);
+      expect(savedHistory[0]).toMatchObject({
+        externalId: created.taskId,
+        status: 'completed',
+        result: { summary: expect.stringContaining('holaday-file') },
+      });
+      Object.assign(sqlProbe.evidence, {
+        persistedAcrossConnection: true,
+        actualTaskRepositoryWrites: true,
+      });
+      await writeFile(
+        join(artifacts, 'persisted-task-history.json'),
+        JSON.stringify(savedHistory, null, 2),
+      );
+    }
     expect(idempotencyRows).toHaveLength(1);
     expect(idempotencyRows[0]?.taskId).toBe(created.taskId);
-    await writeFile(join(artifacts, 'persisted-task-history.json'), await readFile(historyFile));
+    if (!sqlProbe)
+      await writeFile(join(artifacts, 'persisted-task-history.json'), await readFile(historyFile));
     expect(exported).toEqual([{ method: 'GET', url: '/export?ticket=PRIVATE-EXPORT-731' }]);
     expect(await original.locator('#notes').inputValue()).toBe('keep original');
     expect(original.url()).toBe(`${site}/original?ticket=PRIVATE-ORIGINAL-731`);
@@ -845,10 +942,11 @@ it.runIf(isBuiltin('node:sqlite'))(
     );
     expect(modelRequests.join('\n')).not.toContain('PRIVATE-');
     expect(modelRequests).toHaveLength(5);
-    const file = fixture.records.find((row) => row.filename === 'report.csv')!;
-    const generated = fixture.records.find((row) => row.filename === 'analysis.csv')!;
+    const fileRecords = await readFileRecords();
+    const file = fileRecords.find((row) => row.filename === 'report.csv')!;
+    const generated = fileRecords.find((row) => row.filename === 'analysis.csv')!;
     expect(generated).toBeDefined();
-    expect(fixture.records).toHaveLength(2);
+    expect(fileRecords).toHaveLength(2);
     expect(analysis?.complete).toBe(true);
     expect(file.browserSource).toMatchObject({
       kind: 'task_download',
@@ -856,7 +954,7 @@ it.runIf(isBuiltin('node:sqlite'))(
       origin: site,
       sha256: hash(payload),
     });
-    // Clear the captured terminal object: reload/history must read the file-backed fixture via real tasks.list/detail handlers.
+    // Clear the terminal capture: history reload must query the current database via real tasks.list/detail handlers.
     result = undefined;
     await ui.goto(`${appOrigin}/history`);
     await ui
@@ -931,7 +1029,9 @@ it.runIf(isBuiltin('node:sqlite'))(
           preparedTaskTab: { tabId: preparedTabId, originalTabId: chosen.tabId },
           fullAppComposer: true,
           historyReload: true,
-          fixtureHistoryFile: historyFile,
+          fixtureHistoryFile: sqlProbe ? null : historyFile,
+          persistence: sqlProbe ? 'actual-isolated-mysql' : 'file-backed-fixture',
+          mysqlEvidence: sqlProbe?.evidence,
           source: file.browserSource,
           analyzedRows: analysis?.scope.scannedRows,
           statistics: analysis?.overall.map(({ name, value }) => ({ name, value })),
