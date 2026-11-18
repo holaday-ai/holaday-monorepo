@@ -53,6 +53,7 @@ export function createSelectedChromeBridge() {
     },
     observe: session.observe.bind(session),
     activity: session.activity.bind(session),
+    screenshot: session.screenshot.bind(session),
     describe: session.describe.bind(session),
     tabs: session.tabs.bind(session),
     execute: session.execute.bind(session),

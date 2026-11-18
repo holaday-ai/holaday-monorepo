@@ -1,20 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   BROWSER_UPLOAD_CHUNK_BYTES,
   type BrowserUploadTransferReceipt,
   type SelectedChromeSessionCommand,
   type SelectedChromeUploadAction,
   type SelectedChromeUploadCommand,
+  type TaskScreenshot,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_CHOOSER_CAPABILITY,
   USER_BROWSER_DOWNLOAD_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  USER_BROWSER_SCREENSHOT_CAPABILITY,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserChooserState,
   type UserBrowserDownloadState,
   type UserBrowserTargetDescription,
   selectedChromeUploadActionSchema,
+  taskScreenshotSchema,
   userBrowserActivitySchema,
   userBrowserChooserStateSchema,
   userBrowserDownloadChunkSchema,
@@ -96,6 +99,7 @@ export type SelectedChromeClientReply =
       uploadReceipt?: BrowserUploadTransferReceipt;
       chooserState?: UserBrowserChooserState;
       downloadState?: UserBrowserDownloadState;
+      screenshot?: TaskScreenshot;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -128,6 +132,10 @@ export class SelectedChromeClient {
   private uploadNegotiated = false;
   private chooserNegotiated = false;
   private downloadNegotiated = false;
+  private screenshotNegotiated = false;
+  get screenshotsEnabled(): boolean {
+    return this.nativeActivityEnabled && this.screenshotNegotiated;
+  }
   private download: {
     state: CapturedDownload;
     sessionId: string;
@@ -185,6 +193,7 @@ export class SelectedChromeClient {
                   capabilities: [
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     ...(this.nativeActivityEnabled ? [USER_BROWSER_ACTIVITY_CAPABILITY] : []),
+                    ...(this.nativeActivityEnabled ? [USER_BROWSER_SCREENSHOT_CAPABILITY] : []),
                     ...(this.options.taskFilesV1
                       ? [
                           USER_BROWSER_UPLOAD_CAPABILITY,
@@ -888,6 +897,60 @@ export class SelectedChromeClient {
     });
   }
 
+  async screenshot(): Promise<SelectedChromeClientReply> {
+    if (!this.screenshotsEnabled) return fail('capability_missing');
+    if (!this.sessionId || this.closing || !this.ready) return fail('session_unavailable');
+    if (this.pending) return fail('browser_busy');
+    const sessionId = this.sessionId;
+    const tabId = this.tabId;
+    const revision = this.extensionRevision;
+    const inputRevision = this.options.control.inputRevision;
+    const current = () =>
+      !this.closing &&
+      this.ready &&
+      this.sessionId === sessionId &&
+      this.tabId === tabId &&
+      this.extensionRevision === revision &&
+      this.options.control.canAgentAct() &&
+      this.options.control.inputRevision === inputRevision;
+    if (!current()) return fail('replan_required');
+    return this.track(async () => {
+      const captureId = randomUUID();
+      const reply = await this.send({
+        op: 'screenshot',
+        sessionId,
+        captureId,
+        observationRevision: revision,
+      });
+      const parsed = z
+        .object({
+          ok: z.literal(true),
+          sessionId: z.literal(sessionId),
+          screenshot: taskScreenshotSchema,
+        })
+        .safeParse(reply.result);
+      if (!current()) return fail('replan_required');
+      if (!reply.ok || !parsed.success) return fail('screenshot_unavailable');
+      const image = parsed.data.screenshot;
+      const bytes = Buffer.from(image.data, 'base64');
+      if (
+        image.captureId !== captureId ||
+        image.tabId !== tabId ||
+        image.observationRevision !== revision ||
+        !this.origins.includes(image.origin) ||
+        bytes.length !== image.sizeBytes ||
+        bytes.toString('base64') !== image.data ||
+        createHash('sha256').update(bytes).digest('hex') !== image.sha256 ||
+        bytes[0] !== 255 ||
+        bytes[1] !== 216 ||
+        bytes[bytes.length - 2] !== 255 ||
+        bytes[bytes.length - 1] !== 217
+      )
+        return fail('invalid_screenshot_receipt');
+      return { ok: true, screenshot: image };
+    });
+  }
+
   async observe(): Promise<SelectedChromeClientReply> {
     if (!this.sessionId || this.closing) return fail('session_unavailable');
     if (this.pending) return fail('browser_busy');
@@ -1094,6 +1157,8 @@ export class SelectedChromeClient {
         protocol.success && protocol.data.capabilities.includes(USER_BROWSER_CHOOSER_CAPABILITY);
       this.downloadNegotiated =
         protocol.success && protocol.data.capabilities.includes(USER_BROWSER_DOWNLOAD_CAPABILITY);
+      this.screenshotNegotiated =
+        protocol.success && protocol.data.capabilities.includes(USER_BROWSER_SCREENSHOT_CAPABILITY);
       if (
         !protocol.success ||
         !reply.observation.observationRevision ||

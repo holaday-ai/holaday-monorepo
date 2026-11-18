@@ -38,6 +38,10 @@ export interface SelectedChromeBridge {
   ): Promise<SessionReply>;
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
   activity?(taskId: string, sessionId: string): Promise<SessionReply>;
+  screenshot?(
+    taskId: string,
+    command: Extract<SelectedChromeSessionCommand, { op: 'screenshot' }>,
+  ): Promise<SessionReply>;
   upload?(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply>;
   download?(taskId: string, command: SelectedChromeDownloadCommand): Promise<SessionReply>;
   openChooser?(
@@ -276,6 +280,17 @@ export function createSelectedChromeTransport(deps: {
           : deps.bridge.observe(taskId, command.sessionId),
       );
     }
+
+    if (command.op === 'screenshot')
+      return run(entry, async () => {
+        const reply = (await deps.bridge.screenshot?.(taskId, command)) ?? {
+          ok: false as const,
+          error: 'capability_missing',
+        };
+        return !entry.stopping && deps.currentOwner() === entry.owner
+          ? reply
+          : { ok: false, error: 'session_unavailable' };
+      });
 
     if (command.op === 'download_read' || command.op === 'download_release')
       return run(

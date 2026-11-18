@@ -16,6 +16,7 @@ export * from './browser-tool-names.js';
 export * from './tool-call-markup.js';
 
 export * from './browser-user-contract.js';
+export * from './browser-task-screenshot.js';
 export * from './browser-session-vault.js';
 export * from './login-context.js';
 export * from './reply-language.js';

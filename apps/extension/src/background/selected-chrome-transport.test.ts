@@ -45,6 +45,10 @@ function harness() {
       sessionId,
       observation: { tabId: 42 },
     })),
+    screenshot: vi.fn<NonNullable<SelectedChromeBridge['screenshot']>>(async () => ({
+      ok: false,
+      error: 'capability_missing',
+    })),
     execute: vi.fn<SelectedChromeBridge['execute']>(async () => ({
       ok: true as const,
       sessionId,
@@ -88,6 +92,45 @@ function harness() {
 }
 
 describe('selected Chrome command schema', () => {
+  it('rejects model-supplied targets, paths or image bytes in a screenshot command', () => {
+    const request = {
+      op: 'screenshot',
+      sessionId: target.selectionId,
+      captureId: target.selectionId,
+      observationRevision: 1,
+    };
+    expect(selectedChromeSessionCommandSchema.safeParse(request).success).toBe(true);
+    for (const extra of [
+      { tabId: 99 },
+      { path: '/tmp/image' },
+      { data: 'invented' },
+      { observationRevision: 0 },
+    ])
+      expect(selectedChromeSessionCommandSchema.safeParse({ ...request, ...extra }).success).toBe(
+        false,
+      );
+  });
+  it('discards a screenshot reply after transport owner changes', async () => {
+    const h = harness();
+    const opened = openedSession(
+      await h.transport.handle('task-a', command({ op: 'open', target })),
+    );
+    h.bridge.screenshot.mockImplementationOnce(async () => {
+      h.setOwner('other');
+      return { ok: true, sessionId: opened.sessionId };
+    });
+    expect(
+      await h.transport.handle(
+        'task-a',
+        command({
+          op: 'screenshot',
+          sessionId: opened.sessionId,
+          captureId: target.selectionId,
+          observationRevision: 1,
+        }),
+      ),
+    ).toMatchObject({ ok: false, error: 'session_unavailable' });
+  });
   it('accepts the five bounded action kinds with their native requirements', () => {
     const actions = [
       { kind: 'click', selector },

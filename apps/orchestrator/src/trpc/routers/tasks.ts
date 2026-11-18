@@ -7575,6 +7575,8 @@ export const tasksRouter = router({
                     onCreateFile: supercarArgs.onCreateFile,
                     onBrowserDownload: supercarArgs.onBrowserDownload,
                     onBrowserDownloadSaved: supercarArgs.onBrowserDownloadSaved,
+                    onBrowserScreenshot: supercarArgs.onBrowserDownload,
+                    onBrowserScreenshotSaved: supercarArgs.onBrowserDownloadSaved,
                     onBeforeAction: supercarArgs.onBeforeAction,
                     logger: ctx.logger,
                     onAwaitingUser: supercarArgs.onAwaitingUser,

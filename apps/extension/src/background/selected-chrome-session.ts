@@ -10,10 +10,12 @@ import {
   type SelectedChromeDownloadCommand,
   type SelectedChromeUploadAction,
   type SelectedChromeUploadCommand,
+  type TaskScreenshot,
   USER_BROWSER_ACTIVITY_CAPABILITY,
   USER_BROWSER_CHOOSER_CAPABILITY,
   USER_BROWSER_DOWNLOAD_CAPABILITY,
   USER_BROWSER_PROTOCOL,
+  USER_BROWSER_SCREENSHOT_CAPABILITY,
   USER_BROWSER_UPLOAD_CAPABILITY,
   type UserBrowserActivity,
   type UserBrowserBinding,
@@ -24,6 +26,7 @@ import {
   type UserBrowserTargetDescription,
   type UserBrowserUploadState,
   selectedChromeDownloadCommandSchema,
+  taskScreenshotSchema,
   userBrowserActivitySchema,
   userBrowserChooserFailureSchema,
   userBrowserChooserStateSchema,
@@ -42,6 +45,11 @@ export interface SelectedChromeDriver {
     dispatchAllowed?: () => boolean,
   ): Promise<DriverResult>;
   readActivity?(): Promise<DriverResult>;
+  captureTaskScreenshot?(
+    captureId: string,
+    revision: number,
+    current: () => boolean,
+  ): Promise<DriverResult>;
   captureFileChooserBound?(
     action: DriverAction,
     binding: UserBrowserBinding,
@@ -85,6 +93,7 @@ export type SessionReply =
       downloadState?: UserBrowserDownloadState;
       downloadChunk?: UserBrowserDownloadChunk;
       downloadReleased?: string;
+      screenshot?: TaskScreenshot;
     }
   | { ok: false; error: string; actionOutcome?: 'applied' | 'not_applied' | 'unknown' };
 
@@ -106,6 +115,7 @@ interface Entry {
   uploadsEnabled: boolean;
   choosersEnabled: boolean;
   downloadsEnabled: boolean;
+  screenshotsEnabled: boolean;
   downloadAbort?: AbortController;
   download?: {
     id: string;
@@ -210,6 +220,7 @@ export class SelectedChromeSession {
       uploadsEnabled: false,
       choosersEnabled: false,
       downloadsEnabled: false,
+      screenshotsEnabled: false,
       releasedDownloads: [],
       uploadsStopped: false,
       uploadBindings: new Map(),
@@ -252,6 +263,11 @@ export class SelectedChromeSession {
           entry.driver.captureDownloadBound &&
           entry.driver.readDownloadChunk &&
           entry.driver.releaseDownload,
+      );
+      entry.screenshotsEnabled = Boolean(
+        entry.collaborationV2 &&
+          input.protocol?.capabilities.includes(USER_BROWSER_SCREENSHOT_CAPABILITY) &&
+          entry.driver.captureTaskScreenshot,
       );
       entry.tabs.set(input.tabId, {
         driver: entry.driver,
@@ -300,6 +316,53 @@ export class SelectedChromeSession {
     if (entry.quarantined)
       return { ok: false, error: 'input_outcome_unknown', actionOutcome: 'unknown' };
     return this.track(entry, () => this.observeEntry(entry));
+  }
+
+  async screenshot(
+    taskId: string,
+    command: { sessionId: string; captureId: string; observationRevision: number },
+  ): Promise<SessionReply> {
+    const entry = this.find(taskId, command.sessionId);
+    if (!entry) return { ok: false, error: 'session_unavailable' };
+    if (!entry.screenshotsEnabled) return { ok: false, error: 'capability_missing' };
+    if (entry.pending) return { ok: false, error: 'browser_busy' };
+    if (!entry.ready || entry.quarantined || entry.tabClosed)
+      return { ok: false, error: 'observation_required' };
+    return this.track(entry, async () => {
+      const driver = entry.driver;
+      const tabId = entry.tabId;
+      const current = () =>
+        this.current(entry) &&
+        !entry.tabClosed &&
+        !entry.quarantined &&
+        entry.ready &&
+        entry.driver === driver &&
+        entry.tabId === tabId;
+      if (await this.nativeGate(entry)) return { ok: false, error: 'stale_observation' };
+      let result: DriverResult | undefined;
+      try {
+        result = await driver?.captureTaskScreenshot?.(
+          command.captureId,
+          command.observationRevision,
+          current,
+        );
+      } catch {
+        /* no page data in errors */
+      }
+      const parsed = taskScreenshotSchema.safeParse(result?.data);
+      if (!current() || (await this.nativeGate(entry)))
+        return { ok: false, error: 'session_unavailable' };
+      if (
+        result?.status !== 'ok' ||
+        !parsed.success ||
+        parsed.data.captureId !== command.captureId ||
+        parsed.data.observationRevision !== command.observationRevision ||
+        parsed.data.tabId !== tabId ||
+        !entry.origins.includes(parsed.data.origin)
+      )
+        return { ok: false, error: 'screenshot_unavailable' };
+      return { ok: true, sessionId: entry.id, screenshot: parsed.data };
+    });
   }
 
   async activity(taskId: string, sessionId: string): Promise<SessionReply> {
@@ -1086,6 +1149,7 @@ export class SelectedChromeSession {
                     ...(entry.uploadsEnabled ? [USER_BROWSER_UPLOAD_CAPABILITY] : []),
                     ...(entry.choosersEnabled ? [USER_BROWSER_CHOOSER_CAPABILITY] : []),
                     ...(entry.downloadsEnabled ? [USER_BROWSER_DOWNLOAD_CAPABILITY] : []),
+                    ...(entry.screenshotsEnabled ? [USER_BROWSER_SCREENSHOT_CAPABILITY] : []),
                   ],
                 },
               }

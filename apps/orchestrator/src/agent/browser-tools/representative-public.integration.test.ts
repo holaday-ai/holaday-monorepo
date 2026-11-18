@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
 import { openRepresentativeChrome } from '../../testing/browser-representative-candidate.js';
 import type { SupercarOutcome, SupercarTickEvent } from '../supercar/agent-loop.js';
@@ -143,6 +144,9 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
         let postRequests = 0;
         let outcome: SupercarOutcome | undefined;
         let hardTimeout: ReturnType<typeof setTimeout> | undefined;
+        let outputFixture: Awaited<ReturnType<typeof browserOutputFixture>> | undefined;
+        const deliveredScreenshots: Array<{ fileId: string; sha256: string; sizeBytes: number }> =
+          [];
         try {
           if (id.startsWith('cloud')) {
             executor = new PlaywrightExecutor();
@@ -157,6 +161,10 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
             );
             if (!navigated.ok) throw new Error('Public page unavailable before model');
           } else {
+            outputFixture = await (
+              await import('../../files/testing/browser-output-fixture.js')
+            ).browserOutputFixture();
+            outputFixture.taskRecords[0]!.externalId = taskId;
             native ??= await openRepresentativeChrome(join(artifacts, 'native'));
             const target = await native.target(url);
             page = target.page;
@@ -285,6 +293,36 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
               control: session.control,
               signal: session.cancellation.signal,
               messagesAdapter: adapter,
+              onBrowserScreenshot: async (input) => {
+                const row = await outputFixture!.service.storeOutput({
+                  userIdInternal: 7,
+                  userExternalId: 'usr_alice',
+                  taskIdInternal: 9,
+                  filename: input.filename,
+                  mimetype: input.mimetype,
+                  buffer: input.buffer,
+                });
+                const loaded = await outputFixture!.service.loadForUser(row.externalId, 7);
+                if (!loaded || (await outputFixture!.service.loadForUser(row.externalId, 8)))
+                  throw new Error('Screenshot ownership verification failed');
+                await writeFile(join(artifacts, `${id}-${row.externalId}.jpg`), loaded.buffer);
+                return {
+                  fileId: row.externalId,
+                  filename: row.filename,
+                  sizeBytes: row.sizeBytes,
+                  sha256: input.sha256,
+                  mimetype: row.mimetype,
+                  expiresAt: row.expiresAt!.toISOString(),
+                  downloadUrl: `/api/files/${row.externalId}/download`,
+                };
+              },
+              onBrowserScreenshotSaved: (receipt) => {
+                deliveredScreenshots.push({
+                  fileId: receipt.fileId,
+                  sha256: receipt.sha256,
+                  sizeBytes: receipt.sizeBytes,
+                });
+              },
               maxIterations: 10,
               timeoutMs: 120000,
               onTick: (event) => {
@@ -311,8 +349,9 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
                 postRequests,
               };
           await page.screenshot({ path: join(artifacts, `${id}-actual-page.png`) });
-          const screenshotTool =
-            outcome?.toolsUsed.some((tool) => /screenshot/.test(tool)) ?? false;
+          const screenshotTool = id.startsWith('chrome')
+            ? deliveredScreenshots.some((file) => summary.includes(file.fileId))
+            : (outcome?.toolsUsed.some((tool) => /screenshot/.test(tool)) ?? false);
           const success =
             outcome?.status === 'completed' &&
             postRequests === 0 &&
@@ -341,6 +380,10 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
             outcome,
             actual,
             screenshotTool,
+            deliveredScreenshots,
+            screenshotStorageBoundary: id.startsWith('chrome')
+              ? 'actual FileService/local storage;in-memory DB predicate fixture;owner7 allowed,owner8 denied'
+              : 'existing cloud screenshot tool receipt',
             harnessScreenshot: `${id}-actual-page.png`,
             assessment: success ? 'passed' : 'failed',
             redline,
@@ -365,6 +408,7 @@ describe.runIf(enabled)('bounded representative public batch with actual models'
           if (sessions && session)
             record.sessionClose = await sessions.finish('fixture-owner', taskId);
           await executor?.disconnect();
+          if (outputFixture) await rm(outputFixture.root, { recursive: true, force: true });
           if (page && !executor) await page.close().catch(() => {});
           Object.assign(record, {
             elapsedMs: Date.now() - started,

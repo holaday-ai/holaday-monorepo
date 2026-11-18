@@ -75,8 +75,8 @@ const web = join(root, 'apps/web-workbench');
 const extension = join(root, 'apps/extension');
 const payload = Buffer.from(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
 const expectedAnalysis = 'metric,value\nsum,1099.9\nrows,10001\n';
-const intent =
-  '从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我';
+const captureScreenshot = process.env.HOLADAY_CHROME_APP_SCREENSHOT === '1';
+const intent = `从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我${captureScreenshot ? '，另外截图并一并交付截图文件' : ''}`;
 const hash = (buffer: Uint8Array) => createHash('sha256').update(buffer).digest('hex');
 const originalEnv = { ...env };
 let context: BrowserContext | undefined;
@@ -417,6 +417,7 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       DASHSCOPE_API_KEY: '',
     });
     vi.stubEnv('USER_BROWSER_ROUTING_V2', 'true');
+    if (captureScreenshot) vi.stubEnv('BROWSER_COLLABORATION_V2', 'true');
     vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
     vi.stubEnv('BROWSER_LAUNCH_RECOVERY_ENABLED', 'false');
     reloadFeatureFlagsForTest();
@@ -560,16 +561,28 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
               format: 'csv',
               content: `metric,value\nsum,${analysis.overall[0]!.value}\nrows,${analysis.overall[1]!.value}\n`,
             };
-          } else {
-            expect(turn).toBe(5);
+          } else if (captureScreenshot && turn === 5) {
+            expect(request.tools?.some((tool) => tool.name === 'browser_screenshot')).toBe(true);
             expect(toolResults.at(-1)).toMatchObject({
               ok: true,
               file: { filename: 'analysis.csv' },
             });
+            name = 'browser_screenshot';
+            input = {};
+          } else {
+            expect(turn).toBe(captureScreenshot ? 6 : 5);
+            expect(toolResults.at(-1)).toMatchObject({
+              ok: true,
+              file: {
+                filename: captureScreenshot
+                  ? expect.stringMatching(/^screenshot-.*\.jpg$/)
+                  : 'analysis.csv',
+              },
+            });
             name = 'browser_finish';
             input = {
               status: 'completed',
-              summary: '已保存原报表，完整统计并生成分析文件。',
+              summary: `已保存原报表，完整统计并生成分析文件。${captureScreenshot ? '已保存遮罩截图。' : ''}`,
               evidenceText: 'Export report',
               fields: analysis!.overall.map((metric) => ({
                 name: metric.name,
@@ -941,12 +954,16 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       site,
     );
     expect(modelRequests.join('\n')).not.toContain('PRIVATE-');
-    expect(modelRequests).toHaveLength(5);
+    expect(modelRequests).toHaveLength(captureScreenshot ? 6 : 5);
     const fileRecords = await readFileRecords();
     const file = fileRecords.find((row) => row.filename === 'report.csv')!;
     const generated = fileRecords.find((row) => row.filename === 'analysis.csv')!;
     expect(generated).toBeDefined();
-    expect(fileRecords).toHaveLength(2);
+    expect(fileRecords).toHaveLength(captureScreenshot ? 3 : 2);
+    const screenshot = captureScreenshot
+      ? fileRecords.find((row) => row.mimetype === 'image/jpeg')
+      : undefined;
+    if (captureScreenshot) expect(screenshot).toMatchObject({ userId: 7, kind: 'output' });
     expect(analysis?.complete).toBe(true);
     expect(file.browserSource).toMatchObject({
       kind: 'task_download',
@@ -974,7 +991,11 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       expect(await ui.title()).toBe('Holaday task result candidate');
       await expect.poll(() => ui.locator('body').innerText(), { timeout: 10000 }).toContain(intent);
       const files = [];
-      for (const filename of ['report.csv', 'analysis.csv']) {
+      for (const filename of [
+        'report.csv',
+        'analysis.csv',
+        ...(screenshot ? [String(screenshot.filename)] : []),
+      ]) {
         const button = ui.getByRole('button', {
           name: new RegExp(`下载.*${filename.replace('.', '\\.')}`),
         });
@@ -988,13 +1009,19 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
         for await (const chunk of stream) chunks.push(Buffer.from(chunk));
         const received = Buffer.concat(chunks);
         if (filename === 'report.csv') expect(received).toEqual(payload);
-        else
+        else if (filename === 'analysis.csv')
           expect(
             received
               .toString()
               .replace(/^\uFEFF/, '')
               .replace(/\r\n/g, '\n'),
           ).toBe(expectedAnalysis);
+        else {
+          expect(received.subarray(0, 2)).toEqual(Buffer.from([255, 216]));
+          expect(received.subarray(-2)).toEqual(Buffer.from([255, 217]));
+          expect(received.length).toBe(Number(screenshot!.sizeBytes));
+          await writeFile(join(artifacts, 'app-delivered-screenshot.jpg'), received);
+        }
         expect(download.suggestedFilename()).toBe(filename);
         await download.delete();
         const bounds = await button.boundingBox();
@@ -1040,6 +1067,13 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
             filename: generated.filename,
             sizeBytes: generated.sizeBytes,
           },
+          screenshotFile: screenshot
+            ? {
+                fileId: screenshot.externalId,
+                filename: screenshot.filename,
+                sizeBytes: screenshot.sizeBytes,
+              }
+            : null,
           originalRequests: exported,
           sourceUserPageUnchanged: true,
           otherTabUnchanged: true,
@@ -1056,8 +1090,10 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
           browserPlugin: 'Browser plugin not available; using repository Playwright workflow',
           buildFiles: hashes,
           limits: [
-            'Synthetic account/database/model and controlled WS delivery; actual JWT/authenticated HTTP/tRPC/core task/loaded extension/native download/FileService/TaskStream/card/browser delivery. Not real-user/SQL/OS/focus/public-site acceptance.',
-            'Actual App/Composer and real tasks.list/detail handlers after reload/history navigation; TaskRepository write boundary is a file-backed synthetic fixture, not real MySQL transaction/durability acceptance.',
+            'Synthetic account/model and controlled WS delivery; actual JWT/authenticated HTTP/tRPC/core task/loaded extension/native download/FileService/TaskStream/card/browser delivery. Not real-user/physical OS/public-site acceptance.',
+            sqlProbe
+              ? 'Actual isolated MySQL with ownership guard; no business data or production migration.'
+              : 'TaskRepository write boundary is a file-backed synthetic fixture, not real MySQL durability acceptance.',
           ],
         },
         null,

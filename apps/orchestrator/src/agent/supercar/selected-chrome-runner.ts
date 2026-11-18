@@ -25,6 +25,10 @@ import type {
 } from '../../playbook/evolution/capture-recorder.js';
 import { persistTransferredTaskBrowserDownload } from '../browser-tools/browser-download.js';
 import {
+  type StoreTaskScreenshot,
+  persistTaskScreenshot,
+} from '../browser-tools/browser-screenshot.js';
+import {
   BrowserTaskFileReader,
   READ_TASK_FILE_TOOL,
   taskFileReadRequest,
@@ -74,6 +78,8 @@ export interface RunSelectedChromeTaskOptions {
   browserTaskFiles?: BrowserTaskFiles;
   onBrowserDownload?: RunSupercarOptions['onBrowserDownload'];
   onBrowserDownloadSaved?: RunSupercarOptions['onBrowserDownloadSaved'];
+  onBrowserScreenshot?: StoreTaskScreenshot;
+  onBrowserScreenshotSaved?: RunSupercarOptions['onBrowserDownloadSaved'];
   /** G2i 复审: what the user typed (see RunSupercarOptions.userRequest). Defaults to `intent`. */
   userRequest?: string;
   messagesAdapter: MessagesAdapter;
@@ -258,9 +264,24 @@ function taskTools(
   fileWorkEnabled = false,
 ): ReadonlyArray<NeutralToolDefinition> {
   const formats = options.createFileFormats ?? [];
+  const coreTools = browserTools.map((tool) =>
+    tool.name === 'browser_finish' && !fileWorkEnabled
+      ? {
+          ...tool,
+          inputSchema: {
+            ...tool.inputSchema,
+            properties: Object.fromEntries(
+              Object.entries(tool.inputSchema.properties as Record<string, unknown>).filter(
+                ([name]) => name !== 'fields',
+              ),
+            ),
+          },
+        }
+      : tool,
+  );
   const chromeTools: NeutralToolDefinition[] = options.client.routingV2
     ? [
-        ...browserTools,
+        ...coreTools,
         {
           name: 'request_human',
           description:
@@ -291,7 +312,7 @@ function taskTools(
           },
         },
       ]
-    : browserTools.map((tool) =>
+    : coreTools.map((tool) =>
         tool.name === 'browser_act'
           ? {
               ...tool,
@@ -306,6 +327,13 @@ function taskTools(
             }
           : tool,
       );
+  if (options.client.screenshotsEnabled && options.onBrowserScreenshot)
+    chromeTools.push({
+      name: 'browser_screenshot',
+      description:
+        'Capture the current task page in the background and save a downloadable JPEG. Editable controls and sensitive mirrored values are masked. No arguments, tab IDs, addresses, paths or bytes. A successful saved file receipt is required to claim screenshot delivery.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+    });
   if (
     options.client.fileDownloadsEnabled &&
     options.browserTaskFiles?.taskId === options.taskId &&
@@ -569,7 +597,7 @@ const browserTools: ReadonlyArray<NeutralToolDefinition> = [
   {
     name: 'browser_finish',
     description:
-      'Use status=failed with an honest summary when the task cannot be fulfilled. Use status=completed only after all requested results and files exist; evidenceText must match the latest page. Files must come from create_file, never invented URLs or code blocks.',
+      'Use status=failed with an honest summary when the task cannot be fulfilled. Use status=completed only after all requested results and files exist; evidenceText must match the latest page. Files must come from create_file, browser_download_file or browser_screenshot; saved files attach automatically. Never invent URLs or code blocks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1051,6 +1079,61 @@ async function processTools(
     if (boundary) {
       await publish(errorResult(tool.id, boundary.status));
       terminal = boundary;
+      continue;
+    }
+
+    if (tool.name === 'browser_screenshot') {
+      if (
+        !emptyInputSchema.safeParse(tool.input).success ||
+        !options.client.screenshotsEnabled ||
+        !options.onBrowserScreenshot
+      ) {
+        await publish(errorResult(tool.id, 'screenshot_unavailable'));
+        continue;
+      }
+      const captured = await options.client.screenshot();
+      if (!captured.ok || !captured.screenshot) {
+        await publish(errorResult(tool.id, 'screenshot_unavailable'));
+        continue;
+      }
+      const inputRevision = options.control.inputRevision;
+      const current = async () =>
+        !run.modelAbort.signal.aborted &&
+        Date.now() < run.deadline &&
+        options.control.canAgentAct() &&
+        options.control.inputRevision === inputRevision &&
+        !(await cancellationRequested(options)) &&
+        !run.modelAbort.signal.aborted &&
+        options.control.canAgentAct() &&
+        options.control.inputRevision === inputRevision;
+      try {
+        const receipt = await persistTaskScreenshot(
+          captured.screenshot,
+          options.onBrowserScreenshot,
+          current,
+        );
+        await options.onBrowserScreenshotSaved?.(receipt);
+        if (!(await current())) throw new Error();
+        const file: CreatedFile = {
+          fileId: receipt.fileId,
+          filename: receipt.filename,
+          size: receipt.sizeBytes,
+          downloadUrl: receipt.downloadUrl,
+          format: 'jpg',
+        };
+        files.set(`screenshot:${receipt.fileId}`, file);
+        await publish(
+          successResult(tool.id, {
+            file,
+            masked: true,
+            message:
+              '截图文件已保存，将自动随 browser_finish 交付附件；不要把截图或网页字段填入仅供输入文件分析的 fields，也不要为完成字段报错重复截图。',
+          }),
+        );
+      } catch {
+        await publish(errorResult(tool.id, 'screenshot_save_unconfirmed'));
+        terminal = failed('截图保存结果未确认，已停止；不会自动重复写入。', iterations, toolsUsed);
+      }
       continue;
     }
 
@@ -1753,6 +1836,27 @@ async function processTools(
         );
         continue;
       }
+      const screenshotRequest = (options.userRequest ?? options.intent)
+        .replace(/(?:不要|无需|不用|不必|不需要)(?:截图|截屏)[^，。；\n]*/g, '')
+        .replace(/(?:do not|don't|without)\s+(?:take\s+)?screenshots?/gi, '');
+      const screenshotClaim =
+        /已(?:经)?(?:成功)?[^，。；\n]{0,20}(?:截图|截屏)|(?:截图|截屏)已(?:保存|完成)|screenshot(?: was| has been)? (?:taken|saved)/i.test(
+          parsed.data.summary,
+        ) &&
+        !/(?:无法|不能|不支持|未能|尚未|没有|未)(?:成功)?(?:截图|截屏)|screenshot (?:was |has )?not/i.test(
+          parsed.data.summary,
+        );
+      if (
+        (/(?:截图|截屏|screenshot)/i.test(screenshotRequest) || screenshotClaim) &&
+        ![...files.keys()].some((key) => key.startsWith('screenshot:'))
+      ) {
+        await publish(
+          errorResult(tool.id, 'screenshot_receipt_missing', {
+            message: '缺少已保存的实际截图文件回执，请截图或如实报告失败。',
+          }),
+        );
+        continue;
+      }
       const partialFileResult = /^\s*(?:部分完成|partially completed)/i.test(parsed.data.summary);
       if (fileWork) {
         if (
@@ -1784,7 +1888,12 @@ async function processTools(
           continue;
         }
       } else if (parsed.data.fields?.length) {
-        await publish(errorResult(tool.id, 'task_file_unavailable'));
+        await publish(
+          errorResult(tool.id, 'task_file_unavailable', {
+            message:
+              'fields 仅供已读取的输入文件统计。本任务输出附件已由宿主保存，请省略 fields 后重新 browser_finish；不需要重新截图或生成文件。',
+          }),
+        );
         continue;
       }
       const requiredFormats = taskFileRequirements(options.intent);
@@ -1915,6 +2024,13 @@ function toolExecutionRecord(
   const receipt = JSON.parse(result.content as string) as Record<string, unknown>;
   const error = typeof receipt.error === 'string' ? receipt.error : undefined;
   const parsed = tool.name === 'browser_act' ? parseAction(tool.input) : undefined;
+  if (tool.name === 'browser_screenshot')
+    return {
+      actionKind: 'selected_chrome_screenshot',
+      actionSummary: '保存任务页面截图',
+      ok: receipt.ok === true && Boolean(receipt.file),
+      message: receipt.ok === true ? '已保存遮罩后的任务页面截图。' : error,
+    };
   if (tool.name === 'browser_download_file') {
     const file = receipt.file as { size?: unknown } | undefined;
     const saved = receipt.ok === true && typeof file?.size === 'number';

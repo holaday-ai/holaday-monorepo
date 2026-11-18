@@ -32,6 +32,7 @@ import { SelectedTargetResolver } from './selected-target.js';
 import type { NativeUploadPayload } from './selected-target.js';
 import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
 import type { VerifiedTaskFile } from './task-file-transfer.js';
+import { captureMaskedTaskScreenshot } from './task-screenshot.js';
 
 /**
  * Per-strategy failure record. Included in the DriverResult.data for
@@ -607,6 +608,62 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
             (chooserError || clickOutcome === 'not_applied'),
         },
       };
+    }
+  }
+
+  async captureTaskScreenshot(
+    captureId: string,
+    revision: number,
+    current: () => boolean,
+  ): Promise<DriverResult> {
+    const page = this.getLivePage();
+    const tabId = this.tabId;
+    const targets = this.targets;
+    const valid = () =>
+      Boolean(
+        current() &&
+          page &&
+          this.getLivePage() === page &&
+          tabId === this.tabId &&
+          targets &&
+          targets.observationRevision === revision &&
+          this.isAllowed(page.url(), this.opts.allowedOrigins),
+      );
+    if (!page || !targets || !this.opts.collaborationV2 || !valid())
+      return driverError(DRIVER_ERRORS.SCREENSHOT_FAILED, 'Task capture unavailable');
+    try {
+      await targets.assertObservationFresh();
+      await targets.assertNativeIdle();
+      // Reuse the tab's existing debugger attachment. CRX newCDPSession tries
+      // Target.attachToBrowserTarget and is unsupported in the extension.
+      const data = await captureMaskedTaskScreenshot(page, valid, () =>
+        chrome.debugger.sendCommand({ tabId: tabId! }, 'Page.getFrameTree'),
+      );
+      // Screenshot masking/caret styles can change DOM epochs. The capture checks
+      // document loader IDs; the session checks the native input stamp separately.
+      await targets.assertNativeIdle();
+      if (!valid()) throw new Error();
+      const bytes = Buffer.from(data, 'base64');
+      const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+      if (!valid()) throw new Error();
+      return {
+        status: 'ok',
+        data: {
+          captureId,
+          tabId,
+          origin: new URL(page.url()).origin,
+          observationRevision: revision,
+          mediaType: 'image/jpeg',
+          sizeBytes: bytes.length,
+          sha256: Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, '0')).join(
+            '',
+          ),
+          data,
+          capturedAt: Date.now(),
+        },
+      };
+    } catch {
+      return driverError(DRIVER_ERRORS.SCREENSHOT_FAILED, 'Task capture unavailable');
     }
   }
 
