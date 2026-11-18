@@ -28,7 +28,7 @@ try {
   await guard.end();
 }
 
-const { pool } = await import('../db/client.js');
+const { pool, db } = await import('../db/client.js');
 const { createHttpApp } = await import('../http.js');
 const {
   createWsServer,
@@ -39,6 +39,17 @@ const {
 } = await import('../ws/server.js');
 // This covers the legacy recovery boot used without controlled maintenance.
 // Controlled boot reconciliation is separate; do not fabricate its opening authority here.
+// Use the same legacy startup SQL sweep as application-main before hydration.
+// This still deliberately does not start production producers or Linux-native boot.
+const { failStaleTasksWithEvents } = await import('../agent/task-maintenance.js');
+await failStaleTasksWithEvents(db, {
+  source: 'boot_sweep',
+  sourceStatuses: ['pending', 'planning', 'queued', 'executing'],
+  staleBy: 'createdAt',
+  cutoff: new Date(Date.now() - 2 * 60_000),
+  errorCode: 'ORCHESTRATOR_RESTART',
+  errorMessage: '服务重启导致任务中断，重新发送一次即可。',
+});
 const rehydrated = await loadRehydratedTasks();
 const app = createHttpApp({
   planner: {

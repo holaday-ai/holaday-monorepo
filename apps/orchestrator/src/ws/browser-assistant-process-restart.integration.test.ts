@@ -176,6 +176,7 @@ describe.runIf(enabled)(
       const completed = newExternalId('task');
       const unknown = newExternalId('task');
       const awaiting = newExternalId('task');
+      const textTask = newExternalId('task');
       for (const taskId of [completed, unknown, awaiting])
         await repo.insertTask(
           { taskId, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
@@ -188,11 +189,22 @@ describe.runIf(enabled)(
       await probe.db
         .update(tasks)
         .set({
+          createdAt: new Date(Date.now() - 180_000),
+          result: { summary: 'Verified progress before interruption' },
+        })
+        .where(eq(tasks.externalId, unknown));
+      await probe.db
+        .update(tasks)
+        .set({
           status: 'awaiting_user',
           awaitingQuestion: '请核对导出范围后继续。',
           awaitingKind: 'clarification',
         })
         .where(eq(tasks.externalId, awaiting));
+      await repo.insertTask(
+        { taskId: textTask, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+        { userId: 7, intent: 'Text-only unfinished task without browser authority' },
+      );
       const [task] = await probe.db.select().from(tasks).where(eq(tasks.externalId, completed));
       const logger = pino({ level: 'silent' });
       const files = new FileService(
@@ -225,7 +237,10 @@ describe.runIf(enabled)(
       const second = await start(first.ready);
       expect(second.ready.pid).not.toBe(first.ready.pid);
       expect(second.ready.node).toBe(process.version);
-      expect(second.ready.rehydrated.taskCount).toBe(2);
+      const [postSweep] = await probe.db.select().from(tasks).where(eq(tasks.externalId, unknown));
+      evidence.unknownPostStartupSweep = postSweep?.status;
+      expect(postSweep?.status).toBe('awaiting_user');
+      expect(second.ready.rehydrated.taskCount).toBe(3);
       const absent = await connect(
         second.ready,
         await signAccessToken({ sub: newExternalId('user'), plan: 'free' }),
@@ -246,9 +261,10 @@ describe.runIf(enabled)(
       await vi.waitFor(() => {
         expect(restored.frames).toContainEqual(
           expect.objectContaining({
-            type: 'server.task.terminal',
+            type: 'server.supercar.awaiting_user',
             taskId: unknown,
-            status: 'failed',
+            awaitingKind: 'browser_action',
+            question: expect.stringContaining('结果尚未核实'),
           }),
         );
         expect(restored.frames).toContainEqual(
@@ -260,6 +276,13 @@ describe.runIf(enabled)(
         );
       });
       expect(restored.frames.some((frame) => frame.type === 'server.task.dispatch')).toBe(false);
+      expect(restored.frames).toContainEqual(
+        expect.objectContaining({
+          type: 'server.task.terminal',
+          taskId: textTask,
+          status: 'failed',
+        }),
+      );
       expect(
         unrelated.frames.some((frame) =>
           [completed, unknown, awaiting].includes(String(frame.taskId)),
@@ -288,17 +311,45 @@ describe.runIf(enabled)(
       }
       expect(await repo.isCurrentCompletedOutcome(completed, summary)).toBe(true);
       const [stopped] = await probe.db.select().from(tasks).where(eq(tasks.externalId, unknown));
-      expect(stopped?.status).toBe('failed');
+      expect(stopped).toMatchObject({ status: 'awaiting_user', awaitingKind: 'browser_action' });
+      expect(stopped?.awaitingQuestion).toContain('不会自动重复');
+      expect(stopped?.errorCode).toBe('BROWSER_RESULT_UNCONFIRMED');
+      const replyResponse = await fetch(`${origin}/api/trpc/tasks.reply`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ taskId: unknown, message: '继续' }),
+      });
+      expect(replyResponse.status).toBe(200);
+      expect(JSON.stringify(await replyResponse.json())).toContain('stillAwaiting');
+
+      expect(stopped?.result).toMatchObject({ summary: 'Verified progress before interruption' });
+      for (const taskExternalId of [unknown, completed])
+        expect(
+          await repo.persistAwaitingUser({
+            taskExternalId,
+            restartRecovery: true,
+            awaitingKind: 'browser_action',
+            question: 'stale recovery prompt',
+          }),
+        ).toEqual({ persisted: false });
+      const [stillWaiting] = await probe.db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.externalId, unknown));
+      expect(stillWaiting?.awaitingQuestion).toContain('结果尚未核实');
+
       Object.assign(evidence, {
         node: process.version,
         childPids: children.map((child) => child.ready.pid),
         crash,
         oldSocketCloseCode: 1006,
         actualDefaultAuthentication: true,
+        actualLegacyStartupSqlSweep: true,
+        unrelatedTextTaskKeepsLegacyFailure: true,
         absentSignedUserDenied: true,
         crossOwnerDownloadDenied: true,
         ownedAwaitingPromptRestored: true,
-        unknownUnifiedTaskFailedWithoutReplay: true,
+        unknownUnifiedTaskWaitsWithoutReplay: true,
         completedHistoryReadback: true,
         downloads,
         websocketFrameTypes: restored.frames.map((frame) => frame.type),

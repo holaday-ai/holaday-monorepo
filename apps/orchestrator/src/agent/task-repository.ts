@@ -9,6 +9,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm
 import type { DB } from '../db/client.js';
 import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
+import { BROWSER_RESTART_WAIT_CODE, isLocalChromeTaskSource } from './browser-restart-wait.js';
 
 /**
  * mysql2 returns `[ResultSetHeader, ...]` from drizzle's `update().set()`
@@ -652,6 +653,8 @@ export class TaskRepository {
     question: string;
     awaitingKind: string;
     result?: Record<string, unknown> | null;
+    /** Restart recovery must not replace a newer pause, prompt or terminal state. */
+    restartRecovery?: true;
   }): Promise<{ persisted: boolean }> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })
@@ -665,7 +668,7 @@ export class TaskRepository {
       awaitingQuestion: params.question,
       awaitingKind: params.awaitingKind,
       pauseReason: null,
-      errorCode: null,
+      errorCode: params.restartRecovery ? BROWSER_RESTART_WAIT_CODE : null,
       errorMessage: null,
     };
     if (params.result !== undefined) {
@@ -680,7 +683,15 @@ export class TaskRepository {
         .where(
           and(
             eq(tasks.externalId, params.taskExternalId),
-            inArray(tasks.status, [...TASK_RUNNER_OUTCOME_SOURCE_STATUSES]),
+            params.restartRecovery
+              ? and(
+                  eq(tasks.status, 'executing'),
+                  eq(tasks.origin, this.taskOrigin),
+                  isNull(tasks.executionId),
+                  eq(tasks.executionRevision, 0),
+                  eq(tasks.coreRecordVersion, 0),
+                )
+              : inArray(tasks.status, [...TASK_RUNNER_OUTCOME_SOURCE_STATUSES]),
           ),
         );
       const affected = extractMysqlAffectedRows(updateResult);
@@ -1779,6 +1790,7 @@ export class TaskRepository {
         errorCode: tasks.errorCode,
         errorMessage: tasks.errorMessage,
         result: tasks.result,
+        sourceContext: tasks.sourceContext,
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
@@ -1858,6 +1870,9 @@ export class TaskRepository {
         pauseMessage: state.status === 'paused' ? resultReason : null,
         awaitingQuestion: row.awaitingQuestion ?? null,
         awaitingKind: row.awaitingKind ?? null,
+        ...(isLocalChromeTaskSource(row.sourceContext)
+          ? { browserSource: 'local-chrome' as const }
+          : {}),
       });
     }
     return out;
@@ -1865,6 +1880,7 @@ export class TaskRepository {
 }
 
 export interface RehydratedTask {
+  browserSource?: 'local-chrome';
   state: TaskState;
   userExternalId: string;
   pendingConfirm: PendingConfirm | null;

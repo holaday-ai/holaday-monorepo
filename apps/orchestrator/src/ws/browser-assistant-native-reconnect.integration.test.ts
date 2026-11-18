@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,7 +38,7 @@ const sockets: WebSocket[] = [];
 const evidence: Record<string, unknown> = {
   modelAPICalls: 0,
   accounts: 'synthetic SQL owner',
-  boot: 'legacy HTTP/WS modules, not production controlled maintenance',
+  boot: 'legacy startup SQL sweep + HTTP/WS modules, not full production maintenance boot',
   input: 'Playwright/native Chromium, not physical OS input',
 };
 async function backend(ports?: RecoveryReady) {
@@ -211,6 +211,16 @@ describe.runIf(enabled)(
         (built.stdout ?? '') + (built.stderr ?? ''),
       );
       expect(built.status, built.stderr).toBe(0);
+      if (process.env.HOLADAY_NATIVE_PUBLIC_FORM === '1') {
+        // The QA package normally grants only loopback. Grant this one public
+        // test origin in the owned build artifact (production uses <all_urls>).
+        const manifestPath = join(extensionDir, 'manifest.json');
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        manifest.host_permissions.push('https://httpbin.org/*');
+        await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+        evidence.qaPublicHostGrant = 'https://httpbin.org/*; test artifact only';
+      }
+
       context = await chromium.launchPersistentContext(join(root, 'profile'), {
         channel: 'chromium',
         headless: true,
@@ -323,6 +333,10 @@ describe.runIf(enabled)(
           sourceContext: { browserSource: 'local-chrome' },
         },
       );
+      await probe.db
+        .update(tasks)
+        .set({ createdAt: new Date(Date.now() - 180_000) })
+        .where(eq(tasks.externalId, unknown));
       const listed = result(
         await tool(first.process, owner, {
           taskId: unknown,
@@ -503,9 +517,10 @@ describe.runIf(enabled)(
       await vi.waitFor(() =>
         expect(frames).toContainEqual(
           expect.objectContaining({
-            type: 'server.task.terminal',
+            type: 'server.supercar.awaiting_user',
             taskId: unknown,
-            status: 'failed',
+            awaitingKind: 'browser_action',
+            question: expect.stringContaining('结果尚未核实'),
           }),
         ),
       );
@@ -549,7 +564,13 @@ describe.runIf(enabled)(
             args: { session: value },
           }),
         );
-      const open = async (taskId: string, tabId: number, selectionId: string, url: string) => {
+      const open = async (
+        taskId: string,
+        tabId: number,
+        selectionId: string,
+        url: string,
+        grantedOrigins: string[] = [site],
+      ) => {
         const deadline = Date.now() + 12_000;
         for (;;) {
           const opened = await command(taskId, {
@@ -563,7 +584,7 @@ describe.runIf(enabled)(
                 USER_BROWSER_DOWNLOAD_CAPABILITY,
               ],
             },
-            grantedOrigins: [site],
+            grantedOrigins,
           });
           if (opened.ok === true) return opened;
           if (opened.error !== 'browser_busy' || Date.now() >= deadline)
@@ -695,6 +716,99 @@ describe.runIf(enabled)(
         .from(tasks)
         .where(eq(tasks.externalId, cancelTask));
       expect(cancelled?.status).toBe('cancelled');
+      if (process.env.HOLADAY_NATIVE_PUBLIC_FORM === '1') {
+        const publicTask = newExternalId('task');
+        await repo.insertTask(
+          { taskId: publicTask, status: 'executing', plan: [], cursor: 0, pendingConfirm: null },
+          {
+            userId: 7,
+            intent: 'Prepare a public form without submitting',
+            sourceContext: { browserSource: 'local-chrome' },
+          },
+        );
+        const publicPage = await context.newPage();
+        let postAttempts = 0;
+        await publicPage.route('**/*', async (route) => {
+          if (route.request().method() === 'POST') {
+            postAttempts++;
+            await route.abort();
+          } else await route.continue();
+        });
+        await publicPage.goto('https://httpbin.org/forms/post', {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000,
+        });
+        await publicPage.locator('input[name="custname"]').waitFor();
+        await normal.bringToFront();
+        const publicTabId = await worker.evaluate(
+          async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)!.id!,
+          publicPage.url(),
+        );
+        const publicTab = (
+          result(
+            await tool(second.process, owner, {
+              taskId: publicTask,
+              kind: 'tabs',
+              extensionClientId: nextClient,
+            }),
+          ).tabs as typeof tabs
+        ).find((tab) => tab.tabId === publicTabId)!;
+        expect(publicTab).toBeDefined();
+        const opened = await open(
+          publicTask,
+          publicTab.tabId,
+          publicTab.selectionId,
+          publicPage.url(),
+          ['https://httpbin.org'],
+        );
+        const publicAction = {
+          kind: 'type' as const,
+          selector: {
+            description: 'Customer name',
+            scope: { timeoutMs: 5000 },
+            strategies: [{ kind: 'css' as const, value: 'input[name="custname"]' }],
+            selfHeal: false,
+          },
+          payload: { text: 'HOLA DAY recovery QA' },
+        };
+        const publicDescription = await command(publicTask, {
+          op: 'describe',
+          sessionId: String(opened.sessionId),
+          action: publicAction,
+          observationRevision: (opened.observation as typeof observed).observationRevision,
+        });
+        expect(publicDescription.ok).toBe(true);
+        const publicBinding = publicDescription.target as typeof binding;
+        const prepared = await command(publicTask, {
+          op: 'act',
+          sessionId: String(opened.sessionId),
+          action: publicAction,
+          binding: {
+            token: publicBinding.token,
+            observationRevision: publicBinding.observationRevision,
+          },
+        });
+        expect(prepared).toMatchObject({ ok: true });
+        expect(await publicPage.locator('input[name="custname"]').inputValue()).toBe(
+          'HOLA DAY recovery QA',
+        );
+        expect(postAttempts).toBe(0);
+        await publicPage.screenshot({
+          path: join(artifacts, 'public-form-prepared-not-submitted.png'),
+          fullPage: true,
+        });
+        expect(
+          await command(publicTask, { op: 'close', sessionId: String(opened.sessionId) }),
+        ).toMatchObject({ ok: true });
+        await repo.persistVisionOutcome(publicTask, { status: 'cancelled', tickCount: 0 });
+        evidence.publicForm = {
+          url: publicPage.url(),
+          boundInputVerified: true,
+          postAttempts,
+          modelCalls: 0,
+          submitted: false,
+        };
+      }
       await target.screenshot({ path: join(artifacts, 'native-target-after-reconnect.png') });
       await normal.screenshot({ path: join(artifacts, 'normal-input-preserved.png') });
       await writeFile(join(artifacts, 'browser-console.json'), JSON.stringify(logs, null, 2));

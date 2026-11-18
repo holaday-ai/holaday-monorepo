@@ -19,6 +19,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import { BROWSER_RESTART_WAIT_CODE } from '../../agent/browser-restart-wait.js';
 import {
   BrowserTaskFiles,
   type ValidatedBrowserTaskFile,
@@ -11178,6 +11179,7 @@ export const tasksRouter = router({
             coreRecordVersion: tasksTable.coreRecordVersion,
             awaitingQuestion: tasksTable.awaitingQuestion,
             awaitingKind: tasksTable.awaitingKind,
+            errorCode: tasksTable.errorCode,
             roleId: tasksTable.roleId,
           })
           .from(tasksTable)
@@ -11191,6 +11193,19 @@ export const tasksRouter = router({
           .limit(1);
         if (!taskRow) {
           throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+        }
+        // A crashed browser runner has no live continuation to wake. A generic
+        // reply must not fall through to creating/re-running the original intent.
+        if (taskRow.status === 'awaiting_user' && taskRow.errorCode === BROWSER_RESTART_WAIT_CODE) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId: input.taskId,
+            question:
+              taskRow.awaitingQuestion ??
+              '上次浏览器操作的结果尚未核实，请先核对当前页面和下载记录。',
+            awaitingKind: 'browser_action',
+          });
+          return { ok: true, state: 'stillAwaiting' };
         }
         const captchaInstance = ctx.browserPool?.peek(input.taskId);
         const captchaSession =

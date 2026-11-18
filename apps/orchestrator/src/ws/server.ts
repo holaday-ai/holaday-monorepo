@@ -9,6 +9,7 @@ import {
   selectedChromeSessionCommandSchema,
 } from '@holaday/shared-types';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
+import { BROWSER_RESTART_WAIT_QUESTION } from '../agent/browser-restart-wait.js';
 import { TOOL_CALL_TEXT_ONLY, deliverableAnswer } from '../agent/generate-answer-guard.js';
 import type { Planner } from '../agent/planner.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
@@ -313,6 +314,36 @@ async function applyRehydrationForUser(state: ClientState): Promise<void> {
       // Strict mode cannot recreate it under this new authentication root.
       if (state.work.controller) continue;
       const step = entry.state.plan[entry.state.cursor];
+      // Unified browser runners have no legacy step ledger to replay. Their
+      // last effect may already have happened: preserve progress and require a
+      // fresh page/result check instead of suggesting the whole task be resent.
+      if (!step && entry.state.plan.length === 0 && entry.browserSource === 'local-chrome') {
+        const question = BROWSER_RESTART_WAIT_QUESTION;
+        try {
+          const receipt = await taskRepository.persistAwaitingUser({
+            taskExternalId: entry.state.taskId,
+            restartRecovery: true,
+            awaitingKind: 'browser_action',
+            question,
+          });
+          if (receipt.persisted) {
+            state.tasks.set(entry.state.taskId, { ...entry.state, status: 'awaiting_user' });
+            send(state.socket, {
+              type: 'server.supercar.awaiting_user',
+              taskId: entry.state.taskId,
+              question,
+              awaitingKind: 'browser_action',
+            });
+            reemittedAwaiting += 1;
+          }
+        } catch (err) {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err), taskId: entry.state.taskId },
+            'restart recovery: waiting-state persistence unconfirmed',
+          );
+        }
+        continue;
+      }
       if (!step) {
         logger.warn(
           { userId: state.userId, taskId: entry.state.taskId, cursor: entry.state.cursor },
