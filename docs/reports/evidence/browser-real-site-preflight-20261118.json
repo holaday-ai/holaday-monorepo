@@ -1,0 +1,71 @@
+{
+  "preparedAtUTC": "2026-11-18T15:57:26.445526+00:00",
+  "stage": "read-only source and installed-extension preflight; not project browser acceptance",
+  "github": {
+    "commitRef": "91ba3cd6b7b208231f60265a7bb805ae7a5af2cf",
+    "path": "docs/reports/evidence/pr360-premerge-20261118.json",
+    "sourceBytes": 7560,
+    "sourceSHA256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+    "networkConnectorMatchesGitBlob": true,
+    "summaryColumns": [
+      "measurement",
+      "phase",
+      "files",
+      "total",
+      "passed",
+      "failed",
+      "pending"
+    ]
+  },
+  "githubSummaryRows": 8,
+  "sheets": {
+    "tab": "RawData",
+    "dataRows": 100,
+    "sum": "5075.00",
+    "bytes": 1000,
+    "sha256": "f0a91ea82ffde445b25c0cd413d3426f757ba2292aa16435d3ddab540cb86331",
+    "crlf": 100,
+    "endsWithNewline": false,
+    "canonicalFixtureBytesEqual": false,
+    "canonicalFixtureBytes": 901,
+    "scope": "API first-sheet CSV export only; actual browser download hash must be observed separately"
+  },
+  "comparator": {
+    "checks": 7,
+    "passed": 7,
+    "positiveCases": 3,
+    "rejectedMutations": 4,
+    "scope": "local comparator validation only; no project browser task or AWS calls"
+  },
+  "installedBrowser": {
+    "metadataVersion": "157.0.8103.79",
+    "liveVersionAttested": false,
+    "productionCandidate": "0.0.5",
+    "candidatePackageSHA256": "311647dacb6a47c34c6c9a164301c4eab7af50d9836a85b640a697f905395185",
+    "nativeExtensions": [
+      {
+        "name": "HOLA DAY",
+        "id": "pfcicombbnhpjmiopcaccngbidlkgfpl",
+        "version": "0.0.1",
+        "enabled": false,
+        "source": "unpacked"
+      },
+      {
+        "name": "HOLA DAY · Local QA",
+        "id": "hjpkgiddhiolmmibeaeegpmmogjmalji",
+        "version": "0.0.3",
+        "enabled": true,
+        "source": "unpacked"
+      }
+    ],
+    "candidateInstalledInInspectedProfile": false,
+    "settingsChanged": false
+  },
+  "googleStableSubjectVerified": false,
+  "actualProjectPluginTaskRun": false,
+  "realKmsCryptoCalls": 0,
+  "awsExecutionApproval": "pending explicit owner reply",
+  "modelAPICalls": 0,
+  "productionChanged": false,
+  "deployed": false
+}
