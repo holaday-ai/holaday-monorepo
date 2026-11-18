@@ -365,6 +365,20 @@ export function asksToFillForm(requested: string): boolean {
   return /(?:填表|填写|填入|fill.*form)/i.test(asked);
 }
 
+/** Reporting an absent control is not a request to find and fill one elsewhere. */
+export function asksToFillDateControl(requested: string): boolean {
+  const work = requested
+    .replace(
+      /(?:如果|若|如)\s*(?:(?:当前|这个|该)?页面(?:上)?)?\s*(?:没有|无|不存在|找不到)\s*(?:可(?:用|填写)的?)?\s*日期(?:控件|选择器?|输入框?)\s*[,，]?\s*(?:(?:请|就|则)\s*)?(?:如实)?(?:说明|告知|报告|标明)/g,
+      ' ',
+    )
+    .replace(
+      /\bif\s+(?:(?:there\s+(?:is|are)|(?:the\s+|this\s+|current\s+)?page\s+(?:has|contains))\s+)?no\s+date\s+(?:picker|input|control|field)s?(?:\s+(?:is|are)\s+(?:present|available))?\s*,?\s*(?:please\s+)?(?:say\s+so|(?:report|note|state|mention|explain)(?:\s+(?:it|this|that|the\s+absence))?)/gi,
+      ' ',
+    );
+  return /日期控件|日期选择|日期输入|date\s*(?:picker|input|control|field)/i.test(work);
+}
+
 /**
  * FIX-61B P1-8: a single video page — told by its path (YouTube watch / shorts, youtu.be, any
  * /video/ page: 哔哩哔哩, 抖音, an offline fixture's /video). A results or list page is none.

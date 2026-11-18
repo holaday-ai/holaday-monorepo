@@ -95,7 +95,7 @@ describe.runIf(process.env.HOLADAY_PUBLIC_SESSION_COMPAT === '1')(
         const result = await runUnifiedSupercarTask({
           taskId: `public-session-${randomUUID()}`,
           intent:
-            '请使用云端浏览器，在 https://httpbin.org/forms/post 填写 Customer name=Session QA，只填不提交并截图；如果没有日期控件，如实说明。',
+            '请使用云端浏览器，在 https://httpbin.org/forms/post 填写 Customer name=Session QA 和日期控件，只填不提交并截图；如果没有日期控件，如实说明。',
           executor,
           messagesAdapter: adapter,
           maxIterations: 7,

@@ -38,7 +38,12 @@ import {
 } from './action-claims.js';
 import { misplacedAdLabel } from './ad-label.js';
 import { prepareBrowserPlan } from './browser-brain-roles.js';
-import { type BrowserTrace, completionGap, receiptEvidence } from './browser-completion.js';
+import {
+  type BrowserTrace,
+  asksToFillDateControl,
+  completionGap,
+  receiptEvidence,
+} from './browser-completion.js';
 import {
   READ_TASK_FILE_TOOL,
   type TaskFileRead,
@@ -793,9 +798,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
   let countContinued = false;
   /** AP4 (Deploy-22 core-08): a requested date control needs a date fill receipt. */
   let dateContinued = false;
-  const wantsDate = /日期控件|日期选择|日期输入|date\s*(?:picker|input|control|field)/i.test(
-    input.intent,
-  );
+  const wantsDate = asksToFillDateControl(input.intent);
   /** FIX-24 (Deploy-24 core-08): sites the task names; fills elsewhere do not count. */
   const namedHosts = intentHosts(input.intent);
   const onNamedSite = (url: string | undefined) => onDomains(url, namedHosts);
