@@ -1,4 +1,4 @@
-import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
+import { USER_BROWSER_ACTIVITY_CAPABILITY, USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { importSelectedSession } from './session-import.js';
 /**
  * Phase 25 — extension-side tool executor (Mode B v0.1).
@@ -37,10 +37,13 @@ import type {
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import { sanitizePageContextUrl } from '../shared/page-context.js';
+import { browserLaunchSessionId } from './browser-launch-profile.js';
 import { sendCriticalClientMessage } from './critical-send.js';
 import {
   listReadableTabs,
+  prepareIndependentTaskTab,
   readSelectedTab,
+  releasePreparedTaskTab,
   resetTabSelectionsForTests,
 } from './selected-tab-read.js';
 import { getCurrentWsToken } from './ws-client.js';
@@ -886,8 +889,38 @@ async function computeExtensionToolResult(
         error: { message: sanitized.message, code: reply.error },
       };
     }
+    if (kind === 'task_tab') {
+      if (!extensionToolRuntime.transport) throw new Error('capability_missing');
+      const result = await withDeadline(
+        extensionToolRuntime.runLegacy(() =>
+          prepareIndependentTaskTab(
+            args?.target,
+            args?.preparationId,
+            args?.recoverable,
+            args?.resumeOnly,
+            args?.taskTabMode,
+            args?.launchBrowserSessionId,
+          ),
+        ),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return { ok: true, result: { ...result, selectedSessionVersion: 1 } };
+    }
+    if (kind === 'task_tab_release') {
+      if (!extensionToolRuntime.transport) throw new Error('capability_missing');
+      await withDeadline(
+        releasePreparedTaskTab(args?.preparationId, args?.launchBrowserSessionId),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return { ok: true, result: { released: true } };
+    }
     if (args?.target && kind !== 'read') throw new Error('target_unsupported');
     if (kind === 'tabs' || kind === 'read') {
+      const launchBrowserSessionId = extensionToolRuntime.transport
+        ? await browserLaunchSessionId().catch(() => null)
+        : null;
       const result = await withDeadline<unknown>(
         kind === 'tabs' ? listReadableTabs() : readSelectedTab(args?.target),
         operationBudgetMs,
@@ -898,7 +931,21 @@ async function computeExtensionToolResult(
         result: {
           ...(typeof result === 'object' && result !== null ? result : {}),
           selectedSessionVersion: extensionToolRuntime.transport ? 1 : 0,
-          ...(extensionToolRuntime.transport ? { userBrowserProtocol: USER_BROWSER_PROTOCOL } : {}),
+          ...(launchBrowserSessionId ? { launchBrowserSessionId } : {}),
+          ...(extensionToolRuntime.transport
+            ? {
+                userBrowserProtocol: {
+                  ...USER_BROWSER_PROTOCOL,
+                  capabilities: [
+                    ...USER_BROWSER_PROTOCOL.capabilities,
+                    'task_tab_start',
+                    USER_BROWSER_ACTIVITY_CAPABILITY,
+                    'task_tab_recovery_v1',
+                    ...(launchBrowserSessionId ? ['task_launch_recovery_v1'] : []),
+                  ],
+                },
+              }
+            : {}),
         },
       };
     }

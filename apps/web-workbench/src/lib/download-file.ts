@@ -37,6 +37,9 @@ interface BaseInput {
   url: string;
   /** Filename used for the download attribute. */
   filename: string;
+  /** Recheck the original account/view before sending and before delivering bytes. */
+  current?: () => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -45,15 +48,18 @@ interface BaseInput {
  * caller can craft a context-specific toast.
  */
 export async function downloadFileAuthed(input: BaseInput): Promise<DownloadResult> {
-  if (isFileUnavailable(input.url)) {
-    return { ok: false, status: 410, message: 'known unavailable file' };
-  }
-  const token = getAccessToken();
   try {
+    input.current?.();
+    if (isFileUnavailable(input.url)) {
+      return { ok: false, status: 410, message: 'known unavailable file' };
+    }
+    const token = getAccessToken();
     const res = await fetch(input.url, {
       cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: input.signal,
     });
+    input.current?.();
     if (!res.ok) {
       markFileUnavailableFromStatus(input.url, res.status);
       return {
@@ -63,6 +69,7 @@ export async function downloadFileAuthed(input: BaseInput): Promise<DownloadResu
       };
     }
     const blob = await res.blob();
+    input.current?.();
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objectUrl;

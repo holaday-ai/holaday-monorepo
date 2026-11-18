@@ -5,10 +5,11 @@ import {
   type TaskOrigin,
   newExternalId,
 } from '@holaday/shared-types';
-import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { recordQuotaCharge } from '../quota/platform-failure-refunds.js';
 import { type ConsumeReason, QuotaService } from '../quota/quota-service.js';
+import { BROWSER_RESTART_WAIT_CODE, isLocalChromeTaskSource } from './browser-restart-wait.js';
 
 /**
  * mysql2 returns `[ResultSetHeader, ...]` from drizzle's `update().set()`
@@ -28,6 +29,7 @@ import { taskEvents } from '../db/schema/task-events.js';
 import { taskSteps } from '../db/schema/task-steps.js';
 import { tasks } from '../db/schema/tasks.js';
 import { users } from '../db/schema/users.js';
+import { webhookIdempotency } from '../db/schema/webhook-idempotency.js';
 import {
   TASK_ACTIVE_STATUSES,
   TASK_RUNNER_OUTCOME_SOURCE_STATUSES,
@@ -116,6 +118,8 @@ export interface InsertTaskContext {
    * transaction as the insert: if the claim is gone, the insert rolls back.
    */
   publicCloudContinuation?: { originalTaskId: string; claimToken: string };
+  /** Server-owned pending claim; committed with the task, never after dispatch. */
+  creationReceipt?: { idempotencyKey: string; requestHash: string };
 }
 
 /** The original's continuation claim was lost before the replacement was linked. */
@@ -252,6 +256,25 @@ export class TaskRepository {
             ),
           );
         if (extractMysqlAffectedRows(linked) !== 1) throw new PublicCloudContinuationLinkError();
+      }
+      const receipt = ctx.creationReceipt;
+      if (receipt) {
+        const linked = await tx
+          .update(webhookIdempotency)
+          .set({
+            taskId: state.taskId,
+            responseJson: { taskId: state.taskId, status: state.status },
+          })
+          .where(
+            and(
+              eq(webhookIdempotency.userId, ctx.userId),
+              eq(webhookIdempotency.idempotencyKey, receipt.idempotencyKey),
+              eq(webhookIdempotency.requestHash, receipt.requestHash),
+              eq(webhookIdempotency.taskId, ''),
+              gt(webhookIdempotency.expiresAt, new Date()),
+            ),
+          );
+        if (extractMysqlAffectedRows(linked) !== 1) throw new Error('task_creation_receipt_lost');
       }
     });
   }
@@ -630,6 +653,8 @@ export class TaskRepository {
     question: string;
     awaitingKind: string;
     result?: Record<string, unknown> | null;
+    /** Restart recovery must not replace a newer pause, prompt or terminal state. */
+    restartRecovery?: true;
   }): Promise<{ persisted: boolean }> {
     const [taskRow] = await this.db
       .select({ id: tasks.id })
@@ -643,7 +668,7 @@ export class TaskRepository {
       awaitingQuestion: params.question,
       awaitingKind: params.awaitingKind,
       pauseReason: null,
-      errorCode: null,
+      errorCode: params.restartRecovery ? BROWSER_RESTART_WAIT_CODE : null,
       errorMessage: null,
     };
     if (params.result !== undefined) {
@@ -658,7 +683,15 @@ export class TaskRepository {
         .where(
           and(
             eq(tasks.externalId, params.taskExternalId),
-            inArray(tasks.status, [...TASK_RUNNER_OUTCOME_SOURCE_STATUSES]),
+            params.restartRecovery
+              ? and(
+                  eq(tasks.status, 'executing'),
+                  eq(tasks.origin, this.taskOrigin),
+                  isNull(tasks.executionId),
+                  eq(tasks.executionRevision, 0),
+                  eq(tasks.coreRecordVersion, 0),
+                )
+              : inArray(tasks.status, [...TASK_RUNNER_OUTCOME_SOURCE_STATUSES]),
           ),
         );
       const affected = extractMysqlAffectedRows(updateResult);
@@ -1757,6 +1790,7 @@ export class TaskRepository {
         errorCode: tasks.errorCode,
         errorMessage: tasks.errorMessage,
         result: tasks.result,
+        sourceContext: tasks.sourceContext,
       })
       .from(tasks)
       .innerJoin(users, eq(users.id, tasks.userId))
@@ -1836,6 +1870,9 @@ export class TaskRepository {
         pauseMessage: state.status === 'paused' ? resultReason : null,
         awaitingQuestion: row.awaitingQuestion ?? null,
         awaitingKind: row.awaitingKind ?? null,
+        ...(isLocalChromeTaskSource(row.sourceContext)
+          ? { browserSource: 'local-chrome' as const }
+          : {}),
       });
     }
     return out;
@@ -1843,6 +1880,7 @@ export class TaskRepository {
 }
 
 export interface RehydratedTask {
+  browserSource?: 'local-chrome';
   state: TaskState;
   userExternalId: string;
   pendingConfirm: PendingConfirm | null;

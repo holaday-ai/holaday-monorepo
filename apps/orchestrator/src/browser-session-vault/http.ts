@@ -103,7 +103,7 @@ export function installVaultRoutes(options: {
     '/browser-data/grants/:id/import',
     route(async (req, user) =>
       runtime().vault.import(user, id.parse(req.params.id), req.body, (state, grant) =>
-        runtime().worker.verify(user, state, grant),
+        runtime().worker.verifyForImport(user, state, grant),
       ),
     ),
   );

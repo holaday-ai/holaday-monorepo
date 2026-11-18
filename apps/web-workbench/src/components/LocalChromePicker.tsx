@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
+import type { BrowserTaskModeChoice } from '@holaday/shared-types';
 import { Globe, Loader2, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -20,6 +21,7 @@ export function LocalChromePicker({
   const [loading, setLoading] = React.useState(false);
   const [result, setResult] = React.useState<Discovery | null>(null);
   const [error, setError] = React.useState(false);
+  const [taskMode, setTaskMode] = React.useState<BrowserTaskModeChoice>('auto');
   const sequence = React.useRef(0);
   React.useEffect(
     () => () => {
@@ -53,7 +55,10 @@ export function LocalChromePicker({
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          if (next) void discover();
+          if (next) {
+            setTaskMode('auto');
+            void discover();
+          }
         }}
       >
         <DropdownMenuTrigger asChild>
@@ -78,8 +83,33 @@ export function LocalChromePicker({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="w-80 max-w-[90vw] p-2">
           <div className="px-2 py-2 text-xs text-muted-foreground">
-            选择一个页面 · 使用现有登录态
+            {result?.backgroundTaskTabs
+              ? '选择一个网站 · 使用现有登录态'
+              : '选择一个页面 · 使用现有登录态'}
           </div>
+          {result?.backgroundTaskTabs ? (
+            <div className="px-2 pb-2 text-xs text-muted-foreground">
+              <div className="mb-2 flex gap-2">
+                <button
+                  type="button"
+                  aria-pressed={taskMode !== 'current'}
+                  onClick={() => setTaskMode('auto')}
+                  className="rounded border px-2 py-1"
+                >
+                  独立任务页（默认）
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={taskMode === 'current'}
+                  onClick={() => setTaskMode('current')}
+                  className="rounded border px-2 py-1"
+                >
+                  处理当前页
+                </button>
+              </div>
+              在后台执行，你可以继续浏览。也可以在指令里明确说“处理当前页”。
+            </div>
+          ) : null}
           {result?.routingV2 ? (
             <p className="px-2 pb-2 text-xs text-muted-foreground">
               选择即授权这个页面的站点（exact
@@ -116,8 +146,17 @@ export function LocalChromePicker({
               <DropdownMenuItem
                 key={`${tab.extensionClientId}:${tab.tabId}`}
                 className="block w-full rounded-lg px-2 py-2 text-left hover:bg-foreground/5 focus:bg-foreground/5"
+                disabled={
+                  (tab.launchRecovery === true && !tab.launchRecoveryReady) ||
+                  (tab.backgroundTaskTabs === true && taskMode !== 'current' && !tab.taskTabStart)
+                }
                 onSelect={() => {
-                  useTaskStore.setState({ localChromeSelection: tab, browserPreference: null });
+                  useTaskStore.setState({
+                    localChromeSelection: tab.backgroundTaskTabs
+                      ? { ...tab, taskTabMode: taskMode }
+                      : tab,
+                    browserPreference: null,
+                  });
                   setOpen(false);
                 }}
               >
@@ -125,6 +164,11 @@ export function LocalChromePicker({
                 <span className="block truncate text-xs text-muted-foreground">
                   {tab.expectedUrl}
                 </span>
+                {tab.backgroundTaskTabs && !tab.taskTabStart ? (
+                  <span className="block text-xs text-muted-foreground">
+                    独立任务页需要更新插件
+                  </span>
+                ) : null}
               </DropdownMenuItem>
             ))}
           </div>

@@ -15,7 +15,10 @@ import type { SupercarOutcome } from '../../agent/supercar/agent-loop.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { TaskRepository } from '../../agent/task-repository.js';
 import { BROWSER_HOME_IDLE_TIMEOUT_MS } from '../../browser-home/browser-home-session.js';
-import { lendBrowserHomeToTask } from '../../browser-home/browser-home-task.js';
+import {
+  claimBrowserHomeTaskOrThrow,
+  lendBrowserHomeToTask,
+} from '../../browser-home/browser-home-task.js';
 import { BrowserPool } from '../../browser-pool/browser-pool.js';
 import type {
   BrowserInstance,
@@ -118,7 +121,7 @@ function makePool() {
 
 async function openHome(pool: BrowserPool, userId = USER): Promise<BrowserInstance> {
   const inst = await pool.allocate(`bhs_${userId}`, userId, undefined, {
-    sessionPolicy: 'anonymous',
+    sessionPolicy: 'personal_home',
   });
   pool.setIdleTimeout(`bhs_${userId}`, BROWSER_HOME_IDLE_TIMEOUT_MS);
   return inst;
@@ -297,6 +300,7 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
     async (kind) => {
       const { pool, spawn } = makePool();
       const home = await openHome(pool);
+      home.cloudProfileId = 'ee52fe57-1dd1-4562-828d-afcb84b0c96f';
       const seen: Array<Record<string, unknown>> = [];
       script.run = async (args) => {
         seen.push({
@@ -317,6 +321,13 @@ describe('tasks.create browserHomeSession — hand-over and hand-back', () => {
 
       expect(result.status).toBe('executing');
       expect(result.executionMode).toBe('browser');
+      expect(vi.mocked(TaskRepository.prototype.insertTask).mock.calls[0]?.[1]).toMatchObject({
+        sourceContext: {
+          browserSessionPolicy: 'personal_home',
+          browserHomeSession: true,
+          cloudProfileId: home.cloudProfileId,
+        },
+      });
       await vi.waitFor(() => expect(pool.peek(`bhs_${USER}`)).toBe(home), { timeout: 10_000 });
 
       // While it ran: the task held the very same browser, kept its page, the stream followed it.
@@ -633,18 +644,18 @@ describe('lendBrowserHomeToTask — the person still acting (P2-6)', () => {
         }),
       'navigate',
     );
-    const claim = { handOver: vi.fn(), release: vi.fn(), settle: vi.fn() };
+    const claim = claimBrowserHomeTaskOrThrow({ pool, userId: USER });
     await expect(
       lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_busy', claim, settleMs: 50 }),
     ).rejects.toThrow('你在云浏览器里的操作还没有完成，任务没有执行。请稍后再发送。');
-    expect(claim.release).toHaveBeenCalled();
     expect(pool.peek(`bhs_${USER}`)).toBe(home);
     expect(pool.browserHomeHolder(USER)).toBeNull();
     finishAction();
     await action;
     // Settled: lent at once.
+    const next = claimBrowserHomeTaskOrThrow({ pool, userId: USER });
     await expect(
-      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_now', claim: null, settleMs: 50 }),
+      lendBrowserHomeToTask({ pool, userId: USER, taskId: 'tsk_now', claim: next, settleMs: 50 }),
     ).resolves.toBe(home);
   });
 });

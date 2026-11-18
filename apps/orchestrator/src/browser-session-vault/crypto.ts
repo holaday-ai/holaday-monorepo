@@ -6,6 +6,7 @@ export interface EncryptionContext {
   grantId: string;
   purpose: 'session' | 'profile';
   version: number;
+  access?: 'cloud-home-v1';
 }
 export interface WrappedKey {
   keyVersion: string;
@@ -23,7 +24,16 @@ export interface Envelope extends WrappedKey {
   tag: string;
 }
 const aad = (c: EncryptionContext) =>
-  Buffer.from(JSON.stringify([c.userId, c.origin, c.grantId, c.purpose, c.version]));
+  Buffer.from(
+    JSON.stringify([
+      c.userId,
+      c.origin,
+      c.grantId,
+      c.purpose,
+      c.version,
+      ...(c.access ? [c.access] : []),
+    ]),
+  );
 function encrypt(key: Buffer, value: Buffer, context: EncryptionContext) {
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
@@ -144,9 +154,10 @@ export class CloudKmsKeyProvider implements KeyProvider {
 export function assertVaultConfiguration(options: {
   importEnabled: boolean;
   profileEnabled: boolean;
+  cloudHomeEnabled?: boolean;
   keys?: KeyProvider;
 }) {
-  if (!options.importEnabled && !options.profileEnabled) return;
+  if (!options.importEnabled && !options.profileEnabled && !options.cloudHomeEnabled) return;
   if (!options.keys) throw new Error('vault_key_provider_required');
   if (options.keys.kind === 'test' && process.env.NODE_ENV !== 'test')
     throw new Error('test_key_provider_forbidden');

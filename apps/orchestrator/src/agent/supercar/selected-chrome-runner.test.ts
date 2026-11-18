@@ -1,5 +1,8 @@
+import { rm } from 'node:fs/promises';
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { env } from '../../config/env.js';
+import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -7,6 +10,7 @@ import type {
 } from '../../llm/messages-adapter.js';
 import { MessagesAdapterError } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
+import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
 import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
@@ -388,6 +392,40 @@ describe('runSelectedChromeTask', () => {
     });
   });
 
+  it.each([1, 2])(
+    'requires exactly the requested two generated CSV receipts with %i saved',
+    async (count) => {
+      const replies = [toolReply('create_file', fileInput)];
+      if (count === 2)
+        replies.push(
+          toolReply('create_file', { ...fileInput, filename: 'monthly.csv' }, 'monthly'),
+        );
+      replies.push(finish('Draft'));
+      const h = createHarness(replies);
+      let next = 0;
+      const result = await runFileCase(h, {
+        intent: '生成两个 CSV 文件，一个按地区，一个按月份',
+        createFileFormats: ['csv'],
+        maxIterations: replies.length,
+        onCreateFile: async ({ filename }) => {
+          const fileId = `saved_${++next}`;
+          return { ...fileReceipt, filename, fileId, downloadUrl: `/api/files/${fileId}/download` };
+        },
+      });
+      expect(result.status).toBe(count === 2 ? 'completed' : 'failed');
+    },
+  );
+  it('stops after a returned storage error without invoking another generated write', async () => {
+    const h = createHarness([
+      toolReply('create_file', fileInput),
+      toolReply('create_file', fileInput, 'retry'),
+    ]);
+    const store = vi.fn(async () => ({ error: 'receipt lost after commit' }));
+    expect(
+      await runFileCase(h, { createFileFormats: ['csv'], onCreateFile: store, maxIterations: 2 }),
+    ).toMatchObject({ status: 'failed' });
+    expect(store).toHaveBeenCalledOnce();
+  });
   it('can deliver a requested CSV when the reference filename is ZIP', async () => {
     const h = createHarness([toolReply('create_file', fileInput), finish('Draft')]);
     expect(
@@ -421,7 +459,7 @@ describe('runSelectedChromeTask', () => {
     const onCreateFile = vi.fn(async () => fileReceipt);
     const result = await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
     expect(onCreateFile).toHaveBeenCalledTimes(1);
-    expect(onCreateFile).toHaveBeenCalledWith(fileInput);
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining(fileInput));
     expect(result.status).toBe('completed');
     expect(result.summary).toContain('```holaday-file\n');
     expect(result.summary).toContain('"fileId":"file-qa"');
@@ -499,7 +537,7 @@ describe('runSelectedChromeTask', () => {
     const h = createHarness([toolReply('create_file', { ...fileInput, content }), finish('Draft')]);
     const onCreateFile = vi.fn(async () => fileReceipt);
     await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
-    expect(onCreateFile).toHaveBeenCalledWith({ ...fileInput, content });
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining({ ...fileInput, content }));
   });
 
   it.each(['给我一个可下载的 CSV 附件', '整理为 CSV 文件', 'Create a CSV and a JSON file'])(
@@ -1198,6 +1236,37 @@ describe('runSelectedChromeTask', () => {
     expect(h.modelCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('discards a plan after a completed human edit even when the idle window elapsed during model thinking', async () => {
+    let now = 10_000;
+    const control = new BrowserControl(() => now, { collaborationV2: true });
+    const h = createHarness([], { control });
+    h.modelCreate
+      .mockImplementationOnce(async () => {
+        await control.runHuman(async () => {}, 'insertText');
+        now += 3_000;
+        return response('stale-after-idle', [
+          {
+            type: 'tool_use',
+            id: 'stale-goto',
+            name: 'browser_act',
+            input: { action: { kind: 'goto', payload: { url: 'https://work.example/old-plan' } } },
+          },
+        ]);
+      })
+      .mockResolvedValueOnce(finish('Draft', 'fresh-finish'));
+    const outcome = await runSelectedChromeTask({
+      taskId: 'idle-replan',
+      intent: 'Inspect the draft',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control,
+      target,
+    });
+    expect(outcome.status).toBe('completed');
+    expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
+    expect(h.modelCreate).toHaveBeenCalledTimes(2);
+  });
+
   it('discards a model action planned while the person used the browser and re-reads the page', async () => {
     const shared = sharedControl();
     const h = createHarness([], { control: shared.control });
@@ -1774,4 +1843,200 @@ describe('toCapturedToolCall (extension capture)', () => {
     ).toEqual({ op: 'navigate', url: 'https://a.example/' });
     expect(toCapturedToolCall({ kind: 'wait', payload: { ms: 10 } }, undefined)).toBeNull();
   });
+});
+
+describe('selected Chrome task file reading and statistics', () => {
+  const roots: string[] = [];
+  const enabled = env.BROWSER_TASK_FILES_V1;
+  afterEach(async () => {
+    env.BROWSER_TASK_FILES_V1 = enabled;
+    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  });
+  async function owned(text = 'name,amount\nalice,0.1\nbob,0.2\n', taskId = 'task-a') {
+    env.BROWSER_TASK_FILES_V1 = true;
+    const f = await browserOutputFixture();
+    roots.push(f.root);
+    const row = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'report.csv',
+      mimetype: 'text/csv',
+      buffer: Buffer.from(text),
+    });
+    let active = true;
+    const scope = new BrowserTaskFiles({
+      taskId,
+      userId: 7,
+      files: f.service,
+      active: async () => active,
+    });
+    scope.admitValidated(await f.service.loadMany([row.externalId], 7));
+    return {
+      ...f,
+      scope,
+      fileId: row.externalId,
+      revoke: () => {
+        active = false;
+      },
+    };
+  }
+  const call = (name: string, input: unknown, id = name) =>
+    response(id, [{ type: 'tool_use', id, name, input }]);
+  const done = (extra = {}) =>
+    call('browser_finish', {
+      status: 'completed',
+      summary: '已读取报表并核对结果。',
+      evidenceText: 'Draft',
+      ...extra,
+    });
+  function run(h: ReturnType<typeof createHarness>, scope: BrowserTaskFiles, maxIterations = 3) {
+    return runSelectedChromeTask({
+      taskId: 'task-a',
+      intent: '读取报表并分析数据',
+      target,
+      client: h.client,
+      control: h.control,
+      messagesAdapter: h.messagesAdapter,
+      browserTaskFiles: scope,
+      maxIterations,
+    });
+  }
+  function results(request: NeutralMessagesRequest) {
+    return request.messages
+      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+      .flatMap((b) =>
+        b.type === 'tool_result' && typeof b.content === 'string' ? [JSON.parse(b.content)] : [],
+      );
+  }
+  it('reads owned files without requiring extension upload capability', async () => {
+    const f = await owned();
+    const h = createHarness([call('read_task_file', { fileId: f.fileId }), done()]);
+    const result = await run(h, f.scope);
+    expect(result.status).toBe('completed');
+    expect(h.requests[0]?.tools?.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['read_task_file', 'analyze_task_table']),
+    );
+    expect(JSON.stringify(h.requests[0])).toContain(f.fileId);
+    expect(results(h.requests[1]!).find((r) => r.fileId === f.fileId)).toMatchObject({
+      ok: true,
+      text: 'name,amount\nalice,0.1\nbob,0.2\n',
+      coverage: { complete: true },
+    });
+  });
+  it('rejects a complete finish after reading only a prefix', async () => {
+    const f = await owned();
+    const h = createHarness([call('read_task_file', { fileId: f.fileId, maxChars: 5 }), done()]);
+    expect((await run(h, f.scope, 2)).status).toBe('failed');
+  });
+  it('marks a deliberately partial file answer as partial', async () => {
+    const f = await owned();
+    const h = createHarness([
+      call('read_task_file', { fileId: f.fileId, maxChars: 5 }),
+      done({ summary: '部分完成：只读取了文件开头，未分析全文。' }),
+    ]);
+    const result = await run(h, f.scope, 2);
+    expect(result).toMatchObject({ status: 'completed', partial: { wanted: 1 } });
+  });
+  it('allows a complete finish once all file ranges have actually been read', async () => {
+    const f = await owned();
+    const h = createHarness([
+      call('read_task_file', { fileId: f.fileId, maxChars: 5 }, 'read-first'),
+      call('read_task_file', { fileId: f.fileId, offset: 5 }, 'read-rest'),
+      done(),
+    ]);
+    expect((await run(h, f.scope)).status).toBe('completed');
+    expect(
+      results(h.requests[2]!)
+        .filter((r) => r.fileId === f.fileId)
+        .at(-1),
+    ).toMatchObject({ coverage: { complete: true } });
+  });
+  it('computes the entire owned CSV and checks statistic bindings before finish', async () => {
+    const f = await owned(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
+    const h = createHarness([]);
+    let turn = 0;
+    h.messagesAdapter.create = async (request) => {
+      h.requests.push(request);
+      if (++turn === 1)
+        return call('analyze_task_table', {
+          fileId: f.fileId,
+          mode: 'aggregate',
+          metrics: [{ op: 'sum', column: 'B' }, { op: 'count_rows' }],
+        });
+      const table = results(request).at(-1)!;
+      expect(table).toMatchObject({ ok: true, complete: true, scope: { scannedRows: 10001 } });
+      expect(table.overall.map((m: { value: string }) => m.value)).toEqual(['1099.9', '10001']);
+      return done({
+        fields: table.overall.map((m: { id: string; name: string; value: string }) => ({
+          name: m.name,
+          value: m.value,
+          fileId: f.fileId,
+          tableFactId: m.id,
+        })),
+      });
+    };
+    expect((await run(h, f.scope)).status).toBe('completed');
+  });
+  it.each(['unbound', 'forged', 'unseen-groups', 'invalid-number'])(
+    'refuses an unverified complete statistics answer: %s',
+    async (kind) => {
+      const f = await owned(
+        kind === 'invalid-number'
+          ? 'name,amount\nalice,bad\n'
+          : 'name,amount\nalice,0.1\nbob,0.2\n',
+      );
+      const h = createHarness([]);
+      let turn = 0;
+      h.messagesAdapter.create = async (request) => {
+        h.requests.push(request);
+        if (++turn === 1)
+          return call('analyze_task_table', {
+            fileId: f.fileId,
+            mode: 'aggregate',
+            metrics: [{ op: 'sum', column: 'B' }],
+            ...(kind === 'unseen-groups' ? { groupBy: ['A'], limit: 1 } : {}),
+          });
+        const table = results(request).at(-1)!;
+        const m = table.overall?.[0];
+        return done(
+          kind === 'unbound' || !m
+            ? {}
+            : {
+                fields: [
+                  {
+                    name: m.name,
+                    value: kind === 'forged' ? '9999' : m.value,
+                    fileId: f.fileId,
+                    tableFactId: m.id,
+                  },
+                ],
+              },
+        );
+      };
+      expect((await run(h, f.scope, 2)).status).toBe('failed');
+    },
+  );
+  it('does not complete file work after task or account authority is revoked', async () => {
+    const f = await owned();
+    const h = createHarness([]);
+    let turn = 0;
+    h.messagesAdapter.create = async (request) => {
+      h.requests.push(request);
+      if (++turn === 1) return call('read_task_file', { fileId: f.fileId });
+      f.revoke();
+      return done();
+    };
+    expect((await run(h, f.scope, 2)).status).toBe('failed');
+  });
+  it.each(['flag-off', 'other-task'])(
+    'withholds file content outside an enabled matching scope: %s',
+    async (kind) => {
+      const f = await owned(undefined, kind === 'other-task' ? 'other-task' : 'task-a');
+      if (kind === 'flag-off') env.BROWSER_TASK_FILES_V1 = false;
+      const h = createHarness([call('read_task_file', { fileId: f.fileId }), done()]);
+      await run(h, f.scope, 2);
+      expect(h.requests[0]?.tools?.map((t) => t.name)).not.toContain('read_task_file');
+      expect(JSON.stringify(h.requests)).not.toContain('alice,0.1');
+    },
+  );
 });

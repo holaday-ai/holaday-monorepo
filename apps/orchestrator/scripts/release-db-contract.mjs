@@ -22,6 +22,7 @@ const REPLAYABLE_MISSING_DROPS = [
 export const REQUIRED_PRE_APP_ROLLOUT_MIGRATIONS = [
   '0051_account_closures.sql',
   '0052_feedback_cases.sql',
+  '0071_task_files_browser_source.sql',
 ];
 
 export const STOCK_PREFERENCE_REQUIRED_TABLES = [
@@ -49,7 +50,7 @@ export function assertDatabaseReadyForAppRollout(appliedMigrations) {
   const missing = findMissingRequiredPreAppRolloutMigrations(appliedMigrations);
   if (missing.length > 0) {
     throw new Error(
-      `Account closure migrations must run before application rollout: ${missing.join(', ')}`,
+      `Required database migrations must run before application rollout: ${missing.join(', ')}`,
     );
   }
 }

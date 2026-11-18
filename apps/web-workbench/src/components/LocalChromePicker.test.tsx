@@ -66,3 +66,41 @@ it('v2 guides offline connection and requires an explicit public cloud choice', 
   expect(useTaskStore.getState().browserPreference).toBe('cloud-public');
   expect(screen.getByRole('button', { name: '选择 Chrome 页面' }).textContent).toMatch(/无登录态/);
 });
+
+it('defaults the chosen site to an independent task tab on the enabled candidate', async () => {
+  const tab = {
+    extensionClientId: 'connection',
+    tabId: 42,
+    expectedUrl: 'https://work.example',
+    selectionId: 'source',
+    title: '后台报表',
+    backgroundTaskTabs: true,
+    taskTabStart: true,
+  };
+  api.tabs.mockResolvedValue({ tabs: [tab], connected: true, backgroundTaskTabs: true });
+  render(<LocalChromePicker />);
+  fireEvent.keyDown(screen.getByRole('button', { name: '选择 Chrome 页面' }), { key: 'Enter' });
+  await screen.findByRole('menuitem', { name: /后台报表/ });
+  expect(screen.getByText(/后台执行.*继续浏览/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('menuitem', { name: /后台报表/ }));
+  expect(useTaskStore.getState().localChromeSelection).toEqual({ ...tab, taskTabMode: 'auto' });
+});
+
+it('binds the original page only after choosing current-page mode', async () => {
+  const tab = {
+    extensionClientId: 'connection',
+    tabId: 42,
+    expectedUrl: 'https://work.example',
+    selectionId: 'source',
+    title: '后台报表',
+    backgroundTaskTabs: true,
+    taskTabStart: true,
+  };
+  api.tabs.mockResolvedValue({ tabs: [tab], connected: true, backgroundTaskTabs: true });
+  render(<LocalChromePicker />);
+  fireEvent.keyDown(screen.getByRole('button', { name: '选择 Chrome 页面' }), { key: 'Enter' });
+  await screen.findByRole('menuitem', { name: /后台报表/ });
+  fireEvent.click(screen.getByRole('button', { name: '处理当前页' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /后台报表/ }));
+  expect(useTaskStore.getState().localChromeSelection?.taskTabMode).toBe('current');
+});

@@ -67,7 +67,7 @@ export function BrowserDataSection() {
     <Section
       id="browser-data"
       title="浏览器登录与数据"
-      description="按站点授权云端只读访问，随时撤销和清除。"
+      description="管理 Chrome 的只读授权和个人云浏览器的保存状态，随时撤销和清除。"
     >
       {failed ? (
         <p role="alert" className="text-sm text-destructive">
@@ -86,7 +86,7 @@ export function BrowserDataSection() {
             只导入所选站点的 Cookie 和你指定的 localStorage
             字段，不复制密码、支付卡、历史或书签。云端 IP
             与你的设备不同，可能要求重新登录或触发风控；遇到挑战请回到
-            Chrome。当前云端任务只读，不发送表单。
+            Chrome。通过此处导入的站点授权仅用于云端只读任务，不发送表单。
           </p>
           {mode.importEnabled ? (
             <div className="space-y-3 rounded-lg border p-4">
@@ -216,8 +216,16 @@ export function BrowserDataSection() {
             >
               <div>
                 <p>
-                  {grant.origin} · {statuses[grant.status] ?? '状态待确认'}
+                  {grant.origin} ·{' '}
+                  {grant.sessionAccess === 'cloud-home-v1' && grant.status === 'connected'
+                    ? '已保存'
+                    : (statuses[grant.status] ?? '状态待确认')}
                 </p>
+                {grant.sessionAccess === 'cloud-home-v1' && (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    个人云浏览器的保存状态，可用于你授权的网页操作；保存不代表已登录。
+                  </p>
+                )}
                 {grant.cookieDomains?.length ? (
                   <p className="text-xs text-muted-foreground">
                     授权范围：{grant.cookieDomains.join('、')}

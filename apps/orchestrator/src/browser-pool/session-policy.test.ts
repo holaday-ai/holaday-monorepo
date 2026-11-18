@@ -65,6 +65,17 @@ describe('D17-P1-01/02 session policy helpers', () => {
  * + stored policy + the vault runtime. Synthetic store/keys, no network.
  */
 describe('D17-P1-02: restoring a task browser with a connected grant for its site', () => {
+  it('never reinterprets personal Home identity as a public anonymous task', () => {
+    expect(
+      storedBrowserSessionPolicy({ sourceContext: { browserSessionPolicy: 'personal_home' } }),
+    ).toBe('personal_home');
+    expect(
+      storedBrowserSessionPolicy({
+        sourceContext: { browserSessionPolicy: 'personal_home' },
+        result: { metadata: { browserLimitation: '看不到你的个人信息' } },
+      }),
+    ).toBe('personal_home');
+  });
   async function restore(task: ReturnType<typeof legacyTask>) {
     const runtime = createVaultRuntime({
       importEnabled: true,
@@ -85,7 +96,7 @@ describe('D17-P1-02: restoring a task browser with a connected grant for its sit
     };
     const target = restorableBrowserTarget(task);
     if (!target) throw new Error('not restorable');
-    const executor = {};
+    const executor = { setSessionIdentityVerifier: () => {} };
     await runtime.prepare('usr_synthetic', executor as never, {
       targetUrl: target.url,
       sessionPolicy: storedBrowserSessionPolicy(task),

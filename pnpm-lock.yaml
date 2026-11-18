@@ -8,6 +8,9 @@ patchedDependencies:
   '@novnc/novnc':
     hash: 4edfdb4e8d0aba506c85cea4c4dd4f4bd8e11714bf3151fd764e6826e1db03c3
     path: patches/@novnc__novnc.patch
+  playwright-crx@0.15.0:
+    hash: c024d5adc65c95cfcdbff07b1030cc8e0c277437d5b43f753c40fb2869f92a85
+    path: patches/playwright-crx@0.15.0.patch
 
 importers:
 
@@ -88,7 +91,7 @@ importers:
         version: link:../../packages/shared-types
       playwright-crx:
         specifier: 0.15.0
-        version: 0.15.0
+        version: 0.15.0(patch_hash=c024d5adc65c95cfcdbff07b1030cc8e0c277437d5b43f753c40fb2869f92a85)
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -454,7 +457,7 @@ importers:
         version: link:../shared-types
       playwright-crx:
         specifier: 0.15.0
-        version: 0.15.0
+        version: 0.15.0(patch_hash=c024d5adc65c95cfcdbff07b1030cc8e0c277437d5b43f753c40fb2869f92a85)
     devDependencies:
       '@types/chrome':
         specifier: 0.0.287
@@ -11698,7 +11701,7 @@ snapshots:
 
   playwright-core@1.59.1: {}
 
-  playwright-crx@0.15.0: {}
+  playwright-crx@0.15.0(patch_hash=c024d5adc65c95cfcdbff07b1030cc8e0c277437d5b43f753c40fb2869f92a85): {}
 
   playwright@1.59.1:
     dependencies:

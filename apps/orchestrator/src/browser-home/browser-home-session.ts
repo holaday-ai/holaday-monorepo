@@ -2,8 +2,9 @@
  * BROWSER-HOME-1 — a user's cloud browser that belongs to no task.
  *
  * One per user, keyed `bhs_<userId>` in the BrowserPool (no tasks row). It is allocated like a
- * task browser — same Brave pool, network policy and egress proxy, anonymous session (no login
- * state is kept) — but idles out after 15 minutes instead of the pool-wide default. The last
+ * task browser — same Brave pool, network policy and egress proxy, personal identity scope —
+ * but idles out after 15 minutes instead of the pool-wide default. No saved identity is loaded
+ * unless the server explicitly selects an owned profile. The last
  * address it showed (the URL only, never page content) is kept in memory so a reopened session
  * goes back there.
  */
@@ -49,6 +50,10 @@ export type BrowserHomePool = Pick<
 const CLAIM_STALE_MS = 2 * 60_000;
 
 export interface BrowserHomeTaskClaim {
+  /** The server-owned browser present when this task was admitted. */
+  readonly instance: BrowserInstance;
+  /** A superseded claim or replacement browser may never inherit this task. */
+  isCurrent(): boolean;
   /** The request hands the claim to the task's dispatch, which lends the browser. */
   handOver(): void;
   /** Drop it (the browser is lent, or the task never got that far). Idempotent. */
@@ -91,6 +96,14 @@ export interface BrowserHomeOpenResult {
   sessionId: string;
   /** The page the browser shows; null = a blank page (the SPA shows the HOLA DAY home). */
   url: string | null;
+  cloudProfileId?: string;
+}
+export interface BrowserHomeProfileSelection {
+  id: string;
+  origin: string;
+}
+export interface BrowserHomeFileSetup {
+  onReady(instance: BrowserInstance, fresh: boolean): Promise<void>;
 }
 
 /** What leave() did: other pages still use it, its release was scheduled, or none was open. */
@@ -98,7 +111,13 @@ export type BrowserHomeLeaveResult = 'kept' | 'scheduled' | 'none';
 
 export class BrowserHomeSessions {
   private readonly lastUrls = new Map<string, string>();
-  private readonly opening = new Map<string, Promise<BrowserHomeOpenResult>>();
+  private readonly opening = new Map<
+    string,
+    {
+      profileId: string | null;
+      promise: Promise<BrowserHomeOpenResult>;
+    }
+  >();
   private readonly watched = new WeakSet<object>();
   private readonly taskClaims = new Map<string, { token: object; at: number }>();
   /**
@@ -149,7 +168,8 @@ export class BrowserHomeSessions {
     const existing = this.taskClaims.get(userId);
     if (existing && now - existing.at < CLAIM_STALE_MS) return { kind: 'busy' };
     if (pool.browserHomeHolder(userId)) return { kind: 'busy' };
-    if (!this.instanceFor(pool, userId)) return { kind: 'closed' };
+    const instance = this.instanceFor(pool, userId);
+    if (!instance || instance.executor.sessionInterruption) return { kind: 'closed' };
     const token = {};
     this.taskClaims.set(userId, { token, at: now });
     let handedOver = false;
@@ -159,6 +179,12 @@ export class BrowserHomeSessions {
     return {
       kind: 'claimed',
       claim: {
+        instance,
+        isCurrent: () =>
+          this.taskClaims.get(userId)?.token === token &&
+          this.instanceFor(pool, userId) === instance &&
+          !instance.executor.sessionInterruption &&
+          !pool.browserHomeHolder(userId),
         handOver: () => {
           handedOver = true;
         },
@@ -207,17 +233,21 @@ export class BrowserHomeSessions {
     userId: string,
     logger: Logger,
     viewerId?: string,
+    profile?: BrowserHomeProfileSelection,
+    files?: BrowserHomeFileSetup,
   ): Promise<BrowserHomeOpenResult> {
     this.cancelPendingRelease(userId);
     const pending = this.opening.get(userId);
+    if (pending && profile && pending.profileId !== profile.id)
+      throw new Error('home_profile_switch_required');
     // A fresh browser: pages recorded for an earlier one (gone by idle or a crash) do not count.
     if (!pending && !this.locate(pool, userId)) this.viewers.delete(userId);
     if (viewerId) this.addViewer(userId, viewerId);
-    if (pending) return pending;
-    const promise = this.openOnce(pool, userId, logger).finally(() => {
-      if (this.opening.get(userId) === promise) this.opening.delete(userId);
+    if (pending) return pending.promise;
+    const promise = this.openOnce(pool, userId, logger, profile, files).finally(() => {
+      if (this.opening.get(userId)?.promise === promise) this.opening.delete(userId);
     });
-    this.opening.set(userId, promise);
+    this.opening.set(userId, { promise, profileId: profile?.id ?? null });
     return promise;
   }
 
@@ -225,30 +255,55 @@ export class BrowserHomeSessions {
     pool: BrowserHomePool,
     userId: string,
     logger: Logger,
+    profile?: BrowserHomeProfileSelection,
+    files?: BrowserHomeFileSetup,
   ): Promise<BrowserHomeOpenResult> {
     const sessionId = browserHomeSessionId(userId);
     const existing = this.locate(pool, userId);
     if (existing) {
+      if (profile && existing.instance.cloudProfileId !== profile.id)
+        throw new Error('home_profile_switch_required');
       pool.touch(existing.instance.taskId);
       // While a task holds it, the person's input already goes through the task's control.
       if (!existing.heldBy) openPersonControl(existing.instance);
-      const url = await currentUrl(existing.instance);
+      const url = await currentUrl(existing.instance, true);
+      await files?.onReady(existing.instance, false);
       this.rememberUrl(userId, url);
-      return { sessionId, url: rememberable(url) ? url : null };
+      return {
+        sessionId,
+        url: rememberable(url) ? url : null,
+        ...(existing.instance.cloudProfileId
+          ? { cloudProfileId: existing.instance.cloudProfileId }
+          : {}),
+      };
     }
 
-    const restoreTo = this.lastUrl(userId);
+    const remembered = this.lastUrl(userId);
+    const restoreTo =
+      profile && (!remembered || new URL(remembered).origin !== profile.origin)
+        ? profile.origin
+        : remembered;
     const instance = await pool.allocate(sessionId, userId, undefined, {
       targetUrl: restoreTo,
-      // Login state is not kept for the home browser (a resident profile is later work).
-      sessionPolicy: 'anonymous',
+      sessionPolicy: 'personal_home',
+      ...(profile ? { cloudProfileId: profile.id } : {}),
+      ...(files ? { homeDownloadsEnabled: true } : {}),
     });
     pool.setIdleTimeout(sessionId, BROWSER_HOME_IDLE_TIMEOUT_MS);
+    try {
+      await files?.onReady(instance, true);
+    } catch (error) {
+      if (pool.peek(instance.taskId) === instance)
+        await pool.release(instance.taskId, 'browser-home-file-setup-failed');
+      throw error;
+    }
     await this.watchNavigations(instance, userId);
     let url: string | null = null;
     if (restoreTo) url = await this.restore(instance, restoreTo, userId, logger);
+    // Best-effort URL restoration may fail, but a stopped context is never a ready Home.
+    await currentUrl(instance, true);
     openPersonControl(instance);
-    return { sessionId, url };
+    return { sessionId, url, ...(profile ? { cloudProfileId: profile.id } : {}) };
   }
 
   private async restore(
@@ -356,6 +411,26 @@ export class BrowserHomeSessions {
     this.pendingReleases.delete(userId);
   }
 
+  /** Last transfer settled after the last viewer left: restart the ordinary close grace. */
+  backgroundOperationEnded(pool: BrowserHomePool, userId: string, instance: BrowserInstance): void {
+    if (
+      (this.viewers.get(userId)?.size ?? 0) > 0 ||
+      this.locate(pool, userId)?.instance !== instance
+    )
+      return;
+    if (instance.homeFileTransfers?.pending()) return;
+    this.cancelPendingRelease(userId);
+    const timer = setTimeout(() => {
+      if (this.pendingReleases.get(userId) !== timer) return;
+      this.pendingReleases.delete(userId);
+      void this.close(pool, userId, { onlyIfUnused: true, expectedInstance: instance }).catch(
+        () => undefined,
+      );
+    }, this.closeGraceMs);
+    timer.unref?.();
+    this.pendingReleases.set(userId, timer);
+  }
+
   /**
    * Release the user's home browser (remembering where it was). False when none was open. While a
    * task holds it, the session ends instead: nothing is given back when that task ends, and the
@@ -364,7 +439,7 @@ export class BrowserHomeSessions {
   async close(
     pool: BrowserHomePool,
     userId: string,
-    options: { onlyIfUnused?: boolean } = {},
+    options: { onlyIfUnused?: boolean; expectedInstance?: BrowserInstance } = {},
   ): Promise<boolean> {
     // A page opened since the last one left keeps it (the grace path re-checks after each await).
     const reused = () => options.onlyIfUnused === true && (this.viewers.get(userId)?.size ?? 0) > 0;
@@ -373,14 +448,21 @@ export class BrowserHomeSessions {
       this.cancelPendingRelease(userId);
       this.viewers.delete(userId);
     }
-    await this.opening.get(userId)?.catch(() => {});
+    await this.opening.get(userId)?.promise.catch(() => {});
     const seen = this.locate(pool, userId);
     if (!seen) return false;
+    if (options.expectedInstance && seen.instance !== options.expectedInstance) return false;
+    if (options.onlyIfUnused && seen.instance.homeFileTransfers?.pending()) return false;
     this.rememberUrl(userId, await currentUrl(seen.instance));
     // Located again after the await: the task may have given it back meanwhile.
     const location = this.locate(pool, userId);
-    if (!location || reused()) return false;
-    if (location.heldBy) return pool.endBrowserHomeLoan(userId) !== null;
+    if (!location || location.instance !== seen.instance || reused()) return false;
+    if (options.onlyIfUnused && location.instance.homeFileTransfers?.pending()) return false;
+    if (location.heldBy) {
+      // Leaving the viewer is not an instruction to end the ongoing task's workspace.
+      if (options.onlyIfUnused) return false;
+      return pool.endBrowserHomeLoan(userId) !== null;
+    }
     return pool.release(location.instance.taskId, 'browser-home-close');
   }
 }
@@ -398,10 +480,16 @@ function openPersonControl(instance: BrowserInstance): void {
   }
 }
 
-async function currentUrl(instance: BrowserInstance): Promise<string | null> {
+async function currentUrl(instance: BrowserInstance, requireLive = false): Promise<string | null> {
   try {
-    return (await instance.executor.getPage()).url();
-  } catch {
+    if (requireLive && instance.executor.sessionInterruption)
+      throw new Error('home_session_interrupted');
+    const page = await instance.executor.getPage();
+    if (requireLive && instance.executor.sessionInterruption)
+      throw new Error('home_session_interrupted');
+    return page.url();
+  } catch (error) {
+    if (requireLive) throw error;
     return null;
   }
 }

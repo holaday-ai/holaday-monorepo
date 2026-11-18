@@ -15,6 +15,7 @@ describe('auth.me state helpers', () => {
         role: 'admin',
         videoEnabled: true,
         browserHomeEnabled: true,
+        browserHomeProfilesEnabled: false,
         teamProjectsEnabled: true,
         teamTaskLifecycleEnabled: true,
         modelDataRegion: 'intl',
@@ -31,6 +32,7 @@ describe('auth.me state helpers', () => {
       role: 'admin',
       videoEnabled: true,
       browserHomeEnabled: true,
+      browserHomeProfilesEnabled: false,
       teamProjectsEnabled: true,
       teamTaskLifecycleEnabled: true,
       modelDataRegion: 'intl',
@@ -50,6 +52,7 @@ describe('auth.me state helpers', () => {
       role: 'user',
       videoEnabled: false,
       browserHomeEnabled: false,
+      browserHomeProfilesEnabled: false,
       teamProjectsEnabled: false,
       teamTaskLifecycleEnabled: false,
       modelDataRegion: null,
@@ -134,3 +137,15 @@ it('preserves a supplied avatar without changing malformed profile defaults', ()
   );
   expect(normalizeAuthMeProfile({ avatarUrl: { bad: true } }).avatarUrl).toBeUndefined();
 });
+
+it.each([
+  [{ browserHomeEnabled: true, browserHomeProfilesEnabled: true }, true],
+  [{ browserHomeEnabled: true, browserHomeProfilesEnabled: 'true' }, false],
+  [{ browserHomeEnabled: false, browserHomeProfilesEnabled: true }, false],
+  [{ browserHomeEnabled: true }, false],
+])(
+  'personal saved-site controls require an explicit enabled Home capability (%j)',
+  (payload, expected) => {
+    expect(normalizeAuthMeProfile(payload).browserHomeProfilesEnabled).toBe(expected);
+  },
+);

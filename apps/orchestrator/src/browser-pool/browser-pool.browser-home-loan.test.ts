@@ -66,7 +66,7 @@ function makePool(): { pool: BrowserPool; spawnSpy: ReturnType<typeof vi.fn> } {
 
 async function openHome(pool: BrowserPool, userId: string): Promise<BrowserInstance> {
   const inst = await pool.allocate(`bhs_${userId}`, userId, undefined, {
-    sessionPolicy: 'anonymous',
+    sessionPolicy: 'personal_home',
   });
   pool.setIdleTimeout(`bhs_${userId}`, HOME_IDLE_MS);
   return inst;
@@ -76,11 +76,21 @@ const gc = (pool: BrowserPool) =>
   (pool as unknown as { runGcSweep: () => Promise<void> }).runGcSweep();
 
 describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => {
+  it('never lends or adopts personal Home state as a public anonymous browser', async () => {
+    const { pool } = makePool();
+    const home = await openHome(pool, 'usr_A');
+    expect(pool.lendBrowserHome('usr_A', 'tsk_public', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_personal', 'personal_home')).toBe(home);
+    pool.forfeitBrowserHomeLoan('tsk_personal');
+    pool.retain('tsk_personal', 60_000, 'review');
+    expect(pool.adoptRetained('tsk_personal', 'tsk_public', 'usr_A', 'anonymous')).toBeNull();
+    expect(pool.peek('tsk_personal')).toBe(home);
+  });
   it('moves the same live browser to the task without spawning, and back again', async () => {
     const { pool, spawnSpy } = makePool();
     const home = await openHome(pool, 'usr_A');
 
-    const lent = pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    const lent = pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     expect(lent).toBe(home);
     expect(home.taskId).toBe('tsk_1');
     expect(pool.peek('bhs_usr_A')).toBeNull();
@@ -104,8 +114,8 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('one task at a time: a second task cannot take a browser that is already lent', async () => {
     const { pool } = makePool();
     await openHome(pool, 'usr_A');
-    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous')).not.toBeNull();
-    expect(pool.lendBrowserHome('usr_A', 'tsk_2', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home')).not.toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_2', 'personal_home')).toBeNull();
     expect(pool.peek('tsk_2')).toBeNull();
     expect(pool.browserHomeHolder('usr_A')).toBe('tsk_1');
   });
@@ -113,16 +123,16 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it("another user's task can never take the browser (the source id comes from the user)", async () => {
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
-    expect(pool.lendBrowserHome('usr_B', 'tsk_b', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_B', 'tsk_b', 'personal_home')).toBeNull();
     expect(pool.peek('bhs_usr_A')).toBe(home);
     expect(pool.peekBrowserHome('usr_B')).toBeNull();
 
     // Even a home key whose instance belongs to someone else is refused.
     home.userId = 'usr_B';
-    expect(pool.lendBrowserHome('usr_A', 'tsk_a', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_a', 'personal_home')).toBeNull();
     home.userId = 'usr_A';
 
-    expect(pool.lendBrowserHome('usr_A', 'tsk_a', 'anonymous')).toBe(home);
+    expect(pool.lendBrowserHome('usr_A', 'tsk_a', 'personal_home')).toBe(home);
     // Only the owner gives it back.
     expect(pool.returnBrowserHome('tsk_a', 'usr_B')).toBeNull();
     expect(pool.peek('tsk_a')).toBe(home);
@@ -134,17 +144,17 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
     expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'vault_allowed')).toBeNull();
-    expect(pool.lendBrowserHome('usr_A', 'bhs_usr_A', 'anonymous')).toBeNull();
-    expect(pool.lendBrowserHome('usr_A', 'bhs_other', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'bhs_usr_A', 'personal_home')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'bhs_other', 'personal_home')).toBeNull();
     const other = await pool.allocate('tsk_busy', 'usr_A');
-    expect(pool.lendBrowserHome('usr_A', 'tsk_busy', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_busy', 'personal_home')).toBeNull();
     expect(pool.peek('tsk_busy')).toBe(other);
     expect(pool.peek('bhs_usr_A')).toBe(home);
   });
 
   it('nothing to lend when the user has no open cloud browser', async () => {
     const { pool } = makePool();
-    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous')).toBeNull();
+    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home')).toBeNull();
     expect(pool.browserHomeHolder('usr_A')).toBeNull();
     expect(pool.peekBrowserHome('usr_A')).toBeNull();
   });
@@ -152,7 +162,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('the return ends any hold the task left (awaiting-reply) and restores the 15-minute idle', async () => {
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_wait', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_wait', 'personal_home');
     expect(pool.retain('tsk_wait', 30 * 60_000, AWAITING_REPLY)).toBe(true);
     expect(pool.returnBrowserHome('tsk_wait', 'usr_A')).toBe(home);
     expect(home.retainedUntil).toBeUndefined();
@@ -170,7 +180,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('a second return, or a return of a task that never held it, gives back nothing', async () => {
     const { pool } = makePool();
     await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).not.toBeNull();
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
     expect(pool.returnBrowserHome('tsk_never', 'usr_A')).toBeNull();
@@ -180,7 +190,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('closed while lent: the loan ends, the task keeps it until its normal release', async () => {
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     expect(pool.endBrowserHomeLoan('usr_A')).toBe('tsk_1');
     expect(pool.browserHomeHolder('usr_A')).toBeNull();
     expect(pool.peekBrowserHome('usr_A')).toBeNull();
@@ -194,20 +204,20 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('a browser stopped while lent is not given back, and the loan clears', async () => {
     const { pool } = makePool();
     await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     await pool.release('tsk_1', 'browser-died');
     expect(pool.browserHomeHolder('usr_A')).toBeNull();
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
     expect(pool.peek('bhs_usr_A')).toBeNull();
     // A fresh session can be opened and lent again.
     const again = await openHome(pool, 'usr_A');
-    expect(pool.lendBrowserHome('usr_A', 'tsk_2', 'anonymous')).toBe(again);
+    expect(pool.lendBrowserHome('usr_A', 'tsk_2', 'personal_home')).toBe(again);
   });
 
   it('never gives back over a session opened again in the meantime', async () => {
     const { pool } = makePool();
     const first = await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     pool.endBrowserHomeLoan('usr_A');
     const second = await openHome(pool, 'usr_A');
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
@@ -219,7 +229,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
     expect(pool.peekActiveForUser('usr_A')).toBeNull();
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     // Lent, it is that task's browser (the task's own panel routes reach it).
     expect(pool.peekActiveForUser('usr_A')).toBe(home);
   });
@@ -233,7 +243,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
     );
 
     // Fails before the move: nothing changes, the task's hold stays.
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     expect(pool.retain('tsk_1', 30 * 60_000, AWAITING_REPLY)).toBe(true);
     const held = home.retainedUntil;
     valid.mockReturnValueOnce(false);
@@ -248,7 +258,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
 
     // Fails after the move: the key goes back, the hold is restored.
     const again = await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_2', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_2', 'personal_home');
     expect(pool.retain('tsk_2', 30 * 60_000, AWAITING_REPLY)).toBe(true);
     const held2 = again.retainedUntil;
     valid.mockReturnValueOnce(true).mockReturnValueOnce(false);
@@ -266,7 +276,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('a forfeited loan (watchdog) is never given back (P1-1)', async () => {
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
-    pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous');
+    pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home');
     expect(pool.forfeitBrowserHomeLoan('tsk_1')).toBe(true);
     expect(pool.browserHomeHolder('usr_A')).toBeNull();
     expect(pool.returnBrowserHome('tsk_1', 'usr_A')).toBeNull();
@@ -277,7 +287,7 @@ describe('BrowserPool — cloud browser lent to a task (BROWSER-HOME-1)', () => 
   it('G2d: a browser whose route removal stalled during the task is not given back', async () => {
     const { pool } = makePool();
     const home = await openHome(pool, 'usr_A');
-    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'anonymous')).toBe(home);
+    expect(pool.lendBrowserHome('usr_A', 'tsk_1', 'personal_home')).toBe(home);
     const context = {};
     linkRoutingOwner(context, home.executor);
     markRoutingUnreliable(context);

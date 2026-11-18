@@ -15,6 +15,21 @@ afterEach(() => {
 });
 
 describe('sanitizePageContextSnippet', () => {
+  it('can preview tab metadata without reading the original page DOM', async () => {
+    const executeScript = vi.fn();
+    vi.stubGlobal('chrome', {
+      tabs: {
+        query: vi.fn(async () => [{ id: 42, url: 'https://work.example/path', title: 'Work' }]),
+      },
+      scripting: { executeScript },
+    });
+    expect(await getActivePageContext({ metadataOnly: true })).toMatchObject({
+      tabId: 42,
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(executeScript).not.toHaveBeenCalled();
+  });
   it('bounds page metadata before it reaches the side panel', () => {
     const snippet = sanitizePageContextSnippet({
       title: 't'.repeat(800),

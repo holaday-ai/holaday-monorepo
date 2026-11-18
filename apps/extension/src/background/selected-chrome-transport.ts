@@ -1,6 +1,8 @@
 import type { DriverAction } from '@holaday/browser-driver';
 import type {
+  SelectedChromeDownloadCommand,
   SelectedChromeSessionCommand,
+  SelectedChromeUploadCommand,
   UserBrowserBinding,
   UserBrowserProtocol,
 } from '@holaday/shared-types';
@@ -35,6 +37,18 @@ export interface SelectedChromeBridge {
     command: Extract<SelectedChromeSessionCommand, { op: 'tabs' }>,
   ): Promise<SessionReply>;
   observe(taskId: string, sessionId: string): Promise<SessionReply>;
+  activity?(taskId: string, sessionId: string): Promise<SessionReply>;
+  screenshot?(
+    taskId: string,
+    command: Extract<SelectedChromeSessionCommand, { op: 'screenshot' }>,
+  ): Promise<SessionReply>;
+  upload?(taskId: string, command: SelectedChromeUploadCommand): Promise<SessionReply>;
+  download?(taskId: string, command: SelectedChromeDownloadCommand): Promise<SessionReply>;
+  openChooser?(
+    taskId: string,
+    command: Extract<SelectedChromeSessionCommand, { op: 'chooser_open' }>,
+  ): Promise<SessionReply>;
+  stopUploadAdmission?(taskId: string): void;
   execute(
     taskId: string,
     sessionId: string,
@@ -215,12 +229,15 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(command.op === 'act' ? { actionOutcome: 'not_applied' as const } : {}),
+        ...(['act', 'chooser_open', 'download_open'].includes(command.op)
+          ? { actionOutcome: 'not_applied' as const }
+          : {}),
       };
     }
 
     if (command.op === 'close') {
       entry.stopping = true;
+      deps.bridge.stopUploadAdmission?.(taskId);
       if (entry.operation) await entry.operation.catch(() => undefined);
       if (entry.closeCleanupFailed) {
         try {
@@ -250,7 +267,9 @@ export function createSelectedChromeTransport(deps: {
       return {
         ok: false,
         error: 'session_unavailable',
-        ...(command.op === 'act' ? { actionOutcome: 'not_applied' as const } : {}),
+        ...(['act', 'chooser_open', 'download_open'].includes(command.op)
+          ? { actionOutcome: 'not_applied' as const }
+          : {}),
       };
     }
 
@@ -262,6 +281,46 @@ export function createSelectedChromeTransport(deps: {
       );
     }
 
+    if (command.op === 'screenshot')
+      return run(entry, async () => {
+        const reply = (await deps.bridge.screenshot?.(taskId, command)) ?? {
+          ok: false as const,
+          error: 'capability_missing',
+        };
+        return !entry.stopping && deps.currentOwner() === entry.owner
+          ? reply
+          : { ok: false, error: 'session_unavailable' };
+      });
+
+    if (command.op === 'download_read' || command.op === 'download_release')
+      return run(
+        entry,
+        () =>
+          deps.bridge.download?.(taskId, command) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
+
+    if (
+      command.op === 'upload_describe' ||
+      command.op === 'upload_begin' ||
+      command.op === 'upload_chunk' ||
+      command.op === 'upload_commit' ||
+      command.op === 'upload_abort'
+    )
+      return run(
+        entry,
+        () =>
+          deps.bridge.upload?.(taskId, command) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
+
+    if (command.op === 'activity')
+      return run(
+        entry,
+        () =>
+          deps.bridge.activity?.(taskId, command.sessionId) ??
+          Promise.resolve({ ok: false, error: 'capability_missing' }),
+      );
     if (command.op === 'describe')
       return run(
         entry,
@@ -290,6 +349,18 @@ export function createSelectedChromeTransport(deps: {
         };
       }
       try {
+        if (command.op === 'download_open')
+          return await (deps.bridge.download?.(taskId, command) ?? {
+            ok: false,
+            error: 'capability_missing',
+            actionOutcome: 'not_applied',
+          });
+        if (command.op === 'chooser_open')
+          return await (deps.bridge.openChooser?.(taskId, command) ?? {
+            ok: false,
+            error: 'capability_missing',
+            actionOutcome: 'not_applied',
+          });
         return await deps.bridge.execute(
           taskId,
           command.sessionId,
@@ -313,6 +384,7 @@ export function createSelectedChromeTransport(deps: {
     const entry = active;
     if (!entry || entry.taskId !== taskId) return;
     entry.stopping = true;
+    deps.bridge.stopUploadAdmission?.(taskId);
     while (entry.operation) {
       const pending = entry.operation;
       await pending.catch(() => undefined);

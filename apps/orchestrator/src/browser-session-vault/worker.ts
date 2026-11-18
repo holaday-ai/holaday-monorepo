@@ -7,9 +7,20 @@ import {
 } from '../agent/browser-network-policy.js';
 import { detectCaptchaPage, detectLoginPage } from '../agent/login-detector.js';
 import { cookieDomainInScope, hostInScope } from './cookie-scope.js';
-import { type Checkout, type SessionVault, VaultError } from './vault.js';
+import {
+  type SiteIdentityProof,
+  identityFromProof,
+  issueIdentityProof,
+  sameIdentity,
+} from './profile-snapshot.js';
+import { type Checkout, type SessionVault, VaultError, type VerificationResult } from './vault.js';
 
-type Probe = { path: string; selector: string };
+export interface TrustedSiteProbe {
+  path: string;
+  selector: string;
+  /** Configured by the server, never supplied by a page or client request. */
+  subject?: { selector: string; attribute?: string; adapter: string };
+}
 /**
  * Revocation bound for a running vault context (cross-process; in-process
  * revocation closes it at once). A status check runs every STATUS_POLL_MS
@@ -51,11 +62,16 @@ function within<T>(work: Promise<T>, ms: number): Promise<T | 'timeout'> {
 /** Minimum interval between mid-task write-backs of a changed session. */
 export const CHECKPOINT_MS = 30000;
 export type ContextFactory = (options: BrowserContextOptions) => Promise<BrowserContext>;
+export interface VerificationContexts {
+  create: ContextFactory;
+  dispose(context: BrowserContext): Promise<void>;
+}
 export interface VaultTask {
   page: Page;
   context: BrowserContext;
   mode: 'writer' | 'readonly';
   close(save?: boolean): Promise<void>;
+  verifyIdentity(): Promise<string | null>;
 }
 /** Only trusted site adapters define login evidence. A 200 response alone is never login proof. */
 export class VaultBrowserWorker {
@@ -63,7 +79,7 @@ export class VaultBrowserWorker {
     private readonly vault: SessionVault,
     private readonly options: {
       context: ContextFactory;
-      probes: ReadonlyMap<string, Probe>;
+      probes: ReadonlyMap<string, TrustedSiteProbe>;
       networkPolicy?: Pick<BrowserNetworkPolicy, 'check'>;
       statusPollMs?: number;
       statusTimeoutMs?: number;
@@ -106,7 +122,10 @@ export class VaultBrowserWorker {
     context: BrowserContext,
     task?: Checkout,
     onInterrupted?: (reason: string) => void,
+    options?: { interactive: boolean; workspace?: boolean; settled: () => Promise<void> | null },
   ) {
+    const interactive = options?.interactive === true && grant.sessionAccess === 'cloud-home-v1';
+    const workspace = interactive && options?.workspace === true;
     const scope = grant.cookieDomains;
     const pollMs = this.options.statusPollMs ?? STATUS_POLL_MS;
     const timeoutMs = this.options.statusTimeoutMs ?? STATUS_TIMEOUT_MS;
@@ -130,6 +149,8 @@ export class VaultBrowserWorker {
     // Only a confirmed, fresh status lets traffic through; anything else holds it.
     const verified = () => !uncertain && Date.now() - lastConfirmed <= freshMs;
     const check = async () => {
+      // A checkpoint advances the CAS version. Observe only after that same operation settles.
+      if (interactive) await options?.settled();
       if (!task) return this.vault.authorize(userId, grant.id, grant.version, true);
       const status = await this.vault.status(userId, grant.id, task);
       if (status !== 'live') throw new VaultError(status);
@@ -179,23 +200,85 @@ export class VaultBrowserWorker {
         if (
           !live ||
           !verified() ||
-          !['GET', 'HEAD'].includes(req.method()) ||
+          (!interactive && !['GET', 'HEAD'].includes(req.method())) ||
           !(
             url.protocol === 'https:' ||
-            (url.protocol === 'http:' && grant.origin.startsWith('http:'))
+            (url.protocol === 'http:' && (workspace || grant.origin.startsWith('http:')))
           ) ||
-          !hostInScope(url.hostname, scope) ||
+          !(
+            workspace ||
+            hostInScope(url.hostname, scope) ||
+            (interactive &&
+              ['GET', 'HEAD'].includes(req.method()) &&
+              !req.isNavigationRequest() &&
+              ['image', 'font', 'stylesheet', 'script', 'media'].includes(req.resourceType()))
+          ) ||
           !(await (this.options.networkPolicy ?? defaultBrowserNetworkPolicy).check(req.url()))
             .allowed
         )
           return await route.abort('blockedbyclient');
+        if (!live || !verified()) return await route.abort('blockedbyclient');
         await route.continue();
       } catch {
         await route.abort('blockedbyclient').catch(() => {});
       }
     });
-    // WebSockets can mutate state without a POST. They are unavailable in this read-only version.
-    await context.routeWebSocket('**/*', (socket) => socket.close());
+    // Legacy grants remain read-only. Interactive site contexts stay scoped; only a trusted
+    // personal workspace may browse other public sites. Every WS frame checks liveness.
+    await context.routeWebSocket('**/*', async (socket) => {
+      let peer: ReturnType<typeof socket.connectToServer> | undefined;
+      const close = async () => {
+        await Promise.allSettled([socket.close(), ...(peer ? [peer.close()] : [])]);
+      };
+      try {
+        const url = new URL(socket.url());
+        if (
+          !interactive ||
+          !live ||
+          !verified() ||
+          !['ws:', 'wss:'].includes(url.protocol) ||
+          url.username ||
+          url.password ||
+          (!workspace && !hostInScope(url.hostname, scope)) ||
+          (url.protocol === 'ws:' && !workspace && !grant.origin.startsWith('http:'))
+        )
+          return await close();
+        url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+        if (
+          !(await (this.options.networkPolicy ?? defaultBrowserNetworkPolicy).check(url.href))
+            .allowed ||
+          !live ||
+          !verified()
+        )
+          return await close();
+        peer = socket.connectToServer();
+        const server = peer;
+        socket.onMessage((message) => {
+          if (!live || !verified()) {
+            void close();
+            return;
+          }
+          try {
+            server.send(message);
+          } catch {
+            void close();
+          }
+        });
+        server.onMessage((message) => {
+          if (!live || !verified()) {
+            void close();
+            return;
+          }
+          try {
+            socket.send(message);
+          } catch {
+            void close();
+          }
+        });
+      } catch {
+        await close();
+      }
+    });
     const untrack = this.vault.track(userId, grant.id, () => interrupt('grant_unavailable'));
     // Watchdog: independent of any pending query promise.
     const watchdog = setInterval(
@@ -227,10 +310,14 @@ export class VaultBrowserWorker {
       await stop();
       throw error;
     }
-    return { stop, interrupted: () => !live };
+    return { stop, interrupt, interrupted: () => !live };
   }
   /** Current context state restricted to the grant's scope (cookies + selected storage keys). */
-  private async capture(context: BrowserContext, page: Page, grant: BrowserGrantMetadata) {
+  async captureSite(
+    context: BrowserContext,
+    page: Page,
+    grant: Pick<BrowserGrantMetadata, 'cookieDomains' | 'storageKeys' | 'origin'>,
+  ) {
     const captured = await context.storageState();
     const cdp = await context.newCDPSession(page);
     try {
@@ -238,8 +325,9 @@ export class VaultBrowserWorker {
       if (
         raw.cookies.some(
           (c) =>
-            ('partitionKey' in c && c.partitionKey) ||
-            ('partitionKeyOpaque' in c && c.partitionKeyOpaque),
+            cookieDomainInScope(c.domain, grant.cookieDomains) &&
+            (('partitionKey' in c && c.partitionKey) ||
+              ('partitionKeyOpaque' in c && c.partitionKeyOpaque)),
         )
       )
         throw new VaultError('partition_unsupported');
@@ -273,14 +361,49 @@ export class VaultBrowserWorker {
     state: BrowserSessionState,
     grant: BrowserGrantMetadata,
   ): Promise<'connected' | 'relogin' | 'risk_blocked'> {
+    return (await this.verifyForImport(userId, state, grant)).status;
+  }
+  async verifyForImport(
+    userId: string,
+    state: BrowserSessionState,
+    grant: BrowserGrantMetadata,
+  ): Promise<VerificationResult> {
+    return this.verifySnapshot(userId, state, grant, 1);
+  }
+  async proofForCapture(
+    userId: string,
+    state: BrowserSessionState,
+    grant: BrowserGrantMetadata,
+    factory?: VerificationContexts,
+  ): Promise<SiteIdentityProof | undefined> {
+    if (!this.options.probes.get(grant.origin)?.subject) return undefined;
+    const value = await this.verifySnapshot(userId, state, grant, 0, factory);
+    return value.status === 'connected' ? value.identityProof : undefined;
+  }
+  private identityScope(userId: string, grant: BrowserGrantMetadata, snapshotVersion: number) {
+    return {
+      userId,
+      grantId: grant.id,
+      grantVersion: grant.version,
+      origin: grant.origin,
+      snapshotVersion,
+    };
+  }
+  private async verifySnapshot(
+    userId: string,
+    state: BrowserSessionState,
+    grant: BrowserGrantMetadata,
+    snapshotVersion: number,
+    factory?: VerificationContexts,
+  ): Promise<VerificationResult> {
     const probe = this.options.probes.get(grant.origin);
-    if (!probe) return 'relogin';
+    if (!probe) return { status: 'relogin' };
     const url = new URL(probe.path, grant.origin);
     if (url.origin !== grant.origin || url.search || url.hash || url.username || url.password)
-      return 'relogin';
+      return { status: 'relogin' };
     let context: BrowserContext | undefined;
     try {
-      context = await this.options.context({
+      context = await (factory?.create ?? this.options.context)({
         storageState: this.browserState(state, grant),
         serviceWorkers: 'block',
         acceptDownloads: false,
@@ -293,14 +416,33 @@ export class VaultBrowserWorker {
         [403, 429].includes(response?.status() ?? 0) ||
         detectCaptchaPage({ url: page.url(), title }).matched
       )
-        return 'risk_blocked';
+        return { status: 'risk_blocked' };
       if (response?.status() !== 200 || detectLoginPage({ url: page.url(), title }).matched)
-        return 'relogin';
-      return (await page.locator(probe.selector).count()) > 0 ? 'connected' : 'relogin';
+        return { status: 'relogin' };
+      if (!(await page.locator(probe.selector).count())) return { status: 'relogin' };
+      const subject = probe.subject;
+      if (!subject) return { status: 'connected' };
+      const locator = page.locator(subject.selector);
+      if ((await locator.count()) !== 1) return { status: 'connected' };
+      const value = (
+        subject.attribute
+          ? await locator.getAttribute(subject.attribute)
+          : await locator.textContent()
+      )?.trim();
+      if (!value) return { status: 'connected' };
+      const identityProof = issueIdentityProof(
+        this.identityScope(userId, grant, snapshotVersion),
+        state,
+        { adapter: subject.adapter, subject: value },
+      );
+      return { status: 'connected', identityProof };
     } catch {
-      return 'relogin';
+      return { status: 'relogin' };
     } finally {
-      await context?.close().catch(() => {});
+      if (context) {
+        if (factory) await factory.dispose(context);
+        else await context.close().catch(() => {});
+      }
     }
   }
   /**
@@ -314,7 +456,15 @@ export class VaultBrowserWorker {
     userId: string,
     id: string,
     factory = this.options.context,
-    options: { write?: boolean; onInterrupted?: (reason: string) => void } = {},
+    options: {
+      write?: boolean;
+      access?: 'cloud-home-v1';
+      /** Server-owned personal workspace only; saved state remains site-scoped. */
+      workspace?: boolean;
+      allowDownloads?: boolean;
+      onInterrupted?: (reason: string) => void;
+      verificationContext?: VerificationContexts;
+    } = {},
   ): Promise<VaultTask> {
     const task = await this.vault.checkout(userId, id, options);
     let context: BrowserContext | undefined;
@@ -322,35 +472,128 @@ export class VaultBrowserWorker {
       context = await factory({
         storageState: this.browserState(task.state, task.grant),
         serviceWorkers: 'block',
-        acceptDownloads: false,
+        acceptDownloads:
+          options.access === 'cloud-home-v1' &&
+          options.workspace === true &&
+          options.allowDownloads === true,
       });
       const ownedContext = context;
+      const interactive = task.grant.sessionAccess === 'cloud-home-v1';
+      let flushing: Promise<void> | null = null;
       let interrupted: string | null = null;
-      const guard = await this.guard(userId, task.grant, ownedContext, task, (reason) => {
-        interrupted = reason;
-        options.onInterrupted?.(reason);
-      });
+      const guard = await this.guard(
+        userId,
+        task.grant,
+        ownedContext,
+        task,
+        (reason) => {
+          interrupted = reason;
+          options.onInterrupted?.(reason);
+        },
+        { interactive, workspace: options.workspace, settled: () => flushing },
+      );
       const stop = guard.stop;
       const page = await context.newPage();
       const writer = task.mode === 'writer';
       let ended = false;
       let lastDigest = writer
-        ? ((await this.capture(ownedContext, page, task.grant).catch(() => null))?.digest ?? null)
+        ? ((await this.captureSite(ownedContext, page, task.grant).catch(() => null))?.digest ??
+          null)
         : null;
+      if (guard.interrupted()) throw new VaultError(interrupted ?? 'browser_unavailable');
+      const prove = async (
+        state: BrowserSessionState,
+        closing = false,
+      ): Promise<{
+        proof?: SiteIdentityProof;
+        reason: string | null;
+      }> => {
+        if (!task.identity) return { reason: 'identity_unverified' };
+        if ((await this.vault.status(userId, id, task)) !== 'live')
+          return { reason: 'session_revoked' };
+        const version = task.version;
+        const checked = await this.verifySnapshot(
+          userId,
+          state,
+          task.grant,
+          version,
+          options.verificationContext,
+        );
+        // A slow successful response cannot resurrect a revoked or superseded lease.
+        if (
+          (ended && !closing) ||
+          guard.interrupted() ||
+          (await this.vault.status(userId, id, task)) !== 'live'
+        )
+          return { reason: 'session_revoked' };
+        if (checked.status !== 'connected') return { reason: `identity_${checked.status}` };
+        if (!checked.identityProof) return { reason: 'identity_unverified' };
+        const actual = identityFromProof(
+          checked.identityProof,
+          this.identityScope(userId, task.grant, version),
+          state,
+        );
+        if (actual.adapter !== task.identity.adapter) return { reason: 'identity_unverified' };
+        if (!sameIdentity(actual, task.identity)) return { reason: 'account_changed' };
+        return { reason: null, proof: checked.identityProof };
+      };
+      const verifyIdentity = async () => {
+        let reason: string | null;
+        try {
+          reason = interrupted ?? (ended ? 'session_revoked' : null);
+          if (!reason) {
+            const captured = await this.captureSite(ownedContext, page, task.grant);
+            reason = (await prove(captured.state)).reason;
+            if (!reason) {
+              // The readonly probe attests its copied state, not a later user login.
+              // Never dispatch an action from proof that became stale in flight.
+              const current = await this.captureSite(ownedContext, page, task.grant);
+              if (current.digest !== captured.digest) reason = 'identity_state_changed';
+              else if (
+                ended ||
+                guard.interrupted() ||
+                (await this.vault.status(userId, id, task)) !== 'live'
+              )
+                reason = 'session_revoked';
+            }
+          }
+        } catch (error) {
+          reason = error instanceof VaultError ? taskReason(error.code) : 'identity_unverified';
+        }
+        if (reason) await guard.interrupt(reason);
+        return reason;
+      };
       let lastWrite = Date.now();
-      let flushing: Promise<void> | null = null;
       const flush = async (reason: 'interval' | 'site_change') => {
         if (!writer || ended || flushing || interrupted) return;
         if (reason === 'interval' && Date.now() - lastWrite < this.checkpointMs) return;
         flushing = (async () => {
           try {
-            const { state, digest } = await this.capture(ownedContext, page, task.grant);
-            if (digest === lastDigest) return;
-            task.version = await this.vault.save(userId, id, task, state, { keepLease: true });
+            const { state, digest } = await this.captureSite(ownedContext, page, task.grant);
+            if (digest === lastDigest) {
+              if (interactive) {
+                await this.vault.renewCloudLease(userId, id, task);
+                lastWrite = Date.now();
+              }
+              return;
+            }
+            const checked = task.identity ? await prove(state) : { reason: null, proof: undefined };
+            if (checked.reason) {
+              await guard.interrupt(checked.reason);
+              return;
+            }
+            task.version = await this.vault.save(userId, id, task, state, {
+              keepLease: true,
+              identityProof: checked.proof,
+            });
             lastDigest = digest;
             lastWrite = Date.now();
             this.options.onWriteBack?.(reason);
-          } catch {
+          } catch (error) {
+            if (interactive)
+              await guard.interrupt(
+                error instanceof VaultError ? error.code : 'profile_checkpoint_failed',
+              );
             // Lost lease/revoked: the final close discards; never retry with stale state.
           } finally {
             flushing = null;
@@ -362,6 +605,9 @@ export class VaultBrowserWorker {
         ? setInterval(() => void flush('interval'), Math.min(this.checkpointMs, 30000))
         : undefined;
       interval?.unref();
+      ownedContext.once('close', () => {
+        if (interval) clearInterval(interval);
+      });
       // Leaving the current site (main-frame origin change) writes back pending changes.
       let siteOrigin: string | null = null;
       const onNavigate = (frame: import('playwright').Frame) => {
@@ -379,6 +625,7 @@ export class VaultBrowserWorker {
         page,
         context,
         mode: task.mode,
+        verifyIdentity,
         close: async (save = true) => {
           if (ended) return;
           if (interval) clearInterval(interval);
@@ -386,17 +633,27 @@ export class VaultBrowserWorker {
           if (flushing) await within(flushing, CLOSE_STORE_TIMEOUT_MS);
           ended = true;
           let state: BrowserSessionState | undefined;
+          let identityProof: SiteIdentityProof | undefined;
           try {
             // An interrupted context (revoked or unverifiable) never writes back.
             if (save && writer && !interrupted) {
-              const captured = await this.capture(ownedContext, page, task.grant).catch(
+              const captured = await this.captureSite(ownedContext, page, task.grant).catch(
                 (error: unknown) => {
                   // Already stopped (revoked/expired/closed): nothing to write back.
                   if (error instanceof VaultError) throw error;
                   return null;
                 },
               );
-              if (captured && captured.digest !== lastDigest) state = captured.state;
+              if (captured && captured.digest !== lastDigest) {
+                const checked = task.identity
+                  ? await prove(captured.state, true)
+                  : { reason: null, proof: undefined };
+                if (checked.reason) await guard.interrupt(checked.reason);
+                else {
+                  state = captured.state;
+                  identityProof = checked.proof;
+                }
+              }
             }
           } finally {
             await stop();
@@ -409,7 +666,7 @@ export class VaultBrowserWorker {
           // Commit only after Chromium confirms context.close. CAS/revocation is checked again.
           if (state) {
             const saved = await within(
-              this.vault.save(userId, id, task, state),
+              this.vault.save(userId, id, task, state, { identityProof }),
               CLOSE_STORE_TIMEOUT_MS,
             );
             if (saved === 'timeout') this.options.onDiscard?.('store_unavailable');

@@ -16,6 +16,15 @@ export const browserGrantRequestSchema = z
     expiresAt: z.number().int().positive().optional(),
   })
   .strict();
+/** New consent for state captured in the user's own cloud browser, never a Chrome import. */
+export const browserCloudProfileConsentSchema = z
+  .object({
+    consent: z.literal('cloud-browser-profile-v1'),
+    origin: exactWebOriginSchema,
+    storageKeys: z.array(z.string().min(1).max(128)).max(20).default([]),
+    expiresAt: z.number().int().positive().optional(),
+  })
+  .strict();
 export const browserSessionCookieSchema = z
   .object({
     name: z.string().min(1).max(256),
@@ -70,4 +79,6 @@ export interface BrowserGrantMetadata {
   lastUsedAt: number | null;
   cookieCount: number;
   reason: string | null;
+  /** Explicit interactive home access; absent for every legacy readonly import. */
+  sessionAccess?: 'cloud-home-v1';
 }

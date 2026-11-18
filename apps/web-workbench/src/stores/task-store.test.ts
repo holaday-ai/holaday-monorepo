@@ -23,6 +23,7 @@ vi.mock('@/lib/trpc', () => ({
       list: { query: vi.fn() },
       detail: { query: vi.fn() },
       create: { mutate: vi.fn() },
+      localChromeTaskTab: { mutate: vi.fn() },
       reply: { mutate: vi.fn() },
       abort: { mutate: vi.fn() },
       delete: { mutate: vi.fn() },
@@ -54,6 +55,7 @@ beforeEach(() => {
   listQuery.mockReset();
   detailQuery.mockReset();
   createMutate.mockReset();
+  vi.mocked(trpc.tasks.localChromeTaskTab.mutate).mockReset();
   replyMutate.mockReset();
   abortMutate.mockReset();
   deleteMutate.mockReset();

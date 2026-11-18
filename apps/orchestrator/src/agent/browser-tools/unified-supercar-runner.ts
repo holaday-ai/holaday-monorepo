@@ -6,6 +6,7 @@ import {
   saveBrowserProfile,
 } from '../../browser-profiles/profile-store.js';
 import { browserCapabilities } from '../../config/browser-capabilities.js';
+import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { listPartialNote, reviewListAnswer } from '../../execution/answer-verifier.js';
 import { browserOutputGuidance } from '../../execution/execution-contract.js';
@@ -18,14 +19,24 @@ import type {
   SupercarOutcome,
 } from '../supercar/agent-loop.js';
 import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from '../supercar/browser-control.js';
+import {
+  MAX_BROWSER_IMAGE_CHARS,
+  browserAttachmentBlocks,
+  browserAttachmentParams,
+} from '../supercar/browser-messages.js';
 import { inspectChallenge } from '../supercar/captcha-challenge.js';
 import { captchaHandoffs } from '../supercar/captcha-handoff.js';
 import { recordedBrowserAdapter } from '../supercar/recorded-browser-adapter.js';
 import { classifyRuntimeAction } from '../supercar/runtime-action-policy.js';
-import { persistBrowserDownload } from './browser-download.js';
+import { persistTaskBrowserDownload } from './browser-download.js';
 import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
+import { BrowserTaskFileReader } from './browser-task-file-reader.js';
+import type { ValidatedBrowserTaskFile } from './browser-task-files.js';
+import { BrowserTaskOutputs } from './browser-task-output.js';
+import { BrowserTaskTable } from './browser-task-table.js';
 import { browserToolError } from './browser-tool-error.js';
+import { createBrowserUploadGate } from './browser-upload-gate.js';
 import { ensureExecutionViewport } from './browser-viewport.js';
 import { UNPLACED_POST_MESSAGE } from './cloud-observation.js';
 import { installDomainEgress } from './domain-egress.js';
@@ -46,6 +57,7 @@ import { siteEntryHint } from './site-entry-hints.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import {
   NOT_STARTED,
+  type UnifiedHumanReply,
   isEnglishIntent,
   isReadOnlyIntent,
   runUnifiedBrowserLoop,
@@ -61,7 +73,13 @@ const BROWSER_KEEP_ALIVE_MS = 30_000;
 const CANCEL_POLL_MS = 2_000;
 
 interface ParkedTask {
-  resolve: (reply: string | null) => void;
+  resolve: (reply: (UnifiedHumanReply & { handoffToGenerate?: true }) | null) => void;
+  acceptAttachments: (
+    blocks: ReturnType<typeof browserAttachmentBlocks>,
+    files?: readonly ValidatedBrowserTaskFile[],
+  ) => boolean;
+  fileIndex: () => ReturnType<typeof browserAttachmentBlocks>;
+  rejectInput: () => void;
   abort: () => void;
   intent: string;
 }
@@ -69,11 +87,45 @@ const parked = new Map<string, ParkedTask>();
 const running = new Map<string, AbortController>();
 
 /** Resume a unified task parked on a human handoff. False when none is parked. */
-export function unifiedSupercarReply(taskId: string, message: string): boolean {
+export function unifiedSupercarReply(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
+  return deliverUnifiedReply(taskId, message, attachments, files, false);
+}
+export function unifiedSupercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
+  return deliverUnifiedReply(taskId, message, attachments, files, true);
+}
+function deliverUnifiedReply(
+  taskId: string,
+  message: string,
+  attachments: Readonly<NonNullable<RunSupercarOptions['attachments']>> | undefined,
+  files: readonly ValidatedBrowserTaskFile[] | undefined,
+  handoffToGenerate: boolean,
+): boolean {
   const task = parked.get(taskId);
   if (!task) return false;
+  let blocks: ReturnType<typeof browserAttachmentBlocks>;
+  try {
+    blocks = browserAttachmentBlocks(attachments ?? []);
+    if (!task.acceptAttachments(blocks, files)) throw new Error('attachment budget exceeded');
+  } catch {
+    task.rejectInput();
+    return true;
+  }
   parked.delete(taskId);
-  task.resolve(message);
+  task.resolve({
+    message,
+    attachments: [...blocks, ...task.fileIndex()],
+    ...(handoffToGenerate ? { handoffToGenerate: true as const } : {}),
+  });
   return true;
 }
 
@@ -92,7 +144,7 @@ export function unifiedSupercarAbort(taskId: string): boolean {
   if (!controller && !task) return false;
   parked.delete(taskId);
   task?.resolve(null);
-  controller?.abort();
+  controller?.abort('user_cancelled');
   return true;
 }
 
@@ -192,18 +244,64 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       toolsUsed: [],
     };
   }
+  let attachments: ReturnType<typeof browserAttachmentBlocks>;
+  if (
+    env.BROWSER_TASK_FILES_V1 &&
+    opts.browserTaskFiles &&
+    (opts.browserTaskFiles.taskId !== opts.taskId ||
+      !(await opts.browserTaskFiles.isActive().catch(() => false)))
+  )
+    return {
+      status: 'failed',
+      reason: '材料所属的任务或账号已不可用。',
+      failureSource: 'tool',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  try {
+    attachments = browserAttachmentBlocks(opts.attachments ?? []);
+  } catch {
+    return {
+      status: 'failed',
+      reason: '附件暂时无法读取或超过图像预算，请缩小后重新上传。',
+      failureSource: 'tool',
+      iterations: 0,
+      toolsUsed: [],
+    };
+  }
+  const replyMaterials: NonNullable<RunSupercarOptions['attachments']> = [];
+  let generateHandoff: {
+    message: string;
+    attachments: NonNullable<RunSupercarOptions['attachments']>;
+  } | null = null;
+  let attachmentImageChars = attachments.reduce(
+    (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
+    0,
+  );
   // The session vault stopped this task's logged-in context (revoked or its
   // status could not be confirmed): nothing more runs; the task waits for the user.
-  const sessionStopped = () => opts.executor?.sessionInterruption ?? null;
+  let identityStopped: string | null = null;
+  const sessionStopped = () => identityStopped ?? opts.executor?.sessionInterruption ?? null;
+  const checkSession = async () => {
+    if (sessionStopped()) return sessionStopped();
+    try {
+      identityStopped = (await opts.executor?.verifySessionIdentity?.()) ?? null;
+    } catch {
+      identityStopped = 'identity_unverified';
+    }
+    return sessionStopped();
+  };
   const sessionStoppedQuestion = (reason: string) =>
-    `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
+    reason.startsWith('identity_') || reason === 'account_changed'
+      ? `当前登录账号尚未核实或已变化（原因码 ${reason}），任务已暂停，未确认的会话变更已丢弃。请先核对当前账号和已完成步骤，再明确剩余任务；已生效操作不会自动重放。`
+      : `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
   const parkedForSession = (reason: string, iterations = 0): SupercarOutcome => ({
     status: 'awaiting_user',
     question: sessionStoppedQuestion(reason),
     iterations,
     toolsUsed: [],
   });
-  const stoppedBefore = sessionStopped();
+  const stoppedBefore = await checkSession();
   if (stoppedBefore) return parkedForSession(stoppedBefore);
   let page: Awaited<ReturnType<NonNullable<RunSupercarOptions['executor']>['getPage']>>;
   try {
@@ -221,11 +319,84 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     };
   }
   const controller = new AbortController();
+  const fileReader =
+    env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+      ? new BrowserTaskFileReader(opts.browserTaskFiles)
+      : undefined;
+  const fileTables = fileReader ? new BrowserTaskTable(opts.browserTaskFiles!) : undefined;
+  const fileWorkIncomplete = () =>
+    Boolean(fileReader?.incomplete(fileTables?.completeFiles()) || fileTables?.incomplete());
+  const fileWorkNote = () =>
+    [
+      fileReader?.coverageNote(isEnglishIntent(opts.intent)),
+      fileTables?.coverageNote(isEnglishIntent(opts.intent)),
+    ]
+      .filter(Boolean)
+      .join('\n');
+  let fileReadCorrection = false;
+  let outputCorrection = false;
+  let outputInputRevision: number | undefined;
+  const canPublishOutput = () =>
+    !controller.signal.aborted &&
+    !sessionStopped() &&
+    (!control ||
+      (control.canAgentAct() &&
+        !control.humanBusy() &&
+        !control.hasUnobservedHumanInput() &&
+        control.inputRevision === outputInputRevision));
+  const outputs = new BrowserTaskOutputs({
+    formats: opts.createFileFormats,
+    store: opts.onCreateFile,
+    signal: controller.signal,
+    canPublish: canPublishOutput,
+    current: async () =>
+      canPublishOutput() &&
+      !(await opts.isTaskCancelled?.()) &&
+      (!opts.browserTaskFiles || (await opts.browserTaskFiles.isActive())) &&
+      canPublishOutput(),
+  });
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
+    ...(env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+      ? {
+          resolveUploads: (ids: readonly string[]) => {
+            if (!env.BROWSER_TASK_FILES_V1) throw new Error('文件交付功能已停用。');
+            return opts.browserTaskFiles!.resolve(opts.taskId, ids);
+          },
+          captureFileChooserGuard: () => {
+            const revision = control?.inputRevision;
+            return () =>
+              env.BROWSER_TASK_FILES_V1 &&
+              !controller.signal.aborted &&
+              !sessionStopped() &&
+              (!control ||
+                (control.canAgentAct() &&
+                  !control.humanBusy() &&
+                  control.inputRevision === revision));
+          },
+        }
+      : {}),
     ...(opts.onBrowserDownload
-      ? { saveDownload: (download) => persistBrowserDownload(download, opts.onBrowserDownload!) }
+      ? {
+          saveDownload: async (download) => {
+            const receipt = await persistTaskBrowserDownload(
+              download,
+              opts.executor!,
+              opts.onBrowserDownload!,
+              opts.onBrowserDownloadSaved,
+              fileReader ? opts.taskId : undefined,
+            );
+            if (fileReader) {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              await opts.browserTaskFiles!.admitDownloaded(receipt);
+            }
+            if (controller.signal.aborted || sessionStopped()) throw new Error('task_stopped');
+            outputs.admitDownload(receipt);
+            return receipt;
+          },
+        }
       : {}),
     observationV2: capabilities.observationV2,
     taskIntent: opts.intent,
@@ -294,7 +465,23 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       }, 1000)
     : undefined;
   // Same llm_calls accounting as the legacy loop (cost, usage, per-task totals).
-  const baseAdapter = opts.messagesAdapter;
+  const guardModel = (source: MessagesAdapter): MessagesAdapter => ({
+    metadata: source.metadata,
+    async create(request, options) {
+      if (await checkSession()) throw new Error('SESSION_IDENTITY_UNCONFIRMED');
+      return source.create(request, options);
+    },
+  });
+  const sourceAdapter = opts.messagesAdapter;
+  const baseAdapter: MessagesAdapter = {
+    ...guardModel(sourceAdapter),
+    browserBrain: sourceAdapter.browserBrain
+      ? {
+          planning: guardModel(sourceAdapter.browserBrain.planning),
+          verification: guardModel(sourceAdapter.browserBrain.verification),
+        }
+      : undefined,
+  };
   let modelTurn = 0;
   const adapter: MessagesAdapter = {
     metadata: baseAdapter.metadata,
@@ -324,7 +511,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     : opts.timeoutMs;
   let activeRemaining = budgetMs;
   let activeSince = Date.now();
-  let timeout = activeRemaining ? setTimeout(() => controller.abort(), activeRemaining) : undefined;
+  let timeout = activeRemaining
+    ? setTimeout(() => controller.abort('time_budget'), activeRemaining)
+    : undefined;
   // Waiting for the user never counts against the budget (captcha, login, a
   // confirmation — every awaiting_user wait). Nested waits suspend once.
   let suspended = 0;
@@ -346,7 +535,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     if (suspended === 0 || --suspended > 0) return;
     activeSince = Date.now();
     if (activeRemaining !== undefined && !controller.signal.aborted)
-      timeout = setTimeout(() => controller.abort(), activeRemaining);
+      timeout = setTimeout(() => controller.abort('time_budget'), activeRemaining);
   };
   let binding: { control: BrowserControl; finish: () => void } | undefined;
   let control = opts.browserControl;
@@ -362,7 +551,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   const cancelPoll = setInterval(() => {
     void Promise.resolve(opts.isTaskCancelled?.())
       .then((cancelled) => {
-        if (cancelled) controller.abort();
+        if (cancelled) controller.abort('user_cancelled');
       })
       .catch(() => {});
   }, CANCEL_POLL_MS);
@@ -473,7 +662,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   const parkForReply = async (
     question: string,
     awaitingKind: SupercarAwaitingKind,
-  ): Promise<string | null> => {
+  ): Promise<UnifiedHumanReply | null> => {
     // FIX-30 review: a login wall the user takes 5+ minutes on is not a timeout.
     suspendTimeout();
     // FIX-54 #8: nobody watching the panel, the pool's 5-minute idle reclaim closed the browser
@@ -492,17 +681,55 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       if (controller.signal.aborted) return null;
       const since = Date.now();
       let watch: ReturnType<typeof setInterval> | undefined;
-      return await new Promise<string | null>((resolve) => {
+      return await new Promise<UnifiedHumanReply | null>((resolve) => {
         const timer = setTimeout(() => {
           parked.delete(opts.taskId);
           if (watch) clearInterval(watch);
           resolve(null);
         }, HANDOFF_WAIT_MS);
         const entry: ParkedTask = {
+          acceptAttachments: (blocks, files) => {
+            const chars = blocks.reduce(
+              (sum, block) => sum + (block.type === 'image' ? block.source.data.length : 0),
+              0,
+            );
+            if (attachmentImageChars + chars > MAX_BROWSER_IMAGE_CHARS) return false;
+            if (
+              files?.length &&
+              env.BROWSER_TASK_FILES_V1 &&
+              opts.browserTaskFiles?.taskId === opts.taskId
+            )
+              opts.browserTaskFiles.admitReferences(files);
+            attachmentImageChars += chars;
+            replyMaterials.push(...browserAttachmentParams(blocks));
+            return true;
+          },
+          fileIndex: () =>
+            env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+              ? [
+                  {
+                    type: 'text',
+                    text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+                  },
+                ]
+              : [],
+          rejectInput: () => {
+            void safe(() =>
+              opts.onAwaitingUser?.({
+                question: `附件暂时无法读取或超过任务图像预算，请缩小后重新提供。原待处理事项：${question}`,
+                at: new Date(),
+                currentUrl: page.url(),
+                awaitingKind: 'clarification',
+              }),
+            );
+          },
           resolve: (value) => {
             clearTimeout(timer);
             if (watch) clearInterval(watch);
-            resolve(value);
+            if (value?.handoffToGenerate) {
+              generateHandoff = { message: value.message, attachments: [...replyMaterials] };
+              resolve(null);
+            } else resolve(value);
           },
           abort: () => {
             if (watch) clearInterval(watch);
@@ -529,7 +756,10 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 if (!gone || parked.get(opts.taskId) !== entry) return;
                 if (!((await opts.onWallPassed?.().catch(() => false)) ?? false)) return;
                 parked.delete(opts.taskId);
-                entry.resolve('（用户已在画面上完成了这一步，页面已经过了）');
+                entry.resolve({
+                  message: '（用户已在画面上完成了这一步，页面已经过了）',
+                  pageHandled: true,
+                });
               } finally {
                 checking = false;
               }
@@ -546,27 +776,33 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   // Runtime safety boundary: the same LIVE-VETO the legacy loop applies before
   // each live write. tasks.create passes classifyRuntimeAction; a caller that
   // passes nothing still gets it — the gate is never silently off.
+  const pendingReplies: UnifiedHumanReply[] = [];
+  const actionGateOptions = (targetPage: typeof page) => ({
+    page: targetPage,
+    locatorForAction: (action: UnifiedBrowserAction, ref: string) =>
+      tools.observation?.locator(tools.observation.resolve(action).frame, ref) ??
+      targetPage.locator(`aria-ref=${ref}`),
+    frameForAction: (action: UnifiedBrowserAction) =>
+      tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
+    onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
+    labelForRef: (ref: string) => labelForRef(lastSnapshot, ref),
+    park: async (question: string, kind: SupercarAwaitingKind) => {
+      const reply = await parkForReply(question, kind);
+      if (reply) pendingReplies.push(reply);
+      return reply?.message ?? null;
+    },
+    readOnly: isReadOnlyIntent(opts.intent),
+    userIntent: opts.userRequest ?? opts.intent,
+    aborted: () => controller.signal.aborted,
+    stillLive: async () =>
+      !controller.signal.aborted &&
+      !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
+  });
   const baseGateAction = (targetPage: typeof page) =>
-    createUnifiedActionGate({
-      page: targetPage,
-      locatorForAction: (action, ref) =>
-        tools.observation?.locator(tools.observation.resolve(action).frame, ref) ??
-        targetPage.locator(`aria-ref=${ref}`),
-      frameForAction: (action) =>
-        tools.observation?.resolve(action).frame ?? targetPage.mainFrame(),
-      onBeforeAction: opts.onBeforeAction ?? classifyRuntimeAction,
-      labelForRef: (ref) => labelForRef(lastSnapshot, ref),
-      park: parkForReply,
-      readOnly: isReadOnlyIntent(opts.intent),
-      userIntent: opts.userRequest ?? opts.intent,
-      aborted: () => controller.signal.aborted,
-      stillLive: async () =>
-        !controller.signal.aborted &&
-        !(await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true)),
-    });
+    createUnifiedActionGate(actionGateOptions(targetPage));
 
   const gateAction: ReturnType<typeof createUnifiedActionGate> = async (action, phase) => {
-    const stopped = sessionStopped();
+    const stopped = phase === 'before' ? await checkSession() : sessionStopped();
     if (stopped)
       return {
         kind: 'stop',
@@ -591,7 +827,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
       if (said)
         await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
-      if (waited.yielded && control.canAgentAct()) return humanActedSkip();
+      if ((waited.yielded || control.hasUnobservedHumanInput()) && control.canAgentAct())
+        return humanActedSkip();
     }
     if (phase === 'before' && control && !control.canAgentAct()) return controlClosedStop();
     if (phase === 'before' && tools.observation) {
@@ -637,13 +874,27 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       }
     };
     const targetPage = changedTab ? tools.page : (resolvedPage() ?? tools.page);
-    const result = await baseGateAction(targetPage)(action, phase);
+    let upload: Awaited<ReturnType<typeof tools.prepareUpload>> | undefined;
+    const result =
+      action.tool === 'upload' && phase === 'before'
+        ? await (async () => {
+            try {
+              upload = await tools.prepareUpload(action);
+              return await createBrowserUploadGate(upload, {
+                ...actionGateOptions(targetPage),
+                materials: opts.browserTaskFiles?.references(),
+              })(action, phase);
+            } catch (error) {
+              return { kind: 'skip' as const, message: browserToolError(error).errorMessage };
+            }
+          })()
+        : await baseGateAction(targetPage)(action, phase);
     // 复审 #1 #2: the checks above awaited (the page read, the policy, maybe the person's
     // confirmation of a sensitive step). The person may have acted meanwhile: check again right
     // before the action is sent — nothing awaits between here and execute (unified-browser-loop).
     if (phase === 'before' && result.kind === 'proceed' && control) {
       if (!control.canAgentAct()) return controlClosedStop();
-      if (control.humanBusy()) {
+      if (control.humanBusy() || control.hasUnobservedHumanInput()) {
         await recordDiagnostic('browser_human_wait', undefined, '你在操作，我等你停下再继续');
         await control.yieldToHuman();
         if (!control.canAgentAct()) return controlClosedStop();
@@ -658,12 +909,45 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         if (/^https?:/.test(url)) replay.authorize(new URL(url).origin);
       } catch {}
     }
+    if (upload) {
+      if (result.kind === 'proceed') {
+        const revision = control?.inputRevision;
+        upload.approve(() => {
+          if (
+            !env.BROWSER_TASK_FILES_V1 ||
+            controller.signal.aborted ||
+            sessionStopped() ||
+            (control &&
+              (!control.canAgentAct() || control.humanBusy() || control.inputRevision !== revision))
+          )
+            throw new Error('stale_context');
+        });
+      } else await upload.dispose();
+    }
     return result;
   };
   /** The person used the page: the planned action is void; re-read and decide again. */
-  const humanActedSkip = async (): Promise<{ kind: 'skip'; message: string }> => {
+  const humanActedSkip = async (): Promise<
+    Extract<Awaited<ReturnType<typeof gateAction>>, { kind: 'skip' | 'stop' }>
+  > => {
     lastSnapshot = '';
-    const fresh = await tools.recoverObservation().catch(() => null);
+    let fresh: Awaited<ReturnType<typeof tools.recoverObservation>> | null = null;
+    if (control?.hasUnobservedHumanInput()) {
+      const receipt = await control.checkpoint(async () => {
+        fresh = await tools.recoverObservation();
+      });
+      if (receipt.blocked)
+        return {
+          kind: 'stop',
+          outcome: {
+            status: 'awaiting_user',
+            reason: 'human_input_active',
+            message: '你的输入或拖拽尚未结束，旧动作没有执行。完成操作后再继续。',
+            steps: 0,
+          },
+        };
+      if (!control.canAgentAct()) return controlClosedStop();
+    } else fresh = await tools.recoverObservation().catch(() => null);
     return {
       kind: 'skip',
       message: `用户刚在画面上操作过（点击、打字或滚动），原计划的动作没有执行。按页面现在的样子重新判断：把用户的操作当线索（例如用户打开的页面、填过的框），不要撤回用户的操作，也不要重放旧动作；用户填过的输入框不要读、不要改。\nfresh_observation (未执行原动作):\n${fresh?.text ?? '无法重新观察当前页，请先 snapshot'}`,
@@ -735,6 +1019,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       });
     };
     const outcome = await runUnifiedBrowserLoop({
+      attachments: [
+        ...attachments,
+        ...(env.BROWSER_TASK_FILES_V1 && opts.browserTaskFiles?.taskId === opts.taskId
+          ? [
+              {
+                type: 'text' as const,
+                text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+              },
+            ]
+          : []),
+      ],
+      takeUserReplies: () => pendingReplies.splice(0),
       wrapUp,
       ...(control
         ? {
@@ -822,6 +1118,87 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
+      taskOutputs: {
+        tools: outputs.tools,
+        create: async (input) => {
+          toolsUsed.add('create_file');
+          outputInputRevision = control?.inputRevision;
+          return outputs.create(input);
+        },
+      },
+      ...(fileTables
+        ? {
+            analyzeTaskTable: async (request: Parameters<BrowserTaskTable['run']>[0]) => {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务表格统计已停止。');
+              toolsUsed.add('analyze_task_table');
+              const result = await fileTables.run(request, controller.signal);
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务表格统计已停止。');
+              const evidence = {
+                fileId: result.fileId,
+                sha256: result.sha256,
+                scope: result.scope,
+                columns: result.columns,
+                ...(result.mode === 'aggregate'
+                  ? {
+                      analysisId: result.analysisId,
+                      overall: result.overall,
+                      groups: result.groups,
+                      page: result.page,
+                      complete: result.complete,
+                    }
+                  : {}),
+              };
+              await safe(() =>
+                opts.onEvidence?.({
+                  fact: JSON.stringify(evidence),
+                  sourceType: 'tool_result',
+                  sourceDetail: `task-file:${result.fileId}`,
+                  confidence: 'extracted',
+                }),
+              );
+              await safe(() =>
+                opts.onTick?.({
+                  iteration: ++iteration,
+                  execution: {
+                    actionKind: 'analyze_task_table',
+                    actionSummary:
+                      result.mode === 'aggregate'
+                        ? `已统计CSV：扫描${result.scope.scannedRows}条，匹配${result.scope.matchedRows}条`
+                        : `已读取CSV结构：${result.columns.length}列、${result.scope.scannedRows}条数据`,
+                    ok: true,
+                    message: JSON.stringify(evidence),
+                  },
+                  toolsInTurn: [],
+                  textPreamble: '',
+                  apiLatencyMs: 0,
+                }),
+              );
+              if (
+                !env.BROWSER_TASK_FILES_V1 ||
+                controller.signal.aborted ||
+                sessionStopped() ||
+                !(await opts.browserTaskFiles!.isActive())
+              )
+                throw new Error('任务表格统计已停止。');
+              return result;
+            },
+          }
+        : {}),
+      ...(fileReader
+        ? {
+            readTaskFile: async (request: Parameters<BrowserTaskFileReader['read']>[0]) => {
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              toolsUsed.add('read_task_file');
+              const read = await fileReader.read(request);
+              if (!env.BROWSER_TASK_FILES_V1 || controller.signal.aborted || sessionStopped())
+                throw new Error('任务文件读取已停止。');
+              return read;
+            },
+          }
+        : {}),
       controlLabels: tools.controlLabels,
       probeBlocker: async () => {
         const blocker = await tools.blocker();
@@ -1031,10 +1408,52 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return result;
       },
       gateAction,
+      beforeFinish: async (answer) => {
+        if (control && !control.canAgentAct()) return controlClosedStop();
+        if (control && (control.humanBusy() || control.hasUnobservedHumanInput())) {
+          await control.yieldToHuman();
+          if (!control.canAgentAct()) return controlClosedStop();
+          return humanActedSkip();
+        }
+        const outputGap = outputs.gap(opts.userRequest ?? opts.intent);
+        if (answer.status === 'completed' && outputGap) {
+          if (outputCorrection || !outputs.tools.length)
+            return { kind: 'stop', outcome: { status: 'failed', reason: outputGap, steps: 0 } };
+          outputCorrection = true;
+          return { kind: 'skip', message: outputGap };
+        }
+        if (
+          fileReader &&
+          (!env.BROWSER_TASK_FILES_V1 ||
+            !(await opts.browserTaskFiles!.isActive().catch(() => false)))
+        )
+          return {
+            kind: 'stop',
+            outcome: {
+              status: 'failed',
+              reason: '任务文件功能、任务或账号已不可用，未继续交付分析。',
+              steps: 0,
+            },
+          };
+        if (
+          answer.status === 'completed' &&
+          fileWorkIncomplete() &&
+          !/^\s*(?:部分完成|partially completed)/i.test(answer.summary)
+        ) {
+          const message = `尚未读取完整的请求文件，或统计存在未返回分组/缺失/无效值，不能宣告全量分析完成。请继续 read_task_file 的 nextOffset 或 analyze_task_table 的 page.nextOffset；无法补齐时以“部分完成”开头说明实际范围。\n${fileWorkNote()}`;
+          if (fileReadCorrection)
+            return { kind: 'stop', outcome: { status: 'failed', reason: message, steps: 0 } };
+          fileReadCorrection = true;
+          return { kind: 'skip', message };
+        }
+        return { kind: 'proceed' };
+      },
       requestHuman: async ({ reason, message }) =>
-        (await parkForReply(message, awaitingKindFor(reason))) !== null,
+        (await parkForReply(message, awaitingKindFor(reason))) ?? false,
     });
-    const stoppedAtEnd = sessionStopped();
+    if (controller.signal.aborted && controller.signal.reason === 'user_cancelled')
+      return { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
+    const stoppedAtEnd = await checkSession();
     if (stoppedAtEnd && outcome.status !== 'cancelled')
       return {
         status: 'awaiting_user',
@@ -1042,8 +1461,60 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         iterations: outcome.steps,
         toolsUsed: [...toolsUsed],
       };
+    if (generateHandoff) {
+      const handoff = generateHandoff as {
+        message: string;
+        attachments: NonNullable<RunSupercarOptions['attachments']>;
+      };
+      const cancelled = await Promise.resolve(opts.isTaskCancelled?.()).catch(() => true);
+      if (cancelled || controller.signal.aborted)
+        return {
+          status:
+            !cancelled && controller.signal.reason === 'time_budget' ? 'timeout' : 'cancelled',
+          iterations: outcome.steps,
+          toolsUsed: [...toolsUsed],
+        };
+      if (
+        env.BROWSER_TASK_FILES_V1 &&
+        opts.browserTaskFiles &&
+        !(await opts.browserTaskFiles.isActive().catch(() => false))
+      )
+        return {
+          status: 'failed',
+          reason: '任务或账号已不可用，未转交资料。',
+          iterations: outcome.steps,
+          toolsUsed: [...toolsUsed],
+        };
+      if (controller.signal.aborted || sessionStopped())
+        return { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
+      return {
+        status: 'handoff_to_generate',
+        question: handoff.message,
+        handoffAttachments: handoff.attachments,
+        iterations: outcome.steps,
+        toolsUsed: [...toolsUsed],
+      };
+    }
     switch (outcome.status) {
       case 'completed':
+        if (outputs.gap(opts.userRequest ?? opts.intent))
+          return {
+            status: 'failed',
+            reason: outputs.gap(opts.userRequest ?? opts.intent)!,
+            iterations: outcome.steps,
+            toolsUsed: [...toolsUsed],
+          };
+        if (
+          fileReader &&
+          (!env.BROWSER_TASK_FILES_V1 ||
+            !(await opts.browserTaskFiles!.isActive().catch(() => false)))
+        )
+          return {
+            status: 'failed',
+            reason: '任务文件功能、任务或账号已不可用，未继续交付分析。',
+            iterations: outcome.steps,
+            toolsUsed: [...toolsUsed],
+          };
         await safe(() =>
           opts.onEvidence?.({
             fact: outcome.evidence,
@@ -1054,10 +1525,22 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         );
         return {
           status: 'completed',
-          summary: withAlternateNotice(outcome.summary),
+          summary: withAlternateNotice(
+            outputs.attach([outcome.summary, fileWorkNote()].filter(Boolean).join('\n\n')),
+          ),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
-          ...(outcome.partial ? { partial: outcome.partial } : {}),
+          ...(outcome.partial
+            ? { partial: outcome.partial }
+            : fileWorkIncomplete()
+              ? {
+                  partial: {
+                    found: 0,
+                    wanted: 1,
+                    missing: '请求的文件正文未完整读取，分析范围受限',
+                  },
+                }
+              : {}),
         };
       case 'awaiting_user':
         return {
@@ -1082,10 +1565,18 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         };
       case 'cancelled': {
         const timedOut =
-          controller.signal.aborted && Boolean(budgetMs) && !(await opts.isTaskCancelled?.());
+          controller.signal.aborted &&
+          controller.signal.reason === 'time_budget' &&
+          !(await opts.isTaskCancelled?.());
         // Out of time during the remediation turn: deliver the held answer for
         // verification (it explains what is missing) instead of a bare timeout.
-        if (timedOut && outcome.heldAnswer) {
+        if (
+          timedOut &&
+          outcome.heldAnswer &&
+          !outputs.gap(opts.userRequest ?? opts.intent) &&
+          !fileWorkIncomplete() &&
+          (!fileReader || env.BROWSER_TASK_FILES_V1)
+        ) {
           await safe(() =>
             opts.onEvidence?.({
               fact: outcome.heldAnswer?.evidence ?? '',
@@ -1096,7 +1587,11 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           );
           return {
             status: 'completed',
-            summary: withAlternateNotice(outcome.heldAnswer.summary),
+            summary: withAlternateNotice(
+              outputs.attach(
+                [outcome.heldAnswer.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
+              ),
+            ),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],
           };

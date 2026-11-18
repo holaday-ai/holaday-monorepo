@@ -4,9 +4,192 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CdpScreencastViewport } from './CdpScreencastViewport';
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+it('keeps the visible human-active state alive during a long composition without network heartbeats', async () => {
+  vi.useFakeTimers();
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.compositionStart(h.input);
+  const messages = h.sent.length;
+  await vi.advanceTimersByTimeAsync(2_500);
+  expect(h.onUserInput.mock.calls.length).toBeGreaterThan(2);
+  expect(h.sent).toHaveLength(messages);
+  fireEvent.compositionEnd(h.input);
+  const calls = h.onUserInput.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(2_500);
+  expect(h.onUserInput.mock.calls).toHaveLength(calls);
+});
+
+it('reports a composition hold without sending any unfinished text or page action', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  expect(h.urls.at(-1)).toContain('collaborationV2=1');
+  h.frame();
+  fireEvent.compositionStart(h.input, { data: 'unfinished-private-text' });
+  expect(h.sent.filter((m) => m.type === 'activity')).toEqual([
+    { type: 'activity', keys: 0, pointers: 0, composing: true },
+  ]);
+  expect(JSON.stringify(h.sent)).not.toContain('unfinished-private-text');
+  // happy-dom does not populate CompositionEvent.data through fireEvent's init.
+  const committed = new Event('compositionend', { bubbles: true });
+  Object.defineProperty(committed, 'data', { value: '完成' });
+  fireEvent(h.input, committed);
+  expect(h.sent.filter((m) => m.payload?.type === 'insertText')).toHaveLength(1);
+  expect(h.sent.at(-1)).toMatchObject({ type: 'activity', keys: 0, pointers: 0, composing: false });
+});
+
+it('keeps physical key and pointer counts until their matching releases', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.keyDown(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  expect(h.sent.at(-1)).toMatchObject({ type: 'input', payload: { type: 'keyDown' } });
+  expect(h.sent.filter((m) => m.type === 'activity').at(-1)).toMatchObject({ keys: 1 });
+  fireEvent.keyUp(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  expect(h.sent.at(-1)).toMatchObject({ type: 'activity', keys: 0 });
+  fireEvent.pointerDown(h.canvas, {
+    clientX: 20,
+    clientY: 30,
+    button: 0,
+    pointerId: 1,
+    pointerType: 'mouse',
+  });
+  expect(h.sent.filter((m) => m.type === 'activity').at(-1)).toMatchObject({ pointers: 1 });
+  fireEvent.pointerUp(h.canvas, {
+    clientX: 30,
+    clientY: 40,
+    button: 0,
+    pointerId: 1,
+    pointerType: 'mouse',
+  });
+  expect(h.sent.at(-1)).toMatchObject({ type: 'activity', pointers: 0 });
+});
+
+it('keeps activity metadata dark for old or disabled screens', () => {
+  const h = sharedScreen();
+  expect(h.urls.at(-1)).not.toContain('collaborationV2');
+  h.frame();
+  fireEvent.compositionStart(h.input);
+  fireEvent.compositionEnd(h.input, { data: '完成' });
+  expect(h.sent.some((m) => m.type === 'activity')).toBe(false);
+});
+
+it('does not transfer held inputs to a different task or account stream', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.keyDown(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  h.rerender(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_other"
+      streamToken="other-owner"
+      viewportV2
+      collaborationV2
+      viewOnly={false}
+    />,
+  );
+  fireEvent.compositionStart(h.input);
+  expect(h.sent.at(-1)).toEqual({ type: 'activity', keys: 0, pointers: 0, composing: true });
+});
+
+function commitComposition(input: HTMLInputElement, text: string) {
+  const event = new Event('compositionend', { bubbles: true });
+  Object.defineProperty(event, 'data', { value: text });
+  fireEvent(input, event);
+}
+
+it('does not send a previous connection release into the replacement stream', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.keyDown(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  const pointer = { clientX: 20, clientY: 30, button: 0, pointerId: 1, pointerType: 'mouse' };
+  fireEvent.pointerDown(h.canvas, pointer);
+  h.rerender(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
+      collaborationV2
+      viewOnly={false}
+      reconnectSignal={1}
+    />,
+  );
+  h.frame();
+  const before = h.sent.length;
+  fireEvent.keyUp(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  fireEvent.pointerUp(h.canvas, pointer);
+  expect(h.sent.slice(before).filter((m) => m.type === 'input')).toEqual([]);
+});
+
+it('discards an old composition and its trailing input after a same-target reconnect', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.compositionStart(h.input);
+  h.rerender(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
+      collaborationV2
+      viewOnly={false}
+      reconnectSignal={1}
+    />,
+  );
+  h.frame();
+  commitComposition(h.input, '旧页面的私密输入');
+  fireEvent.input(h.input, {
+    target: { value: '旧页面的私密输入' },
+    inputType: 'insertFromComposition',
+  });
+  expect(h.sent.filter((m) => m.payload?.type === 'insertText')).toHaveLength(0);
+  fireEvent.compositionStart(h.input);
+  commitComposition(h.input, '新的输入');
+  expect(
+    h.sent.filter((m) => m.payload?.type === 'insertText').map((m) => m.payload?.text),
+  ).toEqual(['新的输入']);
+});
+
+it('keeps a held key and composition across a display-only fit change', () => {
+  const h = sharedScreen(undefined, { collaborationV2: true });
+  h.frame();
+  fireEvent.keyDown(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  fireEvent.compositionStart(h.input);
+  h.rerender(
+    <CdpScreencastViewport
+      wsUrl="ws://localhost/screencast-ws/tsk_test"
+      streamToken="test"
+      viewportV2
+      collaborationV2
+      viewOnly={false}
+      displayMode="actual"
+    />,
+  );
+  commitComposition(h.input, '完成');
+  expect(h.sent.at(-1)).toMatchObject({ type: 'activity', keys: 1, composing: false });
+  fireEvent.keyUp(h.input, { key: 'Shift', code: 'ShiftLeft' });
+  expect(h.sent.at(-1)).toMatchObject({ type: 'activity', keys: 0 });
+  expect(h.sent.filter((m) => m.payload?.type === 'insertText')).toHaveLength(1);
+});
+
+it.each([false, true])(
+  'does not commit a composition started against a replaced document, new frame=%s',
+  (newFrame) => {
+    const h = sharedScreen(undefined, { collaborationV2: true });
+    h.frame();
+    fireEvent.compositionStart(h.input);
+    h.invalidate();
+    if (newFrame) h.frame();
+    commitComposition(h.input, '原页面输入');
+    fireEvent.input(h.input, {
+      target: { value: '原页面输入' },
+      inputType: 'insertFromComposition',
+    });
+    expect(h.sent.filter((m) => m.payload?.type === 'insertText')).toHaveLength(0);
+    expect(h.sent.at(-1)).toMatchObject({ type: 'activity', composing: false });
+    expect(h.onInputRefused).toHaveBeenCalledWith('key');
+  },
+);
 
 type Sent = {
   type?: string;
@@ -24,13 +207,15 @@ function sharedScreen(
   props: Partial<React.ComponentProps<typeof CdpScreencastViewport>> = {},
 ) {
   const sent: Sent[] = [];
+  const urls: string[] = [];
   const sockets: Array<{ onmessage: ((e: { data: string }) => void) | null }> = [];
   class Socket {
     static OPEN = 1;
     static CONNECTING = 0;
     readyState = 1;
     onmessage: ((e: { data: string }) => void) | null = null;
-    constructor() {
+    constructor(url: string) {
+      urls.push(url);
       sockets.push(this);
     }
     send(raw: string) {
@@ -71,7 +256,7 @@ function sharedScreen(
   );
   const socket = sockets.at(-1);
   if (!socket?.onmessage) throw new Error('socket not connected');
-  const receive = (m: unknown) => socket.onmessage?.({ data: JSON.stringify(m) });
+  const receive = (m: unknown) => sockets.at(-1)?.onmessage?.({ data: JSON.stringify(m) });
   let n = 0;
   // As the server: a re-captured still page keeps its revision; only an invalidation (navigation,
   // tab change) moves it.
@@ -126,6 +311,7 @@ function sharedScreen(
   return {
     ...view,
     sent,
+    urls,
     receive,
     frame,
     invalidate,

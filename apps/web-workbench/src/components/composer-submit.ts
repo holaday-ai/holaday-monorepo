@@ -1,6 +1,11 @@
 import { taskActionError } from '@/lib/error-copy';
 
-export type ComposerSubmitResult = void | { ok?: boolean; error?: string };
+export type ComposerSubmitResult = void | {
+  ok?: boolean;
+  error?: string;
+  notice?: string;
+  browserOperationId?: string;
+};
 
 export const keepComposerOnSubmitFailure = { ok: false } as const;
 export const clearComposerOnSubmitSuccess = { ok: true } as const;

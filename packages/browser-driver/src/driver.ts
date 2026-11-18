@@ -1,9 +1,8 @@
 import type { ResilientSelector } from '@holaday/shared-types';
 
 /**
- * The seven action kinds the orchestrator can dispatch. Matches the WS
- * protocol's `server.task.dispatch.action.kind` enum so driver translation
- * is a 1:1 mapping.
+ * Typed action vocabulary. Each runtime and WS channel exposes only its
+ * explicitly supported subset; byte upload requires its bound file channel.
  */
 export type ActionKind =
   | 'goto'
@@ -15,7 +14,8 @@ export type ActionKind =
   | 'eval'
   | 'screenshot'
   | 'scroll'
-  | 'select';
+  | 'select'
+  | 'upload';
 
 export interface DriverAction {
   kind: ActionKind;

@@ -26,3 +26,14 @@ export const trpc = createTRPCClient<AppRouter>({
 });
 
 export type { AppRouter };
+/** Pin the authenticated actor for a durable submission, even if global auth changes mid-batch. */
+export function createPinnedTrpc(token: string) {
+  return createTRPCClient<AppRouter>({
+    links: [
+      httpBatchLink({
+        url: '/api/trpc',
+        headers: () => ({ authorization: `Bearer ${token}` }),
+      }),
+    ],
+  });
+}

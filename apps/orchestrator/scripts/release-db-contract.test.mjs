@@ -136,6 +136,22 @@ describe('numbered migration filename contract', () => {
         '0050_user_mfa.sql',
         '0051_account_closures.sql',
         '0052_feedback_cases.sql',
+        '0071_task_files_browser_source.sql',
+      ]),
+    );
+  });
+
+  it('refuses rollout until the Home file provenance column migration is applied', () => {
+    assert.throws(
+      () =>
+        assertDatabaseReadyForAppRollout(['0051_account_closures.sql', '0052_feedback_cases.sql']),
+      /0071_task_files_browser_source\.sql/,
+    );
+    assert.doesNotThrow(() =>
+      assertDatabaseReadyForAppRollout([
+        '0051_account_closures.sql',
+        '0052_feedback_cases.sql',
+        '0071_task_files_browser_source.sql',
       ]),
     );
   });

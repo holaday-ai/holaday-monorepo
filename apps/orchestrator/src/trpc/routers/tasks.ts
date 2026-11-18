@@ -19,6 +19,11 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { z } from 'zod';
 import { ashareQaHandlesMode } from '../../agent/a-share/ashare-qa-lane-gate.js';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
+import { BROWSER_RESTART_WAIT_CODE } from '../../agent/browser-restart-wait.js';
+import {
+  BrowserTaskFiles,
+  type ValidatedBrowserTaskFile,
+} from '../../agent/browser-tools/browser-task-files.js';
 import {
   createResponsesWebSearch,
   withoutVerbatimNotes,
@@ -87,6 +92,7 @@ import {
   supercarAbort,
   supercarHandoffToGenerate,
   supercarReply,
+  validateExternalBrowserReply,
 } from '../../agent/supercar/index.js';
 import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
 import {
@@ -215,6 +221,7 @@ import {
   type ClaimResult as TaskCreateClaimResult,
   recordClaim as claimTaskCreate,
   finalizeClaim as finalizeTaskCreateClaim,
+  hashBody as hashTaskCreateRequest,
   releaseClaim as releaseTaskCreateClaim,
 } from '../../api-keys/webhook-idempotency-service.js';
 import {
@@ -231,6 +238,7 @@ import { AWAITING_REPLY } from '../../browser-pool/browser-pool.js';
 import {
   BrowserSessionRestoreFlights,
   restorableBrowserTarget,
+  storedBrowserHomeProfileId,
   storedBrowserSessionPolicy,
 } from '../../browser-pool/browser-session-recovery.js';
 import { finishTaskBrowser } from '../../browser-pool/finish-task-browser.js';
@@ -287,6 +295,7 @@ import {
   appendSearchSourceReferences,
   collectSearchSourceReferences,
 } from '../../execution/search-source-references.js';
+import { createBrowserTaskFileScope } from '../../files/browser-task-file-scope.js';
 import { MAX_DOWNLOAD_BYTES } from '../../files/download-manager.js';
 import { FileService, taskInternalIdFor } from '../../files/file-service.js';
 import {
@@ -375,8 +384,13 @@ import {
 } from './browser-control.js';
 import {
   assertLocalChromeSelection,
+  launchRecoveryEnabled,
+  localChromeLaunchAcknowledgeProcedure,
+  localChromeLaunchOptionsProcedure,
+  localChromeLaunchReceiptProcedure,
   localChromeSelectionSchema,
   localChromeTabsProcedure,
+  localChromeTaskTabProcedure,
 } from './local-chrome-selection.js';
 import { deferredTaskCosts } from './media-task-background.js';
 import { runMediaTaskBackground } from './media-task-background.js';
@@ -1238,6 +1252,15 @@ export const tasksRouter = router({
   create: protectedProcedure
     .input(pureTaskInput(createInput))
     .use(async ({ ctx, input, next }) => {
+      if (
+        input.localChrome &&
+        launchRecoveryEnabled(ctx.userId) &&
+        !input.localChrome.launchBrowserSessionId
+      )
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '请更新 Chrome 扩展后安全续接任务。未创建任务或扣除额度。',
+        });
       let localChromeReservation: ReturnType<typeof localChromeTaskSessions.reserve> | undefined;
       try {
         localChromeReservation = input.localChrome
@@ -1359,6 +1382,10 @@ export const tasksRouter = router({
       const taskCreateIdempotencyKey = input.clientRequestId
         ? `spa_task:${input.clientRequestId}`
         : null;
+      const creationReceipt =
+        input.localChrome && taskCreateIdempotencyKey && launchRecoveryEnabled(ctx.userId)
+          ? { idempotencyKey: taskCreateIdempotencyKey, requestHash: hashTaskCreateRequest(input) }
+          : undefined;
       // Inside the idempotency claim: a continuation claims its original row,
       // and the first task insert of this request links the replacement in the
       // same transaction (see insertWithContinuationLink below).
@@ -1442,6 +1469,7 @@ export const tasksRouter = router({
             taskCreateIdempotencyKey!,
             taskId,
             response,
+            creationReceipt ? { requestHash: creationReceipt.requestHash } : undefined,
           ),
         release: () =>
           releaseTaskCreateClaim(
@@ -1472,6 +1500,7 @@ export const tasksRouter = router({
               // Best-effort: a failed audit row never blocks task creation.
               const insertTask = repo.insertTask.bind(repo);
               repo.insertTask = (async (...args: Parameters<typeof insertTask>) => {
+                if (creationReceipt) args[1] = { ...args[1], creationReceipt };
                 const link = continuationLink;
                 let result: Awaited<ReturnType<typeof insertTask>> = undefined;
                 if (link) {
@@ -1607,6 +1636,7 @@ export const tasksRouter = router({
             // anchor must return BAD_REQUEST without charging the task.
             const fileService = new FileService(ctx.db, ctx.logger);
             const inputFileMetadata: { fileId: string; filename: string; mimetype: string }[] = [];
+            const browserInputReferences: ValidatedBrowserTaskFile[] = [];
             const attachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
             let orderedFileIds: string[];
             try {
@@ -1627,6 +1657,10 @@ export const tasksRouter = router({
             const parseCreateAttachments = async (completeText: boolean) => {
               if (orderedFileIds.length === 0) return;
               const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+              if (appEnv.BROWSER_TASK_FILES_V1)
+                browserInputReferences.push(
+                  ...BrowserTaskFiles.validatedReferences(loaded, userRow.id),
+                );
               const requestedFileIds = [...new Set(orderedFileIds)];
               inputFileMetadata.push(
                 ...loaded.map(({ row }) => ({
@@ -2064,8 +2098,8 @@ export const tasksRouter = router({
               executionMode === 'browser' ? classifyIdentityNeed(input.intent) : null;
             const browserRoute: UserBrowserRoute =
               executionMode === 'browser' && input.browserHomeSession
-                ? // BROWSER-HOME-1: the person's own (anonymous) cloud browser, as it is.
-                  { lane: 'cloud', reason: 'public_site', sessionPolicy: 'anonymous' }
+                ? // The explicitly selected personal workspace may already carry manual login.
+                  { lane: 'cloud', reason: 'personal_home', sessionPolicy: 'personal_home' }
                 : executionMode === 'browser'
                   ? decideUserBrowserRoute({
                       enabled: taskBrowserCapabilities.routingV2,
@@ -2081,13 +2115,16 @@ export const tasksRouter = router({
                   : { lane: 'legacy' as const, reason: 'flag_off' as const };
             // D17-P1-01 — which sessions this task's browser may load, fixed here by the
             // server and stored on the task. Only a task that needs the user's own data
-            // may load a vault session (and not after a public choice or on a logged-out
-            // route); everything else is `anonymous`. Nothing later can widen it.
+            // may load a readonly vault session (and not after a public choice or on a logged-out
+            // route). Explicit Home tasks preserve their personal workspace scope.
             const taskSessionPolicy: BrowserSessionPolicy = deriveTaskSessionPolicy({
               identityRequired: identityDecision?.required === true,
               publicCloudRequested: input.browserPreference === 'cloud-public',
               route: browserRoute,
             });
+            const taskCloudProfileId = input.browserHomeSession
+              ? browserHomeClaim?.instance.cloudProfileId
+              : undefined;
             if (scrapeBrowserRetry && browserRoute.lane === 'awaiting_user')
               throw new TRPCError({
                 code: 'PRECONDITION_FAILED',
@@ -5653,7 +5690,11 @@ export const tasksRouter = router({
                   roleId: dispatchRoleId,
                   opusUsed: opusActuallyConsumed,
                   executionMode: 'browser',
-                  sourceContext: { browserSessionPolicy: taskSessionPolicy },
+                  sourceContext: {
+                    browserSessionPolicy: taskSessionPolicy,
+                    ...(input.browserHomeSession ? { browserHomeSession: true } : {}),
+                    ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
+                  },
                 },
               );
 
@@ -5677,6 +5718,7 @@ export const tasksRouter = router({
                         targetUrl: browserTargetUrl,
                         capabilities: taskBrowserCapabilities,
                         sessionPolicy: taskSessionPolicy,
+                        ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                       }));
                     executor = instance.executor;
                     allocatedPool = true;
@@ -5942,6 +5984,8 @@ export const tasksRouter = router({
               const browserSourceContext = {
                 ...(input.localChrome ? { browserSource: 'local-chrome' } : {}),
                 browserSessionPolicy: taskSessionPolicy,
+                ...(input.browserHomeSession ? { browserHomeSession: true } : {}),
+                ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                 ...(input.browserHomeSession && browserQwenEndpoint
                   ? { qwenEndpoint: browserQwenEndpoint }
                   : {}),
@@ -6118,6 +6162,7 @@ export const tasksRouter = router({
                           targetUrl: browserTargetUrl,
                           capabilities: taskBrowserCapabilities,
                           sessionPolicy: taskSessionPolicy,
+                          ...(taskCloudProfileId ? { cloudProfileId: taskCloudProfileId } : {}),
                         });
                     allocatedForContinuation = adopted == null;
                     const continuation = resolveBrowserFollowUpContinuation({
@@ -6475,6 +6520,18 @@ export const tasksRouter = router({
                   resolveScrapeRuntimeForUser(ctx.userId, userRow.modelDataRegion, taskModelWiring)
                     .kind === 'ready';
                 const supercarArgs: Parameters<typeof runSupercarTask>[0] = {
+                  ...(appEnv.BROWSER_TASK_FILES_V1
+                    ? {
+                        browserTaskFiles: createBrowserTaskFileScope({
+                          db: ctx.db,
+                          files: fileService,
+                          taskId,
+                          userId: userRow.id,
+                          origin: ctx.taskOrigin,
+                          inputs: browserInputReferences,
+                        }),
+                      }
+                    : {}),
                   browserCapabilities: taskBrowserCapabilities,
                   ...(askedFieldJudge ? { askedFieldJudge } : {}),
                   ...(unifiedWebSearch ? { unifiedWebSearch } : {}),
@@ -6782,33 +6839,60 @@ export const tasksRouter = router({
                         },
                       }
                     : {}),
-                  async onBrowserDownload({ filename, buffer, sha256 }) {
+                  async onBrowserDownload({
+                    filename,
+                    buffer,
+                    sha256,
+                    mimetype,
+                    source,
+                    canPublish,
+                  }) {
                     const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
                     if (taskInternalId == null) throw new Error('task row not found');
-                    const stored = await fileService.storeOutput({
+                    if (source && source.taskId !== taskId)
+                      throw new Error('download_task_mismatch');
+                    const output = {
                       userIdInternal: userRow.id,
                       userExternalId: ctx.userId,
                       taskIdInternal: taskInternalId,
                       filename,
-                      mimetype: 'application/octet-stream',
+                      mimetype: mimetype ?? 'application/octet-stream',
                       buffer,
-                    });
+                    };
+                    const stored =
+                      appEnv.BROWSER_TASK_FILES_V1 && source
+                        ? await fileService.storeTaskBrowserOutput({
+                            ...output,
+                            source: { version: 1, kind: 'task_download', ...source },
+                          })
+                        : await fileService.storeOutput({
+                            ...output,
+                            requireLiveTask: true,
+                            canPublish,
+                          });
                     const receipt = {
                       fileId: stored.externalId,
                       filename: stored.filename,
                       sizeBytes: stored.sizeBytes,
                       sha256,
                       downloadUrl: `/api/files/${stored.externalId}/download`,
+                      mimetype: stored.mimetype,
+                      expiresAt: stored.expiresAt?.toISOString(),
                     };
-                    pdfAttachments.push({
-                      ...receipt,
-                      mimetype: 'application/octet-stream',
-                      expiresAt: stored.expiresAt!.toISOString(),
-                      kind: 'file',
-                    });
                     return receipt;
                   },
-                  async onCreateFile({ filename, format, content }) {
+                  onBrowserDownloadSaved(receipt) {
+                    if (!receipt.expiresAt || !receipt.mimetype)
+                      throw new Error('download_metadata_unavailable');
+                    if (pdfAttachments.some((item) => item.fileId === receipt.fileId)) return;
+                    pdfAttachments.push({
+                      ...receipt,
+                      mimetype: receipt.mimetype,
+                      expiresAt: receipt.expiresAt,
+                      kind: 'file',
+                    });
+                  },
+                  async onCreateFile({ filename, format, content, canPublish }) {
                     if (!isCreateFileFormat(format)) {
                       return { error: `unsupported format: ${format}` };
                     }
@@ -6822,6 +6906,8 @@ export const tasksRouter = router({
                         userIdInternal: userRow.id,
                         userExternalId: ctx.userId,
                         taskIdInternal: taskInternalId,
+                        requireLiveTask: true,
+                        canPublish,
                         filename,
                         mimetype: rendered.mimetype,
                         buffer: rendered.buffer,
@@ -7486,6 +7572,8 @@ export const tasksRouter = router({
                     taskId,
                     intent: effectiveIntent,
                     userRequest: parentUserContext + input.intent,
+                    attachments: supercarArgs.attachments,
+                    browserTaskFiles: supercarArgs.browserTaskFiles,
                     messagesAdapter: browserMessagesAdapter,
                     client: session.client,
                     control: session.control,
@@ -7498,6 +7586,10 @@ export const tasksRouter = router({
                     onThinking: supercarArgs.onThinking,
                     createFileFormats: supercarArgs.createFileFormats,
                     onCreateFile: supercarArgs.onCreateFile,
+                    onBrowserDownload: supercarArgs.onBrowserDownload,
+                    onBrowserDownloadSaved: supercarArgs.onBrowserDownloadSaved,
+                    onBrowserScreenshot: supercarArgs.onBrowserDownload,
+                    onBrowserScreenshotSaved: supercarArgs.onBrowserDownloadSaved,
                     onBeforeAction: supercarArgs.onBeforeAction,
                     logger: ctx.logger,
                     onAwaitingUser: supercarArgs.onAwaitingUser,
@@ -7803,6 +7895,10 @@ export const tasksRouter = router({
                       // re-charge — same task, same id, just a different runner.
                       if (outcome.status === 'handoff_to_generate') {
                         const userManualData = outcome.question ?? '';
+                        const handoffAttachments = [
+                          ...attachmentBlocks,
+                          ...(outcome.handoffAttachments ?? []),
+                        ];
                         const combinedIntent = [
                           input.intent,
                           userManualData ? `\n\n[用户提供的数据]\n${userManualData}` : '',
@@ -7841,8 +7937,8 @@ export const tasksRouter = router({
                                 responsesAdapter: handoffGenerateResponsesAdapter,
                                 firecrawl: ctx.firecrawl ?? null,
                                 logger: ctx.logger,
-                                ...(attachmentBlocks.length > 0
-                                  ? { attachments: attachmentBlocks }
+                                ...(handoffAttachments.length > 0
+                                  ? { attachments: handoffAttachments }
                                   : {}),
                                 onStreamDelta: (delta) => {
                                   try {
@@ -8996,6 +9092,7 @@ export const tasksRouter = router({
                   sendExtensionToolCall,
                   ctx.localChromeReservation,
                   taskBrowserCapabilities,
+                  { taskFilesV1: appEnv.BROWSER_TASK_FILES_V1 },
                 );
                 try {
                   await dispatchToBrave(executionContext);
@@ -11096,6 +11193,8 @@ export const tasksRouter = router({
             executionRevision: tasksTable.executionRevision,
             coreRecordVersion: tasksTable.coreRecordVersion,
             awaitingQuestion: tasksTable.awaitingQuestion,
+            awaitingKind: tasksTable.awaitingKind,
+            errorCode: tasksTable.errorCode,
             roleId: tasksTable.roleId,
           })
           .from(tasksTable)
@@ -11109,6 +11208,19 @@ export const tasksRouter = router({
           .limit(1);
         if (!taskRow) {
           throw new TRPCError({ code: 'NOT_FOUND', message: `task ${input.taskId} not found` });
+        }
+        // A crashed browser runner has no live continuation to wake. A generic
+        // reply must not fall through to creating/re-running the original intent.
+        if (taskRow.status === 'awaiting_user' && taskRow.errorCode === BROWSER_RESTART_WAIT_CODE) {
+          broadcastToUser(ctx.userId, {
+            type: 'server.supercar.awaiting_user',
+            taskId: input.taskId,
+            question:
+              taskRow.awaitingQuestion ??
+              '上次浏览器操作的结果尚未核实，请先核对当前页面和下载记录。',
+            awaitingKind: 'browser_action',
+          });
+          return { ok: true, state: 'stillAwaiting' };
         }
         const captchaInstance = ctx.browserPool?.peek(input.taskId);
         const captchaSession =
@@ -11184,9 +11296,15 @@ export const tasksRouter = router({
         // Core replies require every referenced file and complete text before
         // releasing the wait. Other lanes retain their existing parsing policy.
         const replyAttachmentBlocks: Awaited<ReturnType<typeof parseFileForPrompt>>['blocks'] = [];
+        const replyFileReferences: ValidatedBrowserTaskFile[] = [];
         if (input.fileIds && input.fileIds.length > 0) {
           const fileService = new FileService(ctx.db, ctx.logger);
           const loaded = await fileService.loadMany(input.fileIds, userRow.id);
+          if (appEnv.BROWSER_TASK_FILES_V1) {
+            if (input.fileIds.some((id) => !loaded.some((file) => file.row.externalId === id)))
+              throw new TRPCError({ code: 'BAD_REQUEST', message: '有附件已失效，请重新提供。' });
+            replyFileReferences.push(...BrowserTaskFiles.validatedReferences(loaded, userRow.id));
+          }
           if (
             coreTextReply &&
             input.fileIds.some((id) => !loaded.some((file) => file.row.externalId === id))
@@ -11220,8 +11338,8 @@ export const tasksRouter = router({
           }
         }
         // F1 — classify the user's reply intent. Four buckets:
-        //   manual_data     — user pasted metrics / "数据如下" / numeric
-        //                     blob; supercar should hand off to generate.
+        //   manual_data     — user explicitly replaces browser work with
+        //                     analysis of supplied materials.
         //   login_completed — user finished a manual login or captcha
         //                     ("扫完了" / "登录好了"); continue browser.
         //   still_awaiting  — user said "等一下 / 稍等 / wait"; keep
@@ -11230,7 +11348,9 @@ export const tasksRouter = router({
         // The classifier is intentionally conservative (favors `default`)
         // — false-handoff aborts a working browser session, so we only
         // hand off when the message is unambiguously self-sufficient.
-        const replyKind = classifyReplyIntent(input.message);
+        const replyKind = classifyReplyIntent(input.message, {
+          awaitingKind: taskRow.awaitingKind,
+        });
         ctx.logger.info(
           { taskId: input.taskId, replyKind, msgLen: input.message.length },
           'reply: classified',
@@ -11309,6 +11429,19 @@ export const tasksRouter = router({
         const supercarHasHandle = hasParkedSupercarHandle(input.taskId);
         if (supercarHasHandle) {
           try {
+            validateExternalBrowserReply(
+              input.taskId,
+              replyAttachmentBlocks,
+              replyKind === 'manual_data',
+              replyFileReferences,
+            );
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: '补充材料超过当前浏览器任务范围或预算，请缩小后重试；任务仍在等待。',
+            });
+          }
+          try {
             const repo = new TaskRepository(ctx.db, ctx.taskOrigin);
             const persisted = await repo.markAwaitingReplyResumed(input.taskId, userRow.id);
             if (!persisted.persisted) {
@@ -11329,11 +11462,17 @@ export const tasksRouter = router({
 
         const delivered =
           replyKind === 'manual_data'
-            ? supercarHandoffToGenerate(input.taskId, input.message)
+            ? supercarHandoffToGenerate(
+                input.taskId,
+                input.message,
+                replyAttachmentBlocks,
+                replyFileReferences,
+              )
             : supercarReply(
                 input.taskId,
                 input.message,
                 replyAttachmentBlocks.length > 0 ? replyAttachmentBlocks : undefined,
+                replyFileReferences,
               );
         if (delivered) {
           return { ok: true, state: 'resumed' as const };
@@ -11544,14 +11683,9 @@ export const tasksRouter = router({
         //      runner will either complete (report) or park again with
         //      a new intake question (the model decides).
         //
-        // Short-circuit: if the user clearly pasted metrics/data
-        // (`replyKind === 'manual_data'`) we skip the workflow re-run
-        // and go straight to generate. The classifier is conservative,
-        // so a `manual_data` verdict means there are unambiguous numeric
-        // figures or "数据如下" markers — no need to ask whether the
-        // user actually wants the browser path. Avoids edge cases where
-        // a paste happens to contain platform keywords ("罗盘 GMV 156k
-        // UV 28k") and would otherwise trip the browser-handoff branch.
+        // An explicit user instruction to replace browser work with supplied
+        // material analysis skips the workflow reroute. Pasted values alone stay
+        // in the current task; they do not imply giving up website work.
         // A saved legacy choice may refresh its missing inputs, but later text
         // must not introduce a legacy workflow that was never selected.
         const newWorkflow =
@@ -12250,6 +12384,13 @@ export const tasksRouter = router({
             message: '这个任务没有可恢复的真实浏览器页面',
           });
         }
+        const sessionPolicy = storedBrowserSessionPolicy(taskRow);
+        const cloudProfileId = storedBrowserHomeProfileId(taskRow);
+        if (sessionPolicy === 'personal_home' && !cloudProfileId)
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: '原个人浏览器会话已结束，请从云浏览器入口重新打开并核对登录状态。',
+          });
 
         const decision = await defaultBrowserNetworkPolicy.check(target.url);
         if (!decision.allowed) {
@@ -12263,9 +12404,10 @@ export const tasksRouter = router({
         try {
           const instance = await browserPool.allocate(input.taskId, ctx.userId, undefined, {
             targetUrl: target.url,
-            // Fail closed: only a task stored as vault_allowed may reload a session;
-            // legacy rows and logged-out promises restore anonymously (D17-P1-02).
-            sessionPolicy: storedBrowserSessionPolicy(taskRow),
+            // Restore only the stored policy and explicit personal profile. Legacy
+            // rows and their logged-out promises stay anonymous (D17-P1-02).
+            sessionPolicy,
+            ...(cloudProfileId ? { cloudProfileId } : {}),
           });
           allocated = true;
           await instance.executor.resetPageForTask();
@@ -12416,6 +12558,10 @@ export const tasksRouter = router({
   browserProfileStatus: browserProfileStatusProcedure,
   browserProfileClear: browserProfileClearProcedure,
   localChromeTabs: localChromeTabsProcedure,
+  localChromeLaunchOptions: localChromeLaunchOptionsProcedure,
+  localChromeLaunchReceipt: localChromeLaunchReceiptProcedure,
+  localChromeLaunchAcknowledge: localChromeLaunchAcknowledgeProcedure,
+  localChromeTaskTab: localChromeTaskTabProcedure,
   browserNav: browserNavProcedure,
 
   /**
@@ -12896,31 +13042,37 @@ export function normalizeReplyAwaitingKindForBroadcast(
 }
 
 /**
- * F1 — classify a `tasks.reply` body so the handler picks the right
- * resume path:
- *   manual_data     — user pasted metrics, table-shaped data, or said
- *                     "数据如下" / "我直接给你数据". Supercar should
- *                     hand off to generate; trying to keep driving the
- *                     browser is wasted work and often loops on a
- *                     login page the user has explicitly opted out of.
- *   login_completed — user finished a manual login / captcha so
- *                     supercar should keep driving the browser. Today
- *                     this returns the same code path as `default`,
- *                     but the explicit bucket lets us tune the prompt
- *                     or telemetry separately later.
- *   default         — anything else; let supercar continue.
- *
- * Conservative: false-positives abort a working browser session, so
- * we only flag manual_data when the message has structural signals
- * (≥ 3 numerical figures, OR `key: value` lines, OR an explicit
- * "数据如下" / "I'll provide data" phrase). Casual replies stay default.
+ * Route a reply without treating supplied material as a new task. Numeric or
+ * key:value text stays in the current browser loop. A direct replacement
+ * instruction may hand analysis to generate while preserving the original task
+ * and its materials. Action/permission decisions retain their own gate.
  */
 export function classifyReplyIntent(
   message: string,
+  context?: { awaitingKind?: string | null },
 ): 'manual_data' | 'login_completed' | 'still_awaiting' | 'default' {
   const trimmed = message.trim();
   if (!trimmed) return 'default';
   const lower = trimmed.toLowerCase();
+
+  // Supplying numbers, form fields or attachments does not replace the user's
+  // browser goal. Only a direct instruction to stop browser work AND analyze
+  // supplied material can take this automatic off-ramp. Keep quoted material
+  // out by requiring that instruction at the start of the reply.
+  const replaceWithAnalysis =
+    /^(?:请)?(?:不用|不要|别|停止|跳过|无需|无须)(?:再|继续)?(?:登录|登陆|操作(?:网页|网站|浏览器)|浏览(?:网页|网站)|读取(?:网页|网站|后台)|访问(?:网页|网站|后台))\s*[,，。;；]?\s*(?:请)?(?:只|仅)?(?:用|使用|根据|基于|结合)(?:我(?:提供|上传|补充|发)的)?(?:数据|表格|文件|附件)(?:和(?:数据|表格|文件|附件))*\s*(?:做|写|进行|完成|来)?(?:分析|复盘|统计|总结|汇总)/u.test(
+      trimmed,
+    ) ||
+    /^(?:please\s+)?(?:stop\s+browsing|skip\s+(?:the\s+)?login|(?:do\s+not|don't)\s+(?:continue\s+)?(?:browsing|log\s+in))[\s.,;:]*(?:and\s+)?(?:please\s+)?(?:use\s+(?:my\s+|the\s+)?(?:uploaded\s+|supplied\s+|attached\s+)?(?:data|files?|attachments?|table)\s+(?:to\s+)?(?:analy[sz]e|summari[sz]e|calculate)\b|(?:analy[sz]e|summari[sz]e|calculate)\s+(?:my\s+|the\s+)?(?:uploaded\s+|supplied\s+|attached\s+)?(?:data|files?|attachments?|table)\b)/i.test(
+      trimmed,
+    );
+  if (replaceWithAnalysis) {
+    // Action/permission/quote replies belong to their existing decision gate.
+    // A material reply must never approve or silently discard that decision.
+    return context && !['clarification', 'login', 'captcha'].includes(context.awaitingKind ?? '')
+      ? 'default'
+      : 'manual_data';
+  }
 
   // Fix 2 — still-awaiting tells. User is mid-login / mid-captcha and
   // typing "等一下 / 稍等 / wait" to ask the system to keep waiting.
@@ -12944,18 +13096,6 @@ export function classifyReplyIntent(
     }
   }
 
-  // Strong manual-data tells. The phrase patterns are a high-precision
-  // signal — users typing "数据如下" or "I'll give you the numbers"
-  // almost never mean "keep driving the browser".
-  const MANUAL_DATA_PHRASES: readonly RegExp[] = [
-    /数据如下|以下是数据|这些(?:是|就是)数据|我(?:直接|手动)?(?:给|提供|发)(?:你)?数据/u,
-    /用我(?:上传|提供|发)的(?:数据|表格|文件|附件)/u,
-    /(?:不(?:用|要)|跳过|别)(?:登录|登陆)|(?:不要|别)(?:打开|访问)(?:网站|页面|后台)/u,
-    /\bhere(?:'s|\s+is)\s+the\s+(?:data|numbers|metrics)/i,
-    /\bi(?:'ll)?\s+(?:provide|give|paste)\s+(?:the\s+)?(?:data|numbers)/i,
-  ];
-  if (MANUAL_DATA_PHRASES.some((re) => re.test(trimmed))) return 'manual_data';
-
   // Login-completed tells. Conservative — the message has to be short
   // and unambiguously about login state, not a long answer that
   // happens to mention "登录".
@@ -12969,18 +13109,6 @@ export function classifyReplyIntent(
       return 'login_completed';
     }
   }
-
-  // Structural manual-data signal: ≥ 3 distinct numeric figures (with
-  // unit / separator hints to dodge the "1, 2, 3 step list" false-fire),
-  // OR multiple `key: value` lines.
-  const NUMERIC_WITH_HINT =
-    /(?:¥|\$|€|£|RMB|usd)\s*[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s*(?:%|元|万|亿|人民币)|[\d,]+(?:\.\d+)?(?=\s*(?:GMV|UV|ROI|GPM|UV价值|订单|转化|消耗|分|%))/giu;
-  const numericHits = trimmed.match(NUMERIC_WITH_HINT);
-  if (numericHits && numericHits.length >= 3) return 'manual_data';
-
-  const KV_LINE = /^[一-龥A-Za-z0-9 \t（）()\-_/]+\s*[：:][^\n]+$/u;
-  const kvLines = trimmed.split('\n').filter((l) => KV_LINE.test(l.trim())).length;
-  if (kvLines >= 2) return 'manual_data';
 
   return 'default';
 }

@@ -1,5 +1,7 @@
 import { replyLanguageRule } from '@holaday/shared-types';
 import { modelProviderFailureMessage } from '../../llm/provider-error-diagnostics.js';
+import type { ValidatedBrowserTaskFile } from '../browser-tools/browser-task-files.js';
+import type { BrowserDownloadReceipt } from '../browser-tools/playwright-unified-executor.js';
 /**
  * Supercar agent loop.
  *
@@ -74,9 +76,17 @@ import type {
 } from '../vision-loop/playwright-executor.js';
 import type { ApifyAdapter } from './adapters/apify.js';
 import type { ZapierAdapter } from './adapters/zapier.js';
-import { type BrowserControl, HUMAN_ALSO_ACTED_NOTE } from './browser-control.js';
+import {
+  type BrowserControl,
+  BrowserHumanInputBusyError,
+  HUMAN_ALSO_ACTED_NOTE,
+} from './browser-control.js';
 import { toBrowserPixels } from './browser-coordinates.js';
-import { type BrowserModelResponse, createBrowserMessage } from './browser-messages.js';
+import {
+  type BrowserModelResponse,
+  browserAttachmentBlocks,
+  createBrowserMessage,
+} from './browser-messages.js';
 import { buildCtripFlightHint, isCtripFlightResultsUrl } from './ctrip-flight-extractor.js';
 import {
   type Effort,
@@ -567,6 +577,8 @@ export type SupercarStatus =
  */
 export interface SupercarOutcome {
   status: SupercarStatus;
+  /** Parsed reply materials retained when the browser phase yields to generation. */
+  handoffAttachments?: RunSupercarOptions['attachments'];
   /** Populated on status=completed — the model's final markdown report. */
   summary?: string;
   /** Populated on awaiting_user — the question the model asked the user. */
@@ -735,9 +747,18 @@ export interface SupercarEvidenceEvent {
 }
 
 export interface RunSupercarOptions {
-  onBrowserDownload?: (input: { filename: string; buffer: Buffer; sha256: string }) => Promise<
-    import('../browser-tools/playwright-unified-executor.js').BrowserDownloadReceipt
-  >;
+  /** Server-owned material scope for this exact task; disabled unless the task-files flag is on. */
+  browserTaskFiles?: import('../browser-tools/browser-task-files.js').BrowserTaskFiles;
+  onBrowserDownload?: (input: {
+    filename: string;
+    buffer: Buffer;
+    sha256: string;
+    mimetype?: string;
+    source?: import('../browser-tools/browser-download.js').TaskDownloadSource;
+    canPublish?: () => boolean;
+  }) => Promise<BrowserDownloadReceipt>;
+  /** Publish both newly persisted and already-owned Home download receipts to this task. */
+  onBrowserDownloadSaved?: (receipt: BrowserDownloadReceipt) => void | Promise<void>;
   /** BROWSER_EXECUTOR=unified only: web search (Qwen built-in, Firecrawl fallback). */
   unifiedWebSearch?: (query: string) => Promise<Array<{ title: string; url: string }>>;
   /** FIRECRAWL-1: web search once the task met a wall (no Firecrawl fallback). */
@@ -1050,6 +1071,7 @@ export interface RunSupercarOptions {
     filename: string;
     format: string;
     content: string;
+    canPublish?: () => boolean;
   }) => Promise<
     { fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }
   >;
@@ -1157,9 +1179,30 @@ interface RunHandle {
    * reply was text-only (the original behaviour).
    */
   pendingAttachmentBlocks: ReadonlyArray<{ type: string }> | null;
+  replyAttachmentHistory: NonNullable<RunSupercarOptions['attachments']>;
+  validateReply?: (
+    blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+    files?: readonly ValidatedBrowserTaskFile[],
+  ) => void;
+  admitReplyFiles?: (files: readonly ValidatedBrowserTaskFile[]) => void;
+  canHandoff?: () => boolean;
 }
 
 const handles = new Map<string, RunHandle>();
+
+/** Preflight external-lane materials before tasks.reply releases its DB wait. */
+export function validateExternalBrowserReply(
+  taskId: string,
+  blocks: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  handoff = false,
+  files?: readonly ValidatedBrowserTaskFile[],
+): void {
+  const handle = handles.get(taskId);
+  if (!handle?.validateReply) return;
+  if (!handle.resolveReply || (handoff && handle.canHandoff && !handle.canHandoff()))
+    throw new Error('Browser reply is not accepted in the current wait');
+  handle.validateReply(blocks, files);
+}
 
 /** Register a non-cloud browser lane with the existing task reply lifecycle. */
 export function createExternalBrowserPark(options: {
@@ -1169,13 +1212,30 @@ export function createExternalBrowserPark(options: {
   onAwaitingUser?: RunSupercarOptions['onAwaitingUser'];
   aborted: () => boolean;
   timeoutMs?: number;
+  attachments?: RunSupercarOptions['attachments'];
+  browserTaskFiles?: RunSupercarOptions['browserTaskFiles'];
 }) {
+  if (options.browserTaskFiles && options.browserTaskFiles.taskId !== options.taskId)
+    throw new Error('browser_task_file_scope_mismatch');
+  let parkedKind: SupercarAwaitingKind | null = null;
   const handle: RunHandle = {
     resolveReply: null,
     abort: () => handle.resolveReply?.('__SUPERCAR_ABORT__'),
     handoffMessage: null,
     originalIntent: options.intent,
     pendingAttachmentBlocks: null,
+    replyAttachmentHistory: [],
+    validateReply: (blocks, files) => {
+      browserAttachmentBlocks([
+        ...(options.attachments ?? []),
+        ...handle.replyAttachmentHistory,
+        ...blocks,
+      ]);
+      options.browserTaskFiles?.validateReferences(files ?? []);
+    },
+    admitReplyFiles: (files) => options.browserTaskFiles?.admitReferences(files),
+    canHandoff: () =>
+      parkedKind !== null && ['clarification', 'login', 'captcha'].includes(parkedKind),
   };
   if (handles.has(options.taskId)) throw new Error('browser_task_already_running');
   handles.set(options.taskId, handle);
@@ -1189,6 +1249,7 @@ export function createExternalBrowserPark(options: {
         resolve = r;
       });
       handle.resolveReply = resolve;
+      parkedKind = awaitingKind;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await options.onAwaitingUser?.({ question, awaitingKind, at: new Date(), currentUrl: '' });
@@ -1203,7 +1264,23 @@ export function createExternalBrowserPark(options: {
       } finally {
         if (timer) clearTimeout(timer);
         if (handle.resolveReply === resolve) handle.resolveReply = null;
+        parkedKind = null;
       }
+    },
+    takeReply() {
+      const attachments = [...(handle.pendingAttachmentBlocks ?? [])] as NonNullable<
+        RunSupercarOptions['attachments']
+      >;
+      handle.pendingAttachmentBlocks = null;
+      const handoff =
+        handle.handoffMessage === null
+          ? null
+          : {
+              message: handle.handoffMessage,
+              attachments: [...handle.replyAttachmentHistory],
+            };
+      handle.handoffMessage = null;
+      return { attachments, handoff };
     },
     close() {
       options.signal?.removeEventListener('abort', abort);
@@ -1226,12 +1303,20 @@ export function createExternalBrowserPark(options: {
 export function supercarReply(
   taskId: string,
   message: string,
-  attachmentBlocks?: ReadonlyArray<{ type: string }>,
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
+  try {
+    handle.validateReply?.(attachmentBlocks ?? [], files);
+    handle.admitReplyFiles?.(files ?? []);
+  } catch {
+    return false;
+  }
   if (attachmentBlocks && attachmentBlocks.length > 0) {
     handle.pendingAttachmentBlocks = attachmentBlocks;
+    handle.replyAttachmentHistory.push(...attachmentBlocks);
   }
   const resolve = handle.resolveReply;
   handle.resolveReply = null;
@@ -1262,10 +1347,23 @@ export function hasParkedSupercarHandle(taskId: string): boolean {
  * cancelled. Returns true if the handoff was accepted (handle exists +
  * is parked); false if the task isn't currently parked.
  */
-export function supercarHandoffToGenerate(taskId: string, message: string): boolean {
+export function supercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
   const handle = handles.get(taskId);
   if (!handle || !handle.resolveReply) return false;
+  if (handle.canHandoff && !handle.canHandoff()) return false;
+  try {
+    handle.validateReply?.(attachmentBlocks ?? [], files);
+    handle.admitReplyFiles?.(files ?? []);
+  } catch {
+    return false;
+  }
   handle.handoffMessage = message;
+  if (attachmentBlocks?.length) handle.replyAttachmentHistory.push(...attachmentBlocks);
   const resolve = handle.resolveReply;
   handle.resolveReply = null;
   resolve(message);
@@ -1315,6 +1413,7 @@ export function runSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutco
     handoffMessage: null,
     originalIntent: opts.intent,
     pendingAttachmentBlocks: null,
+    replyAttachmentHistory: [],
     abort: () => {
       lifecycle.cancelled = true;
       lifecycle.modelAbort.abort();
@@ -1932,6 +2031,7 @@ async function runSupercarTaskInternal(
       return {
         status: 'handoff_to_generate',
         question: handoffMsg,
+        handoffAttachments: [...handle.replyAttachmentHistory],
         iterations: iteration,
         toolsUsed: Array.from(toolsUsed),
       };
@@ -2011,6 +2111,7 @@ async function runSupercarTaskInternal(
       observation = await observeBrowser();
     });
     deadline += receipt.waitedMs;
+    if (receipt.blocked) throw new BrowserHumanInputBusyError();
     return receipt.resumed ? observation : null;
   };
 
@@ -2846,6 +2947,7 @@ async function runSupercarTaskInternal(
             return {
               status: 'handoff_to_generate',
               question: handoffMsg,
+              handoffAttachments: [...handle.replyAttachmentHistory],
               iterations: iteration,
               toolsUsed: Array.from(toolsUsed),
             };
@@ -4515,6 +4617,16 @@ async function runSupercarTaskInternal(
       iterations: iteration,
       toolsUsed: Array.from(toolsUsed),
     };
+  } catch (error) {
+    if (!(error instanceof BrowserHumanInputBusyError)) throw error;
+    const question =
+      '你的输入、拖拽或输入法组合还没有结束，旧动作没有执行。请完成操作、松开按键和鼠标后再继续。';
+    await safeCall(opts.onAwaitingUser, {
+      question,
+      at: new Date(),
+      awaitingKind: 'clarification',
+    });
+    return { status: 'awaiting_user', question, iterations: iteration, toolsUsed: [...toolsUsed] };
   } finally {
     if (handles.get(opts.taskId) === handle) handles.delete(opts.taskId);
   }

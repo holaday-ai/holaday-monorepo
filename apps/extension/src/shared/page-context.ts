@@ -174,7 +174,9 @@ function getTabContextUrl(tab: chrome.tabs.Tab): string {
   return url || pendingUrl;
 }
 
-export async function getActivePageContext(): Promise<PageContext | null> {
+export async function getActivePageContext(options?: {
+  metadataOnly?: boolean;
+}): Promise<PageContext | null> {
   const tab = await queryActivePageContextTab();
   if (!tab?.id) return null;
 
@@ -186,7 +188,7 @@ export async function getActivePageContext(): Promise<PageContext | null> {
   const restrictedScheme = /^(chrome|chrome-extension|chrome-error|edge|about|file):/i.test(
     rawTabUrl,
   );
-  if (restrictedScheme || !tabUrl) {
+  if (options?.metadataOnly || restrictedScheme || !tabUrl) {
     const snippet = sanitizePageContextSnippet({
       title: tab.title ?? '',
       url: tabUrl,

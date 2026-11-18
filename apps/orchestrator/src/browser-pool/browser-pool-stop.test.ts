@@ -149,6 +149,42 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it('publishes a personal Home only after its explicitly selected profile is prepared', async () => {
+  const gate = deferred();
+  const prepare = vi.fn(async () => gate.promise);
+  const f = fixture({ prepareSession: prepare });
+  const session = { sessionPolicy: 'personal_home' as const, cloudProfileId: 'owned-profile' };
+  const opening = observe(f.pool.allocate('bhs_alice', 'alice', undefined, session));
+  await vi.dynamicImportSettled();
+  await flush();
+  expect(prepare).toHaveBeenCalledWith(
+    'alice',
+    expect.anything(),
+    expect.objectContaining(session),
+  );
+  expect(opening.state.done).toBe(false);
+  expect(f.pool.peek('bhs_alice')).toBeNull();
+  gate.resolve();
+  await opening.finished;
+  expect(opening.state.error).toBeUndefined();
+  expect(opening.state.value).toMatchObject(session);
+});
+
+it('refuses a selected personal profile when no restoration runtime is installed', async () => {
+  const f = fixture();
+  const opening = observe(
+    f.pool.allocate('bhs_alice', 'alice', undefined, {
+      sessionPolicy: 'personal_home',
+      cloudProfileId: 'owned-profile',
+    }),
+  );
+  await flush();
+  await vi.advanceTimersByTimeAsync(3_000);
+  await opening.finished;
+  expect(opening.state.error).toMatchObject({ message: 'cloud_profile_runtime_required' });
+  expect(f.pool.peek('bhs_alice')).toBeNull();
+});
+
 it.each(['ready', 'connect'] as const)(
   'shutdown waits for pending %s allocation before closing proxy',
   async (phase) => {

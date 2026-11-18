@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlaywrightCrxAdapter } from './crx-adapter.js';
 import { DRIVER_ERRORS } from './driver.js';
+import { SelectedTargetResolver } from './selected-target.js';
 
 const crxBoundary = vi.hoisted(() => ({
   start: vi.fn<() => Promise<unknown>>(),
@@ -87,6 +88,48 @@ beforeEach(() => {
 });
 
 describe('PlaywrightCrxAdapter selected-tab bridge', () => {
+  it('stops new selected-tab operations before awaiting uncertain native restoration', async () => {
+    const { page, app } = createCrxBoundary();
+    const restore = vi
+      .spyOn(SelectedTargetResolver.prototype, 'dispose')
+      .mockRejectedValueOnce(new Error('controlled native restoration unavailable'))
+      .mockResolvedValueOnce(undefined);
+    try {
+      const adapter = new PlaywrightCrxAdapter({
+        attachToTabId: 42,
+        allowedOrigins: ['https://allowed.example'],
+        userBrowserRoutingV2: true,
+      });
+      await adapter.attachExistingTab();
+      await expect(adapter.dispose()).rejects.toThrow('controlled native restoration unavailable');
+      expect(
+        await adapter.execute({ kind: 'goto', payload: { url: 'https://allowed.example/next' } }),
+      ).toMatchObject({ status: 'error', error: { code: DRIVER_ERRORS.NOT_ATTACHED } });
+      expect(page.goto).not.toHaveBeenCalled();
+      expect(app.detach).not.toHaveBeenCalled();
+      await adapter.dispose();
+      expect(app.detach).toHaveBeenCalledWith(page);
+    } finally {
+      restore.mockRestore();
+    }
+  });
+  it('keeps original download capture unavailable without the bound target capability', async () => {
+    createCrxBoundary();
+    const adapter = new PlaywrightCrxAdapter({ attachToTabId: 42 });
+    await adapter.attachExistingTab();
+    expect(
+      await adapter.captureDownloadBound(
+        { kind: 'click' },
+        { token: 'none', observationRevision: 0 },
+        () => true,
+      ),
+    ).toMatchObject({
+      status: 'error',
+      error: { code: 'capability_missing' },
+      data: { clickOutcome: 'not_applied', interceptionRestored: true },
+    });
+    await adapter.dispose();
+  });
   it('rejects attach without a constructor tab id before starting CRX', async () => {
     const adapter = new PlaywrightCrxAdapter();
 
@@ -488,4 +531,36 @@ describe('PlaywrightCrxAdapter selected-tab bridge', () => {
     expect(app.close).not.toHaveBeenCalled();
     expect(page.close).not.toHaveBeenCalled();
   });
+});
+
+it('never foregrounds a bound task tab when every background screenshot path fails', async () => {
+  const { page } = createCrxBoundary();
+  const update = vi.fn(async () => ({}));
+  const focus = vi.fn(async () => ({}));
+  const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,aGVsbG8=');
+  vi.stubGlobal('chrome', {
+    tabs: { get: vi.fn(async () => ({ id: 42, windowId: 5 })), update, captureVisibleTab },
+    windows: { update: focus },
+    debugger: {
+      sendCommand: vi.fn(async () => {
+        throw new Error('capture unavailable');
+      }),
+    },
+  });
+  try {
+    const adapter = new PlaywrightCrxAdapter({
+      attachToTabId: 42,
+      allowedOrigins: ['allowed.example'],
+    });
+    await adapter.attachExistingTab();
+    const result = await adapter.execute({ kind: 'screenshot' });
+    expect(update).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    expect(page.bringToFront).not.toHaveBeenCalled();
+    expect(captureVisibleTab).not.toHaveBeenCalled();
+    expect(result.status).toBe('skipped');
+    await adapter.dispose();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

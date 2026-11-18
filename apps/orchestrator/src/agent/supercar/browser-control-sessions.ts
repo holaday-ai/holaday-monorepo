@@ -1,9 +1,15 @@
+import {
+  type BrowserCapabilities,
+  instanceBrowserCapabilities,
+} from '../../config/browser-capabilities.js';
 import { BrowserControl } from './browser-control.js';
+import type { HeldBrowserInput } from './browser-control.js';
 
 interface BrowserBinding {
   taskId: string;
   userId: string;
   executor?: object;
+  capabilities?: BrowserCapabilities;
 }
 interface ControlSession {
   control: BrowserControl;
@@ -59,7 +65,13 @@ export class BrowserControlSessions {
     if (previous?.control.snapshot().error === 'input_outcome_unknown')
       throw new Error('browser_input_outcome_unknown');
     previous?.control.close();
-    const entry = { control: new BrowserControl(), active: true };
+    const entry = {
+      control: new BrowserControl(Date.now, {
+        collaborationV2: instanceBrowserCapabilities(instance).collaborationV2,
+        activity: previous?.control.humanActivity,
+      }),
+      active: true,
+    };
     this.entries.set(instance, entry);
     return {
       control: entry.control,
@@ -101,6 +113,15 @@ export class BrowserControlSessions {
     if (entry?.control.canAgentAct()) entry.control.noteHumanInput('pending');
   }
 
+  noteViewerActivity(instance: BrowserBinding, source: object, input: HeldBrowserInput): void {
+    const entry = this.entries.get(instance);
+    if (entry?.control.canAgentAct()) entry.control.setHeldInput(source, input);
+  }
+
+  viewerHasHeldInput(instance: BrowserBinding, source: object): boolean {
+    return this.entries.get(instance)?.control.hasHeldInput(source) ?? false;
+  }
+
   /**
    * Caller has verified a terminal DB task and the same restored pool instance. REBUILD-4: the person
    * just uses the finished task's browser — the open review control is reused; no lease, no handback.
@@ -112,7 +133,13 @@ export class BrowserControlSessions {
       throw new Error('browser_runner_active');
     if (previous?.control.snapshot().error) throw new Error('browser_input_outcome_unknown');
     if (previous && previous.control.snapshot().phase !== 'closed') return previous;
-    const entry = { control: new BrowserControl(), active: false };
+    const entry = {
+      control: new BrowserControl(Date.now, {
+        collaborationV2: instanceBrowserCapabilities(instance).collaborationV2,
+        activity: previous?.control.humanActivity,
+      }),
+      active: false,
+    };
     this.entries.set(instance, entry);
     return entry;
   }
@@ -123,6 +150,10 @@ export class BrowserControlSessions {
    */
   async inputSettledWithin(instance: BrowserBinding, timeoutMs: number): Promise<boolean> {
     const entry = this.entries.get(instance);
+    if (entry?.control.tracksHeldInput) {
+      await entry.control.yieldToHuman({ maxWaitMs: Math.max(0, timeoutMs) });
+      return !entry.control.humanBusy();
+    }
     if (!entry || entry.control.isSettled()) return true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<false>((resolve) => {

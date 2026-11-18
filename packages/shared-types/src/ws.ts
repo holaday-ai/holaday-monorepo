@@ -4,6 +4,9 @@ import {
   userBrowserBindingSchema,
   userBrowserProtocolSchema,
 } from './browser-user-contract.js';
+import { selectedChromeChooserCommandSchema } from './selected-chrome-chooser.js';
+import { selectedChromeDownloadCommandSchema } from './selected-chrome-download.js';
+import { selectedChromeUploadCommandSchema } from './selected-chrome-upload.js';
 import { resilientSelectorSchema } from './selector.js';
 
 // Legacy lanes omit these fields. Core text publishers always send both;
@@ -91,6 +94,9 @@ const selectedChromeActionSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
+  ...selectedChromeDownloadCommandSchema.options,
+  ...selectedChromeUploadCommandSchema.options,
+  selectedChromeChooserCommandSchema,
   z
     .object({
       op: z.literal('open'),
@@ -100,6 +106,15 @@ export const selectedChromeSessionCommandSchema = z.discriminatedUnion('op', [
     })
     .strict(),
   z.object({ op: z.literal('observe'), sessionId: z.string().uuid() }).strict(),
+  z.object({ op: z.literal('activity'), sessionId: z.string().uuid() }).strict(),
+  z
+    .object({
+      op: z.literal('screenshot'),
+      sessionId: z.string().uuid(),
+      captureId: z.string().uuid(),
+      observationRevision: z.number().int().positive(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal('describe'),
@@ -376,6 +391,7 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export const serverWelcomeSchema = z.object({
   type: z.literal('server.welcome'),
   clientId: z.string(),
+  userId: z.string().min(1).max(128).optional(),
   heartbeatMs: z.number().int().positive(),
 });
 
@@ -1003,11 +1019,26 @@ export const serverExtensionToolCallSchema = z.object({
   type: z.literal('server.extension.tool_call'),
   taskId: z.string().min(1).max(64),
   requestId: z.string().min(1).max(64),
-  kind: z.enum(['navigate', 'screenshot', 'tabs', 'read', 'session', 'session_import']),
+  kind: z.enum([
+    'navigate',
+    'screenshot',
+    'tabs',
+    'read',
+    'session',
+    'session_import',
+    'task_tab',
+    'task_tab_release',
+  ]),
   /** `url` is for legacy navigate; `target` is required for read only. */
   args: z
     .object({
       url: httpUrlSchema.optional(),
+      /** Idempotent background task-tab preparation, scoped to the selected connection. */
+      preparationId: z.string().uuid().optional(),
+      recoverable: z.boolean().optional(),
+      resumeOnly: z.boolean().optional(),
+      taskTabMode: z.enum(['current', 'independent']).optional(),
+      launchBrowserSessionId: z.string().uuid().optional(),
       /** Explicit local tab for read. Never infer it from the active tab. */
       target: selectedChromeTargetSchema.optional(),
       /** Selected-tab mutation/observation command. Required by the session handler. */

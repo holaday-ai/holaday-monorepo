@@ -1,5 +1,7 @@
+import type { ValidatedBrowserTaskFile } from '../browser-tools/browser-task-files.js';
 import type { RunSupercarOptions, SupercarOutcome } from './agent-loop.js';
 import { runSupercarTask as runBrowserTask } from './agent-loop.js';
+export { validateExternalBrowserReply } from './agent-loop.js';
 
 export type {
   RunSupercarOptions,
@@ -18,16 +20,28 @@ import {
   runUnifiedSupercarTask,
   unifiedParkedIntent,
   unifiedSupercarAbort,
+  unifiedSupercarHandoffToGenerate,
   unifiedSupercarReply,
 } from '../browser-tools/unified-supercar-runner.js';
 import {
   hasParkedSupercarHandle as hasParkedLegacyHandle,
   supercarAbort as legacyAbort,
+  supercarHandoffToGenerate as legacyHandoff,
   supercarHandleOriginalIntent as legacyOriginalIntent,
   supercarReply as legacyReply,
 } from './agent-loop.js';
 
-export { supercarHandoffToGenerate } from './agent-loop.js';
+export function supercarHandoffToGenerate(
+  taskId: string,
+  message: string,
+  attachments?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
+): boolean {
+  return (
+    unifiedSupercarHandoffToGenerate(taskId, message, attachments, files) ||
+    legacyHandoff(taskId, message, attachments, files)
+  );
+}
 
 /** BROWSER_EXECUTOR: 'unified' (default, batch-04 tools) | 'legacy' (coordinate protocol, rollback). */
 export function browserExecutorMode(): 'legacy' | 'unified' {
@@ -37,9 +51,13 @@ export function browserExecutorMode(): 'legacy' | 'unified' {
 export function supercarReply(
   taskId: string,
   message: string,
-  attachmentBlocks?: Parameters<typeof legacyReply>[2],
+  attachmentBlocks?: Readonly<NonNullable<RunSupercarOptions['attachments']>>,
+  files?: readonly ValidatedBrowserTaskFile[],
 ): boolean {
-  return unifiedSupercarReply(taskId, message) || legacyReply(taskId, message, attachmentBlocks);
+  return (
+    unifiedSupercarReply(taskId, message, attachmentBlocks, files) ||
+    legacyReply(taskId, message, attachmentBlocks, files)
+  );
 }
 
 export function hasParkedSupercarHandle(taskId: string): boolean {

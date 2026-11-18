@@ -1,6 +1,12 @@
 import type { ServerMessage } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
-import { getCurrentWsToken } from './ws-client.js';
+import { browserLaunchSessionId } from './browser-launch-profile.js';
+import { TASK_TAB_JOURNAL_PREFIX, TaskTabJournal } from './task-tab-journal.js';
+import {
+  getAuthenticatedExtensionClientId,
+  getAuthenticatedExtensionUserId,
+  getCurrentWsToken,
+} from './ws-client.js';
 
 type ToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
 type Target = NonNullable<ToolCall['args']>['target'];
@@ -15,10 +21,15 @@ const selections = new Map<
     url: string;
     ownerToken: string | null;
     expiresAt: number;
+    ownership: 'selected' | 'task';
   }
 >();
 
-function rememberSelection(tab: chrome.tabs.Tab, ownerToken: string | null): string {
+function rememberSelection(
+  tab: chrome.tabs.Tab,
+  ownerToken: string | null,
+  ownership: 'selected' | 'task' = 'selected',
+): string {
   const now = Date.now();
   for (const [id, selection] of selections) {
     if (selection.expiresAt <= now || selection.ownerToken !== ownerToken) selections.delete(id);
@@ -34,12 +45,15 @@ function rememberSelection(tab: chrome.tabs.Tab, ownerToken: string | null): str
     url: tab.url ?? '',
     ownerToken,
     expiresAt: now + SELECTION_TTL_MS,
+    ownership,
   });
   return id;
 }
 
 export function resetTabSelectionsForTests(): void {
   selections.clear();
+  taskTabPreparations.clear();
+  recoveryFlights.clear();
 }
 
 /** Only display origin. Signed credentials can occur in any path/query field;
@@ -165,4 +179,211 @@ export async function readSelectedTab(target: Target) {
     bodyText: result.bodyText.slice(0, MAX_TEXT),
     truncated: result.truncated === true || result.bodyText.length > MAX_TEXT,
   };
+}
+
+export async function selectedTabOwnership(target: Target): Promise<'selected' | 'task'> {
+  return (await selectedTabState(target)).selection.ownership;
+}
+
+type PreparedTaskTab = {
+  taskTabCreated: boolean;
+  tabId: number;
+  selectionId: string;
+  url: string;
+  title: string;
+};
+const taskTabPreparations = new Map<
+  string,
+  {
+    owner: string;
+    target: string;
+    expiresAt: number;
+    settled: boolean;
+    result: Promise<PreparedTaskTab>;
+  }
+>();
+
+/** Only Chrome metadata is read. The raw, potentially signed URL stays in this worker. */
+export async function prepareIndependentTaskTab(
+  target: Target,
+  preparationId: string | undefined,
+  recoverable = false,
+  resumeOnly = false,
+  mode: 'current' | 'independent' = 'independent',
+  expectedBrowserSessionId?: string,
+): Promise<PreparedTaskTab> {
+  if (recoverable) {
+    if (expectedBrowserSessionId && (await browserLaunchSessionId()) !== expectedBrowserSessionId)
+      throw new Error('target_changed');
+    return prepareRecoverableTaskTab(target, preparationId, resumeOnly, mode);
+  }
+  if (mode === 'current' || resumeOnly || expectedBrowserSessionId)
+    throw new Error('capability_missing');
+  const owner = getCurrentWsToken();
+  if (!owner || !target || !preparationId || !/^[a-f0-9-]{36}$/i.test(preparationId))
+    throw new Error('target_required');
+  const key = JSON.stringify([owner, preparationId]);
+  const fingerprint = JSON.stringify(target);
+  const existing = taskTabPreparations.get(key);
+  if (existing) {
+    if (existing.target !== fingerprint) throw new Error('target_changed');
+    const prepared = await existing.result;
+    // A timed-out caller can safely retry, but never receive a different owner's handle.
+    if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+    return prepared;
+  }
+  for (const [id, item] of taskTabPreparations) {
+    if (item.settled && (item.expiresAt <= Date.now() || item.owner !== owner))
+      taskTabPreparations.delete(id);
+  }
+  if (taskTabPreparations.size >= 64) throw new Error('browser_busy');
+  const entry = {
+    owner,
+    target: fingerprint,
+    expiresAt: Date.now() + SELECTION_TTL_MS,
+    settled: false,
+    result: Promise.resolve(null) as unknown as Promise<PreparedTaskTab>,
+  };
+  taskTabPreparations.set(key, entry);
+  entry.result = (async () => {
+    const source = await validateSelectedTab(target);
+    const raw = new URL(source.url ?? '');
+    if (!/^https?:$/.test(raw.protocol) || raw.username || raw.password)
+      throw new Error('target_changed');
+    if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+    const created = await chrome.tabs.create({ url: source.url, active: false });
+    if (created.id === undefined) throw new Error('tab_create_failed');
+    const deadline = Date.now() + 8000;
+    for (;;) {
+      if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+      const tab = await withDeadline(chrome.tabs.get(created.id), 1500, 'extension_tool_timeout');
+      const origin = publicWebUrl(tab.url);
+      if (!tab.pendingUrl && tab.status !== 'loading') {
+        if (origin && origin !== raw.origin) throw new Error('origin_grant_required');
+        if (origin === raw.origin) {
+          return {
+            taskTabCreated: true as const,
+            tabId: created.id,
+            selectionId: rememberSelection(tab, owner, 'task'),
+            url: origin,
+            title: (tab.title ?? '').slice(0, 512),
+          };
+        }
+      }
+      if (Date.now() >= deadline) throw new Error('task_tab_not_ready');
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  })();
+  // Keep unknown/late creation outcomes in the dedupe map. Never create a second tab on retry.
+  void entry.result.then(
+    () => {
+      entry.settled = true;
+    },
+    () => {
+      entry.settled = true;
+    },
+  );
+  return entry.result;
+}
+
+const recoveryFlights = new Map<string, { source: string; promise: Promise<PreparedTaskTab> }>();
+async function prepareRecoverableTaskTab(
+  target: Target,
+  preparationId: string | undefined,
+  resumeOnly: boolean,
+  mode: 'current' | 'independent',
+): Promise<PreparedTaskTab> {
+  const owner = getAuthenticatedExtensionUserId();
+  const token = getCurrentWsToken();
+  const connection = getAuthenticatedExtensionClientId();
+  if (!owner || !token || !connection || !chrome.storage.session || !target || !preparationId)
+    throw new Error('capability_missing');
+  const origin = new URL(target.expectedUrl).origin;
+  if (origin !== target.expectedUrl) throw new Error('target_changed');
+  const source = JSON.stringify([target.tabId, origin, mode]);
+  const key = JSON.stringify([owner, preparationId]);
+  const existing = recoveryFlights.get(key);
+  if (existing) {
+    if (existing.source !== source) throw new Error('target_changed');
+    return existing.promise;
+  }
+  const current = () =>
+    getCurrentWsToken() === token &&
+    getAuthenticatedExtensionUserId() === owner &&
+    getAuthenticatedExtensionClientId() === connection;
+  const journal = taskTabJournal(owner, current, target);
+  const promise = journal
+    .prepare({ tabId: target.tabId, origin }, preparationId, resumeOnly, mode)
+    .then((tab) => {
+      if (!current()) throw new Error('target_changed');
+      return {
+        taskTabCreated: mode === 'independent',
+        tabId: tab.id!,
+        selectionId: rememberSelection(
+          tab as chrome.tabs.Tab,
+          token,
+          mode === 'current' ? 'selected' : 'task',
+        ),
+        url: origin,
+        title: (tab.title ?? '').slice(0, 512),
+      };
+    })
+    .finally(() => {
+      recoveryFlights.delete(key);
+    });
+  recoveryFlights.set(key, { source, promise });
+  return promise;
+}
+
+function taskTabJournal(owner: string, current: () => boolean, target?: Target): TaskTabJournal {
+  return new TaskTabJournal({
+    owner: () => owner,
+    current,
+    read: async (name) => (await chrome.storage.session.get(name))[name],
+    write: async (name, entry) => {
+      await chrome.storage.session.set({ [name]: entry });
+    },
+    count: async () =>
+      Object.entries(await chrome.storage.session.get(null)).filter(
+        ([name, value]) =>
+          name.startsWith(TASK_TAB_JOURNAL_PREFIX) &&
+          (value as { phase?: unknown })?.phase !== 'released',
+      ).length,
+    source: () => validateSelectedTab(target),
+    get: (tabId) => withDeadline(chrome.tabs.get(tabId), 2000, 'extension_tool_timeout'),
+    find: async (marker) =>
+      (await chrome.tabs.query({ windowType: 'normal' })).filter(
+        (tab) => tab.url === marker || tab.pendingUrl === marker,
+      ),
+    create: (url) => chrome.tabs.create({ url, active: false }),
+    navigate: (tabId, url) => chrome.tabs.update(tabId, { url }),
+    marker: (nonce) => `${chrome.runtime.getURL('task-launch.html')}#${nonce}`,
+    wait: () => new Promise((resolve) => setTimeout(resolve, 50)),
+  });
+}
+
+export async function releasePreparedTaskTab(
+  preparationId?: string,
+  expectedBrowserSessionId?: string,
+): Promise<void> {
+  const owner = getAuthenticatedExtensionUserId();
+  const token = getCurrentWsToken();
+  const connection = getAuthenticatedExtensionClientId();
+  if (
+    !owner ||
+    !token ||
+    !connection ||
+    !preparationId ||
+    !expectedBrowserSessionId ||
+    (await browserLaunchSessionId()) !== expectedBrowserSessionId
+  )
+    throw new Error('target_changed');
+  if (recoveryFlights.has(JSON.stringify([owner, preparationId]))) throw new Error('browser_busy');
+  await taskTabJournal(
+    owner,
+    () =>
+      getCurrentWsToken() === token &&
+      getAuthenticatedExtensionUserId() === owner &&
+      getAuthenticatedExtensionClientId() === connection,
+  ).release(preparationId);
 }

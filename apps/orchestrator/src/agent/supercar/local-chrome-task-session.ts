@@ -56,6 +56,7 @@ export class LocalChromeTaskSessions {
     send: Send,
     ticket?: LocalChromeReservation,
     capabilities: BrowserCapabilities = Object.freeze(browserCapabilities(userId)),
+    options: { taskFilesV1?: boolean } = {},
   ): Session {
     if (this.get(userId, taskId)) throw new Error('chrome_task_exists');
     const reservation = ticket ?? this.reserve(userId, selection);
@@ -67,13 +68,15 @@ export class LocalChromeTaskSessions {
     )
       throw new Error('chrome_reservation_invalid');
     slot.claimed = true;
-    const control = new BrowserControl();
+    const control = new BrowserControl(Date.now, { collaborationV2: capabilities.collaborationV2 });
     const client = new SelectedChromeClient({
       userId,
       taskId,
       extensionClientId: selection.extensionClientId,
       control,
       routingV2: capabilities.routingV2,
+      collaborationV2: capabilities.collaborationV2,
+      taskFilesV1: options.taskFilesV1 === true,
       send,
     });
     const session = {

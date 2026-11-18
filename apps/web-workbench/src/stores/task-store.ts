@@ -1,8 +1,14 @@
 import { parseImageTaskMeta } from '@/components/image/image-task-meta';
 import { type NextStepOption, normalizeNextSteps } from '@/lib/assistant-turn';
 import { normaliseAttachmentDownloadUrl } from '@/lib/attachment-download-url';
+import { getAccessToken } from '@/lib/auth';
 import { batchConfirmQuestion, singleConfirmQuestion } from '@/lib/batch-confirm-copy';
 import { getSelectedBrainId } from '@/lib/brain-preference';
+import {
+  hasWebBrowserLaunchRecords,
+  webBrowserLaunchContext,
+  webBrowserLaunchJournal,
+} from '@/lib/browser-launch-journal';
 import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profile';
 import { humaniseTaskError } from '@/lib/error-copy';
 import { hdDebug } from '@/lib/hd-debug';
@@ -25,9 +31,14 @@ import type {
 import { isTerminalStatus } from '@/types/task';
 import type { VideoCreationOptions } from '@/types/video';
 import {
+  BROWSER_LAUNCH_RECOVERED_EVENT,
+  type BrowserLaunchSource,
+  BrowserTaskLaunches,
+  type BrowserTaskModeChoice,
   type BrowserViewportProfile,
   type ServerMessage,
   browserConnectionWaitSchema,
+  resolveBrowserTaskMode,
 } from '@holaday/shared-types';
 import { create } from 'zustand';
 import {
@@ -86,6 +97,12 @@ export interface TaskStore {
     expectedUrl: string;
     selectionId: string;
     title: string;
+    backgroundTaskTabs?: boolean;
+    taskTabStart?: boolean;
+    taskTabMode?: BrowserTaskModeChoice;
+    launchRecovery?: boolean;
+    launchRecoveryReady?: boolean;
+    launchBrowserSessionId?: string;
   } | null;
   tasks: UiTask[];
   selectedTaskId: string | null;
@@ -327,7 +344,7 @@ export interface TaskStore {
     retryOfTaskId?: string,
     /** Per-creation overrides; never written to the global browser preference. */
     overrides?: TaskCreateOverrides,
-  ): Promise<{ taskId: string } | { error: string }>;
+  ): Promise<{ taskId: string; notice?: string } | { error: string; browserOperationId?: string }>;
   /** Submit from the stock dashboard without mutating the user's wording. */
   createStockTask(
     intent: string,
@@ -676,6 +693,98 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   const uncertainReplies = new Map<string, ExecutionIdentity | 'invalid'>();
   const observedExecutions = new Map<string, ExecutionIdentity>();
   const uncertainCreations = new Map<string, string>();
+  const browserLaunches = new BrowserTaskLaunches<NonNullable<TaskStore['localChromeSelection']>>();
+  let launchRecoveryGeneration = -1;
+  let launchRecoveryAttempts = 0;
+  let launchRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  let launchRecoveryFlight: Promise<void> | undefined;
+  async function recoverDurableLaunches(force = false): Promise<void> {
+    const generation = captureSessionGeneration();
+    const token = getAccessToken();
+    if (!token || (!force && launchRecoveryGeneration === generation)) return;
+    if (launchRecoveryFlight) return launchRecoveryFlight;
+    if (!hasWebBrowserLaunchRecords()) return;
+    launchRecoveryGeneration = generation;
+    const operation = (async () => {
+      try {
+        const options = await trpc.tasks.localChromeLaunchOptions.query();
+        if (!isCurrentSession(generation) || getAccessToken() !== token || !options.launchRecovery)
+          return;
+        const context = await webBrowserLaunchContext(() => {
+          if (!isCurrentSession(generation) || getAccessToken() !== token)
+            throw new Error(SESSION_ENDED_ERROR);
+        });
+        await webBrowserLaunchJournal.cleanup(context.ownerId, context.deps);
+        const pending = await webBrowserLaunchJournal.pending(context.ownerId);
+        const selectedBefore = get().selectedTaskId;
+        for (const entry of pending) {
+          const localId = `${LOCAL_PENDING_TASK_PREFIX}${entry.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`;
+          set((prev) => ({
+            tasks: [
+              {
+                taskId: localId,
+                intent: String(entry.request.intent),
+                title: '正在核对此前网页任务',
+                status: 'unknown' as const,
+                tickCount: 0,
+                createdAt: new Date(entry.createdAt),
+                executionMode: 'browser' as const,
+                browserSource: 'local-chrome' as const,
+              },
+              ...prev.tasks.filter((t) => t.taskId !== localId),
+            ],
+          }));
+          const result = await webBrowserLaunchJournal.resume(
+            context.ownerId,
+            entry.clientRequestId,
+            context.deps,
+          );
+          await context.deps.current();
+          set((prev) => ({ tasks: prev.tasks.filter((t) => t.taskId !== localId), error: null }));
+          await get().refreshTaskList();
+          await context.deps.current();
+          if (get().selectedTaskId === selectedBefore) get().selectTask(result.taskId, 'ui');
+          if (typeof window !== 'undefined')
+            window.dispatchEvent(
+              new CustomEvent(BROWSER_LAUNCH_RECOVERED_EVENT, {
+                detail: {
+                  operationId: result.operationId,
+                  intent: entry.request.intent,
+                  source: entry.source,
+                  taskId: result.taskId,
+                },
+              }),
+            );
+          await webBrowserLaunchJournal.acknowledge(
+            context.ownerId,
+            result.operationId,
+            context.deps,
+          );
+        }
+        launchRecoveryAttempts = 0;
+      } catch (err) {
+        if (!isCurrentSession(generation) || getAccessToken() !== token) return;
+        set({ error: taskStoreError(err) });
+        // Bounded metadata reconciliation; no fresh ID or alternate browser is chosen.
+        if (launchRecoveryAttempts++ < 12 && !launchRecoveryTimer) {
+          launchRecoveryTimer = setTimeout(
+            () => {
+              launchRecoveryTimer = undefined;
+              if (isCurrentSession(generation) && getAccessToken() === token)
+                void recoverDurableLaunches(true);
+            },
+            Math.min(5000, 1000 * launchRecoveryAttempts),
+          );
+        }
+      }
+    })();
+    launchRecoveryFlight = operation;
+    try {
+      await operation;
+    } finally {
+      if (launchRecoveryFlight === operation) launchRecoveryFlight = undefined;
+    }
+  }
   // One continuation attempt per original task at a time, across every button.
   const publicCloudFlights = new Map<string, Promise<{ taskId: string } | { error: string }>>();
   const publicCloudEligible = new Set<string>();
@@ -1346,11 +1455,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         if (!isCurrentSession(generation)) return;
         set({ loading: false, error: taskStoreError(err) });
       }
+      if (isCurrentSession(generation)) void recoverDurableLaunches();
     },
 
     // Legacy alias retained for code paths that haven't migrated.
     async refreshTasks() {
       await get().refreshTaskList();
+      await recoverDurableLaunches();
     },
 
     async loadMoreTasks(visibleIds) {
@@ -1814,6 +1925,67 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           stockContext)
       )
         return { error: '本地 Chrome 当前支持新建网页操作任务，请移除附件并使用自动执行模式。' };
+      const pickedViewportProfile =
+        viewportProfile ?? get().defaultViewportProfile ?? pickDefaultBrowserViewportProfile();
+      const approvedRequest = {
+        intent,
+        ...(browserHomeSession ? { browserHomeSession: true as const } : {}),
+        ...(!browserHomeSession && (overrides?.browserPreference ?? get().browserPreference)
+          ? {
+              browserPreference:
+                overrides?.browserPreference ?? get().browserPreference ?? undefined,
+            }
+          : {}),
+        ...(overrides?.publicCloudContinuationOf
+          ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
+          : {}),
+        ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
+        ...(replyToTaskId ? { replyToTaskId } : {}),
+        ...(retryOfTaskId ? { retryOfTaskId } : {}),
+        ...(mode === 'plan' ? { mode } : {}),
+        ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
+        ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),
+        ...(skillSelection?.skillId
+          ? { skillId: skillSelection.skillId, skillSource: skillSelection.skillSource }
+          : {}),
+        ...(videoOptions ? { videoOptions } : {}),
+        ...(imageOptions ? { imageOptions } : {}),
+        ...(taskSource ? { taskSource } : {}),
+        ...(stockContext ? { stockContext } : {}),
+        viewportProfile: pickedViewportProfile,
+      };
+      let durableSource: BrowserLaunchSource | undefined;
+      let durableContext: Awaited<ReturnType<typeof webBrowserLaunchContext>> | undefined;
+      try {
+        if (chromeSelection?.launchRecovery) {
+          if (!chromeSelection.launchRecoveryReady || !chromeSelection.launchBrowserSessionId)
+            return { error: '请更新并重新连接原 Chrome 扩展后继续任务。' };
+          durableSource = {
+            browserSessionId: chromeSelection.launchBrowserSessionId,
+            tabId: chromeSelection.tabId,
+            origin: chromeSelection.expectedUrl,
+            selectionId: chromeSelection.selectionId,
+            mode: resolveBrowserTaskMode(intent, chromeSelection.taskTabMode),
+          };
+        } else if (!chromeSelection && hasWebBrowserLaunchRecords()) {
+          durableContext = await webBrowserLaunchContext(() => {
+            if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
+          });
+          const pending = (await webBrowserLaunchJournal.pending(durableContext.ownerId)).filter(
+            (e) => e.request.intent === intent,
+          );
+          if (pending.length > 1) return { error: '此前有多次未确认提交，请先核对任务列表。' };
+          if (pending[0]) {
+            if (browserHomeSession || overrides?.browserPreference || get().browserPreference)
+              return { error: '此前 Chrome 提交尚未核实，请先确认原任务再切换浏览器。' };
+            durableSource = pending[0].source;
+          }
+        }
+        if (durableSource && overrides?.clientRequestId)
+          return { error: '该提交已绑定任务编号，请从原任务入口继续。' };
+      } catch (err) {
+        return { error: taskStoreError(err) };
+      }
       const creationKey = JSON.stringify([
         intent,
         fileIds ?? [],
@@ -1830,13 +2002,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       ]);
       // A caller-supplied server idempotency key makes a resend safe: the server
       // replays the first task instead of creating another.
-      const idempotentResend = Boolean(overrides?.clientRequestId);
+      const backgroundLaunch = chromeSelection?.backgroundTaskTabs === true;
+      const launch =
+        backgroundLaunch && !durableSource ? browserLaunches.attempt(creationKey) : undefined;
+      const idempotentResend = Boolean(durableSource || overrides?.clientRequestId || launch);
       if (!idempotentResend && uncertainCreations.has(creationKey))
         return { error: uncertainWriteMessage };
-      const pickedViewportProfile =
-        viewportProfile ?? get().defaultViewportProfile ?? pickDefaultBrowserViewportProfile();
-      const localTaskId = overrides?.clientRequestId
-        ? `${LOCAL_PENDING_TASK_PREFIX}${overrides.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
+      const stableRequestId = overrides?.clientRequestId ?? launch?.clientRequestId;
+      let localTaskId = stableRequestId
+        ? `${LOCAL_PENDING_TASK_PREFIX}${stableRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`
         : `${LOCAL_PENDING_TASK_PREFIX}${Date.now().toString(36)}_${Math.random()
             .toString(36)
             .slice(2, 8)}`;
@@ -1854,8 +2028,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const pendingTask: UiTask = {
         taskId: localTaskId,
         intent,
-        title: '正在创建任务',
-        status: 'executing',
+        title: durableSource ? '正在核对网页任务' : '正在创建任务',
+        status: durableSource ? 'unknown' : 'executing',
         tickCount: 0,
         createdAt,
         executionMode: inferExecutionModeFromIntent(intent),
@@ -1867,54 +2041,101 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         browserInteractive: false,
         error: null,
       }));
+      let createDispatched = false;
+      let durableOperationId: string | undefined;
+      let durableAttemptId: string | undefined;
+      let durableRecovered = false;
       try {
-        const res = await trpc.tasks.create.mutate({
-          ...(chromeSelection
-            ? {
-                localChrome: {
-                  extensionClientId: chromeSelection.extensionClientId,
-                  tabId: chromeSelection.tabId,
-                  expectedUrl: chromeSelection.expectedUrl,
-                  selectionId: chromeSelection.selectionId,
+        let executionSelection = chromeSelection;
+        if (backgroundLaunch && chromeSelection && !durableSource) {
+          const taskMode = resolveBrowserTaskMode(intent, chromeSelection.taskTabMode);
+          if (taskMode === 'independent' && !chromeSelection.taskTabStart)
+            throw new Error('请更新并重新连接 HOLADAY Chrome 扩展后使用独立任务页。');
+          executionSelection = await browserLaunches.prepare(creationKey, async (preparationId) => {
+            if (taskMode === 'current') return chromeSelection;
+            return trpc.tasks.localChromeTaskTab.mutate({
+              selection: {
+                extensionClientId: chromeSelection.extensionClientId,
+                tabId: chromeSelection.tabId,
+                expectedUrl: chromeSelection.expectedUrl,
+                selectionId: chromeSelection.selectionId,
+              },
+              preparationId,
+            });
+          });
+          if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
+        }
+        if (!durableSource) createDispatched = true;
+        const res = durableSource
+          ? await (async () => {
+              durableContext ??= await webBrowserLaunchContext(() => {
+                if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
+              });
+              const context = durableContext;
+              const deps = {
+                ...context.deps,
+                onOperation: (entry: import('@holaday/shared-types').BrowserLaunchJournalEntry) => {
+                  if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
+                  const previousId = localTaskId;
+                  durableAttemptId = entry.clientRequestId;
+                  localTaskId = `${LOCAL_PENDING_TASK_PREFIX}${entry.clientRequestId.replace(/[^A-Za-z0-9_]/g, '_')}`;
+                  createDispatched = entry.phase === 'creating';
+                  set((prev) => ({
+                    tasks: [
+                      { ...pendingTask, taskId: localTaskId },
+                      ...prev.tasks.filter(
+                        (t) => t.taskId !== previousId && t.taskId !== localTaskId,
+                      ),
+                    ],
+                  }));
                 },
-              }
-            : {}),
-          intent,
-          ...(browserHomeSession ? { browserHomeSession: true } : {}),
-          ...(!browserHomeSession && (overrides?.browserPreference ?? get().browserPreference)
-            ? {
-                browserPreference:
-                  overrides?.browserPreference ?? get().browserPreference ?? undefined,
-              }
-            : {}),
-          clientRequestId: overrides?.clientRequestId ?? localTaskId,
-          ...(overrides?.publicCloudContinuationOf
-            ? { publicCloudContinuationOf: overrides.publicCloudContinuationOf }
-            : {}),
-          ...(fileIds && fileIds.length > 0 ? { fileIds } : {}),
-          ...(replyToTaskId ? { replyToTaskId } : {}),
-          ...(retryOfTaskId ? { retryOfTaskId } : {}),
-          ...(mode === 'plan' ? { mode } : {}),
-          ...(expertMode && expertMode !== 'auto' ? { expertMode } : {}),
-          ...(getSelectedBrainId() ? { brainId: getSelectedBrainId() ?? undefined } : {}),
-          ...(skillSelection?.skillId
-            ? {
-                skillId: skillSelection.skillId,
-                skillSource: skillSelection.skillSource,
-              }
-            : {}),
-          ...(videoOptions ? { videoOptions } : {}),
-          ...(imageOptions ? { imageOptions } : {}),
-          ...(taskSource ? { taskSource } : {}),
-          ...(stockContext ? { stockContext } : {}),
-          viewportProfile: pickedViewportProfile,
-        });
+                create: async (body: Parameters<typeof context.deps.create>[0]) => {
+                  createDispatched = true;
+                  return context.deps.create(body);
+                },
+              };
+              const result = await webBrowserLaunchJournal.run(
+                context.ownerId,
+                approvedRequest,
+                durableSource,
+                deps,
+              );
+              durableOperationId = result.operationId;
+              durableRecovered = result.recovered;
+              return (
+                result.response ?? {
+                  taskId: result.taskId,
+                  status: result.status ?? 'unknown',
+                  executionMode: 'browser' as const,
+                  browserSource: 'local-chrome' as const,
+                }
+              );
+            })()
+          : await trpc.tasks.create.mutate({
+              ...approvedRequest,
+              ...(executionSelection
+                ? {
+                    localChrome: {
+                      extensionClientId: executionSelection.extensionClientId,
+                      tabId: executionSelection.tabId,
+                      expectedUrl: executionSelection.expectedUrl,
+                      selectionId: executionSelection.selectionId,
+                    },
+                  }
+                : {}),
+              clientRequestId: stableRequestId ?? localTaskId,
+            });
+        if (durableContext) await durableContext.deps.current();
         if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
         const createState = (res as { admissionState?: string }).admissionState;
         const createIdentity = readExecutionIdentity(
           res as { executionId?: unknown; executionRevision?: unknown },
         );
         const observedCreation = observedExecutions.get(res.taskId);
+        const creationQuestion = (res as { question?: string }).question;
+        const creationBrowserConnection = (
+          res as { browserConnection?: UiAwaitingUser['browserConnection'] }
+        ).browserConnection;
         const creationObserved =
           createIdentity === null
             ? Boolean(observedCreation)
@@ -1982,20 +2203,17 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               : optimistic,
             ...prev.tasks.filter((t) => t.taskId !== res.taskId && t.taskId !== localTaskId),
           ],
-          ...((res as { question?: string }).question
+          ...(creationQuestion
             ? {
                 awaitingUserByTask: {
                   ...prev.awaitingUserByTask,
                   [res.taskId]: {
-                    question: (res as { question: string }).question,
+                    question: creationQuestion,
                     at: Date.now(),
                     awaitingKind: 'permission' as const,
-                    ...((res as { browserConnection?: UiAwaitingUser['browserConnection'] })
-                      .browserConnection
+                    ...(creationBrowserConnection
                       ? {
-                          browserConnection: (
-                            res as { browserConnection: UiAwaitingUser['browserConnection'] }
-                          ).browserConnection,
+                          browserConnection: creationBrowserConnection,
                         }
                       : {}),
                   },
@@ -2003,7 +2221,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               }
             : {}),
           selectedTaskId: res.taskId,
-          ...(prev.localChromeSelection === chromeSelection ? { localChromeSelection: null } : {}),
+          ...(!creationUnconfirmed && prev.localChromeSelection === chromeSelection
+            ? { localChromeSelection: null }
+            : {}),
           composerMode: 'task' as const,
           browserInteractive: false,
           ...(creationUnconfirmed ? { error: uncertainWriteMessage } : {}),
@@ -2016,12 +2236,29 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         // Fire-and-forget refresh so the row's server-authored fields
         // (createdAt, status) replace the optimistic stub once available.
         if (creationUnconfirmed) return { error: uncertainWriteMessage };
+        if (durableOperationId && durableContext)
+          await webBrowserLaunchJournal.acknowledge(
+            durableContext.ownerId,
+            durableOperationId,
+            durableContext.deps,
+          );
+        browserLaunches.complete(creationKey);
         if (createOrder === 'reconcile') void hydrateDetail(res.taskId);
         void get().refreshTasks();
-        return { taskId: res.taskId };
+        return {
+          taskId: res.taskId,
+          ...(durableRecovered ? { notice: '已找回此前创建的 Chrome 任务，未重复发送。' } : {}),
+        };
       } catch (err) {
+        if (durableContext) {
+          try {
+            await durableContext.deps.current();
+          } catch {
+            return { error: SESSION_ENDED_ERROR };
+          }
+        }
         if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
-        const unknownWrite = !isDefiniteWriteRejection(err);
+        const unknownWrite = createDispatched && !isDefiniteWriteRejection(err);
         const msg = unknownWrite ? uncertainWriteMessage : taskStoreError(err);
         if (unknownWrite && !idempotentResend) uncertainCreations.set(creationKey, localTaskId);
         set((prev) => ({
@@ -2034,7 +2271,15 @@ export const useTaskStore = create<TaskStore>((set, get) => {
               )
             : prev.tasks.filter((t) => t.taskId !== localTaskId),
         }));
-        return { error: msg };
+        if (
+          durableSource &&
+          (unknownWrite || /timeout|断开|尚未准备|暂时/.test(taskStoreError(err)))
+        )
+          void recoverDurableLaunches(true);
+        return {
+          error: msg,
+          ...(durableAttemptId ? { browserOperationId: durableAttemptId } : {}),
+        };
       }
     },
 
@@ -3000,10 +3245,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     reset() {
       sessionGeneration += 1;
+      if (launchRecoveryTimer) clearTimeout(launchRecoveryTimer);
+      launchRecoveryTimer = undefined;
+      launchRecoveryGeneration = -1;
+      launchRecoveryAttempts = 0;
+      launchRecoveryFlight = undefined;
       executionOrder.clear();
       uncertainReplies.clear();
       observedExecutions.clear();
       uncertainCreations.clear();
+      browserLaunches.clear();
       publicCloudEligible.clear();
       publicCloudFlights.clear();
       pendingReplies.clear();

@@ -80,6 +80,30 @@ function site(dateRefs: string[], staleOnce: string[] = []) {
 const finish = (summary: string) => ({ name: 'finish', input: { status: 'completed', summary } });
 
 describe('core-08: a named site bounds where the form may be filled', () => {
+  it('keeps the prepared form when date controls occur only in an absence-disclosure condition', async () => {
+    const { adapter, seen } = scripted([
+      { name: 'navigate', input: { url: 'https://httpbin.org/forms/post' } },
+      { name: 'snapshot', input: {} },
+      { name: 'type', input: { ref: 'e21', text: 'Session QA' } },
+      { name: 'screenshot', input: {} },
+      finish(
+        '已在 httpbin.org/forms/post 填写 Customer name=Session QA，未提交并已截图。该表单没有日期控件，只有 time 时间控件，已如实说明。',
+      ),
+    ]);
+    const browser = site([]);
+    const outcome = await runUnifiedBrowserLoop({
+      intent: `${P}在 https://httpbin.org/forms/post 填写 Customer name=Session QA，只填不提交并截图；如果没有日期控件，请如实说明。`,
+      adapter,
+      execute: browser.execute as never,
+      currentPageUrl: browser.currentPageUrl,
+      maxSteps: 8,
+    });
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect(seen.join('\n')).not.toContain('任务要求操作日期控件');
+    expect(seen).toHaveLength(5);
+    expect(browser.currentPageUrl()).toBe('https://httpbin.org/forms/post');
+  });
+
   it('reads the hosts a task names', () => {
     expect(intentHosts(CORE08)).toEqual(['httpbin.org', 'the-internet.herokuapp.com']);
     expect(intentHosts(`${P}从一个页面打开3个链接到新标签`)).toEqual([]);

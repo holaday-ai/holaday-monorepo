@@ -1,7 +1,10 @@
 import { type SelectedChromeSessionCommand, USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { describe, expect, it, vi } from 'vitest';
+import { parseFileForPrompt } from '../../files/parsers.js';
 import type { MessagesAdapter, NeutralMessagesResponse } from '../../llm/messages-adapter.js';
+import { createExternalBrowserPark } from './agent-loop.js';
 import { BrowserControl } from './browser-control.js';
+import { supercarHandoffToGenerate, supercarReply } from './qwen-only-agent-loop.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
 import { runSelectedChromeTask } from './selected-chrome-runner.js';
 const id = '00000000-0000-4000-8000-000000000001';
@@ -128,6 +131,294 @@ function fixture(label: string, missing = false) {
   return { client, control, cancellation, commands, adapter, effects: () => effects };
 }
 describe('selected Chrome v2 actual runner/client/gate integration', () => {
+  it('re-observes after clarification instead of applying the remaining old plan', async () => {
+    const h = fixture('Search');
+    let calls = 0;
+    const requests: unknown[] = [];
+    vi.spyOn(h.adapter, 'create').mockImplementation(async (request) => {
+      requests.push(structuredClone(request));
+      return {
+        id: `turn-${++calls}`,
+        metadata,
+        stopReason: 'tool_use',
+        content:
+          calls === 1
+            ? [
+                {
+                  type: 'tool_use',
+                  id: 'human',
+                  name: 'request_human',
+                  input: { reason: 'clarification', message: 'Which report?' },
+                },
+                {
+                  type: 'tool_use',
+                  id: 'old-click',
+                  name: 'browser_act',
+                  input: {
+                    action: {
+                      kind: 'click',
+                      selector: {
+                        description: 'Search',
+                        strategies: [{ kind: 'css', value: '#go' }],
+                      },
+                    },
+                  },
+                },
+                {
+                  type: 'tool_use',
+                  id: 'old-finish',
+                  name: 'browser_finish',
+                  input: { status: 'completed', summary: 'Saved', evidenceText: 'Saved' },
+                },
+              ]
+            : [
+                {
+                  type: 'tool_use',
+                  id: 'finish',
+                  name: 'browser_finish',
+                  input: { status: 'completed', summary: 'Draft', evidenceText: 'Draft' },
+                },
+              ],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: null,
+          cacheCreationInputTokens: null,
+          complete: true,
+        },
+      };
+    });
+    const outcome = await runSelectedChromeTask({
+      taskId: 'v2-test',
+      intent: 'Inspect the report',
+      target,
+      messagesAdapter: h.adapter,
+      client: h.client,
+      control: h.control,
+      onAwaitingUser: async () => {
+        expect(supercarReply('v2-test', 'Use report 731')).toBe(true);
+      },
+    });
+    expect(outcome.status).toBe('completed');
+    expect(calls).toBe(2);
+    expect(h.effects()).toBe(0);
+    expect(JSON.stringify(requests[1])).toContain('Use report 731');
+    expect(JSON.stringify(requests[1])).toContain('replan_required');
+  });
+
+  it('rejects a material handoff from the actual action confirmation wait', async () => {
+    const h = fixture('确认支付');
+    let accepted: boolean | undefined;
+    const outcome = await runSelectedChromeTask({
+      taskId: 'v2-test',
+      intent: 'Inspect the page',
+      target,
+      messagesAdapter: h.adapter,
+      client: h.client,
+      control: h.control,
+      signal: h.cancellation.signal,
+      onAwaitingUser: async ({ awaitingKind }) => {
+        expect(awaitingKind).toBe('browser_action');
+        accepted = supercarHandoffToGenerate('v2-test', 'Analyze my data', [
+          { type: 'text', text: 'NOT-ADMITTED-731' },
+        ]);
+        h.cancellation.abort();
+      },
+    });
+    expect(accepted).toBe(false);
+    expect(outcome.status).toBe('cancelled');
+    expect(outcome.handoffAttachments).toBeUndefined();
+    expect(h.effects()).toBe(0);
+  });
+
+  it('bounds initial plus accepted reply images cumulatively and retains the wait on rejection', async () => {
+    const image = (size: number) => ({
+      type: 'image' as const,
+      source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'A'.repeat(size) },
+    });
+    const parking = createExternalBrowserPark({
+      taskId: 'cumulative-images',
+      intent: 'Inspect reports',
+      attachments: [image(2_000_000)],
+      aborted: () => false,
+    });
+    try {
+      const first = parking.park('First report?', 'clarification');
+      expect(supercarReply('cumulative-images', 'First', [image(1_500_000)])).toBe(true);
+      await first;
+      parking.takeReply();
+      const second = parking.park('Second report?', 'clarification');
+      expect(supercarReply('cumulative-images', 'Too much', [image(1_000_000)])).toBe(false);
+      expect(
+        supercarReply('cumulative-images', 'Smaller', [{ type: 'text', text: 'SMALLER-731' }]),
+      ).toBe(true);
+      expect(await second).toBe('Smaller');
+      expect(JSON.stringify(parking.takeReply())).toContain('SMALLER-731');
+    } finally {
+      parking.close();
+    }
+  });
+
+  it('keeps the initial parsed attachment in the selected task model context', async () => {
+    const h = fixture('Search');
+    const initial = await parseFileForPrompt(
+      Buffer.from('name,qty\nINITIAL-531,31\n'),
+      'report.csv',
+      'text/csv',
+    );
+    const requests: unknown[] = [];
+    vi.spyOn(h.adapter, 'create').mockImplementation(async (request) => {
+      requests.push(structuredClone(request));
+      return {
+        id: 'finish',
+        metadata,
+        stopReason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'finish',
+            name: 'browser_finish',
+            input: { status: 'completed', summary: 'Draft', evidenceText: 'Draft' },
+          },
+        ],
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: null,
+          cacheCreationInputTokens: null,
+          complete: true,
+        },
+      };
+    });
+    const outcome = await runSelectedChromeTask({
+      taskId: 'v2-test',
+      intent: 'Read the attached material and inspect this page',
+      attachments: initial.blocks,
+      target,
+      messagesAdapter: h.adapter,
+      client: h.client,
+      control: h.control,
+    });
+    expect(outcome.status).toBe('completed');
+    expect(JSON.stringify(requests)).toContain('INITIAL-531');
+    expect(h.effects()).toBe(0);
+  });
+
+  it.each(['handoff', 'cancel', 'unconfirmed-close'] as const)(
+    'retains accepted external reply materials through %s',
+    async (ending) => {
+      const h = fixture('Search');
+      const initial = await parseFileForPrompt(
+        Buffer.from('name,qty\nINITIAL-531,31\n'),
+        'initial.csv',
+        'text/csv',
+      );
+      const first = await parseFileForPrompt(
+        Buffer.from('name,qty\nFIRST-731,31\n'),
+        'first.csv',
+        'text/csv',
+      );
+      const image = await parseFileForPrompt(
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=',
+          'base64',
+        ),
+        'chart.png',
+        'image/png',
+      );
+      const requests: unknown[] = [];
+      let waits = 0;
+      vi.spyOn(h.adapter, 'create').mockImplementation(async (request) => {
+        requests.push(structuredClone(request));
+        return {
+          id: `human-${requests.length}`,
+          metadata,
+          stopReason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: `human-${requests.length}`,
+              name: 'request_human',
+              input: {
+                reason: 'clarification',
+                message: 'Please provide the missing report material.',
+              },
+            },
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      });
+      if (ending === 'unconfirmed-close')
+        vi.spyOn(h.client, 'close').mockResolvedValue({
+          ok: false,
+          error: 'target_extension_unavailable',
+        });
+      const outcome = await runSelectedChromeTask({
+        taskId: 'v2-test',
+        intent: 'Read reports, then analyze supplied data if I explicitly change to that',
+        attachments: initial.blocks,
+        target,
+        messagesAdapter: h.adapter,
+        client: h.client,
+        control: h.control,
+        signal: h.cancellation.signal,
+        maxIterations: 3,
+        onAwaitingUser: async ({ awaitingKind }) => {
+          expect(awaitingKind).toBe('clarification');
+          if (++waits === 1) {
+            expect(supercarReply('v2-test', 'FIRST-REPLY-451', first.blocks)).toBe(true);
+          } else {
+            const tooLarge = [
+              {
+                type: 'image' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: 'image/png' as const,
+                  data: 'a'.repeat(4_000_001),
+                },
+              },
+            ];
+            expect(supercarReply('v2-test', 'REJECTED-MATERIAL', tooLarge)).toBe(false);
+            expect(supercarHandoffToGenerate('v2-test', 'REJECTED-HANDOFF', tooLarge)).toBe(false);
+            expect(
+              supercarHandoffToGenerate(
+                'v2-test',
+                'Stop browsing. Use my uploaded data to analyze the results.',
+                image.blocks,
+              ),
+            ).toBe(true);
+            if (ending === 'cancel') h.cancellation.abort();
+          }
+        },
+      });
+      expect(waits).toBe(2);
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1])).toContain('INITIAL-531');
+      expect(JSON.stringify(requests[1])).toContain('FIRST-731');
+      expect(JSON.stringify(requests[1])).toContain('FIRST-REPLY-451');
+      expect(JSON.stringify(requests)).not.toContain('REJECTED-MATERIAL');
+      expect(h.effects()).toBe(0);
+      if (ending === 'handoff') {
+        expect(outcome.status).toBe('handoff_to_generate');
+        expect(outcome.question).toContain('FIRST-REPLY-451');
+        expect(outcome.question).toContain('Stop browsing.');
+        expect(JSON.stringify(outcome.handoffAttachments)).toContain('FIRST-731');
+        expect(JSON.stringify(outcome.handoffAttachments)).toContain('media_type');
+        expect(JSON.stringify(outcome.handoffAttachments)).not.toContain('INITIAL-531');
+        expect(h.commands.at(-1)?.op).toBe('close');
+      } else {
+        expect(outcome.status).toBe(ending === 'cancel' ? 'cancelled' : 'failed');
+        expect(outcome.handoffAttachments).toBeUndefined();
+      }
+    },
+  );
+
   it('ungranted new task tab parks for origin selection without creating a tab', async () => {
     const h = fixture('搜索');
     vi.spyOn(h.adapter, 'create').mockResolvedValue({

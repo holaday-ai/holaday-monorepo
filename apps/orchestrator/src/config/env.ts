@@ -302,11 +302,27 @@ const baseEnvSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   BROWSER_EXECUTOR: z.enum(['legacy', 'unified']).default('unified'),
+  BROWSER_COLLABORATION_V2: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   BROWSER_SESSION_IMPORT_V2: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
   BROWSER_PROFILE_PERSIST_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_HOME_PROFILE_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_HOME_FILES_V1: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BROWSER_TASK_FILES_V1: z
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
@@ -445,6 +461,17 @@ const baseEnvSchema = z.object({
     .transform((v) => v === 'true'),
   /** Gradual rollout: allowed user externalIds (CSV). Empty = all (when ENABLED). */
   VIDEO_CREATION_ALLOWLIST: z.string().default(''),
+
+  /** BA-1: independent local Chrome task tabs, staged rollout (default OFF). */
+  BROWSER_TASK_TABS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Durable task-launch recovery is staged separately from task-tab creation. */
+  BROWSER_LAUNCH_RECOVERY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 
   /**
    * BROWSER-HOME-1 — the「云浏览器」entry: one task-less cloud browser per user

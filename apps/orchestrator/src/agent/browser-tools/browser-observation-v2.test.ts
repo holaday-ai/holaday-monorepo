@@ -3,11 +3,28 @@ import type { AddressInfo } from 'node:net';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagesAdapter } from '../../llm/messages-adapter.js';
+import { safeObservationUrl } from './cloud-observation.js';
 import { createPlaywrightUnifiedExecutor } from './playwright-unified-executor.js';
 import { runUnifiedBrowserLoop } from './unified-browser-loop.js';
 import type { UnifiedBrowserAction } from './unified-tools.js';
 
 // Real Chromium and local HTTP; the only scripted component is the model.
+it('redacts signed download credentials only in the model URL copy', () => {
+  for (const key of [
+    'X-Amz-Signature',
+    'X-Amz-Credential',
+    'X-Amz-Security-Token',
+    'X-Goog-Signature',
+    'X-Goog-Credential',
+    'X%2DAmz%2DSignature',
+  ]) {
+    const original = `https://files.test/export?x=%2f&x=+&range=7&${key}=PRIVATE-731&X-Amz-Expires=300#/part`;
+    expect(safeObservationUrl(original)).toBe(
+      `https://files.test/export?x=%2f&x=+&range=7&${key}=[redacted]&X-Amz-Expires=300#/part`,
+    );
+    expect(original).toContain(`${key}=PRIVATE-731`);
+  }
+});
 describe('cloud observation v2', () => {
   let browser: Browser;
   let base: string;
@@ -68,7 +85,9 @@ describe('cloud observation v2', () => {
       });
       expect(second.observationRevision).toBe(first.observationRevision);
       expect(second.range).toEqual([256, 512]);
-      await page.locator('h1').evaluate((n) => (n.textContent = 'Changed'));
+      await page.locator('h1').evaluate((n) => {
+        n.textContent = 'Changed';
+      });
       const third = await read(tools, {
         tool: 'get_page_text',
         cursor: second.cursor,

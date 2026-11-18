@@ -117,6 +117,33 @@ function qwenTransport(fetchImpl: typeof fetch) {
 }
 
 describe('Supercar browser ownership checkpoints', () => {
+  it('parks without another model call when a bounded input wait is still blocked', async () => {
+    const c = new BrowserControl(Date.now, { collaborationV2: true });
+    vi.spyOn(c, 'checkpoint').mockResolvedValue({
+      resumed: false,
+      blocked: true,
+      waitedMs: 120_000,
+    });
+    const browser = fixture(async () => {});
+    const onAwaitingUser = vi.fn();
+    const before = createMessage.mock.calls.length;
+    const outcome = await runSupercarTask({
+      taskId: 'still-held',
+      intent: '查看网页',
+      executor: browser.executor,
+      apiKey: 'fixture',
+      browserControl: c,
+      onAwaitingUser,
+    });
+    expect(outcome).toMatchObject({
+      status: 'awaiting_user',
+      question: expect.stringMatching(/还没有结束/),
+    });
+    expect(createMessage.mock.calls).toHaveLength(before);
+    expect(onAwaitingUser).toHaveBeenCalledWith(
+      expect.objectContaining({ awaitingKind: 'clarification' }),
+    );
+  });
   // These cover the legacy coordinate loop behind the production entry; the
   // default executor is unified since batch 08, so pin the rollback mode.
   const executorBefore = env.BROWSER_EXECUTOR;

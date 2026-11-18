@@ -49,6 +49,7 @@ import { CdpInputHandler, PAGE_CHANGED_ERROR } from './cdp-input.js';
 import { CdpStreamer } from './cdp-streamer.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import type { InputEnvelope } from './screencast-input-bridge.js';
+import { acceptViewerActivity, finishViewerActivity } from './viewer-activity.js';
 
 /**
  * Phase 24 fix #2 — `/screencast-ws/{arg}` route dispatcher.
@@ -172,7 +173,9 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     const url = req.url ?? '';
     const m = pathPattern.exec(url);
     if (!m) return; // not our path; leave for next handler
-    const v2Requested = new URL(url, 'http://localhost').searchParams.get('viewportV2') === '1';
+    const parsedUrl = new URL(url, 'http://localhost');
+    const v2Requested = parsedUrl.searchParams.get('viewportV2') === '1';
+    const collaborationRequested = parsedUrl.searchParams.get('collaborationV2') === '1';
 
     if (!admissionOpen()) {
       reject(socket, 503, 'maintenance');
@@ -247,6 +250,10 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
 
           const instance = picked.instance;
           const capabilities = instanceBrowserCapabilities(instance);
+          if (collaborationRequested && !capabilities.collaborationV2) {
+            reject(socket, 409, 'browser collaboration disabled');
+            return;
+          }
           if (v2Requested && !capabilities.viewportV2) {
             reject(socket, 409, 'browser viewport v2 disabled');
             return;
@@ -275,6 +282,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
                 callerUserId,
                 instance,
                 viewportV2: capabilities.viewportV2,
+                collaborationV2: capabilities.collaborationV2 === true,
+                collaborationRequested,
               }).then(resolve, rejectSetup);
             }),
           );
@@ -298,6 +307,8 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     ws: WebSocket;
     callerUserId: string;
     viewportV2: boolean;
+    collaborationV2: boolean;
+    collaborationRequested: boolean;
     instance: ReturnType<BrowserPool['peek']> & object;
   }): Promise<void> {
     const userLog = log.child({ userId: args.callerUserId });
@@ -350,7 +361,7 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     };
     const invalidate = () => {
       confirmations.invalidate();
-      if (args.viewportV2 && args.ws.readyState === WebSocket.OPEN)
+      if ((args.viewportV2 || args.collaborationV2) && args.ws.readyState === WebSocket.OPEN)
         args.ws.send(JSON.stringify({ type: 'observation-invalidated' }));
     };
     if (args.viewportV2)
@@ -428,6 +439,14 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
       invalidate();
       inputBridge.detach();
       userLog.info({ reason }, 'screencast: tearing down');
+      await finishViewerActivity({
+        instance: args.instance,
+        source: args.ws,
+        peek: (taskId) => opts.pool.peek(taskId),
+        stop: () => opts.pool.release(args.instance.taskId, 'browser-held-input-disconnected'),
+      }).catch((err: unknown) =>
+        userLog.warn({ err: errMsg(err) }, 'screencast: held input stop unconfirmed'),
+      );
       try {
         await streamer?.stop();
       } catch (err) {
@@ -452,6 +471,22 @@ export function createScreencastProxy(opts: ScreencastProxyOptions): ScreencastP
     // replayed later). REBUILD-4: a viewer's size is never applied to the page.
     args.ws.on('message', (raw) => {
       if (args.ws.readyState !== WebSocket.OPEN) return;
+      if (
+        args.collaborationV2 &&
+        !args.collaborationRequested &&
+        raw.toString() !== '{"type":"observe"}'
+      ) {
+        args.ws.send(JSON.stringify({ type: 'input-closed', reason: 'client_update_required' }));
+        return;
+      }
+      if (
+        acceptViewerActivity(raw.toString(), {
+          instance: args.instance,
+          source: args.ws,
+          peek: (taskId) => opts.pool.peek(taskId),
+        })
+      )
+        return;
       if (args.viewportV2 && raw.toString() === '{"type":"observe"}') {
         streamer?.requestFrameRefresh();
         return;

@@ -59,6 +59,63 @@ describe('normalization', () => {
 });
 
 describe('fact assessment', () => {
+  it('does not relabel a bound row count as an amount total even if the value is a real computed number', () => {
+    const result = assessCompletionFacts({
+      summary: '完整统计',
+      fields: [
+        {
+          name: 'amount [B] 合计',
+          value: '10001',
+          fileId: 'file_report',
+          tableFactId: 'tbf_count',
+        },
+      ],
+      pages: [],
+      tableFacts: [
+        { id: 'tbf_count', fileId: 'file_report', name: '记录数', value: '10001', complete: true },
+      ],
+    });
+    expect(result.contradictions.length).toBeGreaterThan(0);
+  });
+  it('grounds actual file fields without using file contents to prove a bound or unread webpage', () => {
+    const materials = [{ fileId: 'file_report', text: 'sku,qty\nTAIL-731,31\n' }];
+    expect(
+      assessCompletionFacts({
+        summary: '导出文件尾部已读取',
+        fields: [{ name: 'SKU', value: 'TAIL-731', fileId: 'file_report' }],
+        pages: [],
+        materials,
+      }),
+    ).toMatchObject({ contradictions: [], unverified: [] });
+    const bound = assessCompletionFacts({
+      summary: '页面数据',
+      fields: [
+        {
+          name: 'SKU',
+          value: 'TAIL-731',
+          tabId: 'tab_unread',
+          sourceURL: 'https://other.example/',
+        },
+      ],
+      pages: [{ text: '报表首页', tabId: 'tab_main', sourceURL: 'https://reports.example/' }],
+      materials,
+    });
+    expect(bound.contradictions.length).toBeGreaterThan(0);
+    const wrongFile = assessCompletionFacts({
+      summary: '文件数据',
+      fields: [{ name: 'SKU', value: 'TAIL-731', fileId: 'file_other' }],
+      pages: [],
+      materials,
+    });
+    expect(wrongFile.contradictions.length).toBeGreaterThan(0);
+    const mixed = assessCompletionFacts({
+      summary: '文件数据',
+      fields: [{ name: 'SKU', value: 'TAIL-731', fileId: 'file_report', tabId: 'tab_unread' }],
+      pages: [],
+      materials,
+    });
+    expect(mixed.contradictions.length).toBeGreaterThan(0);
+  });
   const assess = (summary: string, fields?: unknown) =>
     assessCompletionFacts({ summary, fields, pages: [{ text: page }] });
   it('checks each labelled fact in a list written with literal \\n', () => {

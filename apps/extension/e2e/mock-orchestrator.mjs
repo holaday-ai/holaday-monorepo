@@ -147,6 +147,16 @@ export class MockOrchestrator {
 
   #onHttp(req, res) {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (this.rpcHandler && path.startsWith('/trpc/')) {
+      const handler = this.rpcHandler;
+      void Promise.resolve()
+        .then(() => handler(req, res))
+        .catch(() => {
+          if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'local RPC fixture failed' } }));
+        });
+      return;
+    }
     if (process.env.HOLADAY_E2E_DEBUG === '1')
       console.log(`[mock] ${Date.now() % 100000} ${req.method} ${path}`);
     if (path === '/healthz') {
@@ -202,8 +212,14 @@ export class MockOrchestrator {
       this.received.push(msg);
       if (msg.type === 'client.hello') {
         connection.helloAt = Date.now();
+        connection.clientId = randomUUID();
         ws.send(
-          JSON.stringify({ type: 'server.welcome', clientId: randomUUID(), heartbeatMs: 30_000 }),
+          JSON.stringify({
+            type: 'server.welcome',
+            userId: 'fixture-owner',
+            clientId: connection.clientId,
+            heartbeatMs: 30_000,
+          }),
         );
         const authed = this.connections.filter((c) => c.helloAt).length;
         this.connectionWaiters = this.connectionWaiters.filter((w) => {

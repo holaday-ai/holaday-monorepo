@@ -45,14 +45,24 @@ function harness() {
       sessionId,
       observation: { tabId: 42 },
     })),
+    screenshot: vi.fn<NonNullable<SelectedChromeBridge['screenshot']>>(async () => ({
+      ok: false,
+      error: 'capability_missing',
+    })),
     execute: vi.fn<SelectedChromeBridge['execute']>(async () => ({
       ok: true as const,
       sessionId,
       observation: { tabId: 42, bodyText: 'Saved' },
       actionOutcome: 'applied' as const,
     })),
+    openChooser: vi.fn<NonNullable<SelectedChromeBridge['openChooser']>>(async () => ({
+      ok: false,
+      error: 'capability_missing',
+      actionOutcome: 'not_applied',
+    })),
     close: vi.fn<SelectedChromeBridge['close']>(async () => ({ ok: true })),
     stopTask: vi.fn<SelectedChromeBridge['stopTask']>(async () => {}),
+    stopUploadAdmission: vi.fn(),
   } satisfies SelectedChromeBridge;
   const ownership = createBrowserExecutionOwnership();
   const prepareLegacy = vi.fn(async () => {});
@@ -82,6 +92,45 @@ function harness() {
 }
 
 describe('selected Chrome command schema', () => {
+  it('rejects model-supplied targets, paths or image bytes in a screenshot command', () => {
+    const request = {
+      op: 'screenshot',
+      sessionId: target.selectionId,
+      captureId: target.selectionId,
+      observationRevision: 1,
+    };
+    expect(selectedChromeSessionCommandSchema.safeParse(request).success).toBe(true);
+    for (const extra of [
+      { tabId: 99 },
+      { path: '/tmp/image' },
+      { data: 'invented' },
+      { observationRevision: 0 },
+    ])
+      expect(selectedChromeSessionCommandSchema.safeParse({ ...request, ...extra }).success).toBe(
+        false,
+      );
+  });
+  it('discards a screenshot reply after transport owner changes', async () => {
+    const h = harness();
+    const opened = openedSession(
+      await h.transport.handle('task-a', command({ op: 'open', target })),
+    );
+    h.bridge.screenshot.mockImplementationOnce(async () => {
+      h.setOwner('other');
+      return { ok: true, sessionId: opened.sessionId };
+    });
+    expect(
+      await h.transport.handle(
+        'task-a',
+        command({
+          op: 'screenshot',
+          sessionId: opened.sessionId,
+          captureId: target.selectionId,
+          observationRevision: 1,
+        }),
+      ),
+    ).toMatchObject({ ok: false, error: 'session_unavailable' });
+  });
   it('accepts the five bounded action kinds with their native requirements', () => {
     const actions = [
       { kind: 'click', selector },
@@ -129,6 +178,34 @@ describe('selected Chrome command schema', () => {
 });
 
 describe('selected Chrome transport lifecycle', () => {
+  it('classifies an asynchronous chooser bridge failure as unknown without retrying the input', async () => {
+    const h = harness();
+    const opened = openedSession(
+      await h.transport.handle('task-a', command({ op: 'open', target })),
+    );
+    let effects = 0;
+    h.bridge.openChooser.mockImplementationOnce(async () => {
+      effects++;
+      throw new Error('private acknowledgement');
+    });
+    const result = await h.transport.handle(
+      'task-a',
+      command({
+        op: 'chooser_open',
+        sessionId: opened.sessionId,
+        action: { kind: 'click', selector },
+        binding: { token: opened.sessionId, observationRevision: 1 },
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'input_outcome_unknown',
+      actionOutcome: 'unknown',
+    });
+    expect(effects).toBe(1);
+    expect(JSON.stringify(result)).not.toContain('private acknowledgement');
+    await h.transport.stopTask('task-a');
+  });
   it.each([null, 'owner-b'])(
     'stops the old owner on auth change to %s and waits for detach',
     async (nextOwner) => {
@@ -226,6 +303,49 @@ describe('selected Chrome transport lifecycle', () => {
     expect(h.bridge.open).not.toHaveBeenCalled();
     await expect(h.ownership.runLegacy(async () => 'legacy')).resolves.toBe('legacy');
   });
+
+  it.each(['stop', 'close'] as const)(
+    '%s stops file admission before draining an in-flight operation',
+    async (method) => {
+      const h = harness();
+      const opened = openedSession(
+        await h.transport.handle('task-a', command({ op: 'open', target })),
+      );
+      let finish!: () => void;
+      h.bridge.execute.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () =>
+              resolve({
+                ok: true,
+                sessionId: opened.sessionId,
+                observation: { tabId: 42 },
+                actionOutcome: 'applied',
+              });
+          }),
+      );
+      const act = h.transport.handle(
+        'task-a',
+        command({
+          op: 'act',
+          sessionId: opened.sessionId,
+          action: { kind: 'key', payload: { key: 'Enter' } },
+        }),
+      );
+      await vi.waitFor(() => expect(h.bridge.execute).toHaveBeenCalledTimes(1));
+      const stop =
+        method === 'stop'
+          ? h.transport.stopTask('task-a')
+          : h.transport.handle('task-a', command({ op: 'close', sessionId: opened.sessionId }));
+      try {
+        expect(h.bridge.stopUploadAdmission).toHaveBeenCalledWith('task-a');
+      } finally {
+        finish();
+        await act;
+        await stop;
+      }
+    },
+  );
 
   it('stop closes admission immediately and releases only after the real action settles', async () => {
     const h = harness();

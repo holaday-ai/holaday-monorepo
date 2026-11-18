@@ -948,6 +948,39 @@ describe('ws-client send', () => {
     expect(send({ type: 'client.pong', at: 123 })).toBe(false);
   });
 
+  it('exposes only the authenticated identity of the current socket', async () => {
+    const {
+      connect,
+      disconnect,
+      getAuthenticatedExtensionClientId,
+      getAuthenticatedExtensionUserId,
+    } = await import('./ws-client.js');
+    connect('owner-a');
+    const socket = sockets[0]!;
+    expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
+    socket.dispatch('message', {
+      data: JSON.stringify({
+        type: 'server.welcome',
+        clientId: 'connection-a',
+        userId: 'user-a',
+        heartbeatMs: 30_000,
+      }),
+    });
+    expect(getAuthenticatedExtensionClientId()).toBe('connection-a');
+    expect(getAuthenticatedExtensionUserId()).toBe('user-a');
+    disconnect();
+    expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
+    connect('owner-b');
+    expect(getAuthenticatedExtensionClientId()).toBeNull();
+    expect(getAuthenticatedExtensionUserId()).toBeNull();
+    socket.dispatch('message', {
+      data: JSON.stringify({ type: 'server.welcome', clientId: 'stale', heartbeatMs: 30_000 }),
+    });
+    expect(getAuthenticatedExtensionClientId()).toBeNull();
+  });
+
   it('keeps dispatching server messages when one listener throws', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { connect, onServerMessage } = await import('./ws-client.js');

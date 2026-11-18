@@ -21,15 +21,21 @@ export interface UploadError {
  * object on non-2xx so the caller can render the right copy
  * (free-plan upsell vs. file-too-large vs. unsupported type).
  */
-export async function uploadFile(file: File): Promise<UploadedFileMeta> {
+export async function uploadFile(
+  file: File,
+  options?: { token?: string; current?: () => void; signal?: AbortSignal },
+): Promise<UploadedFileMeta> {
+  options?.current?.();
   const fd = new FormData();
   fd.append('file', file, file.name);
-  const token = getAccessToken();
+  const token = options?.token ?? getAccessToken();
   const res = await fetch('/api/files/upload', {
     method: 'POST',
     headers: token ? { authorization: `Bearer ${token}` } : {},
     body: fd,
+    ...(options?.signal ? { signal: options.signal } : {}),
   });
+  options?.current?.();
   if (!res.ok) {
     let body: { error?: string; message?: string } = {};
     try {
@@ -53,6 +59,7 @@ export async function uploadFile(file: File): Promise<UploadedFileMeta> {
     throw err;
   }
   const json = (await res.json()) as UploadedFileMeta;
+  options?.current?.();
   return json;
 }
 

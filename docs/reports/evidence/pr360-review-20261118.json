@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-11-18T10:46:35.028101+00:00",
+  "pr": "https://github.com/holaday-ai/holaday-monorepo/pull/360",
+  "reviewBase": "16c50c8c4647e066632b49ffefa1a6c4d0183ff4",
+  "reviewedHead": "48d437362fd170c7e9d6a0d044658c8caacd730d",
+  "runtimeFixHead": "ebded6e2b743b77e74783bbb4d196af9c7564f3d",
+  "review": {
+    "kind": "one independent AI reviewer, cold context, read-only, serial",
+    "initialRecommendation": "request changes",
+    "findings": {
+      "P1": 3,
+      "P2": 3
+    },
+    "response": "all six addressed with negative/positive evidence; no formal GitHub approval submitted"
+  },
+  "validation": {
+    "backendAffected": {
+      "files": 11,
+      "passed": 243,
+      "log": "affected-backend-final.log"
+    },
+    "extensionAffected": {
+      "files": 5,
+      "passed": 96,
+      "log": "extension-final.log"
+    },
+    "driver": {
+      "files": 10,
+      "passed": 85,
+      "log": "driver-suite.log"
+    },
+    "actualSqlAndScreenshot": {
+      "files": 3,
+      "passed": 3,
+      "log": "native-sql-final.log",
+      "sqlCleanup": true
+    },
+    "nativeDownload": {
+      "passed": 5,
+      "unselected": 13,
+      "log": "native-download-final.log"
+    },
+    "routeAudit": 74,
+    "blockerAudit": 24,
+    "types": {
+      "driver": true,
+      "extension": true,
+      "selectedBackendTests": true,
+      "backendProductionBuild": true,
+      "fullBackendIncludingAllTests": "OOM at fixed 2048 MB, not passed"
+    },
+    "static": {
+      "errors": 0,
+      "preExistingWarnings": 3
+    },
+    "build": {
+      "backend": true,
+      "productionExtension": true,
+      "webRebuilt": false,
+      "webSourceUnchangedFrom91825516": true
+    },
+    "externalModelApiCalls": 0,
+    "formalFullReleaseSuite": false
+  },
+  "candidate": "/Users/yaleiqi/.holaday-recovery/tasks/browser-assistant-next/pr360-review-ebded6e2/candidate.json",
+  "evidenceDirectory": "/Users/yaleiqi/.holaday-recovery/tasks/browser-assistant-next/pr360-review-ebded6e2/evidence",
+  "productionChanges": false,
+  "merged": false,
+  "pending": [
+    "user decision on merge/formal full checks/release",
+    "production migration0071",
+    "production KMS/KeyProvider, trusted site adapters and startup wiring",
+    "real-account, physical OS and installed/store extension acceptance"
+  ],
+  "logSha256": {
+    "R1-red.log": "a5fca8650c027cee27f6830ee34892f683bad14d72b6947248e9a0a16759c36b",
+    "R2-red.log": "733adb3575d578053863879b1326a5372830838550290c46fadf6e51c55f7f0f",
+    "R3-red.log": "add044278e70fe0ad11767b1c3fbcd19b363e5fd6bbe06c1616435fd6dfd92d1",
+    "R3-local-cancel-red.log": "68fb9ffc1dff77619dc3e2d8160296a25f413e0b680866a1234aac2609af589a",
+    "R4-red.log": "7c49100b38e964c30b0e7d82df4cac5c2366974fe0642f4e450028f5cbd35c72",
+    "R5-and-R3retry-red.log": "0cde14b959f03b0d278c39c3f7107b17df47938f16288d0769e8f870c1b318e7",
+    "R6-red.log": "225f4bae59dc335ae7a371401afd7820d42087758e9bea65866c3b56f40a7a13",
+    "affected-backend-final.log": "33cd0735ed7e4b91dd777fe179ce8507161a5f21ffad8f6ab9d6463566499f48",
+    "extension-final.log": "964f09796572bde7d23a62b273906a8cd1c26fba166de02756aee4a0e1a21417",
+    "driver-suite.log": "7ee3b197d8a981456a11739e67685f50ca3985f102983bda701fc71014fb3652",
+    "native-sql-final.log": "ed9b09e9016ff4b051bc9cdf5b4a25b47c2cf3da2151d81ce264f028d19495d3",
+    "native-download-final.log": "7c1422e3f1e3bb712c9dd30549c30ca566b5e650e8d46b07176a8485ba6fae27",
+    "backend-build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "extension-build.log": "bdbc6bf55c4b40f4387e9caa9b76364a57716349bc54c14976a8eb2d86891fb2",
+    "scoped-test-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "static-final.log": "c79a9aec8d86bb31003495346e044583d280250df61bc061985a4bfa2989c711",
+    "route-audit.log": "caf5f29bb691d41c640344034dd1509c6c3c4e24210c80cc1e8441d26065d386",
+    "blocker-audit.log": "a0da5863928453268072d34da87993cbe2818aea3c0f8b83bde419c9ed240fdf"
+  }
+}

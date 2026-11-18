@@ -100,7 +100,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
     env = makePool();
   });
 
-  it('creates bhs_<userId> with no task, an anonymous session and a 15-minute idle timeout', async () => {
+  it('creates a personal Home with no implicit saved identity and a 15-minute idle timeout', async () => {
     const opened = await sessions.open(env.pool, 'usr_a', logger);
     expect(opened).toEqual({ sessionId: 'bhs_usr_a', url: null });
     expect(browserHomeSessionId('usr_a')).toBe('bhs_usr_a');
@@ -108,7 +108,8 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
     expect(env.spawnSpy.mock.calls[0]?.[0]).toBe('bhs_usr_a');
     expect(env.spawnSpy.mock.calls[0]?.[1]).toBe('usr_a');
     const inst = env.pool.peek('bhs_usr_a');
-    expect(inst?.sessionPolicy).toBe('anonymous');
+    expect(inst?.sessionPolicy).toBe('personal_home');
+    expect(env.spawnSpy.mock.calls[0]?.[3]?.cloudProfileId).toBeUndefined();
     expect(inst?.idleTimeoutMs).toBe(BROWSER_HOME_IDLE_TIMEOUT_MS);
     expect(BROWSER_HOME_IDLE_TIMEOUT_MS).toBe(15 * 60_000);
     // The person can drive it directly: an open review control exists.
@@ -217,7 +218,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
       await sessions.open(env.pool, 'usr_a', logger);
       const home = env.pool.peek('bhs_usr_a')!;
       env.executors.get('bhs_usr_a')!.clickTo('https://1.1.1.1/item');
-      expect(env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous')).toBe(home);
+      expect(env.pool.lendBrowserHome('usr_a', 'tsk_1', 'personal_home')).toBe(home);
       expect(sessions.locate(env.pool, 'usr_a')).toEqual({ instance: home, heldBy: 'tsk_1' });
       const again = await sessions.open(env.pool, 'usr_a', logger);
       expect(again).toEqual({ sessionId: 'bhs_usr_a', url: 'https://1.1.1.1/item' });
@@ -246,7 +247,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
       second.claim.settle();
       expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('busy');
       // The dispatch lent it: from now on the pool's loan keeps others out.
-      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'personal_home');
       second.claim.release();
       expect(sessions.claimTask(env.pool, 'usr_a').kind).toBe('busy');
       expect(sessions.giveBack(env.pool, 'tsk_1', 'usr_a')).toBe(true);
@@ -267,7 +268,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
     it('give back restores the review control and the 15-minute idle', async () => {
       await sessions.open(env.pool, 'usr_a', logger);
       const home = env.pool.peek('bhs_usr_a')!;
-      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'personal_home');
       // The task's run takes the control, then finishes.
       const run = browserControlSessions.start(home);
       run.finish();
@@ -278,7 +279,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
       expect(control?.active).toBe(false);
       expect(control?.control.snapshot().phase).not.toBe('closed');
       // Another user's give back does nothing.
-      env.pool.lendBrowserHome('usr_a', 'tsk_2', 'anonymous');
+      env.pool.lendBrowserHome('usr_a', 'tsk_2', 'personal_home');
       expect(sessions.giveBack(env.pool, 'tsk_2', 'usr_b')).toBe(false);
       expect(env.pool.peek('tsk_2')).toBe(home);
     });
@@ -287,7 +288,7 @@ describe('BrowserHomeSessions — BROWSER-HOME-1 per-user cloud browser', () => 
       await sessions.open(env.pool, 'usr_a', logger);
       const home = env.pool.peek('bhs_usr_a')!;
       env.executors.get('bhs_usr_a')!.clickTo('https://1.1.1.1/where');
-      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'anonymous');
+      env.pool.lendBrowserHome('usr_a', 'tsk_1', 'personal_home');
       expect(await sessions.close(env.pool, 'usr_a')).toBe(true);
       expect(env.pool.peek('tsk_1')).toBe(home);
       expect(sessions.locate(env.pool, 'usr_a')).toBeNull();

@@ -83,6 +83,8 @@ import {
   armCappedSlowRetry,
   connect as connectWs,
   disconnect as disconnectWs,
+  getAuthenticatedExtensionClientId,
+  getAuthenticatedExtensionConnectionOwner,
   getCurrentWsToken,
   getWsConnectionStatus,
   isConnected,
@@ -185,11 +187,15 @@ async function prepareIdleLegacyBrowserExecution(): Promise<void> {
   await prepareSelectedChromeCdp();
 }
 
+// A reusable bearer is account authentication, not an execution generation.
+// The server confirms a fresh user/client pair after each socket reconnect.
+const selectedChromeConnectionOwner = getAuthenticatedExtensionConnectionOwner;
+
 const selectedChromeTransport = createSelectedChromeTransport({
   bridge: createSelectedChromeBridge(),
   ownership: browserExecutionOwnership,
   prepareLegacy: prepareIdleLegacyBrowserExecution,
-  currentOwner: getCurrentWsToken,
+  currentOwner: selectedChromeConnectionOwner,
 });
 
 configureExtensionToolRuntime({
@@ -210,12 +216,18 @@ function stopSelectedForOwner(nextOwner: string | null): void {
 }
 
 function connect(...args: Parameters<typeof connectWs>): ReturnType<typeof connectWs> {
-  stopSelectedForOwner(args[0]);
+  stopSelectedForOwner(
+    getCurrentWsToken() === args[0].trim() ? selectedChromeConnectionOwner() : null,
+  );
   return connectWs(...args);
 }
 
 function reconnect(...args: Parameters<typeof reconnectWs>): ReturnType<typeof reconnectWs> {
-  stopSelectedForOwner(args[0]);
+  stopSelectedForOwner(
+    !args[1]?.force && getCurrentWsToken() === args[0].trim()
+      ? selectedChromeConnectionOwner()
+      : null,
+  );
   return reconnectWs(...args);
 }
 
@@ -360,6 +372,7 @@ const controlledTaskGenerations = new Map<string, number>();
 
 onServerMessage((msg) => {
   if (msg.type === 'server.welcome') {
+    stopSelectedForOwner(selectedChromeConnectionOwner());
     state.lastWelcomeAt = Date.now();
     console.info('[holaday] welcome', msg);
     // Phase 14 — first welcome after a (re)connect is the right moment
@@ -1863,7 +1876,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'holaday.status') {
     void getWsConnectionStatus().then(
       (ws) => {
-        safeSendResponse(sendResponse, { lastWelcomeAt: state.lastWelcomeAt, ws });
+        safeSendResponse(sendResponse, {
+          lastWelcomeAt: state.lastWelcomeAt,
+          ws,
+          extensionClientId: getAuthenticatedExtensionClientId(),
+        });
       },
       (err) => {
         console.warn('[holaday] status message failed', compactLogErrorReason(err));

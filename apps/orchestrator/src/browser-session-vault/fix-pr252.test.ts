@@ -329,7 +329,10 @@ describe('vault browser worker (real Chromium)', () => {
       { cookies: [cookie('127.0.0.1')], storage: [] },
       async () => 'connected',
     );
-    const executor = () => ({ createSessionVaultContext: vi.fn((o) => browser.newContext(o)) });
+    const executor = () => ({
+      createSessionVaultContext: vi.fn((o) => browser.newContext(o)),
+      setSessionIdentityVerifier: vi.fn(),
+    });
     for (const target of [undefined, null, 'https://www.ctrip.com/hotels', 'http://localhost/']) {
       const e = executor();
       await runtime.prepare('alice', e as never, {
@@ -415,6 +418,7 @@ describe('vault browser worker (real Chromium)', () => {
       const { runtime, match, open } = await grantedRuntime();
       const contexts: import('playwright').BrowserContext[] = [];
       const executor = {
+        setSessionIdentityVerifier: vi.fn(),
         createSessionVaultContext: vi.fn(async (o) => {
           const context = await browser.newContext(o);
           contexts.push(context);

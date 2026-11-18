@@ -7,8 +7,16 @@ import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
+import { browserHomeProfileSaveHash } from '../../browser-home/browser-home-profile.js';
 import { browserHomeSessions } from '../../browser-home/browser-home-session.js';
-import type { BrowserInstance } from '../../browser-pool/types.js';
+import type { BrowserInstance, BrowserSessionTarget } from '../../browser-pool/types.js';
+import { TestKeyProvider } from '../../browser-session-vault/crypto.js';
+import {
+  createVaultRuntime,
+  getVaultRuntime,
+  installVaultRuntime,
+} from '../../browser-session-vault/runtime.js';
+import { MemoryVaultStore } from '../../browser-session-vault/vault.js';
 import { env as appEnv } from '../../config/env.js';
 import type { Context } from '../context.js';
 import { browserHomeRouter } from './browser-home.js';
@@ -17,41 +25,58 @@ const original = {
   enabled: appEnv.BROWSER_HOME_ENABLED,
   allowlist: appEnv.BROWSER_HOME_ALLOWLIST,
   region: appEnv.MODEL_DATA_REGION_DEFAULT,
+  profiles: appEnv.BROWSER_HOME_PROFILE_V1,
 };
 
-function fakePool() {
+function fakePool(capabilities?: BrowserInstance['capabilities']) {
   const instances = new Map<string, BrowserInstance>();
   const gotos: string[] = [];
   /** Test hook: how the next goto behaves (sets the landed URL, may throw). */
   const loads: Array<(target: string) => { url: string; error?: Error }> = [];
   const pool = {
-    allocate: vi.fn(async (taskId: string, userId: string) => {
-      let url = 'about:blank';
-      const page = {
-        url: () => url,
-        goto: async (target: string) => {
-          gotos.push(target);
-          const load = target === 'about:blank' ? undefined : loads.shift();
-          const outcome = load ? load(target) : { url: target };
-          url = outcome.url;
-          if (outcome.error) throw outcome.error;
-        },
-        goBack: async () => null,
-        goForward: async () => null,
-        reload: async () => {},
-      };
-      const inst = {
-        taskId,
-        userId,
-        status: 'ready',
-        lastActiveAt: Date.now(),
-        createdAt: Date.now(),
-        index: 0,
-        executor: { getPage: async () => page },
-      } as unknown as BrowserInstance;
-      instances.set(taskId, inst);
-      return inst;
-    }),
+    allocate: vi.fn(
+      async (
+        taskId: string,
+        userId: string,
+        _viewport?: unknown,
+        session?: BrowserSessionTarget,
+      ) => {
+        let url = 'about:blank';
+        const page = {
+          url: () => url,
+          goto: async (target: string) => {
+            gotos.push(target);
+            const load = target === 'about:blank' ? undefined : loads.shift();
+            const outcome = load ? load(target) : { url: target };
+            url = outcome.url;
+            if (outcome.error) throw outcome.error;
+          },
+          goBack: async () => null,
+          goForward: async () => null,
+          reload: async () => {},
+        };
+        const inst = {
+          taskId,
+          userId,
+          status: 'ready',
+          sessionPolicy: session?.sessionPolicy,
+          cloudProfileId: session?.cloudProfileId,
+          capabilities,
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          index: 0,
+          executor: {
+            getPage: async () => page,
+            navigate: async (_page: unknown, target: string) => {
+              await page.goto(target);
+              return { ok: true };
+            },
+          },
+        } as unknown as BrowserInstance;
+        instances.set(taskId, inst);
+        return inst;
+      },
+    ),
     peek: (taskId: string) => instances.get(taskId) ?? null,
     release: vi.fn(async (taskId: string) => instances.delete(taskId)),
     touch: vi.fn(),
@@ -109,7 +134,173 @@ afterEach(async () => {
   appEnv.BROWSER_HOME_ENABLED = original.enabled;
   appEnv.BROWSER_HOME_ALLOWLIST = original.allowlist;
   appEnv.MODEL_DATA_REGION_DEFAULT = original.region;
+  appEnv.BROWSER_HOME_PROFILE_V1 = original.profiles;
+  installVaultRuntime(undefined);
   vi.restoreAllMocks();
+});
+
+describe('explicit personal Home profile selection', () => {
+  async function profile() {
+    const runtime = createVaultRuntime({
+      importEnabled: false,
+      profileEnabled: false,
+      cloudHomeEnabled: true,
+      keys: new TestKeyProvider(),
+      store: new MemoryVaultStore(),
+    })!;
+    installVaultRuntime(runtime);
+    vi.spyOn(defaultBrowserNetworkPolicy, 'check').mockImplementation(async (url) => ({
+      allowed: true as const,
+      url,
+      addresses: ['1.1.1.1'],
+    }));
+    const grant = await runtime.vault.captureCloudProfile(
+      'usr_profile',
+      {
+        consent: 'cloud-browser-profile-v1',
+        origin: 'https://fixture.test',
+        storageKeys: ['pref'],
+      },
+      async () => ({
+        origin: 'https://fixture.test',
+        state: {
+          cookies: [],
+          storage: [{ name: 'pref', value: 'SYNTHETIC_PRIVATE_STATE' }],
+        },
+      }),
+    );
+    return grant;
+  }
+  it('requires the profile gate and returns only owned non-secret selection metadata', async () => {
+    const grant = await profile();
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    appEnv.BROWSER_HOME_PROFILE_V1 = false;
+    expect(await c.profileOptions()).toEqual({ enabled: false, profiles: [] });
+    await expect(c.open({ profileId: grant.id })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const options = await c.profileOptions();
+    expect(options.profiles).toMatchObject([
+      { id: grant.id, origin: 'https://fixture.test', status: 'connected' },
+    ]);
+    expect(JSON.stringify(options)).not.toContain('SYNTHETIC_PRIVATE_STATE');
+    expect((await caller('usr_other_profile', pool).profileOptions()).profiles).toEqual([]);
+    await expect(
+      caller('usr_other_profile', pool).open({ profileId: grant.id }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+  it('opens the selected profile only after the current live Home is closed, with personal policy', async () => {
+    const grant = await profile();
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    await c.open();
+    const originalHome = pool.peek('bhs_usr_profile');
+    await expect(c.open({ profileId: grant.id })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+    expect(pool.peek('bhs_usr_profile')).toBe(originalHome);
+    expect(pool.release).not.toHaveBeenCalled();
+    await c.close();
+    const restored = await c.open({ profileId: grant.id });
+    expect(restored).toMatchObject({
+      sessionId: 'bhs_usr_profile',
+      cloudProfileId: grant.id,
+      url: 'https://fixture.test',
+    });
+    expect(pool.peek('bhs_usr_profile')).toMatchObject({
+      sessionPolicy: 'personal_home',
+      cloudProfileId: grant.id,
+    });
+    await c.close();
+  });
+  it('persists selection for the next fresh Home and preserves the current live workspace', async () => {
+    const grant = await profile();
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    await c.open();
+    const live = pool.peek('bhs_usr_profile');
+    await expect(c.selectProfile({ profileId: grant.id })).resolves.toEqual({ ok: true });
+    expect(await c.profileOptions()).toMatchObject({ selectedProfileId: grant.id });
+    await c.open();
+    expect(pool.peek('bhs_usr_profile')).toBe(live);
+    expect(pool.release).not.toHaveBeenCalled();
+    await c.close();
+    expect(await c.open()).toMatchObject({ cloudProfileId: grant.id, url: grant.origin });
+    await c.close();
+    await c.forgetProfile({ profileId: grant.id });
+    await expect(c.open()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(pool.peek('bhs_usr_profile')).toBeNull();
+    await c.selectProfile({ profileId: null });
+    expect(await c.open()).not.toHaveProperty('cloudProfileId');
+    await c.close();
+  });
+  it('reconciles a saved operation without an open browser and never accepts raw browser-state input', async () => {
+    await profile();
+    appEnv.BROWSER_HOME_PROFILE_V1 = true;
+    const runtime = getVaultRuntime()!;
+    const request = {
+      consent: 'cloud-browser-profile-v1' as const,
+      origin: 'https://fixture.test',
+      sourceId: 'ae52fe57-1dd1-4562-828d-afcb84b0c96f',
+      includeStorage: false,
+      requestId: 'ee52fe57-1dd1-4562-828d-afcb84b0c96f',
+      requestedAt: Date.now(),
+      clearEpoch: 0,
+    };
+    await runtime.vault.captureCloudProfile(
+      'usr_profile',
+      {
+        consent: request.consent,
+        origin: request.origin,
+        storageKeys: ['pref'],
+      },
+      async () => ({
+        origin: request.origin,
+        state: { cookies: [], storage: [{ name: 'pref', value: 'SYNTHETIC_SECRET' }] },
+      }),
+      {
+        requestId: request.requestId,
+        requestHash: browserHomeProfileSaveHash(request),
+        requestedAt: request.requestedAt,
+        clearEpoch: 0,
+        makeDefault: true,
+      },
+    );
+    const { pool } = fakePool();
+    const c = caller('usr_profile', pool);
+    expect(await c.profileSaveReceipt(request)).toMatchObject({
+      state: 'saved',
+      id: request.requestId,
+    });
+    expect(await c.saveProfile(request)).toMatchObject({
+      status: 'connected',
+      id: request.requestId,
+    });
+    expect(pool.allocate).not.toHaveBeenCalled();
+    expect(await c.cancelProfileSave(request)).toMatchObject({
+      state: 'saved',
+      id: request.requestId,
+    });
+    expect(JSON.stringify(await c.profileSaveReceipt(request))).not.toContain('SYNTHETIC_SECRET');
+    expect(await caller('usr_other_profile', pool).profileSaveReceipt(request)).toEqual({
+      state: 'missing',
+    });
+    await expect(
+      c.saveProfile({ ...request, state: { cookies: [] } } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller('usr_other_profile', pool).forgetProfile({ profileId: request.requestId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    appEnv.BROWSER_HOME_PROFILE_V1 = false;
+    await expect(c.saveProfile(request)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await expect(c.profileSaveReceipt(request)).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+  });
 });
 
 describe('browserHome router — gate', () => {
@@ -128,7 +319,7 @@ describe('browserHome router — gate', () => {
     appEnv.BROWSER_HOME_ALLOWLIST = 'usr_listed';
     const { pool } = fakePool();
     await expect(caller('usr_unlisted', pool).open()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(caller('usr_listed', pool).open()).resolves.toEqual({
+    await expect(caller('usr_listed', pool).open()).resolves.toMatchObject({
       sessionId: 'bhs_usr_listed',
       url: null,
     });
@@ -143,15 +334,32 @@ describe('browserHome router — gate', () => {
 });
 
 describe('browserHome router — open / close', () => {
+  it('returns the owned instance capability snapshot before and during a task loan', async () => {
+    const capabilities = Object.freeze({
+      viewportV2: true,
+      observationV2: false,
+      replayV1: false,
+      routingV2: false,
+      collaborationV2: true as const,
+    });
+    const { pool } = fakePool(capabilities);
+    const c = caller('usr_snapshot', pool);
+    expect(await c.open()).toMatchObject({ capabilities });
+    pool.lend('usr_snapshot', 'tsk_snapshot');
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_snapshot', capabilities });
+    expect(pool.allocate).toHaveBeenCalledTimes(1);
+    await c.close();
+  });
+
   it('open creates once, then reuses; close releases', async () => {
     const { pool } = fakePool();
     const c = caller('usr_life', pool);
-    expect(await c.open()).toEqual({ sessionId: 'bhs_usr_life', url: null });
-    expect(await c.open()).toEqual({ sessionId: 'bhs_usr_life', url: null });
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_life', url: null });
+    expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_life', url: null });
     expect(pool.allocate).toHaveBeenCalledTimes(1);
     expect(pool.allocate).toHaveBeenCalledWith('bhs_usr_life', 'usr_life', undefined, {
       targetUrl: null,
-      sessionPolicy: 'anonymous',
+      sessionPolicy: 'personal_home',
     });
     expect(pool.setIdleTimeout).toHaveBeenCalledWith('bhs_usr_life', 15 * 60_000);
     expect(await c.close()).toEqual({ released: true });
@@ -268,7 +476,7 @@ describe('browserHome router — while a task holds the browser (step 4)', () =>
     const inst = pool.lend('usr_lent', 'tsk_running');
     const run = browserControlSessions.start(inst);
     try {
-      expect(await c.open()).toEqual({ sessionId: 'bhs_usr_lent', url: null });
+      expect(await c.open()).toMatchObject({ sessionId: 'bhs_usr_lent', url: null });
       expect(pool.allocate).toHaveBeenCalledTimes(1);
       expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/x' })).toEqual({
         ok: true,
@@ -309,6 +517,9 @@ describe('browserHome router — a page that does not load (P1-3)', () => {
     const { pool, gotos, loads } = fakePool();
     const c = caller('usr_loadfail', pool);
     await c.open();
+    // Home may first restore the address remembered by the preceding case. Only the
+    // following explicit navigation belongs to this load-failure assertion.
+    gotos.length = 0;
     const inst = pool.peek('bhs_usr_loadfail')!;
     loads.push(() => ({ url: 'chrome-error://chromewebdata/', error: new Error(raw) }));
     expect(await c.nav({ direction: 'goto', input: 'https://1.1.1.1/x' })).toEqual({

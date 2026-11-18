@@ -1,5 +1,30 @@
 import { z } from 'zod';
 
+/** Optional extension ability; keep the six mandatory v2 capabilities compatible. */
+export const USER_BROWSER_ACTIVITY_CAPABILITY = 'human_activity_v1' as const;
+export const USER_BROWSER_UPLOAD_CAPABILITY = 'task_file_upload_v1' as const;
+export const USER_BROWSER_CHOOSER_CAPABILITY = 'task_file_chooser_v1' as const;
+export const USER_BROWSER_DOWNLOAD_CAPABILITY = 'task_file_download_v1' as const;
+export const userBrowserActivitySchema = z
+  .object({
+    tabId: z.number().int().nonnegative(),
+    stamp: z.string().regex(/^[a-f0-9]{64}$/),
+    keys: z.number().int().min(0).max(1280),
+    pointers: z.number().int().min(0).max(60),
+    composing: z.boolean(),
+    interrupted: z.boolean(),
+  })
+  .strict();
+export type UserBrowserActivity = z.infer<typeof userBrowserActivitySchema>;
+/** Local page→extension relay. Never carries field values, key names or URLs. */
+export const nativeDocumentActivitySchema = userBrowserActivitySchema
+  .omit({ tabId: true, stamp: true })
+  .extend({
+    document: z.string().uuid(),
+    input: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
 export const USER_BROWSER_PROTOCOL = Object.freeze({
   version: 2 as const,
   capabilitiesVersion: 1 as const,
@@ -65,6 +90,21 @@ export const userBrowserTargetDescriptionSchema = z
     observationRevision: z.number().int().positive(),
     capturedAt: z.number().int().positive(),
     element: userBrowserElementSignalsSchema,
+    /** Present only for the opt-in bound file-delivery path. No local paths or
+     * names of files already selected by the human leave the document. */
+    fileInput: z
+      .object({
+        accept: z.string().max(1200),
+        multiple: z.boolean(),
+        disabled: z.boolean(),
+        directory: z.boolean(),
+        credentialForm: z.boolean(),
+        formOrigin: exactWebOriginSchema.nullable(),
+        formMethod: z.string().max(16),
+        selectedCount: z.number().int().nonnegative().max(10000),
+      })
+      .strict()
+      .optional(),
     /** The tab's current document, read by the extension (never the model):
      * origin + path only — query and hash values never leave the page — and
      * whether the full address (including query/hash) is a transaction page. */

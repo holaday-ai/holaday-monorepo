@@ -5,6 +5,8 @@ import { env } from '../../config/env.js';
 import { llmCalls } from '../../db/schema/llm-calls.js';
 import { taskFiles } from '../../db/schema/task-files.js';
 import { taskSteps } from '../../db/schema/task-steps.js';
+import { tasks } from '../../db/schema/tasks.js';
+import { users } from '../../db/schema/users.js';
 import { ExecutionDrain } from '../../execution/execution-drain.js';
 import { reloadFeatureFlagsForTest } from '../../execution/feature-flags.js';
 import {
@@ -281,10 +283,16 @@ it.each([
   const fileRows: Record<string, unknown>[] = [];
   const storageWrites: Array<{ userExternalId: string; buffer: Buffer; filename: string }> = [];
   if (scenario === 'local-file') {
+    const stored = new Map<string, Buffer>();
     vi.spyOn(storageProvider, 'getSharedStorageProvider').mockReturnValue({
       put: async (input: { userExternalId: string; buffer: Buffer; filename: string }) => {
         storageWrites.push(input);
+        stored.set('fixture/output/notes.csv', input.buffer);
         return { storagePath: 'fixture/output/notes.csv' };
+      },
+      get: async (path: string) => stored.get(path) ?? null,
+      delete: async (path: string) => {
+        stored.delete(path);
       },
     } as unknown as ReturnType<typeof storageProvider.getSharedStorageProvider>);
   }
@@ -292,7 +300,7 @@ it.each([
   const regionWrites: unknown[] = [];
   const db = {
     select(projection: Record<string, unknown> = {}) {
-      const rows =
+      let rows: Record<string, unknown>[] =
         'plan' in projection
           ? [
               {
@@ -333,7 +341,7 @@ it.each([
       const query = {
         where: () => query,
         orderBy: () => query,
-        limit: async () => rows,
+        limit: () => Object.assign(Promise.resolve(rows), { for: () => Promise.resolve(rows) }),
         // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable; this is the database boundary fixture.
         then: (resolve: (rows: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
       };
@@ -343,7 +351,15 @@ it.each([
         // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are awaitable; this is the database boundary fixture.
         then: (resolve: (rows: unknown[]) => unknown) => Promise.resolve(fileRows).then(resolve),
       };
-      return { from: (table: unknown) => (table === taskFiles ? fileQuery : query) };
+      return {
+        from: (table: unknown) => {
+          if (scenario === 'local-file' && 'status' in projection) {
+            if (table === users) rows = [{ id: 41, status: 'active' }];
+            else if (table === tasks) rows = [{ id: 41, userId: 41, status: 'executing' }];
+          }
+          return table === taskFiles ? fileQuery : query;
+        },
+      };
     },
     insert: (table: unknown) => ({
       values: async (row: Record<string, unknown>) => {

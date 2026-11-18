@@ -4,7 +4,10 @@ import {
 } from '@/components/CdpScreencastViewport';
 import { InputArea } from '@/components/InputArea';
 import { BrowserHomeAddressBar } from '@/components/browser-home/BrowserHomeAddressBar';
+import { BrowserHomeFiles } from '@/components/browser-home/BrowserHomeFiles';
+import { BrowserHomeProfiles } from '@/components/browser-home/BrowserHomeProfiles';
 import { BrowserHomeTaskCard } from '@/components/browser-home/BrowserHomeTaskCard';
+import { BrowserHomeUpload } from '@/components/browser-home/BrowserHomeUpload';
 import { BrowserHomeView, recentBrowserHomeTasks } from '@/components/browser-home/BrowserHomeView';
 import {
   type ComposerSubmitResult,
@@ -12,6 +15,7 @@ import {
   keepComposerOnSubmitFailure,
 } from '@/components/composer-submit';
 import { useToast } from '@/components/ui/toast';
+import { getAccessToken } from '@/lib/auth';
 import {
   type BrowserHomeNavDirection,
   type BrowserHomeRegion,
@@ -35,7 +39,15 @@ import { useNavigate } from 'react-router-dom';
 
 type SessionState =
   | { status: 'opening' }
-  | { status: 'ready'; sessionId: string }
+  | {
+      status: 'ready';
+      sessionId: string;
+      viewportV2: boolean;
+      collaborationV2: boolean;
+      filesAvailable: boolean;
+      filesEnabled: boolean;
+      uploadInstanceId: string | null;
+    }
   | { status: 'error'; message: string };
 
 /** One id per page mount: the server counts open /browser pages (P2-4, see browserHome.close). */
@@ -63,9 +75,13 @@ function newViewerId(): string {
 export function BrowserHomePage({
   region,
   plan,
+  ownerId,
+  profilesEnabled = false,
 }: {
   region: BrowserHomeRegion | null;
   plan: string;
+  ownerId?: string;
+  profilesEnabled?: boolean;
 }): JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -98,7 +114,15 @@ export function BrowserHomePage({
     const promise = trpc.browserHome.open.mutate(viewerId ? { viewerId } : undefined).then(
       (res) => {
         if (!aliveRef.current) return null;
-        setSession({ status: 'ready', sessionId: res.sessionId });
+        setSession({
+          status: 'ready',
+          sessionId: res.sessionId,
+          viewportV2: res.capabilities?.viewportV2 === true,
+          collaborationV2: res.capabilities?.collaborationV2 === true,
+          filesAvailable: res.filesAvailable === true,
+          filesEnabled: res.filesEnabled === true,
+          uploadInstanceId: res.uploadsEnabled === true ? res.uploadInstanceId : null,
+        });
         // An open browser (or the last address, restored) goes on showing its page.
         if (isWebPageUrl(res.url) && !navigatedRef.current) {
           setUrl(res.url);
@@ -120,9 +144,33 @@ export function BrowserHomePage({
   React.useEffect(() => {
     aliveRef.current = true;
     const viewerId = newViewerId();
+    const viewerToken = getAccessToken();
     viewerIdRef.current = viewerId;
     void openSession();
+    // React cleanup is not guaranteed on a reload or full-page navigation. Release exactly
+    // this document's viewer; a new document's open cancels the server's close grace.
+    const leaveDocument = () => {
+      if (!viewerToken) return;
+      void fetch('/api/trpc/browserHome.close', {
+        method: 'POST',
+        keepalive: true,
+        headers: { authorization: `Bearer ${viewerToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ viewerId }),
+      }).catch(() => undefined);
+    };
+    const rejoinDocument = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      if (getAccessToken() !== viewerToken) {
+        window.location.reload();
+        return;
+      }
+      void openSession({ quiet: true });
+    };
+    window.addEventListener('pagehide', leaveDocument);
+    window.addEventListener('pageshow', rejoinDocument);
     return () => {
+      window.removeEventListener('pagehide', leaveDocument);
+      window.removeEventListener('pageshow', rejoinDocument);
       aliveRef.current = false;
       openRef.current = null;
       if (viewerIdRef.current === viewerId) viewerIdRef.current = null;
@@ -283,7 +331,22 @@ export function BrowserHomePage({
         pending={pending}
         onNavigate={navigateBrowser}
         onHome={() => setView('home')}
+        endContent={
+          ownerId ? (
+            <>
+              {profilesEnabled && (
+                <BrowserHomeProfiles key={`profiles-${ownerId}`} ownerId={ownerId} />
+              )}
+              {session.status === 'ready' && session.filesAvailable && (
+                <BrowserHomeFiles ownerId={ownerId} receiving={session.filesEnabled} />
+              )}
+            </>
+          ) : null
+        }
       />
+      {ownerId && session.status === 'ready' && session.uploadInstanceId && (
+        <BrowserHomeUpload ownerId={ownerId} instanceId={session.uploadInstanceId} />
+      )}
       <div className="relative min-h-0 flex-1">
         {view === 'home' ? (
           <div className="h-full overflow-y-auto">
@@ -304,9 +367,13 @@ export function BrowserHomePage({
                 <CdpScreencastViewport
                   wsUrl={wsUrl}
                   streamToken={streamToken}
+                  viewOnly={session.status !== 'ready' || !session.collaborationV2}
+                  viewportV2={session.status === 'ready' && session.viewportV2}
+                  collaborationV2={session.status === 'ready' && session.collaborationV2}
                   fitMode="contain"
                   onUrlChange={handleUrlChange}
                   onStatusChange={handleStreamStatus}
+                  onInputRefused={() => toast.show('页面或连接已变化，请等画面更新后重试', 'info')}
                 />
               )}
               {session.status === 'error' ? (

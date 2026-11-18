@@ -6,6 +6,7 @@ export interface BrowserCapabilities {
   readonly observationV2: boolean;
   readonly replayV1: boolean;
   readonly routingV2: boolean;
+  readonly collaborationV2?: true;
 }
 
 /** Existing test/legacy instances get a single owner-based snapshot on first use. */
@@ -26,6 +27,7 @@ export function resolveBrowserCapabilities(
     observation?: boolean;
     replay?: boolean;
     routing?: boolean;
+    collaboration?: boolean;
   },
 ) {
   const canary = Boolean(
@@ -41,6 +43,7 @@ export function resolveBrowserCapabilities(
     observationV2: Boolean(config.observation || canary),
     replayV1: Boolean(config.replay || canary),
     routingV2: Boolean(config.routing || canary),
+    ...(config.collaboration ? { collaborationV2: true as const } : {}),
   };
 }
 export function browserCapabilities(userId?: string) {
@@ -50,5 +53,6 @@ export function browserCapabilities(userId?: string) {
     observation: env.BROWSER_OBSERVATION_V2 || process.env.BROWSER_OBSERVATION_V2 === 'true',
     replay: env.BROWSER_REPLAY_V1 || process.env.BROWSER_REPLAY_V1 === 'true',
     routing: getFeatureFlags().USER_BROWSER_ROUTING_V2,
+    collaboration: env.BROWSER_COLLABORATION_V2 || process.env.BROWSER_COLLABORATION_V2 === 'true',
   });
 }

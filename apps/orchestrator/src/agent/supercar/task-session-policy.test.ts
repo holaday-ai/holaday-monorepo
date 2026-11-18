@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { deriveTaskSessionPolicy } from './user-browser-routing.js';
 
 describe('deriveTaskSessionPolicy (FIX-INTENT-ROUTE-BROWSER)', () => {
+  it('preserves the explicitly selected personal workspace even for a public lookup inside it', () => {
+    expect(
+      deriveTaskSessionPolicy({
+        identityRequired: false,
+        publicCloudRequested: false,
+        route: { sessionPolicy: 'personal_home' },
+      }),
+    ).toBe('personal_home');
+    expect(
+      deriveTaskSessionPolicy({
+        identityRequired: true,
+        publicCloudRequested: true,
+        route: { sessionPolicy: 'personal_home' },
+      }),
+    ).toBe('anonymous');
+  });
   it.each([
     [
       'public task, cloud route',

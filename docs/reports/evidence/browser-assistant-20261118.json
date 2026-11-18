@@ -1,0 +1,97 @@
+{
+  "runtimeSourceCommit": "91825516e2339c767432328b25f1533f9fec4f02",
+  "candidateCreatedAt": "2026-11-18T07:53:18.876062+00:00",
+  "candidate": {
+    "node": "v22.23.3",
+    "extension": {
+      "name": "HOLA DAY",
+      "version": "0.0.5",
+      "minimum_chrome_version": "120",
+      "host_permissions": [
+        "<all_urls>"
+      ],
+      "background": {
+        "service_worker": "service-worker-loader.js",
+        "type": "module"
+      }
+    },
+    "authBridgeMatches": [
+      [
+        "https://holaday.ai/*",
+        "https://*.holaday.ai/*",
+        "https://hd-app.orangebench.tech/*"
+      ]
+    ],
+    "artifacts": {
+      "backend": {
+        "files": 1602,
+        "sizeBytes": 15533973,
+        "contentDigest": "8e29f7daf26e8398b3fc99ab2cb06a5886e7ae0135687303e5c8e9710b6367c2"
+      },
+      "web": {
+        "files": 332,
+        "sizeBytes": 37920446,
+        "contentDigest": "b9bd0ff8f4cbb5b96920fe21042a74b56beb094f7e9d05c1949f86f7440adbac"
+      },
+      "extension": {
+        "files": 19,
+        "sizeBytes": 3541308,
+        "contentDigest": "4ef26a42607a227f898a114c55c9afbcfd81d38215b93d00bcad186effd1e606"
+      }
+    },
+    "archives": {
+      "holaday-extension-0.0.5.zip": {
+        "sizeBytes": 998275,
+        "sha256": "e6fb009e9c715bcfdab64ba93fa87565014a7dbe38056d258f3aff6293a787ac"
+      },
+      "holaday-workbench-91825516.zip": {
+        "sizeBytes": 33106916,
+        "sha256": "849a4f56212d8c89f5b2ecb7d7e1fef96d84af7aede8dae3f62eb609c6745417"
+      }
+    },
+    "dependencies": {
+      "pnpm-lock.yaml": "be14ace822f4f616bb5463addc4df9311b449a6bc1b5eacaa7e6441aa25b99b4",
+      "patches/playwright-crx@0.15.0.patch": "c024d5adc65c95cfcdbff07b1030cc8e0c277437d5b43f753c40fb2869f92a85"
+    },
+    "protocol": {
+      "websocket": 1,
+      "selectedBrowser": 2,
+      "capabilitiesVersion": 1,
+      "screenshot": "optional task_screenshot_v1;requires collaborationv2 and negotiated real port"
+    },
+    "zipIntegrity": "passed",
+    "mapsInPublicExtension": false,
+    "productionModified": false
+  },
+  "prBase": {
+    "branch": "claude/capability-recovery",
+    "sha": "16c50c8c4647e066632b49ffefa1a6c4d0183ff4",
+    "reason": "verified ancestor;recent merged PR integration target;defaultPoC wrongscope"
+  },
+  "productionReadOnly": {
+    "node": "v22.23.3",
+    "release": "cr-b1053fbf",
+    "processDatabaseMatchesQueriedSource": true,
+    "businessRowsRead": 0,
+    "mutations": 0,
+    "0067": "table/columns/indexespresent",
+    "0069": "table/columns/indexespresent",
+    "0070": "column+uniqueindexpresent",
+    "0071": "browser_source missing;notapplied"
+  },
+  "goals": {
+    "Goal1": "edc55e1461ceec9074d555914347d7614a484bc0",
+    "Goal2": "4b6ea02281b82d6b013da7b518db97507b759b32",
+    "Goal3": "22a9a87b889565393372ea51b3283e94a44a243f"
+  },
+  "externalModelCalls": 33,
+  "undiscountedModelEstimateUsd": 0.525996,
+  "actualProviderChargeUsd": null,
+  "limits": [
+    "no independent review yet",
+    "no formal repository-wide release check",
+    "no production KMS/site startup wiring or real-account/physical OS acceptance",
+    "installed/store channel unverified",
+    "no merge/deploy/store publication"
+  ]
+}

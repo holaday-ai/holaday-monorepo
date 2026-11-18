@@ -48,6 +48,11 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
   capabilities?: BrowserCapabilities;
   /** Fixed at allocation; adoption never mixes anonymous and identity contexts. */
   sessionPolicy?: BrowserSessionPolicy;
+  cloudProfileId?: string;
+  /** Server-installed transfer lifetime; not client capability or persisted identity. */
+  homeFileTransfers?: { pending(): boolean };
+  /** The original Home page is waiting for a person to select/cancel files. */
+  homeFileUploads?: { pending(): boolean };
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;
@@ -100,20 +105,26 @@ export const BROWSER_HOME_SESSION_PREFIX = 'bhs_';
  * routing decision at task creation (never from model or client input):
  * - `anonymous`: no vault grant, cookie, storage or profile is loaded and no
  *   identity-bearing context is reused — the "公开云端（看不到你的个人信息）" promise;
- * - `vault_allowed`: a connected site grant for the target may be loaded.
+ * - `vault_allowed`: a connected readonly site grant for the target may be loaded;
+ * - `personal_home`: the user's personal workspace, including manual login. Only
+ *   an explicitly selected owned cloudProfileId may load saved state into it.
  * A missing policy is treated as `anonymous` (fail closed).
  */
-export type BrowserSessionPolicy = 'anonymous' | 'vault_allowed';
+export type BrowserSessionPolicy = 'anonymous' | 'vault_allowed' | 'personal_home';
 
 export interface BrowserSessionTarget {
   /** Trusted server snapshot resolved from the task owner at admission. */
   capabilities?: BrowserCapabilities;
   targetUrl?: string | null;
   sessionPolicy?: BrowserSessionPolicy;
+  cloudProfileId?: string;
+  /** Server-only Home setup: a file observer is installed before navigation. */
+  homeDownloadsEnabled?: boolean;
 }
 
-/** Only an explicit `vault_allowed` lets a session be loaded. */
+/** Missing/unknown policy never inherits personal or readonly saved state. */
 export function sessionPolicyOf(session?: BrowserSessionTarget): BrowserSessionPolicy {
+  if (session?.sessionPolicy === 'personal_home') return 'personal_home';
   return session?.sessionPolicy === 'vault_allowed' ? 'vault_allowed' : 'anonymous';
 }
 

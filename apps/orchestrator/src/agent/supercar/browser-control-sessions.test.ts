@@ -1,7 +1,74 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BrowserControlSessions } from './browser-control-sessions.js';
 
 describe('task browser control sessions', () => {
+  it.each([false, true])(
+    'does not replace a control while its native picker remains unresolved (v2=%s)',
+    async (v2) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      const sessions = new BrowserControlSessions();
+      const instance = {
+        taskId: 'home',
+        userId: 'owner',
+        capabilities: {
+          viewportV2: true,
+          observationV2: true,
+          replayV1: false,
+          routingV2: false,
+          ...(v2 ? { collaborationV2: true as const } : {}),
+        },
+      };
+      const review = sessions.review(instance);
+      const release = review.control.beginPendingInteraction();
+      try {
+        expect(() => sessions.start(instance)).toThrow('browser_runner_active');
+        const waiting = sessions.inputSettledWithin(instance, 100);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(await waiting).toBe(false);
+        release();
+        const settled = sessions.inputSettledWithin(instance, 3000);
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(await settled).toBe(true);
+      } finally {
+        review.control.close();
+        vi.useRealTimers();
+      }
+    },
+  );
+  it('does not lend a personal browser to a task until held inputs and the quiet period finish', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const sessions = new BrowserControlSessions();
+    const instance = {
+      taskId: 'home',
+      userId: 'owner',
+      capabilities: {
+        viewportV2: true,
+        observationV2: true,
+        replayV1: false,
+        routingV2: false,
+        collaborationV2: true as const,
+      },
+    };
+    const review = sessions.review(instance);
+    const source = {};
+    try {
+      review.control.setHeldInput(source, { keys: 1, pointers: 0, composing: false });
+      const blocked = sessions.inputSettledWithin(instance, 100);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await blocked).toBe(false);
+      review.control.setHeldInput(source, { keys: 0, pointers: 0, composing: false });
+      const released = sessions.inputSettledWithin(instance, 3_000);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(review.control.humanBusy()).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await released).toBe(true);
+    } finally {
+      review.control.close();
+      vi.useRealTimers();
+    }
+  });
   it('waits for an already accepted legacy input before binding a controlled runner', () => {
     const sessions = new BrowserControlSessions();
     const executor = {};

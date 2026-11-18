@@ -52,6 +52,20 @@ describe('unified browser tool definitions', () => {
     expect(isMutatingBrowserAction({ tool: 'snapshot' })).toBe(false);
     expect(isMutatingBrowserAction({ tool: 'click', ref: 'e1' })).toBe(true);
   });
+  it('accepts only one concrete file target, including a host-issued chooser id', () => {
+    const chooserId = 'chooser_119a211d-7940-4217-9fa3-d37bad35ceee';
+    expect(parseUnifiedBrowserAction('upload', { chooserId, fileIds: ['file_report'] })).toEqual({
+      tool: 'upload',
+      chooserId,
+      fileIds: ['file_report'],
+    });
+    for (const input of [
+      { ref: 'e3', chooserId, fileIds: ['file_report'] },
+      { chooserId: '#file', fileIds: ['file_report'] },
+      { chooserId, fileIds: ['file_report', 7] },
+    ])
+      expect(() => parseUnifiedBrowserAction('upload', input)).toThrow(UnifiedToolInputError);
+  });
 });
 
 describe('Playwright unified executor (local static page)', () => {
@@ -113,6 +127,34 @@ describe('Playwright unified executor (local static page)', () => {
       await page.close();
     }
   }, 30_000);
+  it('does not disclose upload bytes without a prepared host approval', async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent('<label>Report <input type="file" id="report"></label>');
+      const tools = createPlaywrightUnifiedExecutor(page, {
+        resolveUploads: async () => [
+          {
+            fileId: 'file_task_input',
+            name: 'report.csv',
+            mimeType: 'text/csv',
+            buffer: Buffer.from('private,31\n'),
+          },
+        ],
+      });
+      const snapshot = await tools.execute({ tool: 'snapshot' });
+      const result = await tools.execute({
+        tool: 'upload',
+        ref: refFor(snapshot.text, /button "Report"/),
+        fileIds: ['file_task_input'],
+      });
+      expect(result.ok).toBe(false);
+      expect(
+        await page.locator('#report').evaluate((input: HTMLInputElement) => input.files?.length),
+      ).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
 });
 
 describe('snapshot URL shortening (batch 12)', () => {
