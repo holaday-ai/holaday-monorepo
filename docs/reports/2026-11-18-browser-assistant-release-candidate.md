@@ -2,6 +2,8 @@
 
 候选代码已完成Goal1–3的机制与有限任务验收。本文供评审和发布决定使用；没有合并、部署、执行生产迁移或正式全量检查。单路作者审查不能代替独立评审。
 
+第四阶段评审入口：[草稿PR #360](https://github.com/holaday-ai/holaday-monorepo/pull/360)，目标`claude/capability-recovery`；当前开发分支已推送，保留原工作树用于反馈修改。候选包、哈希、清单及简短恢复入口已冻结。
+
 ## 版本与评审基线
 
 实际集成分支为`claude/capability-recovery`，已刷新至`16c50c8c4647e066632b49ffefa1a6c4d0183ff4`。它是本分支祖先，且近期合并PR均以它为目标。仓库默认`claude/chrome-extension-poc-biwr6`属于旧PoC；以默认分支建PR会包含4917个历史文件，本次不用该错误范围。
