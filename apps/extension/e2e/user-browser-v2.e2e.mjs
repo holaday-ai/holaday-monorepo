@@ -5,7 +5,15 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,11 +30,13 @@ const ORCHESTRATOR_ROOT = fileURLToPath(new URL('../../orchestrator/', import.me
 
 const TOKEN = 'e2e-synthetic-token-0001';
 const TASK_ID = 'e2e-v2-task';
+const browserChannel = process.env.HOLADAY_E2E_BROWSER_CHANNEL ?? 'chromium';
 
 const server = new MockOrchestrator();
 let workDir;
 let context;
 let serviceWorker;
+let extensionInstallation;
 
 function buildExtension(outDir) {
   const result = spawnSync(
@@ -60,31 +70,91 @@ function buildExtension(outDir) {
 }
 
 before(async () => {
+  assert.ok(['chromium', 'chrome'].includes(browserChannel));
   await server.start();
   workDir = mkdtempSync(join(tmpdir(), 'holaday-ext-e2e-'));
   const extDir = join(workDir, 'extension');
   buildExtension(extDir);
   context = await chromium.launchPersistentContext(join(workDir, 'profile'), {
-    channel: 'chromium',
+    channel: browserChannel,
     headless: process.env.HOLADAY_E2E_HEADED !== '1',
+    ignoreDefaultArgs: browserChannel === 'chrome' ? ['--disable-extensions'] : undefined,
     args: [
       '--renderer-process-limit=2',
-      `--disable-extensions-except=${extDir}`,
-      `--load-extension=${extDir}`,
+      ...(browserChannel === 'chrome'
+        ? ['--enable-unsafe-extension-debugging']
+        : [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`]),
     ],
   });
+  if (browserChannel === 'chrome') {
+    const cdp = await context.browser().newBrowserCDPSession();
+    const browserVersion = await cdp.send('Browser.getVersion');
+    const loaded = await cdp.send('Extensions.loadUnpacked', { path: extDir });
+    const extensions = await cdp.send('Extensions.getExtensions');
+    const installed = extensions.extensions.find((item) => item.id === loaded.id);
+    assert.ok(installed, 'Actual Chrome must load the candidate QA extension');
+    assert.equal(installed.path, realpathSync(extDir));
+    const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
+    assert.equal(installed.id, loaded.id);
+    assert.equal(installed.enabled, true);
+    assert.equal(installed.name, manifest.name);
+    assert.equal(installed.version, manifest.version);
+    extensionInstallation = {
+      browserProduct: browserVersion.product,
+      installationMethod: 'Extensions.loadUnpacked over owned private pipe',
+      requestedPath: extDir,
+      ...installed,
+    };
+    await cdp.detach();
+  }
   serviceWorker =
     context.serviceWorkers()[0] ??
     (await context.waitForEvent('serviceworker', { timeout: 15_000 }));
+  if (extensionInstallation) {
+    const runtime = await serviceWorker.evaluate(() => ({
+      id: chrome.runtime.id,
+      name: chrome.runtime.getManifest().name,
+      version: chrome.runtime.getManifest().version,
+    }));
+    assert.equal(runtime.id, extensionInstallation.id);
+    assert.equal(runtime.name, extensionInstallation.name);
+    assert.equal(runtime.version, extensionInstallation.version);
+    const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+    if (artifactDir) {
+      mkdirSync(artifactDir, { recursive: true });
+      writeFileSync(
+        join(artifactDir, 'chrome-installation.json'),
+        JSON.stringify({ browserChannel, ...extensionInstallation, runtime }, null, 2),
+      );
+    }
+  }
   if (process.env.HOLADAY_E2E_DEBUG === '1') {
     context.on('console', (msg) => console.log(`[browser:${msg.type()}]`, msg.text()));
   }
 });
 
 after(async () => {
-  await context?.close().catch(() => undefined);
+  let browserClosed = false;
+  await context
+    ?.close()
+    .then(() => {
+      browserClosed = true;
+    })
+    .catch(() => undefined);
   await server.stop().catch(() => undefined);
   if (workDir) rmSync(workDir, { recursive: true, force: true });
+  const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+  if (artifactDir) {
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(
+      join(artifactDir, 'cleanup.json'),
+      JSON.stringify(
+        { browserClosed, ownedProfileRemoved: !!workDir && !existsSync(workDir) },
+        null,
+        2,
+      ),
+    );
+  }
 });
 
 async function loadServerModule(name) {
@@ -127,7 +197,13 @@ test(
     await connect;
     assert.deepEqual(server.received.find((m) => m.type === 'client.hello').userBrowserProtocol, {
       ...protocol,
-      capabilities: [...protocol.capabilities, 'human_activity_v1', 'task_file_upload_v1'],
+      capabilities: [
+        ...protocol.capabilities,
+        'human_activity_v1',
+        'task_file_upload_v1',
+        'task_file_chooser_v1',
+        'task_file_download_v1',
+      ],
     });
     const open = async (p) => {
       await p.bringToFront();

@@ -76,6 +76,7 @@ const extension = join(root, 'apps/extension');
 const payload = Buffer.from(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
 const expectedAnalysis = 'metric,value\nsum,1099.9\nrows,10001\n';
 const captureScreenshot = process.env.HOLADAY_CHROME_APP_SCREENSHOT === '1';
+const browserChannel = process.env.HOLADAY_CHROME_APP_CHANNEL ?? 'chromium';
 const intent = `从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我${captureScreenshot ? '，另外截图并一并交付截图文件' : ''}`;
 const hash = (buffer: Uint8Array) => createHash('sha256').update(buffer).digest('hex');
 const originalEnv = { ...env };
@@ -147,6 +148,7 @@ afterAll(async () => {
 it.runIf(realSql || isBuiltin('node:sqlite'))(
   'requires native SQLite or explicit MySQL opt-in: submits a plugin report from the full App Composer and restores both files through task history after reload',
   async () => {
+    expect(['chromium', 'chrome']).toContain(browserChannel);
     temp = await realpath(await mkdtemp(join(tmpdir(), 'ba-formal-chrome-file-')));
     const artifacts = process.env.HOLADAY_E2E_ARTIFACT_DIR ?? join(temp, 'artifacts');
     await mkdir(artifacts, { recursive: true });
@@ -753,14 +755,39 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       'workbench-build',
     );
     context = await chromium.launchPersistentContext(join(temp, 'profile'), {
-      channel: 'chromium',
+      channel: browserChannel,
       headless: true,
+      ignoreDefaultArgs: browserChannel === 'chrome' ? ['--disable-extensions'] : undefined,
       args: [
         '--renderer-process-limit=2',
-        `--disable-extensions-except=${extensionDir}`,
-        `--load-extension=${extensionDir}`,
+        ...(browserChannel === 'chrome'
+          ? ['--enable-unsafe-extension-debugging']
+          : [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`]),
       ],
     });
+    let extensionInstallation: Record<string, unknown> | undefined;
+    if (browserChannel === 'chrome') {
+      const cdp = await context.browser()!.newBrowserCDPSession();
+      const browserVersion = await cdp.send('Browser.getVersion');
+      // Branded Chrome no longer accepts --load-extension; use the supported private-pipe API.
+      const loaded = await cdp.send('Extensions.loadUnpacked', { path: extensionDir });
+      const extensions = await cdp.send('Extensions.getExtensions');
+      const installed = extensions.extensions.find((item) => item.path === extensionDir);
+      expect(installed, 'Actual Chrome must load the candidate QA extension').toBeDefined();
+      const builtManifest = JSON.parse(await readFile(join(extensionDir, 'manifest.json'), 'utf8'));
+      expect(installed).toMatchObject({
+        id: loaded.id,
+        enabled: true,
+        name: builtManifest.name,
+        version: builtManifest.version,
+      });
+      extensionInstallation = {
+        browserProduct: browserVersion.product,
+        installationMethod: 'Extensions.loadUnpacked over owned private pipe',
+        ...installed,
+      };
+      await cdp.detach();
+    }
     const bootLogs: string[] = [];
     context.on('console', (message) =>
       bootLogs.push(message.text().replace(/([?&]token=)[^&\s]+/g, '$1[synthetic]')),
@@ -789,6 +816,18 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
         );
     });
     const workerReadyMs = Math.round(performance.now() - bootStarted);
+    if (extensionInstallation)
+      expect(
+        await worker.evaluate(() => ({
+          id: chrome.runtime.id,
+          name: chrome.runtime.getManifest().name,
+          version: chrome.runtime.getManifest().version,
+        })),
+      ).toMatchObject({
+        id: extensionInstallation.id,
+        name: extensionInstallation.name,
+        version: extensionInstallation.version,
+      });
     const handshakeStarted = performance.now();
     // Clean install clears auth asynchronously. Re-seed one stable token only when absent;
     // changing it every pass restarts an in-flight WS preflight on slower launches.
@@ -1093,6 +1132,8 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
           idempotencyStatements,
           modelAPICalls: 0,
           chromium: context.browser()!.version(),
+          browserChannel,
+          extensionInstallation,
           browserPlugin: 'Browser plugin not available; using repository Playwright workflow',
           buildFiles: hashes,
           limits: [

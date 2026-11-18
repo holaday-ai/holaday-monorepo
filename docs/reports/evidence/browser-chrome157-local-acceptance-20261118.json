@@ -1,0 +1,208 @@
+{
+  "kind": "holaday-chrome157-local-acceptance-v1",
+  "observedAtUTC": "2026-11-18T23:33:25.296764+00:00",
+  "runtimeSourceCommit": "2f22be1dc0a49a3874cbabba651d5eb40b3d2795",
+  "baseEvidenceCommit": "842257118881f68e2e558f1e7a14b4c9c993ba85",
+  "scope": "actual branded Chrome + current repository QA extension and full App; loopback pages, synthetic account/model; not real website/account/physical acceptance",
+  "productionRuntimeChanged": false,
+  "fullApp": {
+    "measurement": {
+      "exitCode": 0,
+      "seconds": 27.03,
+      "passed": 1,
+      "failed": 0,
+      "pending": 0
+    },
+    "browserProduct": "Chrome/157.0.8103.79",
+    "extension": {
+      "id": "gbbpnbaniiofpnobmgmkjjbifolfdplh",
+      "name": "HOLA DAY · Local QA",
+      "version": "0.0.3",
+      "enabled": true,
+      "installationMethod": "Extensions.loadUnpacked over owned private pipe"
+    },
+    "fullAppComposer": true,
+    "historyReload": true,
+    "persistence": "file-backed-fixture",
+    "originalExports": 1,
+    "textReadScope": "bounded preview, not complete original text; separate aggregate scans all rows",
+    "aggregateScanComplete": true,
+    "analyzedRows": 10001,
+    "sum": "1099.9",
+    "sourceUserPageUnchanged": true,
+    "otherTabUnchanged": true,
+    "automatedTypingDuringOriginalExport": true,
+    "views": [
+      {
+        "width": 1440,
+        "height": 900,
+        "files": [
+          {
+            "filename": "report.csv",
+            "sha256": "e930101747adf5b900376d7e9079c48c81b4e518257a238a18d106a6beb25bbe",
+            "sizeBytes": 90027,
+            "bounds": {
+              "x": 536,
+              "y": 454,
+              "width": 414,
+              "height": 40
+            }
+          },
+          {
+            "filename": "analysis.csv",
+            "sha256": "9df3c578f0067ea37b6b26f1d1218520fd0fc7d113224241edb82f0141a61e43",
+            "sizeBytes": 35,
+            "bounds": {
+              "x": 536,
+              "y": 368,
+              "width": 414,
+              "height": 40
+            }
+          }
+        ]
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "files": [
+          {
+            "filename": "report.csv",
+            "sha256": "e930101747adf5b900376d7e9079c48c81b4e518257a238a18d106a6beb25bbe",
+            "sizeBytes": 90027,
+            "bounds": {
+              "x": 37,
+              "y": 234.75,
+              "width": 316,
+              "height": 40
+            }
+          },
+          {
+            "filename": "analysis.csv",
+            "sha256": "9df3c578f0067ea37b6b26f1d1218520fd0fc7d113224241edb82f0141a61e43",
+            "sizeBytes": 35,
+            "bounds": {
+              "x": 37,
+              "y": 148.75,
+              "width": 316,
+              "height": 40
+            }
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "consoleErrors": [],
+    "ownedProfileRemoved": true
+  },
+  "protocol": {
+    "measurement": {
+      "exitCode": 0,
+      "seconds": 80.65,
+      "passed": null,
+      "failed": null,
+      "pending": null,
+      "tests": 14,
+      "pass": 14,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "countMeaning": "13 child cases plus parent =14 Node tests; one independent batch",
+    "browserProduct": "Chrome/157.0.8103.79",
+    "extension": {
+      "id": "lenkleffpfcbiipjefcghhfkonjkfpcm",
+      "name": "HOLA DAY · Local QA",
+      "version": "0.0.3",
+      "enabled": true,
+      "installationMethod": "Extensions.loadUnpacked over owned private pipe"
+    },
+    "canonicalInstallationPathVerified": true,
+    "cases": [
+      "task-tab preparation survives a worker crash before the marker receipt and after navigation",
+      "the bundled sidepanel resumes unknown preparation and creation across closes and a worker restart",
+      "background task tab keeps normal browsing and input untouched",
+      "bundled sidepanel sends an independent target while the user switches pages",
+      "open v2 handshake and ordinary button auto click through unified gate",
+      "pay, icon delete, focused payment Enter and generic submit ask confirmation with zero effects",
+      "native typing invalidates the old target, preserves the edit and permits a fresh decision",
+      "native held keys, drag and trusted IME yield naturally with exact task/document binding",
+      "iframe, shadow, ambiguity, missing target and stale DOM revision",
+      "real hit target and page context: shadow, overlays, transaction pages, closed-shadow focus",
+      "scroll/select and list/new/switch never admit unrelated user tabs",
+      "cross-origin navigation refuses observation until a fresh exact-origin grant",
+      "server client recognizes old plugin as capability_missing and offline identity route awaits user"
+    ],
+    "sidepanelRecovery": {
+      "preparationRequests": 2,
+      "taskCreateRequests": 1,
+      "acknowledgementRequests": 1,
+      "duplicateTasks": 0,
+      "duplicateTaskPages": 0,
+      "workerSessionIdentityPreserved": true,
+      "userInputPreserved": true,
+      "sourceUrlNeverUploaded": true,
+      "width": 390,
+      "overflow": false,
+      "syntheticOnly": true,
+      "physicalOsInputAcceptance": false
+    },
+    "cleanup": {
+      "browserClosed": true,
+      "ownedProfileRemoved": true
+    },
+    "physicalOsInputAcceptance": false
+  },
+  "checks": {
+    "types": {
+      "mode": "types",
+      "exitCode": 0,
+      "seconds": 13.09,
+      "heapMB": 2048
+    },
+    "static": {
+      "mode": "static",
+      "exitCode": 0,
+      "seconds": 0.31,
+      "heapMB": 512
+    }
+  },
+  "failedAttempts": [
+    {
+      "batch": "red",
+      "reason": "old Chrome CLI flags did not load extension",
+      "exitCode": 1,
+      "seconds": 28.43
+    },
+    {
+      "batch": "protocol-red",
+      "reason": "old Chrome CLI flags did not load extension",
+      "exitCode": 1,
+      "seconds": 5.61
+    },
+    {
+      "batch": "protocol-green",
+      "reason": "raw macOS symlink path comparison failed despite API installation",
+      "exitCode": 1,
+      "seconds": 5.48
+    },
+    {
+      "batch": "protocol-green2",
+      "reason": "old expected hello omitted chooser and download capabilities already in shared contract",
+      "exitCode": 1,
+      "seconds": 6.06
+    }
+  ],
+  "awsCryptoCalls": 0,
+  "modelAPICalls": 0,
+  "dailyChromeProfileChanged": false,
+  "frozenProductionExtension": "0.0.5 remains unchanged; earlier load-only proof separate from these QA0.0.3 runs",
+  "realGithubSheetsTaskRun": false,
+  "realAccountRecoveryPassed": false,
+  "productionChanged": false,
+  "deployed": false,
+  "harnessSHA256": {
+    "apps/orchestrator/src/trpc/routers/tasks.chrome-full-app-http.test.ts": "b0b30507fa4c61b36b46f8b2574e3c120887440b941283112ff9e2e0cb5af550",
+    "apps/extension/e2e/user-browser-v2.e2e.mjs": "da021b2c574ab37980e425bf3f68e50c27bfdd59ea8a3032f4118c9f2dcb34fe"
+  }
+}

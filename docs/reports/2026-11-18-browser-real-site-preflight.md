@@ -4,6 +4,8 @@
 
 机器摘要：[browser-real-site-preflight-20261118.json](evidence/browser-real-site-preflight-20261118.json)。精确测试表URL、源文件、用例提示词、预期摘要和校验器保存在既有私有恢复目录的 `release-readiness-20261118/real-site-preflight`，不公开账号或业务数据。
 
+随后完成的不依赖AWS的Chrome157本机检查另见[完整App与协作协议验收](2026-11-18-browser-chrome157-local-acceptance.md)：文件闭环1/1、协议14/14，均为回环站点/合成账号/当前源码QA扩展。它补充本机功能证据，不改写本记录中真实GitHub/Sheets任务与账号仍未验的状态。
+
 ## 原始文件与预期统计
 
 GitHub读取固定合并提交 `91ba3cd6b7b208231f60265a7bb805ae7a5af2cf` 的 `docs/reports/evidence/pr360-premerge-20261118.json`。网络连接器返回的7560字节与该Git对象逐字节一致，SHA256为 `159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0`。
