@@ -42,6 +42,17 @@ function harness() {
 }
 
 describe('task-owned masked background capture', () => {
+  it('masks a sensitive value mirrored into a different frame', async () => {
+    const h = harness();
+    const child = {
+      ...h.frame,
+      evaluate: vi.fn(async () => [] as string[]),
+      getByText: vi.fn((text: string) => ({ text })),
+    };
+    h.raw.frames = () => [h.frame, child];
+    await captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'));
+    expect(child.getByText).toHaveBeenCalledWith('private-human-value', { exact: false });
+  });
   it('masks editable controls and sensitive mirrors in every frame without foreground APIs', async () => {
     const h = harness();
     const image = await captureMaskedTaskScreenshot(h.page, h.current, () =>

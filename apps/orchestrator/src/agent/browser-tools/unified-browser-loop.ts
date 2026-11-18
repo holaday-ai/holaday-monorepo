@@ -50,6 +50,7 @@ import {
   type TaskFileReadRequest,
   taskFileReadRequest,
 } from './browser-task-file-reader.js';
+import type { BrowserTaskOutputs } from './browser-task-output.js';
 import {
   ANALYZE_TASK_TABLE_TOOL,
   type TaskTableFact,
@@ -384,6 +385,7 @@ export interface UnifiedBrowserLoopInput {
   /** Host-owned task materials; never a URL/path or an unscoped account file. */
   readTaskFile?: (request: TaskFileReadRequest) => Promise<TaskFileRead>;
   analyzeTaskTable?: (request: TaskTableRequest) => Promise<TaskTableResult>;
+  taskOutputs?: Pick<BrowserTaskOutputs, 'tools' | 'create'>;
   /** Resolves when the user finished the handoff; rejects/false to stop. */
   requestHuman?: (request: { reason: string; message: string }) => Promise<
     boolean | UnifiedHumanReply
@@ -1209,6 +1211,7 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
               ...(input.readPage ? [READ_URL_TOOL] : []),
               ...(input.readTaskFile ? [READ_TASK_FILE_TOOL] : []),
               ...(input.analyzeTaskTable ? [ANALYZE_TASK_TABLE_TOOL] : []),
+              ...(input.taskOutputs?.tools ?? []),
             ],
         toolChoice: { type: 'any' },
       };
@@ -2681,6 +2684,29 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
         } catch {
           results.push(toolResult(call.id, '读取失败，请换一个来源或用浏览器打开。', true));
         }
+        continue;
+      }
+      if (call.name === 'create_file') {
+        if (!input.taskOutputs) {
+          results.push(
+            toolResult(call.id, '当前没有允许的文件生成能力，不能声称已经生成文件。', true),
+          );
+          continue;
+        }
+        const result = await input.taskOutputs.create(call.input);
+        if (input.signal?.aborted) return cancelled(step + 1);
+        trace.push({ tool: 'create_file', ok: result.ok });
+        input.onStep?.({ index: step, tool: 'create_file', ok: result.ok });
+        if (!result.ok && result.fatal)
+          return {
+            status: 'failed',
+            reason:
+              result.error === 'task_stopped'
+                ? '页面或任务执行权已变化，未写入文件；请核对实际页面后明确剩余任务。'
+                : '文件保存结果未确认，已停止；不会自动重复写入。',
+            steps: step + 1,
+          };
+        results.push(toolResult(call.id, JSON.stringify(result), !result.ok));
         continue;
       }
       if (call.name === 'analyze_task_table') {

@@ -21,7 +21,7 @@ it.runIf(process.env.HOLADAY_TASK_SCREENSHOT_NATIVE === '1')(
       res.setHeader('Content-Type', 'text/html');
       res.end(
         req.url === '/frame'
-          ? '<body style="margin:0"><input style="width:200px;height:40px;background:red" type="password" value="frame-secret">'
+          ? '<body style="margin:0"><input style="width:200px;height:40px;background:red" type="password" value="frame-secret"><div style="position:absolute;left:0;top:45px;width:200px;height:25px;background:red">private-password</div>'
           : `<body style="margin:0;background:white"><div style="position:absolute;left:20px;top:20px;width:80px;height:40px;background:#00ff00">Ready</div><input style="position:absolute;left:20px;top:100px;width:200px;height:40px;background:red" type="password" value="private-password"><div style="position:absolute;left:300px;top:100px;width:200px;height:40px;background:red">private-password</div><input data-hd-human-typed style="position:absolute;left:20px;top:180px;width:200px;height:40px;background:red" value="private-human-value"><div style="position:absolute;left:300px;top:180px;width:200px;height:40px;background:red">private-human-value</div><iframe src="/frame" style="position:absolute;left:20px;top:260px;width:250px;height:80px;border:0"></iframe>`,
       );
     });
@@ -132,6 +132,7 @@ it.runIf(process.env.HOLADAY_TASK_SCREENSHOT_NATIVE === '1')(
           [100, 200],
           [400, 200],
           [120, 280],
+          [120, 320],
         ].map(([x, y]) => Array.from(ctx.getImageData(x!, y!, 1, 1).data));
       }, saved!.buffer.toString('base64'));
       expect(samples[0]![1]).toBeGreaterThan(200);

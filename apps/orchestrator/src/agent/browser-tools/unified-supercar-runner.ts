@@ -33,6 +33,7 @@ import { browserReplayStore } from './browser-replay-service.js';
 import { BrowserReplayRecorder } from './browser-replay.js';
 import { BrowserTaskFileReader } from './browser-task-file-reader.js';
 import type { ValidatedBrowserTaskFile } from './browser-task-files.js';
+import { BrowserTaskOutputs } from './browser-task-output.js';
 import { BrowserTaskTable } from './browser-task-table.js';
 import { browserToolError } from './browser-tool-error.js';
 import { createBrowserUploadGate } from './browser-upload-gate.js';
@@ -333,6 +334,30 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       .filter(Boolean)
       .join('\n');
   let fileReadCorrection = false;
+  let outputCorrection = false;
+  let outputInputRevision: number | undefined;
+  const outputs = new BrowserTaskOutputs({
+    formats: opts.createFileFormats,
+    store: opts.onCreateFile,
+    signal: controller.signal,
+    current: async () =>
+      !controller.signal.aborted &&
+      !sessionStopped() &&
+      (!control ||
+        (control.canAgentAct() &&
+          !control.humanBusy() &&
+          !control.hasUnobservedHumanInput() &&
+          control.inputRevision === outputInputRevision)) &&
+      !(await opts.isTaskCancelled?.()) &&
+      (!opts.browserTaskFiles || (await opts.browserTaskFiles.isActive())) &&
+      !controller.signal.aborted &&
+      !sessionStopped() &&
+      (!control ||
+        (control.canAgentAct() &&
+          !control.humanBusy() &&
+          !control.hasUnobservedHumanInput() &&
+          control.inputRevision === outputInputRevision)),
+  });
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);
   const tools = createPlaywrightUnifiedExecutor(page, {
@@ -370,6 +395,8 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 throw new Error('任务文件读取已停止。');
               await opts.browserTaskFiles!.admitDownloaded(receipt);
             }
+            if (controller.signal.aborted || sessionStopped()) throw new Error('task_stopped');
+            outputs.admitDownload(receipt);
             return receipt;
           },
         }
@@ -1094,6 +1121,14 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       observationV2: capabilities.observationV2,
       requireBrowserEvidence: true,
       supportedTools: tools.supportedTools,
+      taskOutputs: {
+        tools: outputs.tools,
+        create: async (input) => {
+          toolsUsed.add('create_file');
+          outputInputRevision = control?.inputRevision;
+          return outputs.create(input);
+        },
+      },
       ...(fileTables
         ? {
             analyzeTaskTable: async (request: Parameters<BrowserTaskTable['run']>[0]) => {
@@ -1383,6 +1418,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           if (!control.canAgentAct()) return controlClosedStop();
           return humanActedSkip();
         }
+        const outputGap = outputs.gap(opts.userRequest ?? opts.intent);
+        if (answer.status === 'completed' && outputGap) {
+          if (outputCorrection || !outputs.tools.length)
+            return { kind: 'stop', outcome: { status: 'failed', reason: outputGap, steps: 0 } };
+          outputCorrection = true;
+          return { kind: 'skip', message: outputGap };
+        }
         if (
           fileReader &&
           (!env.BROWSER_TASK_FILES_V1 ||
@@ -1458,6 +1500,13 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     }
     switch (outcome.status) {
       case 'completed':
+        if (outputs.gap(opts.userRequest ?? opts.intent))
+          return {
+            status: 'failed',
+            reason: outputs.gap(opts.userRequest ?? opts.intent)!,
+            iterations: outcome.steps,
+            toolsUsed: [...toolsUsed],
+          };
         if (
           fileReader &&
           (!env.BROWSER_TASK_FILES_V1 ||
@@ -1480,7 +1529,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         return {
           status: 'completed',
           summary: withAlternateNotice(
-            [outcome.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
+            outputs.attach([outcome.summary, fileWorkNote()].filter(Boolean).join('\n\n')),
           ),
           iterations: outcome.steps,
           toolsUsed: [...toolsUsed],
@@ -1527,6 +1576,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
         if (
           timedOut &&
           outcome.heldAnswer &&
+          !outputs.gap(opts.userRequest ?? opts.intent) &&
           !fileWorkIncomplete() &&
           (!fileReader || env.BROWSER_TASK_FILES_V1)
         ) {
@@ -1541,7 +1591,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           return {
             status: 'completed',
             summary: withAlternateNotice(
-              [outcome.heldAnswer.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
+              outputs.attach(
+                [outcome.heldAnswer.summary, fileWorkNote()].filter(Boolean).join('\n\n'),
+              ),
             ),
             iterations: outcome.steps,
             toolsUsed: [...toolsUsed],

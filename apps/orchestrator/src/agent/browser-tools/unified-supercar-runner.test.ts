@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
 import type { EventEmitter } from 'node:events';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { env } from '../../config/env.js';
 import { parseFileForPrompt } from '../../files/parsers.js';
 import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
+import { renderFile } from '../../files/writers.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -502,6 +505,7 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     await c.page.setContent('<a href="/export.csv">Export report</a>');
     let fileId = '';
     let sumFactId = '';
+    let analysisFileId = '';
     const requests: NeutralMessagesRequest[] = [];
     const final = (value: string) =>
       call('finish', {
@@ -512,7 +516,8 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     try {
       const outcome = await runSupercarTask({
         taskId: 't_download_table',
-        intent: '下载本站CSV报表，统计全部记录的金额合计和记录数',
+        intent:
+          '下载本站CSV报表，统计全部记录的金额合计和记录数，生成 analysis.csv，将原文件和分析文件一并交付',
         browserTaskFiles: c.scope,
         executor: { getPage: async () => c.page } as never,
         onBrowserDownload: async ({ filename, buffer, sha256 }) => {
@@ -533,6 +538,26 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
             downloadUrl: `/api/files/${fileId}/download`,
             mimetype: row.mimetype,
             expiresAt: row.expiresAt!.toISOString(),
+          };
+        },
+        createFileFormats: ['csv'],
+        onCreateFile: async ({ filename, format, content }) => {
+          if (format !== 'csv') throw new Error('Unexpected output format');
+          const rendered = await renderFile(format, content);
+          const row = await c.f.service.storeOutput({
+            userIdInternal: 7,
+            userExternalId: 'usr_alice',
+            taskIdInternal: 9,
+            filename,
+            mimetype: rendered.mimetype,
+            buffer: rendered.buffer,
+          });
+          analysisFileId = row.externalId;
+          return {
+            fileId: row.externalId,
+            filename: row.filename,
+            size: row.sizeBytes,
+            downloadUrl: `/api/files/${row.externalId}/download`,
           };
         },
         messagesAdapter: scripted([
@@ -567,6 +592,16 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
             const text = JSON.stringify(r.messages.at(-1));
             sumFactId =
               [...text.matchAll(/tbf_[a-f0-9]{32}/g)].map((match) => match[0])[1] ?? 'missing';
+            return [
+              call('create_file', {
+                filename: 'analysis.csv',
+                format: 'csv',
+                content: 'metric,value\nsum,1099.9\nrows,10001\n',
+              }),
+            ];
+          },
+          (r) => {
+            requests.push(r);
             return [final('1099.8')];
           },
           (r) => {
@@ -578,18 +613,147 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       expect(outcome.status, JSON.stringify(outcome)).toBe('completed');
       expect(outcome.summary).toContain('1099.9');
       expect(outcome.summary).not.toContain('1099.8');
-      expect(JSON.stringify(requests[6]?.messages.at(-1))).toContain('统计');
-      expect(requests).toHaveLength(7);
+      expect(JSON.stringify(requests[7]?.messages.at(-1))).toContain('统计');
+      expect(requests).toHaveLength(8);
       expect(outcome.toolsUsed).toContain('analyze_task_table');
       expect(outcome.partial).toBeUndefined();
       expect(outcome.summary).toContain('32/');
       expect(outcome.summary).toContain('10001');
       expect(outcome.summary).toContain('网站导出范围尚未核实');
       expect(await c.page.locator('input').count()).toBe(0);
+      const original = await c.f.service.loadForUser(fileId, 7);
+      const generated = await c.f.service.loadForUser(analysisFileId, 7);
+      expect(original!.buffer).toEqual(Buffer.from(csv));
+      expect(
+        generated!.buffer
+          .toString()
+          .replace(/^\uFEFF/, '')
+          .replace(/\r\n/g, '\n'),
+      ).toBe('metric,value\nsum,1099.9\nrows,10001\n');
+      expect(outcome.summary).toContain(analysisFileId);
+      expect(await c.f.service.loadMany([fileId, analysisFileId], 8)).toEqual([]);
+      expect(c.f.records.filter((row) => row.kind === 'output')).toHaveLength(2);
+      const evidence = process.env.HOLADAY_REPRESENTATIVE_FILES_DIR;
+      if (evidence) {
+        await mkdir(evidence, { recursive: true });
+        const outputs = [original!, generated!];
+        for (const file of outputs) await writeFile(join(evidence, file.row.filename), file.buffer);
+        await writeFile(
+          join(evidence, 'cloud-files.json'),
+          JSON.stringify(
+            {
+              outcome,
+              rows: 10001,
+              sum: '1099.9',
+              wrongSumRejected: '1099.8',
+              outputs: outputs.map((file) => ({
+                fileId: file.row.externalId,
+                filename: file.row.filename,
+                size: file.buffer.length,
+                sha256: createHash('sha256').update(file.buffer).digest('hex'),
+                userId: file.row.userId,
+                taskId: file.row.taskId,
+              })),
+              otherOwnerDenied: true,
+              externalModelCalls: 0,
+              boundary:
+                'actual Chromium/cloud unified loop/FileService/local storage;scripted model,synthetic DB predicate fixture;no production writes or real account',
+            },
+            null,
+            2,
+          ),
+        );
+      }
     } finally {
       await c.cleanup();
     }
   }, 30_000);
+  it.each(['missing', 'unknown', 'forged'] as const)(
+    'does not complete a requested output with %s file storage',
+    async (fault) => {
+      const c = await uploadFixture(`t_output_${fault}`, false);
+      await c.page.setContent('<p>Ready</p>');
+      const store = vi.fn(async () => {
+        if (fault === 'unknown') throw new Error('lost write receipt');
+        return { fileId: 'fake', filename: 'analysis.csv', size: 20, downloadUrl: '/unowned' };
+      });
+      try {
+        const outcome = await runSupercarTask({
+          taskId: `t_output_${fault}`,
+          intent: '生成 analysis.csv 文件并交付',
+          executor: { getPage: async () => c.page } as never,
+          browserTaskFiles: c.scope,
+          ...(fault === 'missing' ? {} : { createFileFormats: ['csv'], onCreateFile: store }),
+          messagesAdapter: scripted([
+            () => [call('snapshot', {})],
+            () => [
+              call('create_file', {
+                filename: 'analysis.csv',
+                format: 'csv',
+                content: 'a,b\n1,2\n',
+              }),
+            ],
+            () => [
+              call('finish', {
+                status: 'completed',
+                summary: 'analysis.csv 已生成。',
+                evidence: 'Ready',
+              }),
+            ],
+          ]),
+        });
+        expect(outcome.status).toBe('failed');
+        expect(store).toHaveBeenCalledTimes(fault === 'missing' ? 0 : 1);
+      } finally {
+        await c.cleanup();
+      }
+    },
+  );
+  it('does not generate a file from a stale plan after quiet human input', async () => {
+    let now = 10000;
+    const control = new BrowserControl(() => now, { collaborationV2: true });
+    const c = await uploadFixture('t_stale_output', false);
+    const store = vi.fn(async () => ({
+      fileId: 'file_stale',
+      filename: 'analysis.csv',
+      size: 20,
+      downloadUrl: '/api/files/file_stale/download',
+    }));
+    try {
+      const outcome = await runSupercarTask({
+        taskId: 't_stale_output',
+        intent: '生成 analysis.csv，不改页面',
+        browserControl: control,
+        browserTaskFiles: c.scope,
+        executor: { getPage: async () => c.page } as never,
+        createFileFormats: ['csv'],
+        onCreateFile: store,
+        messagesAdapter: scripted([
+          () => [call('snapshot', {})],
+          async () => {
+            await control.runHuman(
+              () => c.page.locator('#note').fill('human input kept'),
+              'insertText',
+            );
+            now += 3000;
+            return [
+              call('create_file', {
+                filename: 'analysis.csv',
+                format: 'csv',
+                content: 'a,b\n1,2\n',
+              }),
+            ];
+          },
+          () => [call('finish', { status: 'failed', summary: '页面变化，请重新核对。' })],
+        ]),
+      });
+      expect(outcome.status).not.toBe('completed');
+      expect(store).not.toHaveBeenCalled();
+      expect(await c.page.locator('#note').inputValue()).toBe('human input kept');
+    } finally {
+      await c.cleanup();
+    }
+  });
   it.each(['read_task_file', 'analyze_task_table'] as const)(
     'does not finish a file analysis after %s parameters were rejected before reaching the host',
     async (tool) => {

@@ -6,7 +6,7 @@ import {
 } from '@holaday/shared-types';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
-import { ALL_FORMATS, detectRequestedFileFormat } from '../../files/writers.js';
+import { ALL_FORMATS } from '../../files/writers.js';
 import {
   type MessagesAdapter,
   MessagesAdapterError,
@@ -34,6 +34,12 @@ import {
   taskFileReadRequest,
 } from '../browser-tools/browser-task-file-reader.js';
 import type { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
+import {
+  type CreatedFile,
+  createFileSchema,
+  fileReceiptSchema,
+  taskFileRequirements,
+} from '../browser-tools/browser-task-output.js';
 import {
   ANALYZE_TASK_TABLE_TOOL,
   BrowserTaskTable,
@@ -185,79 +191,6 @@ const humanRequestSchema = z
     message: z.string().trim().min(1).max(2000),
   })
   .strict();
-const createFileSchema = z
-  .object({
-    filename: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .regex(/^[^/\\\r\n]+$/),
-    format: z.string().trim().min(1),
-    content: z
-      .string()
-      .min(1)
-      .max(200_000)
-      .refine((content) => content.trim().length > 0),
-  })
-  .strict();
-const fileReceiptSchema = z.object({
-  fileId: z.string().min(1),
-  filename: z.string().min(1),
-  size: z.number().int().positive(),
-  downloadUrl: z.string().min(1),
-});
-type CreatedFile = z.infer<typeof fileReceiptSchema> & { format: string };
-type FileRequirement = { format: string; filename?: string };
-
-function taskFileRequirements(intent: string): FileRequirement[] {
-  // Only explicit delivery requests, not merely a mention of an input PDF/CSV.
-  const request = intent
-    .replace(/(?:不要|无需|不必|不)(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g, '')
-    .replace(/(?:do not|don't|without)\s+(?:create|generate|export|save)[^,.;\n]*/gi, '');
-  const delivery =
-    /生成|创建|导出|制作|交付|给我|提供|输出|整理[成为]|保存为|转换成|转成|可下载|\b(?:create|generate|export|deliver|provide|save|convert|downloadable)\b/i.exec(
-      request,
-    );
-  if (!delivery) return [];
-  let outputRequest = request.slice(delivery.index + delivery[0].length);
-  // In an explicit conversion, the input format is not another requested output.
-  if (/^convert$/i.test(delivery[0]))
-    outputRequest = outputRequest.replace(/^[\s\S]*?\b(?:to|into)\b/i, '');
-  outputRequest = outputRequest
-    .replace(/https?:\/\/\S+/gi, '')
-    // Source filenames after a delivery verb are not requested outputs. Remove
-    // only the qualified filename, not the rest of a clause with more outputs.
-    .replace(
-      /(?:参考|依据|根据|读取|输入(?:文件)?|\b(?:using|from|based on|refer to)\b)\s*["'“]?[^\s"'”），,;；:：]+?\.[a-z0-9]+\b(?!\.)/gi,
-      '',
-    )
-    .replace(/(?:文件名|命名为|名为|filename)\s*[:：=]?\s*/gi, ' ');
-  const formats = new Set(
-    (outputRequest.match(/[a-z]+|电子表格|幻灯片|演示文稿|演示文件|纯文本文件|文本文件/gi) ?? [])
-      .map((token) => detectRequestedFileFormat(token))
-      .filter((format): format is NonNullable<typeof format> => format !== null),
-  );
-  // Explicit unavailable formats must not silently pass as a different file.
-  const unsupported =
-    outputRequest.match(/\b(?:zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz)\b/gi) ?? [];
-  const requirements: FileRequirement[] = [
-    ...formats,
-    ...unsupported.map((format) => format.toLowerCase()),
-  ].map((format) => ({ format }));
-  const names = outputRequest.matchAll(
-    /(?:^|[\s"'“（(、，,])([^\s"'”）)、，,;；:：/\\]+\.(csv|txt|md|json|xlsx|pdf|docx|pptx|zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz))\b/gi,
-  );
-  for (const match of names) {
-    if (match[1] && match[2])
-      requirements.push({ filename: match[1], format: match[2].toLowerCase() });
-  }
-  return requirements.length > 0
-    ? requirements
-    : /文件|附件|\b(?:file|attachment)\b/i.test(outputRequest)
-      ? [{ format: '*' }]
-      : [];
-}
 
 function taskTools(
   options: RunSelectedChromeTaskOptions,

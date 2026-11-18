@@ -26,8 +26,14 @@ export async function captureMaskedTaskScreenshot(
     if (!valid()) throw new Error();
     const before = documentKey(await readDocument());
     const masks: Locator[] = [];
-    for (const frame of page.frames()) {
-      const values = await frame.evaluate<string[]>(collectSensitiveFieldValues);
+    const frames = page.frames();
+    const values = new Set<string>();
+    for (const frame of frames) {
+      if (!valid()) throw new Error();
+      for (const value of await frame.evaluate<string[]>(collectSensitiveFieldValues))
+        values.add(value);
+    }
+    for (const frame of frames) {
       masks.push(
         frame.locator('input, textarea, select, [contenteditable], [data-hd-human-typed]'),
       );
