@@ -279,16 +279,28 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   );
   // The session vault stopped this task's logged-in context (revoked or its
   // status could not be confirmed): nothing more runs; the task waits for the user.
-  const sessionStopped = () => opts.executor?.sessionInterruption ?? null;
+  let identityStopped: string | null = null;
+  const sessionStopped = () => identityStopped ?? opts.executor?.sessionInterruption ?? null;
+  const checkSession = async () => {
+    if (sessionStopped()) return sessionStopped();
+    try {
+      identityStopped = (await opts.executor?.verifySessionIdentity?.()) ?? null;
+    } catch {
+      identityStopped = 'identity_unverified';
+    }
+    return sessionStopped();
+  };
   const sessionStoppedQuestion = (reason: string) =>
-    `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
+    reason.startsWith('identity_') || reason === 'account_changed'
+      ? `当前登录账号尚未核实或已变化（原因码 ${reason}），任务已暂停，未确认的会话变更已丢弃。请先核对当前账号和已完成步骤，再明确剩余任务；已生效操作不会自动重放。`
+      : `站点登录授权已撤销或暂时无法确认（原因码 ${reason}），已停止并关闭该登录会话，未保存的会话变更已丢弃。请在“浏览器登录与数据”中确认授权状态后重新提交任务。`;
   const parkedForSession = (reason: string, iterations = 0): SupercarOutcome => ({
     status: 'awaiting_user',
     question: sessionStoppedQuestion(reason),
     iterations,
     toolsUsed: [],
   });
-  const stoppedBefore = sessionStopped();
+  const stoppedBefore = await checkSession();
   if (stoppedBefore) return parkedForSession(stoppedBefore);
   let page: Awaited<ReturnType<NonNullable<RunSupercarOptions['executor']>['getPage']>>;
   try {
@@ -429,7 +441,23 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
       }, 1000)
     : undefined;
   // Same llm_calls accounting as the legacy loop (cost, usage, per-task totals).
-  const baseAdapter = opts.messagesAdapter;
+  const guardModel = (source: MessagesAdapter): MessagesAdapter => ({
+    metadata: source.metadata,
+    async create(request, options) {
+      if (await checkSession()) throw new Error('SESSION_IDENTITY_UNCONFIRMED');
+      return source.create(request, options);
+    },
+  });
+  const sourceAdapter = opts.messagesAdapter;
+  const baseAdapter: MessagesAdapter = {
+    ...guardModel(sourceAdapter),
+    browserBrain: sourceAdapter.browserBrain
+      ? {
+          planning: guardModel(sourceAdapter.browserBrain.planning),
+          verification: guardModel(sourceAdapter.browserBrain.verification),
+        }
+      : undefined,
+  };
   let modelTurn = 0;
   const adapter: MessagesAdapter = {
     metadata: baseAdapter.metadata,
@@ -750,7 +778,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     createUnifiedActionGate(actionGateOptions(targetPage));
 
   const gateAction: ReturnType<typeof createUnifiedActionGate> = async (action, phase) => {
-    const stopped = sessionStopped();
+    const stopped = phase === 'before' ? await checkSession() : sessionStopped();
     if (stopped)
       return {
         kind: 'stop',
@@ -1386,7 +1414,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
     });
     if (controller.signal.aborted && controller.signal.reason === 'user_cancelled')
       return { status: 'cancelled', iterations: outcome.steps, toolsUsed: [...toolsUsed] };
-    const stoppedAtEnd = sessionStopped();
+    const stoppedAtEnd = await checkSession();
     if (stoppedAtEnd && outcome.status !== 'cancelled')
       return {
         status: 'awaiting_user',

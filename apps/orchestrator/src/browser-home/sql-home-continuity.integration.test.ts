@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -30,6 +30,11 @@ let root: string;
 let artifacts: string;
 let origin: string;
 let releaseSave: (() => void) | undefined;
+let denyIdentity = false;
+let identityBarrier: Promise<void> | undefined;
+let releaseIdentity: (() => void) | undefined;
+let identityStarted: (() => void) | undefined;
+let identityReads = 0;
 let exports = 0;
 const alice = newExternalId('user');
 const bob = newExternalId('user');
@@ -93,7 +98,13 @@ describe.runIf(enabled)('real Home pool continuity with SQL-backed profiles and 
     });
     db = drizzle(sql) as DB;
     server = createServer((req, res) => {
-      if (!req.headers.cookie?.includes(`sid=${cookieValue}`)) {
+      const cookie = req.headers.cookie ?? '';
+      const account = cookie.includes('sid=SYNTHETIC_OTHER_ACCOUNT')
+        ? 'bob'
+        : cookie.includes(`sid=${cookieValue}`) || cookie.includes('sid=SYNTHETIC_ROTATED_A')
+          ? 'alice'
+          : null;
+      if (!account || (req.url === '/account-check' && denyIdentity)) {
         res.writeHead(401);
         res.end('Sign in required');
         return;
@@ -106,10 +117,23 @@ describe.runIf(enabled)('real Home pool continuity with SQL-backed profiles and 
         });
         res.end(csv);
       } else {
-        res.writeHead(200, { 'content-type': 'text/html' });
-        res.end(
-          '<title>Owned account</title><main id="account" data-owner="alice">Synthetic Alice</main><a id="export" href="/report.csv">Export</a>',
-        );
+        const respond = () => {
+          if (res.destroyed) return;
+          res.writeHead(200, { 'content-type': 'text/html' });
+          const subject = account === 'alice' ? 'PRIVATE_SITE_SUBJECT_A' : 'PRIVATE_SITE_SUBJECT_B';
+          res.end(
+            `<title>Owned account</title><main id="account" data-owner="${account}" data-subject="${subject}">Synthetic ${account === 'alice' ? 'Alice' : 'Bob'}</main><a id="export" href="/report.csv">Export</a>`,
+          );
+        };
+        if (req.url === '/account-check') {
+          identityReads++;
+          identityStarted?.();
+          if (identityBarrier) {
+            void identityBarrier.then(respond);
+            return;
+          }
+        }
+        respond();
       }
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -122,6 +146,7 @@ describe.runIf(enabled)('real Home pool continuity with SQL-backed profiles and 
 
   afterAll(async () => {
     releaseSave?.();
+    releaseIdentity?.();
     try {
       await pool?.shutdown();
       for (const pid of (evidence.nativePids as number[] | undefined) ?? [])
@@ -383,6 +408,384 @@ describe.runIf(enabled)('real Home pool continuity with SQL-backed profiles and 
       exports,
       deliveredFiles: rows.length,
       sourceInstanceIds: [taskSource.instanceId, homeSource.instanceId],
+    });
+  }, 120_000);
+
+  it('waits before any model call when a restored profile has no trusted account-subject evidence', async () => {
+    const { runUnifiedSupercarTask } = await import(
+      '../agent/browser-tools/unified-supercar-runner.js'
+    );
+    const home = pool!.peek(`bhs_${alice}`)!;
+    expect(home.executor.sessionInterruption).toBeNull();
+    let fixtureModelAttempts = 0;
+    const metadata = { provider: 'anthropic' as const, model: 'controlled-identity-probe' };
+    const outcome = await runUnifiedSupercarTask({
+      taskId: newExternalId('task'),
+      intent: '读取原账号的信息，账号未核实则等待',
+      executor: home.executor,
+      maxIterations: 1,
+      messagesAdapter: {
+        metadata,
+        create: async () => {
+          fixtureModelAttempts++;
+          return {
+            id: 'identity-gate-fixture',
+            metadata,
+            content: [
+              {
+                type: 'tool_use',
+                id: 'finish',
+                name: 'finish',
+                input: {
+                  status: 'completed',
+                  summary: 'Fixture answer',
+                  evidence: 'Synthetic Alice',
+                },
+              },
+            ],
+            stopReason: 'tool_use',
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              complete: true,
+            },
+          };
+        },
+      },
+    });
+    evidence.identityUnknown = {
+      expected: 'awaiting_user before model',
+      actual: outcome.status,
+      fixtureModelAttempts,
+      externalModelCalls: 0,
+    };
+    expect(fixtureModelAttempts).toBe(0);
+    expect(outcome.status).toBe('awaiting_user');
+  }, 30_000);
+
+  it('uses a fresh trusted cookie-only subject, keeps token rotation writable and stops changed, invalid or late-revoked identity', async () => {
+    const { BrowserPool: RealPool } = await import('../browser-pool/browser-pool.js');
+    const { TestKeyProvider } = await import('../browser-session-vault/crypto.js');
+    const { createVaultRuntime } = await import('../browser-session-vault/runtime.js');
+    const { BrowserHomeSessions } = await import('./browser-home-session.js');
+    const { prepareBrowserHomeProfileSave, saveBrowserHomeProfile } = await import(
+      './browser-home-profile.js'
+    );
+    const { runUnifiedSupercarTask } = await import(
+      '../agent/browser-tools/unified-supercar-runner.js'
+    );
+    await pool!.shutdown();
+    const logger = pino({ level: 'silent' });
+    const runtime = createVaultRuntime({
+      db,
+      keys: new TestKeyProvider(),
+      cloudHomeEnabled: true,
+      importEnabled: false,
+      profileEnabled: false,
+      probes: new Map([
+        [
+          origin,
+          {
+            path: '/account-check',
+            selector: '#account',
+            subject: {
+              selector: '#account',
+              attribute: 'data-subject',
+              adapter: 'fixture-subject-v1',
+            },
+          },
+        ],
+      ]),
+    })!;
+    pool = new RealPool(
+      {
+        maxInstances: 1,
+        idleTimeoutMs: 300_000,
+        baseDir: join(root, 'subject-browsers'),
+        cdpPortStart: await freePort(),
+        vncPortStart: 5910,
+        wsPortStart: 6110,
+        displayStart: 160,
+        screenSize: '1280x800x24',
+        vncEnabled: false,
+        prepareSession: (owner, executor, session) => runtime.prepare(owner, executor, session),
+        finishSession: (executor) => runtime.finish(executor),
+      },
+      logger,
+    );
+    const sessions = new BrowserHomeSessions();
+    const record = () => {
+      const instance = sessions.instanceFor(pool!, alice)!;
+      (evidence.nativePids as number[]).push(instance.bravePid!);
+      return instance;
+    };
+    await sessions.open(pool, alice, logger, 'capture-viewer');
+    const source = record();
+    const sourcePage = await source.executor.getPage();
+    const setCookie = async (page: typeof sourcePage, value: string) =>
+      page.context().addCookies([
+        {
+          name: 'sid',
+          value,
+          domain: '127.0.0.1',
+          path: '/',
+          secure: false,
+          httpOnly: true,
+          sameSite: 'Lax',
+        },
+      ]);
+    await setCookie(sourcePage, cookieValue);
+    // Home's production restore path adapts the native Page to this legacy PageLike interface too.
+    expect(
+      (
+        await source.executor.navigate(
+          sourcePage as unknown as Parameters<typeof source.executor.navigate>[0],
+          origin,
+        )
+      ).ok,
+    ).toBe(true);
+    const prepared = await prepareBrowserHomeProfileSave({ userId: alice, pool, sessions });
+    expect(prepared).not.toBeNull();
+    const settings = await runtime.vault.cloudHomeSettings(alice);
+    const saved = await saveBrowserHomeProfile({
+      userId: alice,
+      pool,
+      sessions,
+      vault: runtime.vault,
+      worker: runtime.worker,
+      request: {
+        consent: 'cloud-browser-profile-v1',
+        origin,
+        sourceId: prepared!.sourceId,
+        includeStorage: false,
+        requestId: randomUUID(),
+        requestedAt: Date.now(),
+        clearEpoch: settings.clearEpoch,
+      },
+    });
+    expect(JSON.stringify(saved)).not.toContain('PRIVATE_SITE_SUBJECT_A');
+    const savedState = await runtime.vault.checkout(alice, saved.id, { access: 'cloud-home-v1' });
+    expect(savedState.identity?.subject).toBe('PRIVATE_SITE_SUBJECT_A');
+    await runtime.vault.release(alice, saved.id, savedState);
+    evidence.trustedCaptureBound = true;
+    expect(await sessions.close(pool, alice)).toBe(true);
+    const profile = { id: saved.id, origin };
+    const reopen = async () => {
+      await sessions.open(pool!, alice, logger, randomUUID(), profile);
+      return record();
+    };
+    const verified = await reopen();
+    expect(await verified.executor.verifySessionIdentity()).toBeNull();
+    let attempts = 0;
+    const metadata = { provider: 'anthropic' as const, model: 'controlled-identity-probe' };
+    const adapter = {
+      metadata,
+      create: async () => {
+        attempts++;
+        const content =
+          attempts === 1
+            ? {
+                type: 'tool_use' as const,
+                id: 'navigate',
+                name: 'navigate',
+                input: { url: origin },
+              }
+            : attempts === 2
+              ? { type: 'tool_use' as const, id: 'snapshot', name: 'snapshot', input: {} }
+              : {
+                  type: 'tool_use' as const,
+                  id: 'finish',
+                  name: 'finish',
+                  input: {
+                    status: 'completed',
+                    summary: '页面显示 Synthetic Alice。',
+                    evidence: 'Synthetic Alice',
+                  },
+                };
+        return {
+          id: randomUUID(),
+          metadata,
+          content: [content],
+          stopReason: 'tool_use' as const,
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            complete: true,
+          },
+        };
+      },
+    };
+    const outcome = await runUnifiedSupercarTask({
+      taskId: newExternalId('task'),
+      intent: `打开 ${origin} 并读取页面上显示的账号名称`,
+      executor: verified.executor,
+      messagesAdapter: adapter,
+      maxIterations: 4,
+    });
+    evidence.boundIdentity = { allowedFixtureModelAttempts: attempts, outcome: outcome.status };
+    expect(attempts).toBeGreaterThan(0);
+    expect(outcome.status).toBe('completed');
+    await setCookie(await verified.executor.getPage(), 'SYNTHETIC_ROTATED_A');
+    expect(await verified.executor.verifySessionIdentity()).toBeNull();
+    expect(await sessions.close(pool, alice)).toBe(true);
+    const checked = await runtime.vault.checkout(alice, saved.id, { access: 'cloud-home-v1' });
+    expect(checked.identity?.subject).toBe('PRIVATE_SITE_SUBJECT_A');
+    expect(checked.state.cookies.find((cookie) => cookie.name === 'sid')?.value).toBe(
+      'SYNTHETIC_ROTATED_A',
+    );
+    await runtime.vault.release(alice, saved.id, checked);
+
+    const boundaryStops: string[] = [];
+    for (const boundary of ['navigate', 'finish'] as const) {
+      const beforeAction = await reopen();
+      let calls = 0;
+      const beforeExports = exports;
+      const result = await runUnifiedSupercarTask({
+        taskId: newExternalId('task'),
+        intent: '读取原账号信息，不导出或提交',
+        executor: beforeAction.executor,
+        messagesAdapter: {
+          ...adapter,
+          create: async () => {
+            calls++;
+            await setCookie(await beforeAction.executor.getPage(), 'SYNTHETIC_OTHER_ACCOUNT');
+            return {
+              id: randomUUID(),
+              metadata,
+              content: [
+                {
+                  type: 'tool_use' as const,
+                  id: boundary,
+                  name: boundary,
+                  input:
+                    boundary === 'navigate'
+                      ? { url: `${origin}/report.csv` }
+                      : {
+                          status: 'completed',
+                          summary: '页面显示 Synthetic Alice。',
+                          evidence: 'Synthetic Alice',
+                        },
+                },
+              ],
+              stopReason: 'tool_use' as const,
+              usage: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadInputTokens: 0,
+                cacheCreationInputTokens: 0,
+                complete: true,
+              },
+            };
+          },
+        },
+        maxIterations: 1,
+      });
+      expect(calls).toBe(1);
+      expect(result.status).toBe('awaiting_user');
+      expect(beforeAction.executor.sessionInterruption).toBe('account_changed');
+      expect(exports).toBe(beforeExports);
+      boundaryStops.push(boundary);
+      await sessions.close(pool, alice);
+    }
+    evidence.postModelBoundaryStops = boundaryStops;
+
+    let deniedCalls = 0;
+    const deniedAdapter = {
+      ...adapter,
+      create: async (...args: Parameters<typeof adapter.create>) => {
+        deniedCalls++;
+        return adapter.create(...args);
+      },
+    };
+    const invalid = await reopen();
+    denyIdentity = true;
+    const invalidOutcome = await runUnifiedSupercarTask({
+      taskId: newExternalId('task'),
+      intent: '读取原账号信息',
+      executor: invalid.executor,
+      messagesAdapter: deniedAdapter,
+      maxIterations: 1,
+    });
+    denyIdentity = false;
+    expect(invalidOutcome.status).toBe('awaiting_user');
+    expect(deniedCalls).toBe(0);
+    await sessions.close(pool, alice);
+    const changed = await reopen();
+    await setCookie(await changed.executor.getPage(), 'SYNTHETIC_OTHER_ACCOUNT');
+    const changedOutcome = await runUnifiedSupercarTask({
+      taskId: newExternalId('task'),
+      intent: '读取原账号信息',
+      executor: changed.executor,
+      messagesAdapter: deniedAdapter,
+      maxIterations: 1,
+    });
+    expect(changedOutcome.status).toBe('awaiting_user');
+    expect(changed.executor.sessionInterruption).toBe('account_changed');
+    expect(deniedCalls).toBe(0);
+    await sessions.close(pool, alice);
+    const unchanged = await runtime.vault.checkout(alice, saved.id, { access: 'cloud-home-v1' });
+    expect(unchanged.identity?.subject).toBe('PRIVATE_SITE_SUBJECT_A');
+    expect(unchanged.state.cookies.find((cookie) => cookie.name === 'sid')?.value).toBe(
+      'SYNTHETIC_ROTATED_A',
+    );
+    await runtime.vault.release(alice, saved.id, unchanged);
+    const switching = await reopen();
+    let sawSwitchProbe!: () => void;
+    const switchProbeStarted = new Promise<void>((resolve) => {
+      sawSwitchProbe = resolve;
+    });
+    identityBarrier = new Promise<void>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    identityStarted = sawSwitchProbe;
+    const oldIdentityCheck = switching.executor.verifySessionIdentity();
+    await switchProbeStarted;
+    await setCookie(await switching.executor.getPage(), 'SYNTHETIC_OTHER_ACCOUNT');
+    releaseIdentity!();
+    expect(await oldIdentityCheck).not.toBeNull();
+    const switchedOutcome = await runUnifiedSupercarTask({
+      taskId: newExternalId('task'),
+      intent: '读取原账号信息',
+      executor: switching.executor,
+      messagesAdapter: deniedAdapter,
+      maxIterations: 1,
+    });
+    expect(switchedOutcome.status).toBe('awaiting_user');
+    expect(deniedCalls).toBe(0);
+    await sessions.close(pool, alice);
+    identityBarrier = undefined;
+    identityStarted = undefined;
+    const revoked = await reopen();
+    let started!: () => void;
+    const sawProbe = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    identityBarrier = new Promise<void>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    identityStarted = started;
+    const pending = revoked.executor.verifySessionIdentity();
+    await sawProbe;
+    await runtime.vault.revoke(alice, saved.id);
+    releaseIdentity!();
+    expect(await pending).not.toBeNull();
+    expect(revoked.executor.sessionInterruption).not.toBeNull();
+    expect((await runtime.vault.list(alice)).find((row) => row.id === saved.id)?.status).toBe(
+      'revoked',
+    );
+    Object.assign(evidence, {
+      identityReads,
+      cookieOnlySubjectVerified: true,
+      tokenRotationSaved: true,
+      invalidPageWaited: true,
+      changedAccountWaited: true,
+      wrongAccountModelAttempts: deniedCalls,
+      lateProofDidNotRestoreRevocation: true,
+      inFlightAccountSwitchWaited: true,
     });
   }, 120_000);
 });

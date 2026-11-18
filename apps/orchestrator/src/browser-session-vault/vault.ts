@@ -16,6 +16,14 @@ import {
   seal,
   unseal,
 } from './crypto.js';
+import {
+  type SiteIdentity,
+  type SiteIdentityProof,
+  identityFromProof,
+  packSnapshot,
+  sameIdentity,
+  unpackSnapshot,
+} from './profile-snapshot.js';
 export const SESSION_TTL = 7 * 86400000;
 export const PROFILE_IDLE_TTL = 7 * 86400000;
 export const PROFILE_ABSOLUTE_TTL = 30 * 86400000;
@@ -119,6 +127,8 @@ export class MemoryVaultStore implements VaultStore {
 }
 export interface Checkout {
   state: BrowserSessionState;
+  /** Decrypted server evidence; never returned as grant metadata. */
+  readonly identity?: SiteIdentity | null;
   /** null for a read-only fork: no lease, changes are discarded at the end. */
   token: string | null;
   version: number;
@@ -127,10 +137,14 @@ export interface Checkout {
   /** Why a fork is read-only (reason code only). */
   reason: 'session_only' | 'writer_busy' | null;
 }
+export interface VerificationResult {
+  status: 'connected' | 'relogin' | 'risk_blocked';
+  identityProof?: SiteIdentityProof;
+}
 type Verify = (
   state: BrowserSessionState,
   grant: BrowserGrantMetadata,
-) => Promise<'connected' | 'relogin' | 'risk_blocked'>;
+) => Promise<'connected' | 'relogin' | 'risk_blocked' | VerificationResult>;
 export class SessionVault {
   private readonly active = new Map<string, Set<() => Promise<void>>>();
   constructor(
@@ -257,6 +271,43 @@ export class SessionVault {
       fail('scope_denied');
     return state;
   }
+  private async snapshot(userId: string, grant: GrantRecord) {
+    const snapshot = grant.snapshot;
+    if (!snapshot) fail('grant_unavailable');
+    try {
+      const value = unpackSnapshot(
+        await unseal(this.options.keys, this.context(userId, grant, snapshot), snapshot.envelope),
+      );
+      return { state: this.state(grant, value.state), identity: value.identity };
+    } catch (error) {
+      if (error instanceof VaultError) throw error;
+      fail('invalid_session');
+    }
+  }
+  private acceptedIdentity(
+    userId: string,
+    grant: GrantRecord,
+    state: BrowserSessionState,
+    snapshotVersion: number,
+    proof?: SiteIdentityProof,
+  ): SiteIdentity | null {
+    if (!proof) return null;
+    try {
+      return identityFromProof(
+        proof,
+        {
+          userId,
+          grantId: grant.id,
+          grantVersion: grant.version,
+          origin: grant.origin,
+          snapshotVersion,
+        },
+        state,
+      );
+    } catch {
+      fail('identity_proof_invalid');
+    }
+  }
   private expireAt(grant: GrantRecord, state: BrowserSessionState, profile = false) {
     const cookies = state.cookies.flatMap((c) =>
       c.expirationDate ? [c.expirationDate * 1000] : [],
@@ -291,7 +342,11 @@ export class SessionVault {
   async captureCloudProfile(
     userId: string,
     raw: unknown,
-    capture: () => Promise<{ origin: string; state: unknown }>,
+    capture: (grant: BrowserGrantMetadata) => Promise<{
+      origin: string;
+      state: unknown;
+      identityProof?: SiteIdentityProof;
+    }>,
     operation?: CloudProfileSaveOperation,
   ): Promise<BrowserGrantMetadata> {
     if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
@@ -379,7 +434,7 @@ export class SessionVault {
     const initial = prepared.grant;
     if (prepared.reused) return initial;
     try {
-      const actual = await capture();
+      const actual = await capture(initial);
       if (!this.options.cloudHomeEnabled) fail('cloud_profile_disabled');
       if (actual.origin !== initial.origin) fail('scope_denied');
       return await this.options.store.update(userId, async (doc) => {
@@ -393,6 +448,7 @@ export class SessionVault {
         )
           fail('grant_unavailable');
         const state = this.state(g, actual.state);
+        const identity = this.acceptedIdentity(userId, g, state, 0, actual.identityProof);
         if (!state.cookies.length && !state.storage.length) fail('empty_session');
         g.profileCreatedAt = this.now();
         const expiresAt = this.expireAt(g, state, true);
@@ -404,7 +460,7 @@ export class SessionVault {
           envelope: await seal(
             this.options.keys,
             this.context(userId, g, { version: 1, purpose: 'profile' }),
-            state,
+            packSnapshot(state, identity),
           ),
         };
         g.status = 'connected';
@@ -593,7 +649,7 @@ export class SessionVault {
         envelope: await seal(
           this.options.keys,
           this.context(userId, g, { version: 1, purpose: 'session' }),
-          state,
+          packSnapshot(state),
         ),
       };
       if (snapshot.expiresAt <= this.now()) fail('session_expired');
@@ -603,17 +659,34 @@ export class SessionVault {
       g.cookieCount = state.cookies.length;
       return { state, grant: this.metadata(g) };
     });
-    let status: 'connected' | 'relogin' | 'risk_blocked';
+    let verification: VerificationResult;
     try {
-      status = await verify(initial.state, initial.grant);
+      const value = await verify(initial.state, initial.grant);
+      verification = typeof value === 'string' ? { status: value } : value;
     } catch {
-      status = 'relogin';
+      verification = { status: 'relogin' };
     }
     return this.options.store.update(userId, async (doc) => {
       const g = this.find(doc, id);
       this.requireLive(g);
       if (g.version !== initial.grant.version || g.status !== 'verifying')
         fail('grant_unavailable');
+      const status = verification.status;
+      if (status === 'connected' && verification.identityProof) {
+        if (!g.snapshot) fail('grant_unavailable');
+        const identity = this.acceptedIdentity(
+          userId,
+          g,
+          initial.state,
+          1,
+          verification.identityProof,
+        );
+        g.snapshot.envelope = await seal(
+          this.options.keys,
+          this.context(userId, g, g.snapshot),
+          packSnapshot(initial.state, identity),
+        );
+      }
       g.status = status;
       g.reason = status === 'connected' ? null : status;
       if (status !== 'connected') {
@@ -631,7 +704,12 @@ export class SessionVault {
       this.requireLive(g);
       if (
         g.version !== version ||
-        (g.status !== 'connected' && !(verifying && g.status === 'verifying'))
+        (g.status !== 'connected' &&
+          !(
+            verifying &&
+            (g.status === 'verifying' ||
+              (g.status === 'awaiting_import' && g.sessionAccess === 'cloud-home-v1'))
+          ))
       )
         fail('grant_unavailable');
     });
@@ -716,10 +794,7 @@ export class SessionVault {
       this.requireLive(g);
       if (g.status !== 'connected' || !g.snapshot || !g.purposes.includes('read'))
         fail('grant_unavailable');
-      const state = this.state(
-        g,
-        await unseal(this.options.keys, this.context(userId, g, g.snapshot), g.snapshot.envelope),
-      );
+      const { state, identity } = await this.snapshot(userId, g);
       g.lastUsedAt = this.now();
       const persist =
         g.purposes.includes('profile-persist') &&
@@ -730,6 +805,7 @@ export class SessionVault {
         g.writer = { token: randomUUID(), expiresAt: this.now() + LEASE_TTL };
         return {
           state,
+          identity,
           token: g.writer.token,
           version: g.snapshot.version,
           grant: this.metadata(g),
@@ -739,6 +815,7 @@ export class SessionVault {
       }
       return {
         state,
+        identity,
         token: null,
         version: g.snapshot.version,
         grant: this.metadata(g),
@@ -820,7 +897,7 @@ export class SessionVault {
     id: string,
     task: Pick<Checkout, 'token' | 'version'>,
     raw: unknown,
-    options: { keepLease?: boolean } = {},
+    options: { keepLease?: boolean; identityProof?: SiteIdentityProof } = {},
   ): Promise<number> {
     this.ensureEnabled();
     let loggedOut = false;
@@ -852,6 +929,11 @@ export class SessionVault {
         g.writer = undefined;
         return;
       }
+      const previous = await this.snapshot(userId, g);
+      const identity = this.acceptedIdentity(userId, g, state, task.version, options.identityProof);
+      if (previous.identity && !identity) fail('identity_unverified');
+      if (previous.identity && identity && !sameIdentity(previous.identity, identity))
+        fail('account_changed');
       saved = task.version + 1;
       g.profileCreatedAt ??= this.now();
       const snapshot = {
@@ -861,7 +943,7 @@ export class SessionVault {
         envelope: await seal(
           this.options.keys,
           this.context(userId, g, { version: task.version + 1, purpose: 'profile' }),
-          state,
+          packSnapshot(state, previous.identity),
         ),
       };
       g.snapshot = snapshot;

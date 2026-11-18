@@ -239,7 +239,7 @@ export async function saveBrowserHomeProfile(args: {
         origin: request.origin,
         storageKeys,
       },
-      async () => {
+      async (grant) => {
         await check();
         const captured = await args.worker.captureSite(page.context(), page, {
           origin: request.origin,
@@ -247,7 +247,17 @@ export async function saveBrowserHomeProfile(args: {
           storageKeys,
         });
         await check();
-        return { origin: request.origin, state: captured.state };
+        const identityProof = await args.worker.proofForCapture?.(
+          args.userId,
+          captured.state,
+          grant,
+          {
+            create: (config) => home.executor.createSessionVerificationContext(config),
+            dispose: (context) => home.executor.closeSessionVerificationContext(context),
+          },
+        );
+        await check();
+        return { origin: request.origin, state: captured.state, identityProof };
       },
       operation,
     );

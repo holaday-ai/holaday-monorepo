@@ -373,6 +373,7 @@ describe('Actual Home download events', () => {
         return context;
       },
       markSessionInterrupted: () => {},
+      setSessionIdentityVerifier: vi.fn(),
       navigate: async (page: import('playwright').Page, url: string) => {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
         return { ok: true };

@@ -5,7 +5,12 @@ import type { DB } from '../db/client.js';
 import { type KeyProvider, assertVaultConfiguration } from './crypto.js';
 import { SqlVaultStore } from './sql-store.js';
 import { SessionVault, VaultError, type VaultStore } from './vault.js';
-import { type ContextFactory, VaultBrowserWorker, type VaultTask } from './worker.js';
+import {
+  type ContextFactory,
+  type TrustedSiteProbe,
+  VaultBrowserWorker,
+  type VaultTask,
+} from './worker.js';
 
 export interface VaultRuntime {
   readonly cloudHomeEnabled: boolean;
@@ -39,7 +44,7 @@ export function createVaultRuntime(options: {
   db?: DB;
   store?: VaultStore;
   context?: ContextFactory;
-  probes?: ReadonlyMap<string, { path: string; selector: string }>;
+  probes?: ReadonlyMap<string, TrustedSiteProbe>;
 }): VaultRuntime | undefined {
   if (!options.importEnabled && !options.profileEnabled && !options.cloudHomeEnabled)
     return undefined;
@@ -104,11 +109,16 @@ export function createVaultRuntime(options: {
           ? (await vault.match(userId, session.targetUrl))?.id
           : undefined;
       if (!grantId) return;
+      const binding: { task?: VaultTask } = {};
       const task = await worker.open(
         userId,
         grantId,
         (config) => executor.createSessionVaultContext(config),
         {
+          verificationContext: {
+            create: (config) => executor.createSessionVerificationContext(config),
+            dispose: (context) => executor.closeSessionVerificationContext(context),
+          },
           ...(personal
             ? {
                 access: 'cloud-home-v1' as const,
@@ -118,17 +128,21 @@ export function createVaultRuntime(options: {
             : {}),
           // Revoked or unverifiable: the task parks for the user instead of continuing.
           onInterrupted: (reason) => {
-            executor.markSessionInterrupted(reason);
+            if (binding.task && tasks.get(executor) === binding.task)
+              executor.markSessionInterrupted(reason);
             logger.info({ reason }, 'browser-vault: task session stopped');
           },
         },
       );
+      binding.task = task;
       tasks.set(executor, task);
+      executor.setSessionIdentityVerifier(() => task.verifyIdentity());
     },
     async finish(executor) {
       const task = tasks.get(executor);
       tasks.delete(executor);
       if (!task) return;
+      executor.setSessionIdentityVerifier(null);
       try {
         await task.close();
       } catch (error) {

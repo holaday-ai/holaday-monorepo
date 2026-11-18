@@ -1,5 +1,5 @@
 import { type Browser, type BrowserContext, chromium } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TestKeyProvider } from './crypto.js';
 import { createVaultRuntime } from './runtime.js';
 import { MemoryVaultStore } from './vault.js';
@@ -53,6 +53,7 @@ async function fixture() {
       return context;
     },
     markSessionInterrupted: (_reason: string) => {},
+    setSessionIdentityVerifier: vi.fn(),
   };
   return { runtime, grant, executor, context: () => context };
 }
@@ -66,6 +67,7 @@ describe('Home allocation -> actual Vault context preparation', () => {
         targetUrl: 'https://fixture.test',
       });
       expect(f.context()?.pages().length).toBe(1);
+      expect(f.executor.setSessionIdentityVerifier).toHaveBeenCalledWith(expect.any(Function));
       expect((await f.context()!.cookies('https://fixture.test'))[0]?.value).toBe(
         'SYNTHETIC_HOME_IDENTITY',
       );
@@ -73,6 +75,7 @@ describe('Home allocation -> actual Vault context preparation', () => {
         { name: 'account', value: 'SYNTHETIC_ACCOUNT' },
       ]);
       await f.runtime.finish(f.executor as never);
+      expect(f.executor.setSessionIdentityVerifier).toHaveBeenLastCalledWith(null);
       expect(f.context()!.pages()).toEqual([]);
       const restored = await f.runtime.vault.checkout('alice', f.grant.id, {
         access: 'cloud-home-v1',

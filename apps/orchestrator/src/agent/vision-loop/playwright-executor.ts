@@ -247,6 +247,11 @@ export class PlaywrightExecutor {
   private cleanMode = false;
   private cleanContext: BrowserContext | null = null;
   private cleanContextLease: OwnedCleanContext | null = null;
+  private readonly identityContexts = new Map<BrowserContext, OwnedCleanContext>();
+  private readonly identityContextLeases = new Set<OwnedCleanContext>();
+  private identityVerifier: (() => Promise<string | null>) | null = null;
+  private identityEpoch = 0;
+  private identityCheck: { epoch: number; promise: Promise<string | null> } | null = null;
   private managedBrowserLease: OwnedManagedBrowser | null = null;
   private cdpConnectionLease: OwnedCdpConnection | null = null;
   private cleanContextGeneration = 0;
@@ -593,12 +598,14 @@ export class PlaywrightExecutor {
     const authenticated = this.#authenticatedCdp;
     try {
       this.assertOutsideRequest();
+      this.setSessionIdentityVerifier(null);
       const stopped = this.stopBrowserRequests();
       this.cleanContextGeneration++;
       this.sealConnectionSetup?.();
       this.cleanContext = null;
       this.activePage = null;
       await stopped;
+      await this.disposeIdentityContexts();
       await this.cleanContextLease?.dispose();
     } catch (error) {
       if (authenticated) throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
@@ -634,6 +641,79 @@ export class PlaywrightExecutor {
   }
   get sessionInterruption(): string | null {
     return this.vaultInterruption;
+  }
+  setSessionIdentityVerifier(check: (() => Promise<string | null>) | null): void {
+    this.identityEpoch++;
+    this.identityVerifier = check;
+    this.identityCheck = null;
+  }
+  async verifySessionIdentity(): Promise<string | null> {
+    const check = this.identityVerifier;
+    if (!check) return this.vaultInterruption;
+    const epoch = this.identityEpoch;
+    if (!this.identityCheck || this.identityCheck.epoch !== epoch) {
+      const promise = Promise.resolve()
+        .then(check)
+        .catch(() => 'identity_unverified');
+      this.identityCheck = { epoch, promise };
+    }
+    const pending = this.identityCheck;
+    try {
+      const reason = await pending.promise;
+      // Report to this caller; never poison a replacement context's verifier.
+      if (epoch !== this.identityEpoch || check !== this.identityVerifier)
+        return 'identity_context_changed';
+      if (reason) this.markSessionInterrupted(reason);
+      return reason;
+    } finally {
+      if (this.identityCheck === pending) this.identityCheck = null;
+    }
+  }
+  async createSessionVerificationContext(
+    options: Parameters<Browser['newContext']>[0],
+  ): Promise<BrowserContext> {
+    if (
+      !this.browser ||
+      (this.cleanMode && !this.cleanContext) ||
+      this.connectionSetup ||
+      this.disconnection
+    )
+      throw new Error('identity_context_unavailable');
+    const generation = this.cleanContextGeneration;
+    const lease = createOwnedCleanContext(this.browser, options);
+    this.identityContextLeases.add(lease);
+    try {
+      const context = await lease.ready;
+      this.assertContextGeneration(generation);
+      this.identityContexts.set(context, lease);
+      return context;
+    } catch {
+      await lease.dispose();
+      this.identityContextLeases.delete(lease);
+      throw new Error('identity_context_unavailable');
+    }
+  }
+  async closeSessionVerificationContext(context: BrowserContext): Promise<void> {
+    const lease = this.identityContexts.get(context);
+    if (!lease) return;
+    await lease.dispose();
+    this.identityContexts.delete(context);
+    this.identityContextLeases.delete(lease);
+  }
+  private async disposeIdentityContexts(): Promise<void> {
+    const leases = [...this.identityContextLeases];
+    const outcomes = await Promise.allSettled(leases.map((lease) => lease.dispose()));
+    for (let index = 0; index < outcomes.length; index++) {
+      const result = outcomes[index]!;
+      if (result.status === 'fulfilled') {
+        const lease = leases[index]!;
+        this.identityContextLeases.delete(lease);
+        for (const [context, owner] of this.identityContexts)
+          if (owner === lease) this.identityContexts.delete(context);
+      }
+    }
+    const failed = outcomes.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
   }
   /** Default-off vault: create an incognito context, never reuse userDataDir/default cookies. */
   async createSessionVaultContext(
@@ -830,6 +910,7 @@ export class PlaywrightExecutor {
   async disconnect(): Promise<void> {
     this.assertOutsideRequest();
     if (this.disconnection) return this.disconnection;
+    this.setSessionIdentityVerifier(null);
     const authenticated = this.#authenticatedCdp;
     const stopped = this.stopBrowserRequests();
     this.cleanContextGeneration++;
