@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { drizzle } from 'drizzle-orm/mysql2';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
@@ -101,6 +101,15 @@ export async function openIsolatedMysqlProbe(
       'CREATE TABLE `holaday_it`.`codex_probe_owner` (token VARCHAR(64) PRIMARY KEY)',
     );
     await control.query('INSERT INTO `holaday_it`.`codex_probe_owner` VALUES (?)', [owner]);
+    Object.assign(evidence, {
+      created: true,
+      createdAt: new Date().toISOString(),
+      ownershipSHA256: createHash('sha256').update(owner).digest('hex'),
+      expectedTables: tables,
+    });
+    // Persist recovery identity before any long browser operation can block teardown.
+    if (options.artifactPath)
+      await writeFile(options.artifactPath, JSON.stringify(evidence, null, 2));
     for (const table of tables)
       await control.query(`CREATE TABLE \`holaday_it\`.\`${table}\` LIKE \`holaday\`.\`${table}\``);
     connection = await connect();
