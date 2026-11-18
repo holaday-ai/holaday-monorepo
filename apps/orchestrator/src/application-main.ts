@@ -1,7 +1,8 @@
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { setMediaFailureRefundHook } from './agent/video/media-failure-refund.js';
 import { cleanupRejectedVideoFrames } from './agent/video/video-quality-audit.js';
-import { createVaultRuntime, installVaultRuntime } from './browser-session-vault/runtime.js';
+import { createProductionVaultRuntime } from './browser-session-vault/production-runtime.js';
+import { getVaultRuntime, installVaultRuntime } from './browser-session-vault/runtime.js';
 import { refundTaskOnce, sweepPlatformFailureRefunds } from './quota/platform-failure-refunds.js';
 import { QuotaService } from './quota/quota-service.js';
 const _proxy = process.env.HTTPS_PROXY;
@@ -66,17 +67,7 @@ import { currentOperationLifetime } from './execution/owned-operation.js';
 import { createPeriodicWork } from './execution/periodic-work.js';
 
 export async function startApplication(boot?: ApplicationBoot, ordinary?: OrdinaryApplication) {
-  // No production KeyProvider is selected here: enabling a Vault path fails closed.
-  const browserVault = createVaultRuntime({
-    importEnabled: env.BROWSER_SESSION_IMPORT_V2,
-    profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
-    cloudHomeEnabled: env.BROWSER_HOME_PROFILE_V1,
-    db,
-  });
-  installVaultRuntime(browserVault);
   if (boot && ordinary) throw new Error('MAINTENANCE_MODE_CONFLICT');
-  const ordinaryMaintenance = ordinary?.coordinator;
-  const executionDrain = ordinaryMaintenance ?? boot?.controller;
   if (
     boot &&
     (process.env.RETENTION_REAPER_ENABLED === 'true' ||
@@ -86,6 +77,25 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
       process.env.PLAYBOOK_EXPLORER_SCHEDULE_ENABLED === 'true')
   )
     throw new Error('CONTROLLED_BACKGROUND_UNPROVEN');
+  const browserVault = await createProductionVaultRuntime({
+    importEnabled: env.BROWSER_SESSION_IMPORT_V2,
+    profileEnabled: env.BROWSER_PROFILE_PERSIST_V1,
+    cloudHomeEnabled: env.BROWSER_HOME_PROFILE_V1,
+    provider: env.BROWSER_VAULT_KMS_PROVIDER,
+    region: env.BROWSER_VAULT_KMS_REGION,
+    keyArn: env.BROWSER_VAULT_KMS_KEY_ARN,
+    profile: env.BROWSER_VAULT_AWS_PROFILE,
+    decryptKeyArnsCsv: env.BROWSER_VAULT_KMS_DECRYPT_KEY_ARNS,
+    probesJson: env.BROWSER_VAULT_TRUSTED_PROBES_JSON,
+    db,
+  });
+  installVaultRuntime(browserVault);
+  const closeBrowserVault = () => {
+    if (getVaultRuntime() === browserVault) installVaultRuntime(undefined);
+    browserVault?.close();
+  };
+  const ordinaryMaintenance = ordinary?.coordinator;
+  const executionDrain = ordinaryMaintenance ?? boot?.controller;
   const resources = boot ? createApplicationResources(boot) : undefined;
   const ordinaryReleases: Array<() => unknown> = [];
   const ordinaryListeners: Array<() => unknown> = [];
@@ -95,6 +105,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
     if (ordinary) ordinaryReleases.push(stop);
     else resources?.add(stop);
   };
+  addCleanup(closeBrowserVault);
   const registerProducer = (name: string, start: () => void, stop: () => Promise<void>) => {
     if (ordinary) producers.push({ name, start, stop });
     else {
@@ -1392,6 +1403,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
           );
         });
       }
+      closeBrowserVault();
       process.exit(0);
     };
 
@@ -1426,6 +1438,7 @@ export async function startApplication(boot?: ApplicationBoot, ordinary?: Ordina
   } catch (error) {
     if (resources) await resources.stop();
     if (ordinary) await closeOrdinaryResources();
+    if (!resources && !ordinary) closeBrowserVault();
     throw error;
   }
 }

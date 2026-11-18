@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WrapAndUnwrapBrowserVaultDataKeys",
+      "Effect": "Allow",
+      "Action": ["kms:Encrypt", "kms:Decrypt"],
+      "Resource": "REPLACE_CURRENT_KEY_ARN",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:application": "holaday-browser-vault",
+          "kms:EncryptionAlgorithm": "SYMMETRIC_DEFAULT"
+        },
+        "Null": { "kms:EncryptionContext:aadSha256": "false" },
+        "ForAllValues:StringEquals": {
+          "kms:EncryptionContextKeys": ["application", "aadSha256"]
+        }
+      }
+    },
+    {
+      "Sid": "ValidateBrowserVaultKeyBeforeStartup",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": "REPLACE_CURRENT_KEY_ARN"
+    }
+  ]
+}
