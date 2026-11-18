@@ -44,7 +44,7 @@ export function downloadFileMetaLabel(options: {
         ? '文件已过期'
         : availability === 'unavailable'
           ? '文件已不可用'
-          : '文件生成后保留 24 小时';
+          : '有效期暂未确认';
   return `${downloadFileKindLabel(kind)} · ${options.formattedSize} · ${availabilityLabel}`;
 }
 

@@ -149,10 +149,12 @@ export class MockOrchestrator {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
     if (this.rpcHandler && path.startsWith('/trpc/')) {
       const handler = this.rpcHandler;
-      void Promise.resolve().then(() => handler(req, res)).catch(() => {
-        if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'local RPC fixture failed' } }));
-      });
+      void Promise.resolve()
+        .then(() => handler(req, res))
+        .catch(() => {
+          if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'local RPC fixture failed' } }));
+        });
       return;
     }
     if (process.env.HOLADAY_E2E_DEBUG === '1')

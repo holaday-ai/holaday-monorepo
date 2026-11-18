@@ -10,6 +10,94 @@ const receipt = {
 };
 describe('task-owned generated outputs', () => {
   it.each([
+    '从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我',
+    'Download report.csv, generate analysis.csv, and give me 2 files',
+    '下载原报表，再生成分析文件，把这两份文件交给我',
+  ])('counts combined delivery separately from newly generated outputs: %s', async (intent) => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async () => receipt,
+    });
+    outputs.admitDownload({
+      fileId: 'original',
+      filename: 'report.csv',
+      sizeBytes: 20,
+      sha256: 'a'.repeat(64),
+      downloadUrl: '/api/files/original/download',
+    });
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create(input);
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it('still requires two generated CSVs when the final three files include an original', async () => {
+    let next = 0;
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async ({ filename }) => {
+        const fileId = `new_${++next}`;
+        return { ...receipt, fileId, filename, downloadUrl: `/api/files/${fileId}/download` };
+      },
+    });
+    outputs.admitDownload({
+      fileId: 'original',
+      filename: 'report.csv',
+      sizeBytes: 20,
+      sha256: 'a'.repeat(64),
+      downloadUrl: '/api/files/original/download',
+    });
+    const intent = '导出 report.csv，再生成两个 CSV 文件，把三份文件交给我';
+    await outputs.create(input);
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create({ ...input, filename: 'monthly.csv' });
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it('requires a new receipt even when combined delivery already has two originals', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async () => receipt,
+    });
+    for (const fileId of ['original-a', 'original-b'])
+      outputs.admitDownload({
+        fileId,
+        filename: `${fileId}.csv`,
+        sizeBytes: 20,
+        sha256: 'a'.repeat(64),
+        downloadUrl: `/api/files/${fileId}/download`,
+      });
+    const intent = '下载原表，再生成分析，把两份文件交给我';
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create(input);
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it.each([
+    '不要下载 report.csv，生成 analysis.csv，把两份文件交给我',
+    'Do not download report.csv, create analysis.csv, and give me 2 files',
+  ])('does not interpret a negated source operation as mixed delivery: %s', async (intent) => {
+    let next = 0;
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async ({ filename }) => {
+        const fileId = `new_${++next}`;
+        return { ...receipt, fileId, filename, downloadUrl: `/api/files/${fileId}/download` };
+      },
+    });
+    outputs.admitDownload({
+      fileId: 'original',
+      filename: 'report.csv',
+      sizeBytes: 20,
+      sha256: 'a'.repeat(64),
+      downloadUrl: '/api/files/original/download',
+    });
+    await outputs.create(input);
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create({ ...input, filename: 'monthly.csv' });
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it.each([
     '分析我提供的 report.csv，给出数量合计',
     '分析提供的 report.csv 并统计数量',
     'Read the provided report.csv and report the total',

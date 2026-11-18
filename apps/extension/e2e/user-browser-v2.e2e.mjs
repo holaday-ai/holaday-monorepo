@@ -125,10 +125,10 @@ test(
       await new Promise((r) => setTimeout(r, 500));
     }
     await connect;
-    assert.deepEqual(
-      server.received.find((m) => m.type === 'client.hello').userBrowserProtocol,
-      { ...protocol, capabilities: [...protocol.capabilities, 'human_activity_v1', 'task_file_upload_v1'] },
-    );
+    assert.deepEqual(server.received.find((m) => m.type === 'client.hello').userBrowserProtocol, {
+      ...protocol,
+      capabilities: [...protocol.capabilities, 'human_activity_v1', 'task_file_upload_v1'],
+    });
     const open = async (p) => {
       await p.bringToFront();
       const list = await server.call(TASK_ID, 'tabs');
@@ -160,264 +160,478 @@ test(
         action,
         binding: { token: target.token, observationRevision: target.observationRevision },
       });
-    await t.test('task-tab preparation survives a worker crash before the marker receipt and after navigation', async () => {
-      const source = await context.newPage();
-      const sourceUrl = `${server.origin}/v2.html?recovery=source-private-signed-value`;
-      await source.goto(sourceUrl);
-      const user = await context.newPage();
-      await user.goto(`${server.origin}/page.html`);
-      await user.locator('#query').fill('normal user browsing');
-      const discovered = await server.call(TASK_ID, 'tabs');
-      const original = discovered.result.tabs.find((tab) => tab.title === 'V2 fixture');
-      const userTab = discovered.result.tabs.find((tab) => tab.active);
-      assert.ok(original && userTab);
-      const args = { target: { tabId: original.tabId, expectedUrl: server.origin, selectionId: original.selectionId }, preparationId: '5e40e175-95f2-4251-b86e-463dc41cb9f6', recoverable: true };
-      const extensionId = new URL(serviceWorker.url()).host;
-      let preparedId;
-      const restart = async () => {
-        const before = server.connections.filter((c) => c.helloAt).length;
-        const cdp = await context.newCDPSession(user);
-        await cdp.send('ServiceWorker.enable');
-        await cdp.send('ServiceWorker.stopAllWorkers');
-        await cdp.detach();
-        const popup = await context.newPage();
+    await t.test(
+      'task-tab preparation survives a worker crash before the marker receipt and after navigation',
+      async () => {
+        const source = await context.newPage();
+        const sourceUrl = `${server.origin}/v2.html?recovery=source-private-signed-value`;
+        await source.goto(sourceUrl);
+        const user = await context.newPage();
+        await user.goto(`${server.origin}/page.html`);
+        await user.locator('#query').fill('normal user browsing');
+        const discovered = await server.call(TASK_ID, 'tabs');
+        const original = discovered.result.tabs.find((tab) => tab.title === 'V2 fixture');
+        const userTab = discovered.result.tabs.find((tab) => tab.active);
+        assert.ok(original && userTab);
+        const args = {
+          target: {
+            tabId: original.tabId,
+            expectedUrl: server.origin,
+            selectionId: original.selectionId,
+          },
+          preparationId: '5e40e175-95f2-4251-b86e-463dc41cb9f6',
+          recoverable: true,
+        };
+        const extensionId = new URL(serviceWorker.url()).host;
+        let preparedId;
+        const restart = async () => {
+          const before = server.connections.filter((c) => c.helloAt).length;
+          const cdp = await context.newCDPSession(user);
+          await cdp.send('ServiceWorker.enable');
+          await cdp.send('ServiceWorker.stopAllWorkers');
+          await cdp.detach();
+          const popup = await context.newPage();
+          try {
+            await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
+            await server.waitForConnection(before + 1, 30_000);
+            serviceWorker = context.serviceWorkers().at(-1);
+            assert.ok(serviceWorker);
+          } finally {
+            await popup.close();
+          }
+          await user.bringToFront();
+        };
         try {
-          await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
+          const fresh = await server.call(TASK_ID, 'task_tab', {
+            ...args,
+            preparationId: 'a168eae6-e63f-4ae4-aea8-f6ea2a8d5d54',
+          });
+          assert.equal(fresh.ok, true, JSON.stringify(fresh));
+          await serviceWorker.evaluate((id) => chrome.tabs.remove(id), fresh.result.tabId);
+          assert.equal(
+            await serviceWorker.evaluate(() => {
+              const write = chrome.storage.session.set.bind(chrome.storage.session);
+              const blocked = (items) =>
+                Object.values(items).some((entry) => entry?.phase === 'created')
+                  ? new Promise(() => {})
+                  : write(items);
+              chrome.storage.session.set = blocked;
+              return chrome.storage.session.set === blocked;
+            }),
+            true,
+          );
+          const markerCreated = context.waitForEvent('page');
+          const interrupted = server
+            .call(TASK_ID, 'task_tab', args, 2500)
+            .catch(() => ({ ok: false }));
+          const marker = await markerCreated;
+          await marker.waitForURL(/task-launch\.html#/);
+          const saved = await serviceWorker.evaluate(() => chrome.storage.session.get(null));
+          assert.equal(
+            Object.values(saved).filter((entry) => entry?.phase === 'creating').length,
+            1,
+          );
+          assert.equal(JSON.stringify(saved).includes('source-private-signed-value'), false);
+          await restart();
+          await interrupted;
+          const recovered = await server.call(TASK_ID, 'task_tab', args);
+          assert.equal(recovered.ok, true, JSON.stringify(recovered));
+          preparedId = recovered.result.tabId;
+          assert.notEqual(preparedId, original.tabId);
+          const firstSelection = recovered.result.selectionId;
+          await restart();
+          const again = await server.call(TASK_ID, 'task_tab', args);
+          assert.equal(again.ok, true, JSON.stringify(again));
+          assert.equal(again.result.tabId, preparedId);
+          assert.notEqual(
+            again.result.selectionId,
+            firstSelection,
+            'new worker issues a fresh owned selection',
+          );
+          const state = await serviceWorker.evaluate(async (sourceUrl) => {
+            const tabs = await chrome.tabs.query({ windowType: 'normal' });
+            return {
+              matching: tabs.filter((tab) => tab.url === sourceUrl).length,
+              markers: tabs.filter((tab) => tab.url?.includes('/task-launch.html#')).length,
+              active: tabs.find((tab) => tab.active)?.id,
+              stored: JSON.stringify(await chrome.storage.session.get(null)),
+            };
+          }, sourceUrl);
+          assert.equal(state.matching, 2, 'one source and exactly one prepared task tab');
+          assert.equal(state.markers, 0);
+          assert.equal(state.active, userTab.tabId);
+          assert.equal(state.stored.includes('source-private-signed-value'), false);
+          assert.equal(state.stored.includes(TOKEN), false);
+          assert.equal(await user.locator('#query').inputValue(), 'normal user browsing');
+        } finally {
+          if (preparedId !== undefined)
+            await serviceWorker
+              .evaluate((id) => chrome.tabs.remove(id), preparedId)
+              .catch(() => {});
+          await source.close();
+          await user.close();
+        }
+      },
+    );
+    await t.test(
+      'the bundled sidepanel resumes unknown preparation and creation across closes and a worker restart',
+      async () => {
+        const source = await context.newPage();
+        const sourceUrl = `${server.origin}/v2.html?ui=source-private-signed-value&sig=a%2Bb%2FC`;
+        await source.goto(sourceUrl);
+        const user = await context.newPage();
+        await user.goto(`${server.origin}/page.html`);
+        await user.locator('#query').fill('normal browsing survives recovery');
+        const extensionId = new URL(serviceWorker.url()).host;
+        const taskId = 'tsk_sidepanel_recovered';
+        const packets = [];
+        const preparations = [];
+        const creations = [];
+        let preparedTabId;
+        let created = false;
+        let acknowledgeCount = 0;
+        let signalPrepared;
+        let signalCreated;
+        let signalAcknowledged;
+        const preparedSeen = new Promise((r) => {
+          signalPrepared = r;
+        });
+        const createdSeen = new Promise((r) => {
+          signalCreated = r;
+        });
+        const acknowledged = new Promise((r) => {
+          signalAcknowledged = r;
+        });
+        const wait = (promise, label) => {
+          let timer;
+          return Promise.race([
+            promise,
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error(label)), 15_000);
+            }),
+          ]).finally(() => clearTimeout(timer));
+        };
+        const openPanel = async () => {
+          const page = context.waitForEvent('page');
+          const cdp = await context.newCDPSession(user);
+          await cdp.send('Target.createTarget', {
+            url: `chrome-extension://${extensionId}/src/sidepanel/index.html`,
+            background: true,
+          });
+          await cdp.detach();
+          const panel = await page;
+          await panel.waitForLoadState('domcontentloaded');
+          return panel;
+        };
+        let panel;
+        server.rpcHandler = async (req, res) => {
+          const url = new URL(req.url, server.origin);
+          if (req.headers.authorization !== `Bearer ${TOKEN}`) {
+            res.writeHead(401, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: 'fixture authentication required' } }));
+            return;
+          }
+          const raw =
+            req.method === 'GET'
+              ? url.searchParams.get('input')
+              : await new Promise((resolve) => {
+                  let body = '';
+                  req.on('data', (part) => {
+                    body += part;
+                  });
+                  req.on('end', () => resolve(body));
+                });
+          const input = raw ? JSON.parse(raw) : {};
+          packets.push({ path: url.pathname, input });
+          const reply = (data) => {
+            res.writeHead(200, {
+              'content-type': 'application/json',
+              'access-control-allow-origin': '*',
+            });
+            res.end(JSON.stringify({ result: { data } }));
+          };
+          const connectionId = server.connections
+            .filter((c) => c.helloAt && !c.closedAt)
+            .at(-1)?.clientId;
+          if (url.pathname === '/trpc/auth.me')
+            return reply({
+              userId: 'fixture-owner',
+              email: 'fixture@local.invalid',
+              plan: 'pro',
+              displayName: 'Local fixture',
+            });
+          if (url.pathname === '/trpc/tasks.localChromeLaunchOptions')
+            return reply({ backgroundTaskTabs: true, launchRecovery: true });
+          if (url.pathname === '/trpc/tasks.localChromeTabs') {
+            const list = await server.call('ui-discovery', 'tabs');
+            assert.equal(list.ok, true);
+            return reply({
+              backgroundTaskTabs: true,
+              launchRecovery: true,
+              tabs: list.result.tabs.map((tab) => ({
+                extensionClientId: connectionId,
+                tabId: tab.tabId,
+                expectedUrl: tab.url,
+                selectionId: tab.selectionId,
+                title: tab.title,
+                taskTabStart: true,
+                launchRecoveryReady: true,
+                launchBrowserSessionId: list.result.launchBrowserSessionId,
+              })),
+            });
+          }
+          if (url.pathname === '/trpc/tasks.localChromeLaunchReceipt') {
+            if (created) {
+              for (const ws of server.sockets)
+                ws.send(
+                  JSON.stringify({
+                    type: 'server.task.terminal',
+                    taskId,
+                    status: 'cancelled',
+                    reason: 'Synthetic cancellation before recovery',
+                  }),
+                );
+              return reply({ state: 'created', taskId, status: 'cancelled' });
+            }
+            return reply({ state: 'absent' });
+          }
+          if (url.pathname === '/trpc/tasks.localChromeTaskTab') {
+            preparations.push(input);
+            const selected = input.selection;
+            const result = await server.call(`ui-prepare-${preparations.length}`, 'task_tab', {
+              target: {
+                tabId: selected.tabId,
+                expectedUrl: selected.expectedUrl,
+                selectionId: selected.selectionId,
+              },
+              preparationId: input.preparationId,
+              recoverable: true,
+              resumeOnly: input.resumeOnly,
+              taskTabMode: input.mode,
+              launchBrowserSessionId: selected.launchBrowserSessionId,
+            });
+            assert.equal(result.ok, true, JSON.stringify(result));
+            if (preparedTabId !== undefined) assert.equal(result.result.tabId, preparedTabId);
+            preparedTabId = result.result.tabId;
+            if (preparations.length === 1) {
+              signalPrepared();
+              return;
+            } // Lose only the HTTP receipt.
+            return reply({
+              extensionClientId: connectionId,
+              tabId: preparedTabId,
+              expectedUrl: result.result.url,
+              selectionId: result.result.selectionId,
+              launchBrowserSessionId: selected.launchBrowserSessionId,
+              title: result.result.title,
+            });
+          }
+          if (url.pathname === '/trpc/tasks.create') {
+            creations.push(input);
+            assert.equal(input.localChrome.tabId, preparedTabId);
+            assert.deepEqual(Object.keys(input.localChrome).sort(), [
+              'expectedUrl',
+              'extensionClientId',
+              'launchBrowserSessionId',
+              'selectionId',
+              'tabId',
+            ]);
+            created = true;
+            signalCreated();
+            return; // The task exists; lose its response as well.
+          }
+          if (url.pathname === '/trpc/tasks.localChromeLaunchAcknowledge') {
+            assert.equal(input.taskId, taskId);
+            const result = await server.call(
+              `ui-release-${input.preparationId}`,
+              'task_tab_release',
+              {
+                preparationId: input.preparationId,
+                launchBrowserSessionId: input.launchBrowserSessionId,
+              },
+            );
+            assert.equal(result.ok, true, JSON.stringify(result));
+            acknowledgeCount++;
+            reply({ acknowledged: true });
+            signalAcknowledged();
+            return;
+          }
+          reply({ tasks: [] });
+        };
+        try {
+          await serviceWorker.evaluate(() =>
+            chrome.storage.local.set({
+              'holaday.user': {
+                externalId: 'stale-owner',
+                email: 'stale@local.invalid',
+                plan: 'pro',
+                displayName: 'Stale cached account',
+              },
+            }),
+          );
+          panel = await openPanel();
+          await panel.locator('textarea').fill('整理后台数据，保留结果供我检查');
+          await panel.waitForFunction(() =>
+            [...document.querySelectorAll('button')].some(
+              (b) => b.textContent === '发送任务' && !b.disabled,
+            ),
+          );
+          await source.bringToFront();
+          await panel.evaluate(() =>
+            [...document.querySelectorAll('button')]
+              .find((b) => b.textContent === '发送任务')
+              .click(),
+          );
+          await wait(preparedSeen, 'sidepanel did not prepare');
+          await user.bringToFront();
+          await panel.close();
+          panel = undefined;
+          const beforeProfile = (await server.call('ui-profile-before', 'tabs')).result
+            .launchBrowserSessionId;
+          const before = server.connections.filter((c) => c.helloAt).length;
+          const cdp = await context.newCDPSession(user);
+          await cdp.send('ServiceWorker.enable');
+          await cdp.send('ServiceWorker.stopAllWorkers');
+          await cdp.detach();
+          panel = await openPanel();
           await server.waitForConnection(before + 1, 30_000);
           serviceWorker = context.serviceWorkers().at(-1);
-          assert.ok(serviceWorker);
-        } finally { await popup.close(); }
-        await user.bringToFront();
-      };
-      try {
-        const fresh = await server.call(TASK_ID, 'task_tab', { ...args, preparationId: 'a168eae6-e63f-4ae4-aea8-f6ea2a8d5d54' });
-        assert.equal(fresh.ok, true, JSON.stringify(fresh));
-        await serviceWorker.evaluate((id) => chrome.tabs.remove(id), fresh.result.tabId);
-        assert.equal(await serviceWorker.evaluate(() => {
-          const write = chrome.storage.session.set.bind(chrome.storage.session);
-          const blocked = (items) => Object.values(items).some((entry) => entry?.phase === 'created') ? new Promise(() => {}) : write(items);
-          chrome.storage.session.set = blocked;
-          return chrome.storage.session.set === blocked;
-        }), true);
-        const markerCreated = context.waitForEvent('page');
-        const interrupted = server.call(TASK_ID, 'task_tab', args, 2500).catch(() => ({ ok: false }));
-        const marker = await markerCreated;
-        await marker.waitForURL(/task-launch\.html#/);
-        const saved = await serviceWorker.evaluate(() => chrome.storage.session.get(null));
-        assert.equal(Object.values(saved).filter((entry) => entry?.phase === 'creating').length, 1);
-        assert.equal(JSON.stringify(saved).includes('source-private-signed-value'), false);
-        await restart();
-        await interrupted;
-        const recovered = await server.call(TASK_ID, 'task_tab', args);
-        assert.equal(recovered.ok, true, JSON.stringify(recovered));
-        preparedId = recovered.result.tabId;
-        assert.notEqual(preparedId, original.tabId);
-        const firstSelection = recovered.result.selectionId;
-        await restart();
-        const again = await server.call(TASK_ID, 'task_tab', args);
-        assert.equal(again.ok, true, JSON.stringify(again));
-        assert.equal(again.result.tabId, preparedId);
-        assert.notEqual(again.result.selectionId, firstSelection, 'new worker issues a fresh owned selection');
-        const state = await serviceWorker.evaluate(async (sourceUrl) => {
-          const tabs = await chrome.tabs.query({ windowType: 'normal' });
-          return { matching: tabs.filter((tab) => tab.url === sourceUrl).length, markers: tabs.filter((tab) => tab.url?.includes('/task-launch.html#')).length, active: tabs.find((tab) => tab.active)?.id, stored: JSON.stringify(await chrome.storage.session.get(null)) };
-        }, sourceUrl);
-        assert.equal(state.matching, 2, 'one source and exactly one prepared task tab');
-        assert.equal(state.markers, 0);
-        assert.equal(state.active, userTab.tabId);
-        assert.equal(state.stored.includes('source-private-signed-value'), false);
-        assert.equal(state.stored.includes(TOKEN), false);
-        assert.equal(await user.locator('#query').inputValue(), 'normal user browsing');
-      } finally {
-        if (preparedId !== undefined) await serviceWorker.evaluate((id) => chrome.tabs.remove(id), preparedId).catch(() => {});
-        await source.close(); await user.close();
-      }
-    });
-    await t.test('the bundled sidepanel resumes unknown preparation and creation across closes and a worker restart', async () => {
-      const source = await context.newPage();
-      const sourceUrl = `${server.origin}/v2.html?ui=source-private-signed-value&sig=a%2Bb%2FC`;
-      await source.goto(sourceUrl);
-      const user = await context.newPage();
-      await user.goto(`${server.origin}/page.html`);
-      await user.locator('#query').fill('normal browsing survives recovery');
-      const extensionId = new URL(serviceWorker.url()).host;
-      const taskId = 'tsk_sidepanel_recovered';
-      const packets = [];
-      const preparations = [];
-      const creations = [];
-      let preparedTabId;
-      let created = false;
-      let acknowledgeCount = 0;
-      let signalPrepared;
-      let signalCreated;
-      let signalAcknowledged;
-      const preparedSeen = new Promise((r) => { signalPrepared = r; });
-      const createdSeen = new Promise((r) => { signalCreated = r; });
-      const acknowledged = new Promise((r) => { signalAcknowledged = r; });
-      const wait = (promise, label) => {
-        let timer;
-        return Promise.race([promise, new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(label)), 15_000);
-        })]).finally(() => clearTimeout(timer));
-      };
-      const openPanel = async () => {
-        const page = context.waitForEvent('page');
-        const cdp = await context.newCDPSession(user);
-        await cdp.send('Target.createTarget', { url: `chrome-extension://${extensionId}/src/sidepanel/index.html`, background: true });
-        await cdp.detach();
-        const panel = await page;
-        await panel.waitForLoadState('domcontentloaded');
-        return panel;
-      };
-      let panel;
-      server.rpcHandler = async (req, res) => {
-        const url = new URL(req.url, server.origin);
-        if (req.headers.authorization !== `Bearer ${TOKEN}`) {
-          res.writeHead(401, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: 'fixture authentication required' } })); return;
-        }
-        const raw = req.method === 'GET' ? url.searchParams.get('input') : await new Promise((resolve) => {
-          let body = ''; req.on('data', (part) => { body += part; }); req.on('end', () => resolve(body));
-        });
-        const input = raw ? JSON.parse(raw) : {};
-        packets.push({ path: url.pathname, input });
-        const reply = (data) => { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify({ result: { data } })); };
-        const connectionId = server.connections.filter((c) => c.helloAt && !c.closedAt).at(-1)?.clientId;
-        if (url.pathname === '/trpc/auth.me') return reply({ userId: 'fixture-owner', email: 'fixture@local.invalid', plan: 'pro', displayName: 'Local fixture' });
-        if (url.pathname === '/trpc/tasks.localChromeLaunchOptions') return reply({ backgroundTaskTabs: true, launchRecovery: true });
-        if (url.pathname === '/trpc/tasks.localChromeTabs') {
-          const list = await server.call('ui-discovery', 'tabs');
-          assert.equal(list.ok, true);
-          return reply({ backgroundTaskTabs: true, launchRecovery: true,
-            tabs: list.result.tabs.map((tab) => ({ extensionClientId: connectionId, tabId: tab.tabId,
-              expectedUrl: tab.url, selectionId: tab.selectionId, title: tab.title,
-              taskTabStart: true, launchRecoveryReady: true, launchBrowserSessionId: list.result.launchBrowserSessionId })) });
-        }
-        if (url.pathname === '/trpc/tasks.localChromeLaunchReceipt') {
-          if (created) {
-            for (const ws of server.sockets) ws.send(JSON.stringify({ type: 'server.task.terminal', taskId,
-              status: 'cancelled', reason: 'Synthetic cancellation before recovery' }));
-            return reply({ state: 'created', taskId, status: 'cancelled' });
+          assert.equal(
+            (await server.call('ui-profile-after', 'tabs')).result.launchBrowserSessionId,
+            beforeProfile,
+          );
+          await wait(createdSeen, 'sidepanel did not resume preparation');
+          await panel.close();
+          panel = undefined;
+          panel = await openPanel();
+          await wait(acknowledged, 'sidepanel did not recover the original task');
+          await panel.getByText(taskId, { exact: true }).waitFor();
+          const state = await serviceWorker.evaluate(
+            async ({ sourceUrl, prefix }) => {
+              const tabs = await chrome.tabs.query({ windowType: 'normal' });
+              const stored = await chrome.storage.local.get(null);
+              return {
+                matching: tabs.filter((t) => t.url === sourceUrl).length,
+                activeUrl: tabs.find((t) => t.active)?.url,
+                launches: Object.keys(stored).filter((key) => key.startsWith(prefix)),
+                released: Object.values(await chrome.storage.session.get(null)).filter(
+                  (v) => v?.phase === 'released',
+                ).length,
+              };
+            },
+            { sourceUrl, prefix: 'holaday.browser-launch.v1.' },
+          );
+          assert.equal(preparations.length, 2);
+          assert.equal(preparations[1].resumeOnly, true);
+          assert.equal(preparations[0].preparationId, preparations[1].preparationId);
+          assert.equal(creations.length, 1);
+          assert.equal(acknowledgeCount, 1);
+          assert.equal(state.matching, 2);
+          assert.equal(state.activeUrl, `${server.origin}/page.html`);
+          assert.equal(state.launches.length, 0);
+          assert.ok(state.released >= 1);
+          assert.equal(JSON.stringify(packets).includes('source-private-signed-value'), false);
+          assert.equal(
+            await user.locator('#query').inputValue(),
+            'normal browsing survives recovery',
+          );
+          assert.deepEqual(
+            {
+              verifiedAccountShown: await panel.getByText('Local fixture', { exact: true }).count(),
+              staleAccountShown: await panel
+                .getByText('Stale cached account', { exact: true })
+                .count(),
+              cancelledTaskLabel: await panel.getByText('任务已取消', { exact: true }).count(),
+              misleadingFailureLabel: await panel.getByText('任务失败', { exact: true }).count(),
+            },
+            {
+              verifiedAccountShown: 1,
+              staleAccountShown: 0,
+              cancelledTaskLabel: 1,
+              misleadingFailureLabel: 0,
+            },
+          );
+          await panel.setViewportSize({ width: 390, height: 844 });
+          assert.equal(
+            await panel.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+            false,
+          );
+          const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+          if (artifactDir) {
+            mkdirSync(artifactDir, { recursive: true });
+            await panel.screenshot({ path: join(artifactDir, 'sidepanel-recovered-390.png') });
+            writeFileSync(
+              join(artifactDir, 'sidepanel-recovery.json'),
+              JSON.stringify(
+                {
+                  preparationRequests: preparations.length,
+                  taskCreateRequests: creations.length,
+                  acknowledgementRequests: acknowledgeCount,
+                  duplicateTasks: creations.length - 1,
+                  duplicateTaskPages: state.matching - 2,
+                  workerSessionIdentityPreserved: true,
+                  userInputPreserved: true,
+                  sourceUrlNeverUploaded: true,
+                  width: 390,
+                  overflow: false,
+                  syntheticOnly: true,
+                  physicalOsInputAcceptance: false,
+                },
+                null,
+                2,
+              ),
+            );
           }
-          return reply({ state: 'absent' });
-        }
-        if (url.pathname === '/trpc/tasks.localChromeTaskTab') {
-          preparations.push(input);
-          const selected = input.selection;
-          const result = await server.call(`ui-prepare-${preparations.length}`, 'task_tab', {
-            target: { tabId: selected.tabId, expectedUrl: selected.expectedUrl, selectionId: selected.selectionId },
-            preparationId: input.preparationId, recoverable: true, resumeOnly: input.resumeOnly,
-            taskTabMode: input.mode, launchBrowserSessionId: selected.launchBrowserSessionId,
+          const refreshed = await server.call('ui-current-source', 'tabs');
+          const original = refreshed.result.tabs.find(
+            (tab) => tab.tabId === preparations[0].selection.tabId,
+          );
+          const currentArgs = {
+            target: {
+              tabId: original.tabId,
+              expectedUrl: original.url,
+              selectionId: original.selectionId,
+            },
+            preparationId: '9f40e175-95f2-4251-b86e-463dc41cb9f6',
+            recoverable: true,
+            taskTabMode: 'current',
+            launchBrowserSessionId: beforeProfile,
+          };
+          const pageCount = context.pages().length;
+          const current = await server.call('ui-current-prepare', 'task_tab', currentArgs);
+          assert.equal(current.ok, true, JSON.stringify(current));
+          assert.equal(current.result.tabId, original.tabId);
+          assert.equal(current.result.taskTabCreated, false);
+          assert.equal(context.pages().length, pageCount);
+          await source.goto(`${sourceUrl}#user-changed`);
+          const changed = await server.call('ui-current-changed', 'task_tab', {
+            ...currentArgs,
+            resumeOnly: true,
           });
-          assert.equal(result.ok, true, JSON.stringify(result));
-          if (preparedTabId !== undefined) assert.equal(result.result.tabId, preparedTabId);
-          preparedTabId = result.result.tabId;
-          if (preparations.length === 1) { signalPrepared(); return; } // Lose only the HTTP receipt.
-          return reply({ extensionClientId: connectionId, tabId: preparedTabId, expectedUrl: result.result.url,
-            selectionId: result.result.selectionId, launchBrowserSessionId: selected.launchBrowserSessionId, title: result.result.title });
+          assert.equal(changed.ok, false);
+          assert.equal(changed.error.code, 'target_changed');
+          assert.equal(context.pages().length, pageCount);
+          assert.equal(
+            (
+              await server.call('ui-current-release', 'task_tab_release', {
+                preparationId: currentArgs.preparationId,
+                launchBrowserSessionId: beforeProfile,
+              })
+            ).ok,
+            true,
+          );
+        } finally {
+          server.rpcHandler = undefined;
+          await panel?.close().catch(() => {});
+          if (preparedTabId !== undefined)
+            await serviceWorker
+              .evaluate((id) => chrome.tabs.remove(id), preparedTabId)
+              .catch(() => {});
+          await source.close();
+          await user.close();
         }
-        if (url.pathname === '/trpc/tasks.create') {
-          creations.push(input);
-          assert.equal(input.localChrome.tabId, preparedTabId);
-          assert.deepEqual(Object.keys(input.localChrome).sort(), ['expectedUrl', 'extensionClientId', 'launchBrowserSessionId', 'selectionId', 'tabId']);
-          created = true; signalCreated(); return; // The task exists; lose its response as well.
-        }
-        if (url.pathname === '/trpc/tasks.localChromeLaunchAcknowledge') {
-          assert.equal(input.taskId, taskId);
-          const result = await server.call(`ui-release-${input.preparationId}`, 'task_tab_release', {
-            preparationId: input.preparationId, launchBrowserSessionId: input.launchBrowserSessionId,
-          });
-          assert.equal(result.ok, true, JSON.stringify(result));
-          acknowledgeCount++; reply({ acknowledged: true }); signalAcknowledged(); return;
-        }
-        reply({ tasks: [] });
-      };
-      try {
-        await serviceWorker.evaluate(() => chrome.storage.local.set({ 'holaday.user': {
-          externalId: 'stale-owner', email: 'stale@local.invalid', plan: 'pro', displayName: 'Stale cached account',
-        } }));
-        panel = await openPanel();
-        await panel.locator('textarea').fill('整理后台数据，保留结果供我检查');
-        await panel.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent === '发送任务' && !b.disabled));
-        await source.bringToFront();
-        await panel.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === '发送任务').click());
-        await wait(preparedSeen, 'sidepanel did not prepare');
-        await user.bringToFront();
-        await panel.close(); panel = undefined;
-        const beforeProfile = (await server.call('ui-profile-before', 'tabs')).result.launchBrowserSessionId;
-        const before = server.connections.filter((c) => c.helloAt).length;
-        const cdp = await context.newCDPSession(user);
-        await cdp.send('ServiceWorker.enable'); await cdp.send('ServiceWorker.stopAllWorkers'); await cdp.detach();
-        panel = await openPanel();
-        await server.waitForConnection(before + 1, 30_000);
-        serviceWorker = context.serviceWorkers().at(-1);
-        assert.equal((await server.call('ui-profile-after', 'tabs')).result.launchBrowserSessionId, beforeProfile);
-        await wait(createdSeen, 'sidepanel did not resume preparation');
-        await panel.close(); panel = undefined;
-        panel = await openPanel();
-        await wait(acknowledged, 'sidepanel did not recover the original task');
-        await panel.getByText(taskId, { exact: true }).waitFor();
-        const state = await serviceWorker.evaluate(async ({ sourceUrl, prefix }) => {
-          const tabs = await chrome.tabs.query({ windowType: 'normal' });
-          const stored = await chrome.storage.local.get(null);
-          return { matching: tabs.filter((t) => t.url === sourceUrl).length,
-            activeUrl: tabs.find((t) => t.active)?.url,
-            launches: Object.keys(stored).filter((key) => key.startsWith(prefix)),
-            released: Object.values(await chrome.storage.session.get(null)).filter((v) => v?.phase === 'released').length };
-        }, { sourceUrl, prefix: 'holaday.browser-launch.v1.' });
-        assert.equal(preparations.length, 2); assert.equal(preparations[1].resumeOnly, true);
-        assert.equal(preparations[0].preparationId, preparations[1].preparationId);
-        assert.equal(creations.length, 1); assert.equal(acknowledgeCount, 1);
-        assert.equal(state.matching, 2); assert.equal(state.activeUrl, `${server.origin}/page.html`);
-        assert.equal(state.launches.length, 0); assert.ok(state.released >= 1);
-        assert.equal(JSON.stringify(packets).includes('source-private-signed-value'), false);
-        assert.equal(await user.locator('#query').inputValue(), 'normal browsing survives recovery');
-        assert.deepEqual({
-          verifiedAccountShown: await panel.getByText('Local fixture', { exact: true }).count(),
-          staleAccountShown: await panel.getByText('Stale cached account', { exact: true }).count(),
-          cancelledTaskLabel: await panel.getByText('任务已取消', { exact: true }).count(),
-          misleadingFailureLabel: await panel.getByText('任务失败', { exact: true }).count(),
-        }, { verifiedAccountShown: 1, staleAccountShown: 0, cancelledTaskLabel: 1, misleadingFailureLabel: 0 });
-        await panel.setViewportSize({ width: 390, height: 844 });
-        assert.equal(await panel.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-        const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
-        if (artifactDir) {
-          mkdirSync(artifactDir, { recursive: true });
-          await panel.screenshot({ path: join(artifactDir, 'sidepanel-recovered-390.png') });
-          writeFileSync(join(artifactDir, 'sidepanel-recovery.json'), JSON.stringify({
-            preparationRequests: preparations.length, taskCreateRequests: creations.length,
-            acknowledgementRequests: acknowledgeCount, duplicateTasks: creations.length - 1,
-            duplicateTaskPages: state.matching - 2, workerSessionIdentityPreserved: true,
-            userInputPreserved: true, sourceUrlNeverUploaded: true, width: 390, overflow: false,
-            syntheticOnly: true, physicalOsInputAcceptance: false,
-          }, null, 2));
-        }
-        const refreshed = await server.call('ui-current-source', 'tabs');
-        const original = refreshed.result.tabs.find((tab) => tab.tabId === preparations[0].selection.tabId);
-        const currentArgs = { target: { tabId: original.tabId, expectedUrl: original.url, selectionId: original.selectionId },
-          preparationId: '9f40e175-95f2-4251-b86e-463dc41cb9f6', recoverable: true,
-          taskTabMode: 'current', launchBrowserSessionId: beforeProfile };
-        const pageCount = context.pages().length;
-        const current = await server.call('ui-current-prepare', 'task_tab', currentArgs);
-        assert.equal(current.ok, true, JSON.stringify(current));
-        assert.equal(current.result.tabId, original.tabId);
-        assert.equal(current.result.taskTabCreated, false);
-        assert.equal(context.pages().length, pageCount);
-        await source.goto(`${sourceUrl}#user-changed`);
-        const changed = await server.call('ui-current-changed', 'task_tab', { ...currentArgs, resumeOnly: true });
-        assert.equal(changed.ok, false);
-        assert.equal(changed.error.code, 'target_changed');
-        assert.equal(context.pages().length, pageCount);
-        assert.equal((await server.call('ui-current-release', 'task_tab_release', {
-          preparationId: currentArgs.preparationId, launchBrowserSessionId: beforeProfile,
-        })).ok, true);
-      } finally {
-        server.rpcHandler = undefined;
-        await panel?.close().catch(() => {});
-        if (preparedTabId !== undefined) await serviceWorker.evaluate((id) => chrome.tabs.remove(id), preparedTabId).catch(() => {});
-        await source.close(); await user.close();
-      }
-    });
+      },
+    );
     await t.test('background task tab keeps normal browsing and input untouched', async () => {
       const sourcePage = await context.newPage();
       await sourcePage.goto(`${server.origin}/v2.html?start=background`);
@@ -702,132 +916,205 @@ test(
         }
       },
     );
-    await t.test('native typing invalidates the old target, preserves the edit and permits a fresh decision', async () => {
-      await page.locator('#query').focus();
-      await page.evaluate(() => {
-        window.manualRaceClicks = 0;
-        document.querySelector('#search').addEventListener('click', () => window.manualRaceClicks++);
-      });
-      await observe();
-      const action = { kind: 'click', selector: css('#search') };
-      const ticket = (await describe(action)).result.target;
-      try {
-        await page.keyboard.type('private native edit');
-        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
-        const stale = await bound(action, ticket);
-        assert.equal(stale.ok, false, 'the model’s pre-edit target must not execute');
-        assert.equal(stale.result.error, 'stale_observation');
-        assert.equal(stale.result.actionOutcome, 'not_applied');
-        assert.equal(await page.evaluate(() => window.manualRaceClicks), 0);
-        assert.equal(JSON.stringify(stale).includes('private native edit'), false);
-        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+    await t.test(
+      'native typing invalidates the old target, preserves the edit and permits a fresh decision',
+      async () => {
+        await page.locator('#query').focus();
+        await page.evaluate(() => {
+          window.manualRaceClicks = 0;
+          document
+            .querySelector('#search')
+            .addEventListener('click', () => window.manualRaceClicks++);
+        });
         await observe();
-        const fresh = await describe(action);
-        assert.equal(fresh.ok, true);
-        assert.equal((await bound(action, fresh.result.target)).ok, true);
-        assert.equal(await page.evaluate(() => window.manualRaceClicks), 1);
-        assert.equal(await page.locator('#query').inputValue(), 'private native edit');
-      } finally {
-        await page.locator('#query').fill('');
-      }
-    });
-    await t.test('native held keys, drag and trusted IME yield naturally with exact task/document binding', async () => {
-      await call({ op: 'close', sessionId });
-      const { BrowserControl } = await loadServerModule('agent/supercar/browser-control.ts');
-      const { SelectedChromeClient } = await loadServerModule('agent/supercar/selected-chrome-client.ts');
-      const control = new BrowserControl(Date.now, { collaborationV2: true });
-      const operations = [];
-      const client = new SelectedChromeClient({
-        userId: 'fixture', taskId: TASK_ID, extensionClientId: 'fixture', control,
-        routingV2: true, collaborationV2: true,
-        send: async (_, input) => {
-          operations.push(input.args.session.op);
-          return server.call(TASK_ID, 'session', input.args);
-        },
-      });
-      let other;
-      let ime;
-      try {
-        const list = await server.call(TASK_ID, 'tabs');
-        const tab = list.result.tabs.find((t) => t.tabId === selected.tabId);
-        assert.ok(tab);
-        const opened = await client.open({ tabId: tab.tabId, expectedUrl: server.origin, selectionId: tab.selectionId });
-        assert.equal(opened.ok, true, JSON.stringify(opened));
-        await page.locator('#query').focus();
-        await client.observe();
-        assert.equal((await client.checkpoint()).resumed, false);
-
-        await page.keyboard.down('Shift');
-        const sinceHeld = operations.filter((op) => op === 'observe').length;
-        assert.equal((await client.checkpoint({ maxWaitMs: 2100 })).blocked, true);
-        assert.equal(operations.filter((op) => op === 'observe').length, sinceHeld);
-        assert.equal(operations.includes('act'), false);
-        await page.keyboard.up('Shift');
-        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
-
-        const box = await page.locator('#query').boundingBox();
-        assert.ok(box);
-        await page.mouse.move(box.x + 5, box.y + 5);
-        await page.mouse.down();
-        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
-        await page.mouse.move(box.x + 20, box.y + 5);
-        await page.mouse.up();
-        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
-
-        other = await context.newPage();
-        await other.goto(`${server.origin}/page.html`);
-        await other.locator('#query').fill('unrelated user input');
-        assert.equal((await client.checkpoint()).resumed, false);
-        const active = await serviceWorker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id);
-        assert.notEqual(active, selected.tabId, 'activity queries must not activate the task tab');
-        assert.equal(await other.locator('#query').inputValue(), 'unrelated user input');
-        await other.close(); other = null;
-        await page.bringToFront();
-        await page.locator('#query').focus();
-        await client.observe();
-        ime = await context.newCDPSession(page);
-        // Trusted browser IME events, not a page-created CompositionEvent (see CDP Input).
-        await ime.send('Input.imeSetComposition', { text: '中', selectionStart: 1, selectionEnd: 1 });
-        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
-        await ime.send('Input.insertText', { text: '中文' });
-        assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true, 'an untrusted end is not a release receipt');
-        await page.keyboard.press('ArrowRight');
-        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
-        assert.equal(await page.locator('#query').inputValue(), '中文');
-
         const action = { kind: 'click', selector: css('#search') };
-        assert.equal((await client.describe(action, client.revision)).ok, true);
-        assert.equal((await client.execute(action, client.revision)).ok, true);
-        assert.equal((await client.checkpoint()).resumed, false, 'our own observed click is not a human takeover');
-        assert.equal((await client.execute({ kind: 'goto', payload: { url: `${server.origin}/v2.html?own=native` } }, client.revision)).ok, true);
-        assert.equal((await client.checkpoint()).resumed, false, 'our own observed navigation is not a human takeover');
-        await page.keyboard.down('Shift');
-        await page.reload();
-        assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).blocked, true, 'a lost held document between polls is not a release receipt');
-      } finally {
-        await page.keyboard.up('Shift').catch(() => {});
-        await page.mouse.up().catch(() => {});
-        await ime?.detach().catch(() => {});
-        await other?.close().catch(() => {});
-        await client.close();
-        await page.locator('#query').fill('');
-        await page.evaluate(() => { document.querySelector('#effects').textContent = '1'; });
+        const ticket = (await describe(action)).result.target;
         try {
-          const discovery = await server.call(TASK_ID, 'tabs');
-          const selectedAgain = discovery.result.tabs.find((tab) => tab.tabId === selected.tabId);
-          assert.ok(selectedAgain);
-          const resumed = new SelectedChromeClient({
-            userId: 'fixture', taskId: TASK_ID, extensionClientId: 'fixture',
-            control: new BrowserControl(Date.now, { collaborationV2: true }), routingV2: true, collaborationV2: true,
-            send: async (_, input) => server.call(TASK_ID, 'session', input.args),
+          await page.keyboard.type('private native edit');
+          assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+          const stale = await bound(action, ticket);
+          assert.equal(stale.ok, false, 'the model’s pre-edit target must not execute');
+          assert.equal(stale.result.error, 'stale_observation');
+          assert.equal(stale.result.actionOutcome, 'not_applied');
+          assert.equal(await page.evaluate(() => window.manualRaceClicks), 0);
+          assert.equal(JSON.stringify(stale).includes('private native edit'), false);
+          assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+          await observe();
+          const fresh = await describe(action);
+          assert.equal(fresh.ok, true);
+          assert.equal((await bound(action, fresh.result.target)).ok, true);
+          assert.equal(await page.evaluate(() => window.manualRaceClicks), 1);
+          assert.equal(await page.locator('#query').inputValue(), 'private native edit');
+        } finally {
+          await page.locator('#query').fill('');
+        }
+      },
+    );
+    await t.test(
+      'native held keys, drag and trusted IME yield naturally with exact task/document binding',
+      async () => {
+        await call({ op: 'close', sessionId });
+        const { BrowserControl } = await loadServerModule('agent/supercar/browser-control.ts');
+        const { SelectedChromeClient } = await loadServerModule(
+          'agent/supercar/selected-chrome-client.ts',
+        );
+        const control = new BrowserControl(Date.now, { collaborationV2: true });
+        const operations = [];
+        const client = new SelectedChromeClient({
+          userId: 'fixture',
+          taskId: TASK_ID,
+          extensionClientId: 'fixture',
+          control,
+          routingV2: true,
+          collaborationV2: true,
+          send: async (_, input) => {
+            operations.push(input.args.session.op);
+            return server.call(TASK_ID, 'session', input.args);
+          },
+        });
+        let other;
+        let ime;
+        try {
+          const list = await server.call(TASK_ID, 'tabs');
+          const tab = list.result.tabs.find((t) => t.tabId === selected.tabId);
+          assert.ok(tab);
+          const opened = await client.open({
+            tabId: tab.tabId,
+            expectedUrl: server.origin,
+            selectionId: tab.selectionId,
+          });
+          assert.equal(opened.ok, true, JSON.stringify(opened));
+          await page.locator('#query').focus();
+          await client.observe();
+          assert.equal((await client.checkpoint()).resumed, false);
+
+          await page.keyboard.down('Shift');
+          const sinceHeld = operations.filter((op) => op === 'observe').length;
+          assert.equal((await client.checkpoint({ maxWaitMs: 2100 })).blocked, true);
+          assert.equal(operations.filter((op) => op === 'observe').length, sinceHeld);
+          assert.equal(operations.includes('act'), false);
+          await page.keyboard.up('Shift');
+          assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+
+          const box = await page.locator('#query').boundingBox();
+          assert.ok(box);
+          await page.mouse.move(box.x + 5, box.y + 5);
+          await page.mouse.down();
+          assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
+          await page.mouse.move(box.x + 20, box.y + 5);
+          await page.mouse.up();
+          assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+
+          other = await context.newPage();
+          await other.goto(`${server.origin}/page.html`);
+          await other.locator('#query').fill('unrelated user input');
+          assert.equal((await client.checkpoint()).resumed, false);
+          const active = await serviceWorker.evaluate(
+            async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+          );
+          assert.notEqual(
+            active,
+            selected.tabId,
+            'activity queries must not activate the task tab',
+          );
+          assert.equal(await other.locator('#query').inputValue(), 'unrelated user input');
+          await other.close();
+          other = null;
+          await page.bringToFront();
+          await page.locator('#query').focus();
+          await client.observe();
+          ime = await context.newCDPSession(page);
+          // Trusted browser IME events, not a page-created CompositionEvent (see CDP Input).
+          await ime.send('Input.imeSetComposition', {
+            text: '中',
+            selectionStart: 1,
+            selectionEnd: 1,
+          });
+          assert.equal((await client.checkpoint({ maxWaitMs: 150 })).blocked, true);
+          await ime.send('Input.insertText', { text: '中文' });
+          assert.equal(
+            (await client.checkpoint({ maxWaitMs: 150 })).blocked,
+            true,
+            'an untrusted end is not a release receipt',
+          );
+          await page.keyboard.press('ArrowRight');
+          assert.equal((await client.checkpoint({ maxWaitMs: 5000 })).resumed, true);
+          assert.equal(await page.locator('#query').inputValue(), '中文');
+
+          const action = { kind: 'click', selector: css('#search') };
+          assert.equal((await client.describe(action, client.revision)).ok, true);
+          assert.equal((await client.execute(action, client.revision)).ok, true);
+          assert.equal(
+            (await client.checkpoint()).resumed,
+            false,
+            'our own observed click is not a human takeover',
+          );
+          assert.equal(
+            (
+              await client.execute(
+                { kind: 'goto', payload: { url: `${server.origin}/v2.html?own=native` } },
+                client.revision,
+              )
+            ).ok,
+            true,
+          );
+          assert.equal(
+            (await client.checkpoint()).resumed,
+            false,
+            'our own observed navigation is not a human takeover',
+          );
+          await page.keyboard.down('Shift');
+          await page.reload();
+          assert.equal(
+            (await client.checkpoint({ maxWaitMs: 5000 })).blocked,
+            true,
+            'a lost held document between polls is not a release receipt',
+          );
+        } finally {
+          await page.keyboard.up('Shift').catch(() => {});
+          await page.mouse.up().catch(() => {});
+          await ime?.detach().catch(() => {});
+          await other?.close().catch(() => {});
+          await client.close();
+          await page.locator('#query').fill('');
+          await page.evaluate(() => {
+            document.querySelector('#effects').textContent = '1';
           });
           try {
-            assert.equal((await resumed.open({ tabId: selectedAgain.tabId, expectedUrl: server.origin, selectionId: selectedAgain.selectionId })).ok, true, 'a released seat must support another advanced task');
-            assert.equal((await resumed.checkpoint()).resumed, false);
-          } finally { await resumed.close(); }
-        } finally { await open(page); }
-      }
-    });
+            const discovery = await server.call(TASK_ID, 'tabs');
+            const selectedAgain = discovery.result.tabs.find((tab) => tab.tabId === selected.tabId);
+            assert.ok(selectedAgain);
+            const resumed = new SelectedChromeClient({
+              userId: 'fixture',
+              taskId: TASK_ID,
+              extensionClientId: 'fixture',
+              control: new BrowserControl(Date.now, { collaborationV2: true }),
+              routingV2: true,
+              collaborationV2: true,
+              send: async (_, input) => server.call(TASK_ID, 'session', input.args),
+            });
+            try {
+              assert.equal(
+                (
+                  await resumed.open({
+                    tabId: selectedAgain.tabId,
+                    expectedUrl: server.origin,
+                    selectionId: selectedAgain.selectionId,
+                  })
+                ).ok,
+                true,
+                'a released seat must support another advanced task',
+              );
+              assert.equal((await resumed.checkpoint()).resumed, false);
+            } finally {
+              await resumed.close();
+            }
+          } finally {
+            await open(page);
+          }
+        }
+      },
+    );
     await t.test('iframe, shadow, ambiguity, missing target and stale DOM revision', async () => {
       await observe();
       for (const [selector, text] of [

@@ -57,9 +57,9 @@ describe('file-download-card-copy', () => {
     ).toBe('表格文件 · 1 KB · 文件已不可用');
   });
 
-  it('states the retention policy without claiming unknown files are active', () => {
+  it('labels an unknown expiry without inventing a retention period', () => {
     expect(downloadFileMetaLabel({ filename: 'report.csv', formattedSize: '1 KB' })).toBe(
-      '表格文件 · 1 KB · 文件生成后保留 24 小时',
+      '表格文件 · 1 KB · 有效期暂未确认',
     );
   });
 

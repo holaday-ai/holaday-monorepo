@@ -96,7 +96,7 @@ describe('D17-P1-02: restoring a task browser with a connected grant for its sit
     };
     const target = restorableBrowserTarget(task);
     if (!target) throw new Error('not restorable');
-    const executor = {};
+    const executor = { setSessionIdentityVerifier: () => {} };
     await runtime.prepare('usr_synthetic', executor as never, {
       targetUrl: target.url,
       sessionPolicy: storedBrowserSessionPolicy(task),

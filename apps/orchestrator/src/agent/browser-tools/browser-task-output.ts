@@ -145,12 +145,29 @@ export function taskOutputGap(
   const generation = /生成|创建|制作|保存为|转换成|转成|\b(?:create|generate|convert)\b/i.exec(
     generationRequest,
   );
-  if (generation)
-    missing.push(
-      ...taskFileRequirements(generationRequest.slice(generation.index)).filter(
-        (required) => !matches(required, true),
-      ),
-    );
+  if (generation) {
+    let scope = generationRequest.slice(generation.index);
+    const sourceRequest = generationRequest
+      .slice(0, generation.index)
+      .replace(/(?:不要|无需|不必|不)(?:下载|导出)[^，。；\n]*/g, '')
+      .replace(/(?:do not|don't|without)\s+(?:download|export)[^,.;\n]*/gi, '');
+    if (/下载|导出|\b(?:download|export)\b/i.test(sourceRequest)) {
+      // A final combined handoff describes originals plus new files. It must
+      // not turn "generate analysis.csv, give me both files" into two new files.
+      const handoff =
+        /[，,；;\n]\s*(?:(?:并|再|最后|然后)\s*)?(?:(?:把|将)\s*(?:这|上述|以上)?(?:[一二两三四五六七八九十\d]+|全部|所有)(?:个|份)?\s*(?:[a-z]+\s*)?(?:文件|附件)(?:一起|都)?(?:交给|交付|提供给|给|发给)|(?:and\s+)?(?:give|send|deliver|provide)\s+(?:me\s+)?(?:both|all|these|the|two|three|four|\d+)\s+(?:[a-z]+\s+)?(?:files?|attachments?))/i.exec(
+          scope,
+        );
+      if (handoff) scope = scope.slice(0, handoff.index);
+    }
+    const generatedRequirements = taskFileRequirements(scope);
+    if (
+      !generatedRequirements.length &&
+      taskFileRequirements(generationRequest.slice(generation.index)).length
+    )
+      generatedRequirements.push({ format: '*' });
+    missing.push(...generatedRequirements.filter((required) => !matches(required, true)));
+  }
   return missing.length
     ? `缺少实际保存的输出文件回执：${[...new Set(missing.map((item) => item.filename ?? `${item.count ?? 1} × ${item.format}`))].join('、')}。请用可用 create_file 生成；不能完成则如实报告失败，不能用文本或链接冒充文件。`
     : null;

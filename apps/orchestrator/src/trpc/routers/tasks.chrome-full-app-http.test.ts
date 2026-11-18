@@ -461,11 +461,13 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       vi.spyOn(TaskRepository.prototype, 'isTaskCancelled').mockResolvedValue(false);
     }
     let result: { status: string; summary?: string; reason?: string } | undefined;
+    let persistenceReceipt: unknown;
     const persistOutcome = TaskRepository.prototype.persistVisionOutcome;
     const terminal = vi.spyOn(TaskRepository.prototype, 'persistVisionOutcome');
     if (realSql) {
       terminal.mockImplementation(async function (this: TaskRepository, taskId, outcome) {
         const receipt = await persistOutcome.call(this, taskId, outcome);
+        persistenceReceipt = receipt;
         if (receipt.persisted) result = outcome;
         return receipt;
       });
@@ -909,11 +911,15 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
     await normal.locator('#query').fill('typing while formal export waits');
     releaseExport!();
     await vi.waitFor(() => expect(terminal).toHaveBeenCalled(), { timeout: 20_000 });
-    expect(result, JSON.stringify(result)).toMatchObject({
+    // A called async persistence method may still be awaiting its SQL commit.
+    // Observe the operation's completion before judging its durable result.
+    await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }), {
+      timeout: 20_000,
+    });
+    expect(result, JSON.stringify({ result, persistenceReceipt })).toMatchObject({
       status: 'completed',
       summary: expect.stringContaining('holaday-file'),
     });
-    await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
     expect(consume).toHaveBeenCalledTimes(1);
     if (sqlProbe) {
       idempotencyRows.push(...(await database.select().from(webhookIdempotency)));
