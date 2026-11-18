@@ -1,6 +1,6 @@
 {
   "preparedAtUTC": "2026-11-18T15:57:26.445526+00:00",
-  "stage": "read-only source and installed-extension preflight; not project browser acceptance",
+  "stage": "source, daily-extension inventory and isolated Chrome157 candidate-load preflight; not project site acceptance",
   "github": {
     "commitRef": "91ba3cd6b7b208231f60265a7bb805ae7a5af2cf",
     "path": "docs/reports/evidence/pr360-premerge-20261118.json",
@@ -67,5 +67,47 @@
   "awsExecutionApproval": "pending explicit owner reply",
   "modelAPICalls": 0,
   "productionChanged": false,
-  "deployed": false
+  "deployed": false,
+  "updatedAtUTC": "2026-11-18T16:18:03.651Z",
+  "isolatedChromeCandidate": {
+    "finishedAtUTC": "2026-11-18T16:18:03.651Z",
+    "extensionId": "olmdjdkljgkmpodheoanlfaahnfllopj",
+    "runtime": {
+      "id": "olmdjdkljgkmpodheoanlfaahnfllopj",
+      "name": "HOLA DAY",
+      "version": "0.0.5",
+      "manifestVersion": 3,
+      "hasAccessToken": false
+    },
+    "extensionManifestSHA256": "49e16aec3619a54edb9a925a5590eb5692e2aa61334f7090aa8eba16eb169f28",
+    "ownedBrowserExit": {
+      "code": 0,
+      "signal": null
+    },
+    "emptyProfileRemoved": true,
+    "runnerExitCode": 0,
+    "seconds": 6.43,
+    "memoryBeforeFreePercent": 39,
+    "awsCryptoCalls": 0,
+    "modelAPICalls": 0,
+    "dailyChromeSettingsChanged": false,
+    "siteTaskRun": false,
+    "browserProduct": "Chrome/157.0.8103.79",
+    "browserRevision": "@6dc9bc3bdaea5c35ed6d41fceab2f7a3a2227c4f",
+    "transport": "owned private pipe; no debug port",
+    "mode": "headless, new blank profile",
+    "packageSHA256": "311647dacb6a47c34c6c9a164301c4eab7af50d9836a85b640a697f905395185",
+    "extensionFilesMatchFrozenArchive": true,
+    "initialFailedAttempts": 2,
+    "beforeBootstrapChromeType": "undefined",
+    "afterBootstrapChromeType": "object",
+    "workerReadinessChecks": 2,
+    "workerEvents": [
+      "Runtime.executionContextCreated",
+      "Inspector.workerScriptLoaded"
+    ],
+    "probeInitializationCorrected": true,
+    "productCodeChanged": false,
+    "realAccountLogin": false
+  }
 }

@@ -1,6 +1,6 @@
 # GitHub / Sheets 真实站点验收前置核对
 
-本记录完成只读源文件比对、文件校验器准备及本机已安装扩展盘点。尚未运行候选App/项目插件的真实站点任务，不是账号、物理操作或上线验收通过。
+本记录完成只读源文件比对、文件校验器准备、本机已安装扩展盘点及独立Chrome157候选加载检查。尚未运行候选App/项目插件的真实站点任务，不是账号、物理操作或上线验收通过。
 
 机器摘要：[browser-real-site-preflight-20261118.json](evidence/browser-real-site-preflight-20261118.json)。精确测试表URL、源文件、用例提示词、预期摘要和校验器保存在既有私有恢复目录的 `release-readiness-20261118/real-site-preflight`，不公开账号或业务数据。
 
@@ -18,7 +18,7 @@ Google Sheets元数据确认只有 `RawData` 一个工作表；API原生导出�
 
 ## 实际安装状态
 
-安装文件元数据显示Google Chrome 157.0.8103.79；尚未将这个磁盘版本冒充运行实例版本。原生Chrome扩展管理页只读核对结果如下：
+日常配置的原生Chrome扩展管理页只读核对结果如下；该次只读盘点仅核实磁盘版本，后续独立实例的运行版本另列：
 
 | 扩展 | 版本 / 状态 | 实际ID / 来源 |
 | --- | --- | --- |
@@ -28,7 +28,17 @@ Google Sheets元数据确认只有 `RawData` 一个工作表；API原生导出�
 
 本次另开扩展信息标签页，没有加载、重载、启停扩展或更改浏览器设置，没有复制日常profile。旧的已加载0.0.3不能当作当前0.0.5候选的实际运行证据。
 
-Chrome官方从137起移除了正式品牌构建的`--load-extension`入口；既有Chromium147脚手架的启动方式不能直接当作Chrome157可用证明。后续使用官方支持的测试安装方式和独立配置，并记录实际加载ID/版本/来源，不更改日常配置以绕过验证。[Chrome官方说明](https://developer.chrome.com/blog/extension-news-june-2025)
+Chrome官方从137起移除了正式品牌构建的`--load-extension`入口；既有Chromium147脚手架的启动方式不能直接当作Chrome157可用证明。[Chrome官方说明](https://developer.chrome.com/blog/extension-news-june-2025)
+
+## 独立Chrome157候选加载检查
+
+实际启动一份空配置、headless的正式Google Chrome，`Browser.getVersion`核实运行版本为`Chrome/157.0.8103.79`。按Chrome官方测试示例，通过独占私有pipe及`Extensions.loadUnpacked`加载上述冻结ZIP的原始字节；未开放调试端口，未使用旧load-extension参数、关闭Web安全或复制日常profile。[Chrome官方加载示例](https://github.com/GoogleChrome/chrome-launcher/blob/main/test/load-extension-test.ts)
+
+本次固定解压路径的实际ID为`olmdjdkljgkmpodheoanlfaahnfllopj`。扩展列表确认启用，后台实际返回HOLA DAY、0.0.5、MV3及相同ID；新配置中无应用access token。没有manifest public key，因此该ID不作为其他安装路径的预期ID。
+
+前两次检查失败并保留原始证据：后台目标已存在，但脚本尚未加载完，直接求值时`chrome`为undefined。对照本地Playwright1.59.1的worker初始化顺序，增加Runtime初始化/恢复和有界就绪等待。第三次同一候选字节、同一浏览器模式下，记录到executionContextCreated及workerScriptLoaded，第二次状态读取已具备runtime/storage，再读取实际manifest与空登录状态通过。修改仅涉及私有检查脚本，扩展及App代码均未改动；没有将检查脚本的初始化时序误报为产品缺陷。
+
+最终检查退出0，用时6.43秒；检查前空闲内存点样本39%，不代表峰值占用。自有浏览器正常退出0，空配置目录已删除；日常配置未更改。私有恢复目录保留两次失败、最终回执、脚本及候选逐文件hash。此结果仅证明候选加载和后台API可读，不证明完整App、真实网站、账号或物理设备操作通过。实际AWS加解密及模型调用均为0。
 
 ## 主体与剩余边界
 
