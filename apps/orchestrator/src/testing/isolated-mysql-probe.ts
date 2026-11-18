@@ -145,6 +145,8 @@ export async function openIsolatedMysqlProbe(
       return database!;
     },
     evidence,
+    // Parent passes this nonce to its own test child; never include it in evidence logs.
+    ownershipToken: owner,
     async reconnect(swap?: (db: DB) => void) {
       const prior = connection;
       connection = await connect();
