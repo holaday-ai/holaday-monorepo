@@ -392,6 +392,40 @@ describe('runSelectedChromeTask', () => {
     });
   });
 
+  it.each([1, 2])(
+    'requires exactly the requested two generated CSV receipts with %i saved',
+    async (count) => {
+      const replies = [toolReply('create_file', fileInput)];
+      if (count === 2)
+        replies.push(
+          toolReply('create_file', { ...fileInput, filename: 'monthly.csv' }, 'monthly'),
+        );
+      replies.push(finish('Draft'));
+      const h = createHarness(replies);
+      let next = 0;
+      const result = await runFileCase(h, {
+        intent: '生成两个 CSV 文件，一个按地区，一个按月份',
+        createFileFormats: ['csv'],
+        maxIterations: replies.length,
+        onCreateFile: async ({ filename }) => {
+          const fileId = `saved_${++next}`;
+          return { ...fileReceipt, filename, fileId, downloadUrl: `/api/files/${fileId}/download` };
+        },
+      });
+      expect(result.status).toBe(count === 2 ? 'completed' : 'failed');
+    },
+  );
+  it('stops after a returned storage error without invoking another generated write', async () => {
+    const h = createHarness([
+      toolReply('create_file', fileInput),
+      toolReply('create_file', fileInput, 'retry'),
+    ]);
+    const store = vi.fn(async () => ({ error: 'receipt lost after commit' }));
+    expect(
+      await runFileCase(h, { createFileFormats: ['csv'], onCreateFile: store, maxIterations: 2 }),
+    ).toMatchObject({ status: 'failed' });
+    expect(store).toHaveBeenCalledOnce();
+  });
   it('can deliver a requested CSV when the reference filename is ZIP', async () => {
     const h = createHarness([toolReply('create_file', fileInput), finish('Draft')]);
     expect(
@@ -425,7 +459,7 @@ describe('runSelectedChromeTask', () => {
     const onCreateFile = vi.fn(async () => fileReceipt);
     const result = await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
     expect(onCreateFile).toHaveBeenCalledTimes(1);
-    expect(onCreateFile).toHaveBeenCalledWith(fileInput);
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining(fileInput));
     expect(result.status).toBe('completed');
     expect(result.summary).toContain('```holaday-file\n');
     expect(result.summary).toContain('"fileId":"file-qa"');
@@ -503,7 +537,7 @@ describe('runSelectedChromeTask', () => {
     const h = createHarness([toolReply('create_file', { ...fileInput, content }), finish('Draft')]);
     const onCreateFile = vi.fn(async () => fileReceipt);
     await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
-    expect(onCreateFile).toHaveBeenCalledWith({ ...fileInput, content });
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining({ ...fileInput, content }));
   });
 
   it.each(['给我一个可下载的 CSV 附件', '整理为 CSV 文件', 'Create a CSV and a JSON file'])(

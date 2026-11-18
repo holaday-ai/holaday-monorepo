@@ -457,7 +457,7 @@ describe('optional original-download session capability', () => {
 });
 
 describe('task download tool uses the shared action gate and actual file service', () => {
-  it.each(['saved', 'analyzed', 'store-unknown', 'permission-denied'])(
+  it.each(['saved', 'analyzed', 'raw-only', 'store-unknown', 'permission-denied'])(
     'keeps truthful file delivery when %s',
     async (mode) => {
       const priorFlag = env.BROWSER_TASK_FILES_V1;
@@ -578,7 +578,9 @@ describe('task download tool uses the shared action gate and actual file service
           intent:
             mode === 'analyzed'
               ? '导出 report.csv，读取并统计，再生成 analysis.csv 交给我'
-              : '导出 report.csv 并交给我',
+              : mode === 'raw-only'
+                ? '导出报表，再生成一份CSV分析文件'
+                : '导出 report.csv 并交给我',
           messagesAdapter: adapter,
           client: h.client,
           control: h.control,
@@ -680,7 +682,7 @@ describe('task download tool uses the shared action gate and actual file service
           }
         } else {
           expect(result.status).not.toBe('completed');
-          expect(published).toHaveLength(0);
+          expect(published).toHaveLength(mode === 'raw-only' ? 1 : 0);
         }
         expect(h.commands.filter((command) => command.op === 'download_open')).toHaveLength(
           mode === 'permission-denied' ? 0 : 1,

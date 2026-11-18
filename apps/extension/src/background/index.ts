@@ -84,7 +84,7 @@ import {
   connect as connectWs,
   disconnect as disconnectWs,
   getAuthenticatedExtensionClientId,
-  getAuthenticatedExtensionUserId,
+  getAuthenticatedExtensionConnectionOwner,
   getCurrentWsToken,
   getWsConnectionStatus,
   isConnected,
@@ -189,11 +189,7 @@ async function prepareIdleLegacyBrowserExecution(): Promise<void> {
 
 // A reusable bearer is account authentication, not an execution generation.
 // The server confirms a fresh user/client pair after each socket reconnect.
-function selectedChromeConnectionOwner(): string | null {
-  const clientId = getAuthenticatedExtensionClientId();
-  const userId = getAuthenticatedExtensionUserId();
-  return clientId && userId ? JSON.stringify([userId, clientId]) : null;
-}
+const selectedChromeConnectionOwner = getAuthenticatedExtensionConnectionOwner;
 
 const selectedChromeTransport = createSelectedChromeTransport({
   bridge: createSelectedChromeBridge(),

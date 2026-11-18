@@ -755,6 +755,7 @@ export interface RunSupercarOptions {
     sha256: string;
     mimetype?: string;
     source?: import('../browser-tools/browser-download.js').TaskDownloadSource;
+    canPublish?: () => boolean;
   }) => Promise<BrowserDownloadReceipt>;
   /** Publish both newly persisted and already-owned Home download receipts to this task. */
   onBrowserDownloadSaved?: (receipt: BrowserDownloadReceipt) => void | Promise<void>;
@@ -1070,6 +1071,7 @@ export interface RunSupercarOptions {
     filename: string;
     format: string;
     content: string;
+    canPublish?: () => boolean;
   }) => Promise<
     { fileId: string; filename: string; size: number; downloadUrl: string } | { error: string }
   >;

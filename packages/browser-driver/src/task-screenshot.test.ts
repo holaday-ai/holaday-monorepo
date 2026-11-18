@@ -7,6 +7,8 @@ function harness() {
   let current = true;
   const masks: unknown[] = [];
   const frame = {
+    url: () => 'https://work.example/task',
+    parentFrame: (): unknown => null,
     evaluate: vi.fn(async () => ['private-human-value']),
     locator: vi.fn((selector: string) => ({ selector })),
     getByText: vi.fn((text: string) => ({ text })),
@@ -42,6 +44,36 @@ function harness() {
 }
 
 describe('task-owned masked background capture', () => {
+  it('rejects a foreign child before reading or capturing any frame', async () => {
+    const h = harness();
+    const foreign = {
+      ...h.frame,
+      url: () => 'https://bank.example/account',
+      evaluate: vi.fn(async () => ['private']),
+    };
+    h.raw.frames = () => [h.frame, foreign];
+    await expect(
+      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+        'https://work.example',
+      ]),
+    ).rejects.toThrow('screenshot_unavailable');
+    expect(h.frame.evaluate).not.toHaveBeenCalled();
+    expect(foreign.evaluate).not.toHaveBeenCalled();
+    expect(h.raw.screenshot).not.toHaveBeenCalled();
+  });
+  it.each(['about:blank', 'about:srcdoc'])(
+    'allows inherited %s only through a granted parent',
+    async (url) => {
+      const h = harness();
+      const child = { ...h.frame, url: () => url, parentFrame: () => h.frame };
+      h.raw.frames = () => [h.frame, child];
+      await expect(
+        captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+          'https://work.example',
+        ]),
+      ).resolves.toBeTruthy();
+    },
+  );
   it('masks a sensitive value mirrored into a different frame', async () => {
     const h = harness();
     const child = {
@@ -50,13 +82,18 @@ describe('task-owned masked background capture', () => {
       getByText: vi.fn((text: string) => ({ text })),
     };
     h.raw.frames = () => [h.frame, child];
-    await captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'));
+    await captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+      'https://work.example',
+    ]);
     expect(child.getByText).toHaveBeenCalledWith('private-human-value', { exact: false });
   });
   it('masks editable controls and sensitive mirrors in every frame without foreground APIs', async () => {
     const h = harness();
-    const image = await captureMaskedTaskScreenshot(h.page, h.current, () =>
-      h.cdp.send('Page.getFrameTree'),
+    const image = await captureMaskedTaskScreenshot(
+      h.page,
+      h.current,
+      () => h.cdp.send('Page.getFrameTree'),
+      ['https://work.example'],
     );
     expect(image).toBe(Buffer.from([255, 216, 255, 1, 255, 217]).toString('base64'));
     expect(h.frame.locator).toHaveBeenCalledWith(
@@ -77,7 +114,9 @@ describe('task-owned masked background capture', () => {
         return Buffer.from([255, 216, 255, 1, 255, 217]);
       });
       await expect(
-        captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree')),
+        captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+          'https://work.example',
+        ]),
       ).rejects.toThrow('screenshot_unavailable');
     },
   );
@@ -86,7 +125,9 @@ describe('task-owned masked background capture', () => {
     const h = harness();
     h.frame.evaluate.mockRejectedValueOnce(new Error('page text must not escape'));
     await expect(
-      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree')),
+      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+        'https://work.example',
+      ]),
     ).rejects.toThrow(/^screenshot_unavailable$/);
     expect(h.raw.screenshot).not.toHaveBeenCalled();
   });
@@ -95,23 +136,27 @@ describe('task-owned masked background capture', () => {
     const h = harness();
     h.raw.screenshot.mockRejectedValueOnce(new Error('secret data'));
     await expect(
-      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree')),
+      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+        'https://work.example',
+      ]),
     ).rejects.toThrow(/^screenshot_unavailable$/);
     expect(h.raw.screenshot).toHaveBeenCalledOnce();
     expect(h.cdp.send.mock.calls.every(([method]) => method === 'Page.getFrameTree')).toBe(true);
   });
   it('requires an actual document receipt before any capture', async () => {
     const h = harness();
-    await expect(captureMaskedTaskScreenshot(h.page, h.current, async () => ({}))).rejects.toThrow(
-      'screenshot_unavailable',
-    );
+    await expect(
+      captureMaskedTaskScreenshot(h.page, h.current, async () => ({}), ['https://work.example']),
+    ).rejects.toThrow('screenshot_unavailable');
     expect(h.raw.screenshot).not.toHaveBeenCalled();
   });
   it('refuses an image exceeding the transport limit', async () => {
     const h = harness();
     h.raw.screenshot.mockResolvedValueOnce(Buffer.alloc(1024 * 1024 + 1));
     await expect(
-      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree')),
+      captureMaskedTaskScreenshot(h.page, h.current, () => h.cdp.send('Page.getFrameTree'), [
+        'https://work.example',
+      ]),
     ).rejects.toThrow('screenshot_unavailable');
   });
 });

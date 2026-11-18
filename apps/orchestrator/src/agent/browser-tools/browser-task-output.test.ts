@@ -16,6 +16,25 @@ describe('task-owned generated outputs', () => {
   ])('does not treat an input reference as output delivery: %s', (intent) => {
     expect(taskFileRequirements(intent)).toEqual([]);
   });
+  it.each([
+    '生成两个 CSV 文件，一个按地区，一个按月份',
+    'Create 2 CSV files',
+    'Generate two CSV files',
+  ])('requires two distinct generated receipts: %s', async (intent) => {
+    let next = 0;
+    const outputs = new BrowserTaskOutputs({
+      formats: ['csv'],
+      current: async () => true,
+      store: async ({ filename }) => {
+        const fileId = `file_${++next}`;
+        return { ...receipt, filename, fileId, downloadUrl: `/api/files/${fileId}/download` };
+      },
+    });
+    await outputs.create(input);
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create({ ...input, filename: 'monthly.csv' });
+    expect(outputs.gap(intent)).toBeNull();
+  });
   it('requires both an allowed format and a host store before advertising generation', () => {
     expect(new BrowserTaskOutputs({ formats: ['csv'], current: async () => true }).tools).toEqual(
       [],

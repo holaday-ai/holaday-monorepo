@@ -6839,7 +6839,14 @@ export const tasksRouter = router({
                         },
                       }
                     : {}),
-                  async onBrowserDownload({ filename, buffer, sha256, mimetype, source }) {
+                  async onBrowserDownload({
+                    filename,
+                    buffer,
+                    sha256,
+                    mimetype,
+                    source,
+                    canPublish,
+                  }) {
                     const taskInternalId = await taskInternalIdFor(ctx.db, taskId);
                     if (taskInternalId == null) throw new Error('task row not found');
                     if (source && source.taskId !== taskId)
@@ -6858,7 +6865,11 @@ export const tasksRouter = router({
                             ...output,
                             source: { version: 1, kind: 'task_download', ...source },
                           })
-                        : await fileService.storeOutput(output);
+                        : await fileService.storeOutput({
+                            ...output,
+                            requireLiveTask: true,
+                            canPublish,
+                          });
                     const receipt = {
                       fileId: stored.externalId,
                       filename: stored.filename,
@@ -6881,7 +6892,7 @@ export const tasksRouter = router({
                       kind: 'file',
                     });
                   },
-                  async onCreateFile({ filename, format, content }) {
+                  async onCreateFile({ filename, format, content, canPublish }) {
                     if (!isCreateFileFormat(format)) {
                       return { error: `unsupported format: ${format}` };
                     }
@@ -6895,6 +6906,8 @@ export const tasksRouter = router({
                         userIdInternal: userRow.id,
                         userExternalId: ctx.userId,
                         taskIdInternal: taskInternalId,
+                        requireLiveTask: true,
+                        canPublish,
                         filename,
                         mimetype: rendered.mimetype,
                         buffer: rendered.buffer,

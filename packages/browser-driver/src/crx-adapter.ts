@@ -636,8 +636,11 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       await targets.assertNativeIdle();
       // Reuse the tab's existing debugger attachment. CRX newCDPSession tries
       // Target.attachToBrowserTarget and is unsupported in the extension.
-      const data = await captureMaskedTaskScreenshot(page, valid, () =>
-        chrome.debugger.sendCommand({ tabId: tabId! }, 'Page.getFrameTree'),
+      const data = await captureMaskedTaskScreenshot(
+        page,
+        valid,
+        () => chrome.debugger.sendCommand({ tabId: tabId! }, 'Page.getFrameTree'),
+        this.opts.allowedOrigins ?? [],
       );
       // Screenshot masking/caret styles can change DOM epochs. The capture checks
       // document loader IDs; the session checks the native input stamp separately.

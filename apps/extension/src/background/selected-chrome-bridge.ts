@@ -2,7 +2,7 @@ import { PlaywrightCrxAdapter } from '@holaday/browser-driver/crx';
 import type { ServerMessage, UserBrowserProtocol } from '@holaday/shared-types';
 import { SelectedChromeSession } from './selected-chrome-session.js';
 import { readSelectedTab, selectedTabOwnership } from './selected-tab-read.js';
-import { getCurrentWsToken } from './ws-client.js';
+import { getAuthenticatedExtensionConnectionOwner } from './ws-client.js';
 
 type Target = NonNullable<
   Extract<ServerMessage, { type: 'server.extension.tool_call' }>['args']
@@ -23,7 +23,7 @@ export function createSelectedChromeBridge() {
       if (tab.id === undefined) throw new Error('tab_create_failed');
       return tab.id;
     },
-    owner: getCurrentWsToken,
+    owner: getAuthenticatedExtensionConnectionOwner,
   });
   if (typeof chrome !== 'undefined') {
     chrome.tabs?.onRemoved?.addListener?.((tabId) => session.markTabClosed(tabId));

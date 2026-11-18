@@ -39,6 +39,7 @@ import {
   createFileSchema,
   fileReceiptSchema,
   taskFileRequirements,
+  taskOutputGap,
 } from '../browser-tools/browser-task-output.js';
 import {
   ANALYZE_TASK_TABLE_TOOL,
@@ -746,6 +747,7 @@ async function runLoop(input: {
   let iterations = 0;
   let recordIndex = 0;
   const files = new Map<string, CreatedFile>();
+  const generatedFiles = new Set<string>();
   const pendingUploads = new Set<string>();
   const fileWork: TaskFileWork | undefined =
     env.BROWSER_TASK_FILES_V1 && options.browserTaskFiles?.taskId === options.taskId
@@ -951,6 +953,7 @@ async function runLoop(input: {
       recordHandback,
       emitRecord,
       files,
+      generatedFiles,
       pendingUploads,
       fileWork,
     );
@@ -984,6 +987,7 @@ async function processTools(
   recordHandback: () => Promise<void>,
   emitRecord: (record: ExecutionRecord, durationMs: number) => Promise<void>,
   files: Map<string, CreatedFile>,
+  generatedFiles: Set<string>,
   pendingUploads: Set<string>,
   fileWork: TaskFileWork | undefined,
 ): Promise<{ results: NeutralToolResultBlock[]; outcome?: SupercarOutcome }> {
@@ -1030,6 +1034,11 @@ async function processTools(
         continue;
       }
       const inputRevision = options.control.inputRevision;
+      const canPublish = () =>
+        !run.modelAbort.signal.aborted &&
+        Date.now() < run.deadline &&
+        options.control.canAgentAct() &&
+        options.control.inputRevision === inputRevision;
       const current = async () =>
         !run.modelAbort.signal.aborted &&
         Date.now() < run.deadline &&
@@ -1044,6 +1053,7 @@ async function processTools(
           captured.screenshot,
           options.onBrowserScreenshot,
           current,
+          canPublish,
         );
         await options.onBrowserScreenshotSaved?.(receipt);
         if (!(await current())) throw new Error();
@@ -1156,11 +1166,17 @@ async function processTools(
         continue;
       }
       const key = JSON.stringify(parsed.data);
+      const inputRevision = options.control.inputRevision;
+      const canPublish = () =>
+        !run.modelAbort.signal.aborted &&
+        Date.now() < run.deadline &&
+        options.control.canAgentAct() &&
+        options.control.inputRevision === inputRevision;
       try {
         let saved = files.get(key);
         if (!saved) {
           const result = await raceWithAbort(
-            options.onCreateFile(parsed.data),
+            options.onCreateFile({ ...parsed.data, canPublish }),
             run.modelAbort.signal,
           );
           const afterWrite = await boundaryState({ options, toolsUsed, ...run }, iterations);
@@ -1170,7 +1186,12 @@ async function processTools(
             continue;
           }
           if ('error' in result) {
-            await publish(errorResult(tool.id, 'file_write_failed'));
+            await publish(errorResult(tool.id, 'file_write_unknown'));
+            terminal = failed(
+              '文件写入结果未确认，已停止；不会自动重复生成。',
+              iterations,
+              toolsUsed,
+            );
             continue;
           }
           const receipt = fileReceiptSchema.safeParse(result);
@@ -1189,6 +1210,7 @@ async function processTools(
           }
           saved = { ...receipt.data, format: parsed.data.format };
           files.set(key, saved);
+          generatedFiles.add(saved.fileId);
         }
         await publish(successResult(tool.id, { file: saved }));
       } catch {
@@ -1829,18 +1851,9 @@ async function processTools(
         );
         continue;
       }
-      const requiredFormats = taskFileRequirements(options.intent);
-      if (
-        requiredFormats.some(
-          ({ format, filename }) =>
-            ![...files.values()].some(
-              (file) =>
-                (format === '*' || file.format === format) &&
-                (!filename || file.filename === filename),
-            ),
-        )
-      ) {
-        await publish(errorResult(tool.id, 'required_file_missing'));
+      const outputGap = taskOutputGap(options.intent, files.values(), generatedFiles);
+      if (outputGap) {
+        await publish(errorResult(tool.id, 'required_file_missing', { message: outputGap }));
         continue;
       }
       if (!parsed.data.evidenceText) {

@@ -336,27 +336,24 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
   let fileReadCorrection = false;
   let outputCorrection = false;
   let outputInputRevision: number | undefined;
+  const canPublishOutput = () =>
+    !controller.signal.aborted &&
+    !sessionStopped() &&
+    (!control ||
+      (control.canAgentAct() &&
+        !control.humanBusy() &&
+        !control.hasUnobservedHumanInput() &&
+        control.inputRevision === outputInputRevision));
   const outputs = new BrowserTaskOutputs({
     formats: opts.createFileFormats,
     store: opts.onCreateFile,
     signal: controller.signal,
+    canPublish: canPublishOutput,
     current: async () =>
-      !controller.signal.aborted &&
-      !sessionStopped() &&
-      (!control ||
-        (control.canAgentAct() &&
-          !control.humanBusy() &&
-          !control.hasUnobservedHumanInput() &&
-          control.inputRevision === outputInputRevision)) &&
+      canPublishOutput() &&
       !(await opts.isTaskCancelled?.()) &&
       (!opts.browserTaskFiles || (await opts.browserTaskFiles.isActive())) &&
-      !controller.signal.aborted &&
-      !sessionStopped() &&
-      (!control ||
-        (control.canAgentAct() &&
-          !control.humanBusy() &&
-          !control.hasUnobservedHumanInput() &&
-          control.inputRevision === outputInputRevision)),
+      canPublishOutput(),
   });
   const capabilities = opts.browserCapabilities ?? browserCapabilities(opts.userExternalId);
   await ensureExecutionViewport(page);

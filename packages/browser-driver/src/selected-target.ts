@@ -10,6 +10,7 @@ import {
 } from '@holaday/shared-types';
 import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
+import { grantedFrameOrigin } from './frame-origin.js';
 import { type NativeBlobSources, captureNativeBlobSources } from './native-blob-source.js';
 import {
   NativeDownloadCaptureController,
@@ -709,22 +710,7 @@ export class SelectedTargetResolver {
     return this.revision;
   }
   private origin(frame: Frame): string {
-    let current: Frame | null = frame;
-    while (current && /^(about:blank|about:srcdoc)$/.test(current.url()))
-      current = current.parentFrame();
-    try {
-      const url = new URL(current?.url() || '');
-      if (
-        !/^https?:$/.test(url.protocol) ||
-        url.username ||
-        url.password ||
-        !this.origins.includes(url.origin)
-      )
-        throw new Error();
-      return url.origin;
-    } catch {
-      throw new Error('origin_grant_required');
-    }
+    return grantedFrameOrigin(frame, this.origins);
   }
   async observe(): Promise<void> {
     this.assertAvailable();

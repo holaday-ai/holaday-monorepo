@@ -7,6 +7,7 @@ export type StoreTaskScreenshot = (input: {
   buffer: Buffer;
   sha256: string;
   mimetype: string;
+  canPublish?: () => boolean;
 }) => Promise<BrowserDownloadReceipt>;
 
 /** Trusted native capture only; one write, with no automatic retry on an unknown receipt. */
@@ -14,6 +15,7 @@ export async function persistTaskScreenshot(
   image: TaskScreenshot,
   store: StoreTaskScreenshot,
   current: () => Promise<boolean>,
+  canPublish?: () => boolean,
 ): Promise<BrowserDownloadReceipt> {
   const parsed = taskScreenshotSchema.parse(image);
   const buffer = Buffer.from(parsed.data, 'base64');
@@ -30,6 +32,7 @@ export async function persistTaskScreenshot(
     buffer,
     sha256: parsed.sha256,
     mimetype: parsed.mediaType,
+    canPublish,
   });
   if (
     !receipt.fileId ||

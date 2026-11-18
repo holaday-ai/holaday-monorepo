@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { type PlanId, newExternalId } from '@holaday/shared-types';
-import { and, asc, desc, eq, gt, isNotNull, isNull, like, notLike, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, like, notLike, or, sql } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
@@ -44,6 +44,7 @@ import {
   deleteStorageObjectForClosure,
   getSharedStorageProvider,
 } from './storage-provider.js';
+import { persistLiveTaskOutput } from './task-output-publication.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -837,7 +838,20 @@ export class FileService {
     filename: string;
     mimetype: string;
     buffer: Buffer;
+    requireLiveTask?: true;
+    canPublish?: () => boolean;
   }): Promise<TaskFile> {
+    if (opts.requireLiveTask) {
+      return persistLiveTaskOutput(
+        {
+          db: this.db,
+          storage: this.storage,
+          logger: this.logger,
+          expiresAt: new Date(Date.now() + outputFileTtlMs()),
+        },
+        { ...opts, filename: sanitiseFilename(opts.filename) },
+      );
+    }
     const externalId = newExternalId('file');
     const safeFilename = sanitiseFilename(opts.filename);
     const { storagePath } = await this.storage.put({
@@ -904,7 +918,16 @@ export class FileService {
     const rows = await this.db
       .select()
       .from(taskFiles)
-      .where(and(eq(taskFiles.userId, userIdInternal), isNotNull(taskFiles.browserSource)))
+      .where(
+        and(
+          eq(taskFiles.userId, userIdInternal),
+          eq(taskFiles.kind, 'output'),
+          eq(
+            sql<string>`JSON_UNQUOTE(JSON_EXTRACT(${taskFiles.browserSource}, '$.kind'))`,
+            'personal_home',
+          ),
+        ),
+      )
       .orderBy(desc(taskFiles.id))
       .limit(50);
     const items = [];

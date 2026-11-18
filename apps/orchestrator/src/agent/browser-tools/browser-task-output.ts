@@ -26,7 +26,38 @@ export const fileReceiptSchema = z.object({
   downloadUrl: z.string().min(1),
 });
 export type CreatedFile = z.infer<typeof fileReceiptSchema> & { format: string };
-type FileRequirement = { format: string; filename?: string };
+type FileRequirement = { format: string; filename?: string; count?: number };
+
+function requestedCount(value: string): number {
+  if (/^[0-9]+$/.test(value)) return Number(value);
+  const words: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (value.includes('十')) {
+    const [tens, units] = value.split('十');
+    return (tens ? (words[tens] ?? 0) : 1) * 10 + (units ? (words[units] ?? 0) : 0);
+  }
+  return words[value.toLowerCase()] ?? 0;
+}
 
 export function taskFileRequirements(intent: string): FileRequirement[] {
   // Only explicit delivery requests, not merely a mention of an input PDF/CSV.
@@ -62,10 +93,23 @@ export function taskFileRequirements(intent: string): FileRequirement[] {
   // Explicit unavailable formats must not silently pass as a different file.
   const unsupported =
     outputRequest.match(/\b(?:zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz)\b/gi) ?? [];
+  const counts = new Map<string, number>();
+  for (const match of outputRequest.matchAll(
+    /([1-9][0-9]{0,2}|one|two|three|four|five|six|seven|eight|nine|ten|[一二两三四五六七八九十]+)\s*(?:个|份|张|本)?\s*(csvs?|xlsx|pdfs?|docx|pptx|json|txt|md|文件|附件|files?|attachments?)(?=\b|[\u3400-\u9fff]|$)/gi,
+  )) {
+    const token = match[2]!;
+    const format = /^(?:文件|附件|files?|attachments?)$/i.test(token)
+      ? '*'
+      : (detectRequestedFileFormat(token) ?? detectRequestedFileFormat(token.replace(/s$/i, '')));
+    if (!format) continue;
+    counts.set(format, Math.max(counts.get(format) ?? 1, requestedCount(match[1]!)));
+    if (format !== '*') formats.add(format);
+  }
   const requirements: FileRequirement[] = [
     ...formats,
     ...unsupported.map((format) => format.toLowerCase()),
-  ].map((format) => ({ format }));
+    ...[...counts.keys()].filter((format) => format === '*'),
+  ].map((format) => ({ format, ...(counts.has(format) ? { count: counts.get(format)! } : {}) }));
   const names = outputRequest.matchAll(
     /(?:^|[\s"'“（(、，,])([^\s"'”）)、，,;；:：/\\]+\.(csv|txt|md|json|xlsx|pdf|docx|pptx|zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz))\b/gi,
   );
@@ -78,6 +122,38 @@ export function taskFileRequirements(intent: string): FileRequirement[] {
     : /文件|附件|\b(?:file|attachment)\b/i.test(outputRequest)
       ? [{ format: '*' }]
       : [];
+}
+
+/** Both runners enforce the same receipt provenance and distinct output counts. */
+export function taskOutputGap(
+  intent: string,
+  receipts: Iterable<CreatedFile>,
+  generated: ReadonlySet<string>,
+): string | null {
+  const files = [...new Map([...receipts].map((file) => [file.fileId, file])).values()];
+  const matches = (required: FileRequirement, generatedOnly = false) =>
+    files.filter(
+      (file) =>
+        (!generatedOnly || generated.has(file.fileId)) &&
+        (required.format === '*' || file.format === required.format) &&
+        (!required.filename || file.filename === required.filename),
+    ).length >= (required.count ?? 1);
+  const missing = taskFileRequirements(intent).filter((required) => !matches(required));
+  const generationRequest = intent
+    .replace(/(?:不要|无需|不必|不)(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g, '')
+    .replace(/(?:do not|don't|without)\s+(?:create|generate|export|save)[^,.;\n]*/gi, '');
+  const generation = /生成|创建|制作|保存为|转换成|转成|\b(?:create|generate|convert)\b/i.exec(
+    generationRequest,
+  );
+  if (generation)
+    missing.push(
+      ...taskFileRequirements(generationRequest.slice(generation.index)).filter(
+        (required) => !matches(required, true),
+      ),
+    );
+  return missing.length
+    ? `缺少实际保存的输出文件回执：${[...new Set(missing.map((item) => item.filename ?? `${item.count ?? 1} × ${item.format}`))].join('、')}。请用可用 create_file 生成；不能完成则如实报告失败，不能用文本或链接冒充文件。`
+    : null;
 }
 
 export type TaskOutputResult =
@@ -95,6 +171,7 @@ export class BrowserTaskOutputs {
       formats?: readonly string[];
       store?: RunSupercarOptions['onCreateFile'];
       signal?: AbortSignal;
+      canPublish?: () => boolean;
       current(): Promise<boolean>;
     },
   ) {}
@@ -144,7 +221,10 @@ export class BrowserTaskOutputs {
     const writing = (async (): Promise<TaskOutputResult> => {
       let abort: (() => void) | undefined;
       try {
-        const operation = this.options.store!(parsed.data);
+        const operation = this.options.store!({
+          ...parsed.data,
+          canPublish: () => !this.options.signal?.aborted && this.options.canPublish?.() !== false,
+        });
         const signal = this.options.signal;
         const result = await (signal
           ? Promise.race([
@@ -180,27 +260,9 @@ export class BrowserTaskOutputs {
   }
   gap(intent: string): string | null {
     if (this.uncertain) return '文件保存结果未知；已停止，不会重复写入。';
-    const matches = (required: FileRequirement, generatedOnly = false) =>
-      [...this.files.values()].some(
-        (file) =>
-          (!generatedOnly || this.generated.has(file.fileId)) &&
-          (required.format === '*' || file.format === required.format) &&
-          (!required.filename || file.filename === required.filename),
-      );
-    const missing = taskFileRequirements(intent).filter((required) => !matches(required));
-    const generation = /生成|创建|制作|保存为|转换成|转成|\b(?:create|generate|convert)\b/i.exec(
-      intent,
-    );
-    if (generation)
-      missing.push(
-        ...taskFileRequirements(intent.slice(generation.index)).filter(
-          (required) => !matches(required, true),
-        ),
-      );
-    return missing.length
-      ? `缺少实际保存的输出文件回执：${missing.map((item) => item.filename ?? item.format).join('、')}。请用可用 create_file 生成；不能完成则如实报告失败，不能用文本或链接冒充文件。`
-      : null;
+    return taskOutputGap(intent, this.files.values(), this.generated);
   }
+
   attach(summary: string): string {
     const clean = summary
       .replace(

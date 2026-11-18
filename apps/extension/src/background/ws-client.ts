@@ -276,6 +276,13 @@ export function getAuthenticatedExtensionUserId(): string | null {
   return isConnected() ? state.authenticatedUserId : null;
 }
 
+/** A bearer can reconnect; an admitted browser action belongs to one authenticated socket. */
+export function getAuthenticatedExtensionConnectionOwner(): string | null {
+  const clientId = getAuthenticatedExtensionClientId();
+  const userId = getAuthenticatedExtensionUserId();
+  return clientId && userId ? JSON.stringify([userId, clientId, state.socketGeneration]) : null;
+}
+
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
     connected: isConnected(),
@@ -479,6 +486,8 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // reconnect/token-swap) would otherwise clobber state.socket
     // (which now points at the NEW socket) and stop heartbeats.
     if (state.socket !== ws) return;
+    state.authenticatedClientId = null;
+    state.authenticatedUserId = null;
     if (state.pingTimer) clearInterval(state.pingTimer);
     state.pingTimer = null;
     state.socket = null;
@@ -590,6 +599,8 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
 
   ws.addEventListener('error', () => {
     if (state.socket !== ws) return;
+    state.authenticatedClientId = null;
+    state.authenticatedUserId = null;
     state.lastErrorAt = Date.now();
     state.lastCloseReason = 'network error';
     // 'close' will fire right after; reconnect handled there.

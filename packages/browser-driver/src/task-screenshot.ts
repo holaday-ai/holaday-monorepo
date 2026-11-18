@@ -1,4 +1,5 @@
 import type { Locator, Page } from 'playwright-crx';
+import { grantedFrameOrigin } from './frame-origin.js';
 import { collectSensitiveFieldValues } from './observation-redaction.js';
 
 /** Privacy inspection is mandatory. There is deliberately no raw/visible fallback. */
@@ -6,6 +7,7 @@ export async function captureMaskedTaskScreenshot(
   page: Page,
   current: () => boolean,
   readDocument: () => Promise<unknown>,
+  origins: readonly string[],
 ): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let expired = false;
@@ -27,13 +29,18 @@ export async function captureMaskedTaskScreenshot(
     const before = documentKey(await readDocument());
     const masks: Locator[] = [];
     const frames = page.frames();
+    // A viewport includes all subframes. Refuse before entering any document
+    // when even one visible or hidden frame lacks task authority.
+    for (const frame of frames) grantedFrameOrigin(frame, origins);
     const values = new Set<string>();
     for (const frame of frames) {
       if (!valid()) throw new Error();
+      grantedFrameOrigin(frame, origins);
       for (const value of await frame.evaluate<string[]>(collectSensitiveFieldValues))
         values.add(value);
     }
     for (const frame of frames) {
+      grantedFrameOrigin(frame, origins);
       masks.push(
         frame.locator('input, textarea, select, [contenteditable], [data-hd-human-typed]'),
       );
@@ -50,6 +57,7 @@ export async function captureMaskedTaskScreenshot(
       timeout: 10_000,
     });
     if (!valid() || before !== documentKey(await readDocument()) || !valid()) throw new Error();
+    for (const frame of page.frames()) grantedFrameOrigin(frame, origins);
     if (
       bytes.length < 4 ||
       bytes.length > 1024 * 1024 ||

@@ -27,11 +27,19 @@ export async function browserOutputFixture() {
   const dialect = new MySqlDialect();
   function matches(row: Record<string, unknown>, query: SQL) {
     const compiled = dialect.sqlToQuery(query);
-    const columns = [...compiled.sql.matchAll(/`\w+`\.`(\w+)`\s*=\s*\?/g)];
+    const statement = compiled.sql.replace(
+      /JSON_UNQUOTE\(JSON_EXTRACT\(`task_files`\.`browser_source`, '\$\.kind'\)\)/g,
+      '`task_files`.`browser_source_kind`',
+    );
+    const columns = [...statement.matchAll(/`\w+`\.`(\w+)`\s*=\s*\?/g)];
     if (columns.length !== compiled.params.length) throw new Error('Unsupported fixture predicate');
     return columns.every((match, i) => {
       const name = match[1]!.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-      return row[name] === compiled.params[i];
+      return (
+        (name === 'browserSourceKind'
+          ? (row.browserSource as { kind?: string } | null)?.kind
+          : row[name]) === compiled.params[i]
+      );
     });
   }
   const db = {

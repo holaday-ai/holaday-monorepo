@@ -73,11 +73,19 @@ it.runIf(process.env.HOLADAY_TASK_SCREENSHOT_NATIVE === '1')(
         },
       };
       const store = vi.fn(
-        async (input: { filename: string; buffer: Buffer; sha256: string; mimetype: string }) => {
+        async (input: {
+          filename: string;
+          buffer: Buffer;
+          sha256: string;
+          mimetype: string;
+          canPublish?: () => boolean;
+        }) => {
           const row = await files.service.storeOutput({
             userIdInternal: 7,
             userExternalId: 'usr_alice',
             taskIdInternal: 9,
+            requireLiveTask: true,
+            canPublish: input.canPublish,
             filename: input.filename,
             mimetype: input.mimetype,
             buffer: input.buffer,
