@@ -64,11 +64,11 @@
   "googleStableSubjectVerified": false,
   "actualProjectPluginTaskRun": false,
   "realKmsCryptoCalls": 0,
-  "awsExecutionApproval": "pending explicit owner reply",
+  "awsExecutionApproval": "explicitly approved; 11crypto attempts /3DescribeKey /0.01USD incremental cap",
   "modelAPICalls": 0,
   "productionChanged": false,
   "deployed": false,
-  "updatedAtUTC": "2026-11-18T16:18:03.651Z",
+  "updatedAtUTC": "2026-11-18T23:15:59.930194+00:00",
   "isolatedChromeCandidate": {
     "finishedAtUTC": "2026-11-18T16:18:03.651Z",
     "extensionId": "olmdjdkljgkmpodheoanlfaahnfllopj",
@@ -109,5 +109,7 @@
     "probeInitializationCorrected": true,
     "productCodeChanged": false,
     "realAccountLogin": false
-  }
+  },
+  "awsExecutionBlocker": "AWS new-account verification prevents CloudShell environment creation",
+  "cloudshellAttemptEvidence": "browser-vault-cloudshell-attempt-20261118.json"
 }

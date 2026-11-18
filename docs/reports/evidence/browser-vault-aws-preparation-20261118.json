@@ -73,7 +73,7 @@
   },
   "approvalReason": "Not an executable approval: actual KMS resource/identity, site subjects, candidate/host/config bindings and approved maintenance window are not yet proven. Snapshot hashes are evidence identifiers, not first-cutover approval digests.",
   "pending": [
-    "real AWS resource and runtime identity",
+    "real KMS service acceptance after AWS verification and production runtime identity",
     "verified GitHub and Sheets account subject adapters",
     "real project plugin/site/account/physical acceptance",
     "first cutover staging and protected approval",
@@ -171,5 +171,20 @@
       "realProjectExtension": true,
       "modelAPICalls": 0
     }
+  },
+  "readOnlyScope": "production metadata inventory and maintenance probes; separately approved nonproduction key and CloudShell attempt recorded below",
+  "testKey": {
+    "region": "us-east-2",
+    "alias": "alias/holaday-browser-vault-test",
+    "createdOnceUnderSeparateApproval": true,
+    "metadataEnabledVerified": true
+  },
+  "cloudshellAcceptance": {
+    "evidence": "browser-vault-cloudshell-attempt-20261118.json",
+    "authorized": true,
+    "stage": "blocked before upload/commands by AWS account verification",
+    "cryptoAttempts": 0,
+    "describeKeyOperations": 0,
+    "passed": false
   }
 }
