@@ -2,6 +2,8 @@
 
 运行时源码锚点：`2f22be1dc0a49a3874cbabba651d5eb40b3d2795`，基于 PR360 合并提交 `91ba3cd6b7b208231f60265a7bb805ae7a5af2cf`。本轮完成软件接线、生产只读盘点、MySQL8.0.46隔离验证和合成测试表准备。真实 AWS 资源、站点主体、账号及物理设备验收仍未完成；不是上线许可。
 
+评审入口：[草稿PR #361](https://github.com/holaday-ai/holaday-monorepo/pull/361)，目标`claude/capability-recovery`。分支已正常推送，maintainer编辑授权为false；本轮仅完成作者串行复核，未提交独立审查或GitHub Approve，尚未授权合并此PR。
+
 机器摘要见 [evidence/browser-vault-aws-preparation-20261118.json](evidence/browser-vault-aws-preparation-20261118.json)；配置与最小权限方案见 [操作说明](../operations/browser-vault-aws-kms.md)。原 PR360 的合并、审查及检查证据保持历史身份。
 
 ## 本次实现与检查
