@@ -31,7 +31,7 @@ KMS 仅处理 32 字节随机 DEK。远端 context 为 `application=holaday-brow
 7. 以真实已授权的不同身份验证权限拒绝；没有第二身份时保留未验，不修改 IAM 或假造另一 profile。SDK transport/credential 失败不能冒充身份隔离通过。
 8. 真实站点主体核对后，才进行云端保存、重建、到期、撤销、换账号和迟到保存验收。登录和验证码由用户操作，不复制日常 Chrome profile。
 
-实际加解密调用可能计费；本轮只准备，不执行上述收费验收。AWS 官方标准客户密钥基础标价为每把每月 1 美元，调用另计；复用已有 key 与新建 key 的费用不同，以账号实际账单为准。
+实际加解密调用可能计费；本轮只准备，不执行上述收费验收。AWS 官方标准客户密钥基础标价为每把每月 1 美元，调用另计；复用已有 key 与新建 key 的费用不同，以账号实际账单为准。免费账号计划可用于验证，官方支持服务包含 KMS，但计划会在6个月或额度耗尽时结束；长期依赖的正式密钥在接线前需确认持续可用的账号方案，不能把免费API额度当成密钥永久免费。
 
 ## 可信站点规则
 
@@ -51,3 +51,4 @@ KMS 仅处理 32 字节随机 DEK。远端 context 为 `application=holaday-brow
 - [Encrypt](https://docs.aws.amazon.com/kms/latest/APIReference/API_Encrypt.html) / [Decrypt](https://docs.aws.amazon.com/kms/latest/APIReference/API_Decrypt.html)
 - [Encryption context](https://docs.aws.amazon.com/kms/latest/developerguide/encrypt_context.html) / [KMS 条件键](https://docs.aws.amazon.com/kms/latest/developerguide/conditions-kms.html)
 - [AWS KMS 定价](https://aws.amazon.com/kms/pricing/)
+- [免费计划支持服务](https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.html) / [账号计划与到期](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html)

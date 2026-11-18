@@ -1,0 +1,175 @@
+{
+  "readOnly": true,
+  "executionAllowed": false,
+  "sourceCommit": "2f22be1dc0a49a3874cbabba651d5eb40b3d2795",
+  "sourceStatus": "verified runtime source committed",
+  "integrationBaseline": "91ba3cd6b7b208231f60265a7bb805ae7a5af2cf",
+  "production": {
+    "inventoryAtUTC": "2026-11-18T14:05:17.851842+00:00",
+    "snapshotSHA256": "a7b69a87d4e19575486ad4d78c5b4ac62721c197e1b41aa7626d10403fd65b15",
+    "runtime": "/opt/holaday-releases/cr-b1053fbf/apps/orchestrator",
+    "node": "v22.23.3",
+    "mysql": "8.0.46-0ubuntu0.22.04.5",
+    "businessRowsRead": 0,
+    "mutations": 0,
+    "inheritedFlagsCaveat": "Inherited environment and current dotenv source resolution; does not read live JS heap or attest flags changed after boot."
+  },
+  "schema": {
+    "requiredTables": 73,
+    "requiredColumns": 549,
+    "actualTables": 96,
+    "missingTables": [],
+    "missingColumns": [
+      "task_files.browser_source"
+    ],
+    "missingIndexes": [],
+    "lifecycleViolations": [],
+    "accountingViolations": []
+  },
+  "migration": {
+    "productionWrites": 0,
+    "productionRowsCopied": 0,
+    "source": "captured production SHOW CREATE TABLE metadata only",
+    "image": "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+    "port": 50063,
+    "server": "8.0.46",
+    "clonedTables": 96,
+    "migration": {
+      "file": "0071_task_files_browser_source.sql",
+      "sha256": "f0ad7abd955d6c14957ed429165c72d95631791293dc73f25984cf4ad7237855",
+      "column": {
+        "DATA_TYPE": "json",
+        "IS_NULLABLE": "YES"
+      },
+      "legacyRowPreserved": true,
+      "jsonReadWrite": true,
+      "duplicateRawCode": "ER_DUP_FIELDNAME",
+      "existingWrapperClassifiesAlreadyApplied": true
+    },
+    "migrationSchemaCleaned": true,
+    "fixtureSourceTaskFiles": 0
+  },
+  "maintenance": {
+    "checkedAtUTC": "2026-11-18T14:55:35.202659+00:00",
+    "readOnly": true,
+    "productionMutations": 0,
+    "storeExists": false,
+    "probeExists": true,
+    "probeSHA256": "525487b9c1104577e67191b6a3a4e728f5d77bc167762019b9229026ff842986",
+    "probeExitCode": 1,
+    "stdoutBytes": 0,
+    "stderrBytes": 0,
+    "sourceMatchesCandidate": true
+  },
+  "approvalBindings": {
+    "candidate": null,
+    "configDigest": null,
+    "migrationDigest": null,
+    "inventoryDigest": null,
+    "legacyDigest": null,
+    "maintenanceEndsAtMs": null,
+    "reconcileByMs": null,
+    "operatorRef": null
+  },
+  "approvalReason": "Not an executable approval: actual KMS resource/identity, site subjects, candidate/host/config bindings and approved maintenance window are not yet proven. Snapshot hashes are evidence identifiers, not first-cutover approval digests.",
+  "pending": [
+    "real AWS resource and runtime identity",
+    "verified GitHub and Sheets account subject adapters",
+    "real project plugin/site/account/physical acceptance",
+    "first cutover staging and protected approval",
+    "production0071 and switch require separate authorization"
+  ],
+  "syntheticSheet": {
+    "records": 100,
+    "sum": "5075.00",
+    "csvSHA256": "1dd9f269ce662ab5597f1e7fdb172002de73eb5967f8a64de1e86c0f7a531ede",
+    "prepared": true,
+    "nativeContentAndVisualChecked": true,
+    "projectPluginAcceptance": false
+  },
+  "productionChanged": false,
+  "deployed": false,
+  "candidate": {
+    "sourceCommit": "2f22be1dc0a49a3874cbabba651d5eb40b3d2795",
+    "createdAtUTC": "2026-11-18T14:57:52.788940+00:00",
+    "node": "22.23.3",
+    "branch": "codex/browser-assistant-release-readiness",
+    "backend": {
+      "archive": "backend-2f22be1d.zip",
+      "sha256": "86bc29b9e6d233b881c78383c054891d2cbf59b74241c1ca17bf9f625f3cf25f",
+      "bytes": 4188388,
+      "files": 1608,
+      "fileManifestSHA256": "dade9b9e591aee2cd0536dc7402651d8a7f64cefb0138f3521b98b365b716449",
+      "changed": [
+        "application-main.js",
+        "application-main.js.map",
+        "browser-session-vault/crypto.js",
+        "browser-session-vault/crypto.js.map",
+        "config/env.js",
+        "config/env.js.map"
+      ],
+      "added": [
+        "browser-session-vault/aws-kms-key-provider.js",
+        "browser-session-vault/aws-kms-key-provider.js.map",
+        "browser-session-vault/production-runtime.js",
+        "browser-session-vault/production-runtime.js.map"
+      ],
+      "removed": [],
+      "packageSHA256": "bbdccecd818086bf156e5a7a7623bdeaff9dff7c73fcb2121c84a7dd214bb795",
+      "lockSHA256": "19a88d73693074cd35660c381680806eb4bfc89b506800bdf297a41da51f7aad",
+      "dependency": "@aws-sdk/client-kms 3.1045.0 / credential-provider-ini 3.972.38; install exact monorepo lock; zip is not standalone installer"
+    },
+    "reusedArtifacts": [
+      {
+        "name": "workbench-61919029.zip",
+        "sourceCommit": "61919029b560ce944d7f7575f02b4979d95b9b42",
+        "sha256": "843f8f2c7cf851a2bb0deba46a23713584cdd78d4f1f59f3e2ad60c1c8e4f90e",
+        "bytes": 33107055,
+        "reason": "git runtime source unchanged from PR360 merged tree; prior build and acceptance evidence retained"
+      },
+      {
+        "name": "holaday-extension-0.0.5-61919029.zip",
+        "sourceCommit": "61919029b560ce944d7f7575f02b4979d95b9b42",
+        "sha256": "311647dacb6a47c34c6c9a164301c4eab7af50d9836a85b640a697f905395185",
+        "bytes": 1000160,
+        "reason": "git runtime source unchanged from PR360 merged tree; prior build and acceptance evidence retained"
+      }
+    ],
+    "scope": "AWS software preparation and source freeze; real resource/site/account/device gates not passed",
+    "deployed": false,
+    "productionChanged": false
+  },
+  "verification": {
+    "relatedVaultAndStartup": {
+      "files": 17,
+      "passed": 137,
+      "failed": 0,
+      "skipped": 0
+    },
+    "finalFocused": {
+      "passed": 45,
+      "failed": 0
+    },
+    "strictTypes": {
+      "roots": 17,
+      "transitiveDependencies": true,
+      "originalStrictOptions": true,
+      "exitCode": 0
+    },
+    "backendProductionBuild": {
+      "exitCode": 0,
+      "heapMB": 2048
+    },
+    "changedFileStatic": {
+      "checked": 9,
+      "exitCode": 0
+    },
+    "exactMysql8046FullApp": {
+      "passed": 1,
+      "failed": 0,
+      "syntheticAccount": true,
+      "realProjectExtension": true,
+      "modelAPICalls": 0
+    }
+  }
+}
