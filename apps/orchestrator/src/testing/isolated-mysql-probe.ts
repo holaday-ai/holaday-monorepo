@@ -11,6 +11,7 @@ const lockName = 'codex:holaday_it';
 export async function openIsolatedMysqlProbe(
   options: {
     allTableStructures?: boolean;
+    includeVaultSchema?: boolean;
     artifactPath?: string;
   } = {},
 ) {
@@ -95,6 +96,10 @@ export async function openIsolatedMysqlProbe(
       )
         throw new Error('Unexpected source table inventory');
     }
+    const clonedTables = [...tables];
+    const missingVault =
+      options.includeVaultSchema === true && !tables.includes('browser_session_vaults');
+    if (missingVault) tables.push('browser_session_vaults');
     await control.query('CREATE DATABASE `holaday_it` CHARACTER SET utf8mb4');
     created = true;
     await control.query(
@@ -110,7 +115,7 @@ export async function openIsolatedMysqlProbe(
     // Persist recovery identity before any long browser operation can block teardown.
     if (options.artifactPath)
       await writeFile(options.artifactPath, JSON.stringify(evidence, null, 2));
-    for (const table of tables)
+    for (const table of clonedTables)
       await control.query(`CREATE TABLE \`holaday_it\`.\`${table}\` LIKE \`holaday\`.\`${table}\``);
     connection = await connect();
     const [version] = await connection.query<RowDataPacket[]>('SELECT VERSION() AS version');
@@ -125,6 +130,16 @@ export async function openIsolatedMysqlProbe(
     ];
     const appliedMigrations: string[] = [];
     const baselineSchemaGaps: string[] = [];
+    if (missingVault) {
+      // The guard owns this exact fresh schema. Never apply a migration to the
+      // source business database or silently expand another probe's namespace.
+      const name = '0067_browser_session_vault';
+      const source = await readFile(new URL(`../../drizzle/${name}.sql`, import.meta.url), 'utf8');
+      for (const statement of source.split('--> statement-breakpoint'))
+        if (statement.trim()) await connection.query(statement);
+      appliedMigrations.push(name);
+      baselineSchemaGaps.push('browser_session_vaults');
+    }
     for (const migration of migrations) {
       if (!tables.includes(migration.table)) continue;
       const [columns] = await connection.query<RowDataPacket[]>(
@@ -144,7 +159,8 @@ export async function openIsolatedMysqlProbe(
     Object.assign(evidence, { appliedMigrations, baselineSchemaGaps });
     database = drizzle(connection) as DB;
     evidence.created = true;
-    evidence.clonedTableStructures = tables.length;
+    evidence.clonedTableStructures = clonedTables.length;
+    evidence.testSchemaTableCount = tables.length;
   } catch (error) {
     await close();
     throw error;
