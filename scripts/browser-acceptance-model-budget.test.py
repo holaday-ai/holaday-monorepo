@@ -370,5 +370,144 @@ class ExtensionTest(unittest.TestCase):
         self.assertEqual(migrated['attempts'][1]['state'], 'unknown')
 
 
+class SavedFileExtensionTest(unittest.TestCase):
+    """Second proposal is synthetic and never activates the private relay."""
+
+    def setUp(self):
+        self.base = ExtensionTest()
+        self.base.setUp()
+        self.first = self.base.approval()
+        self.state = budget.extend_ledger(self.base.state, self.first)
+        self.state['attempts'] += [self.base.entry(n) for n in range(26, 42)]
+        self.materials = [
+            {'scope': 'github-pr360', 'name': 'acceptance.json', 'bytes': 7560, 'sha256': 'a'*64},
+            {'scope': 'sheets-synthetic', 'name': 'RawData.csv', 'bytes': 1708, 'sha256': 'b'*64},
+        ]
+        self.runtime = 'c'*40
+
+    def proposal(self):
+        return budget.prepare_saved_extension(self.state, self.first,
+            runtime_source=self.runtime, materials=self.materials)
+
+    def approval(self):
+        return {**self.proposal(), 'approved': True, 'authorizationRef': 'synthetic-saved-approval'}
+
+    def admit(self, state, policy, **change):
+        args = {'scope': 'sheets-synthetic', 'body_sha': 'f'*64,
+                'permits': self.base.permits, 'extension': self.first,
+                'saved_extension': policy, 'model': 'qwen3.8-max', 'max_tokens': 4096,
+                'material_sha': 'b'*64, 'runtime_source': self.runtime,
+                'tool_names': ['read_task_file','analyze_task_table','create_file','finish']}
+        args.update(change)
+        return budget.authorize(state, **args)
+
+    def entry(self, ordinal):
+        return {**self.base.entry(ordinal), 'scope': 'sheets-synthetic',
+                'savedInputSHA256': 'b'*64, 'runtimeSourceCommit': self.runtime,
+                'toolNames': ['finish']}
+
+    def test_saved_proposal_is_unapproved_and_preserves_every_old_attempt(self):
+        before = copy.deepcopy(self.state)
+        proposal = self.proposal()
+        self.assertEqual(self.state, before)
+        self.assertEqual(proposal['maxAttempts'], 57)
+        self.assertEqual(proposal['additionalAttempts'], 16)
+        self.assertFalse(proposal['approved'])
+        self.assertIsNone(proposal['authorizationRef'])
+        self.assertEqual(proposal['freshOriginalDownloads'], {'github-pr360': 0, 'sheets-synthetic': 0})
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_saved_ledger(self.state, self.first, proposal)
+        with self.assertRaisesRegex(budget.BudgetError, 'EXHAUSTED'):
+            self.base.admit(self.state, self.first)
+
+    def test_second_migration_is_separate_and_cannot_be_repeated_or_skip_exhaustion(self):
+        before = copy.deepcopy(self.state)
+        policy = self.approval()
+        migrated = budget.extend_saved_ledger(self.state, self.first, policy)
+        self.assertEqual(self.state, before)
+        self.assertEqual(migrated, {**before, 'maxAttempts': 57})
+        self.assertEqual(migrated['attempts'][1]['state'], 'unknown')
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_saved_ledger(migrated, self.first, policy)
+        self.state['attempts'].pop()
+        with self.assertRaises(budget.BudgetError):
+            self.proposal()
+
+    def test_only_sixteen_saved_file_calls_are_admitted(self):
+        policy = self.approval()
+        state = budget.extend_saved_ledger(self.state, self.first, policy)
+        for ordinal in range(42, 58):
+            self.admit(state, policy, body_sha=f'{ordinal:064x}')
+            state['attempts'].append(self.entry(ordinal))
+        with self.assertRaisesRegex(budget.BudgetError, 'EXHAUSTED'):
+            self.admit(state, policy)
+
+    def test_policy_and_history_cannot_widen_downloads_tools_or_candidate(self):
+        policy = self.approval()
+        variants = [('additionalAttempts', 17), ('maxAttempts', 58), ('automaticRetries', 1),
+                    ('maxOutputTokens', 4097), ('approved', 1), ('authorizationRef', ''),
+                    ('freshOriginalDownloads', {'github-pr360': 1, 'sheets-synthetic': 0}),
+                    ('allowedTools', ['navigate']), ('model', 'other-model'),
+                    ('baselineAttempts', 40), ('baselineSHA256', '0'*64)]
+        for key, value in variants:
+            with self.subTest(key=key), self.assertRaises(budget.BudgetError):
+                budget.extend_saved_ledger(self.state, self.first, {**policy, key: value})
+        state = budget.extend_saved_ledger(self.state, self.first, policy)
+        for change in [{'savedInputSHA256':'d'*64}, {'runtimeSourceCommit':'d'*40},
+                       {'toolNames':['navigate']}, {'model':'other-model'},
+                       {'bodySHA256':state['attempts'][0]['bodySHA256']}]:
+            changed = copy.deepcopy(state)
+            changed['attempts'].append({**self.entry(42), **change})
+            with self.subTest(change=change), self.assertRaises(budget.BudgetError):
+                self.admit(changed, policy)
+
+    def test_each_request_binds_actual_material_candidate_and_file_tool_catalog(self):
+        policy = self.approval()
+        state = budget.extend_saved_ledger(self.state, self.first, policy)
+        changes = [{'material_sha':'a'*64}, {'runtime_source':'d'*40},
+                   {'tool_names':['navigate']}, {'tool_names':[]}, {'tool_names':['finish','finish']},
+                   {'model':'other-model'}, {'max_tokens':True}, {'max_tokens':4097},
+                   {'scope':'connectivity-probe'}]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(budget.BudgetError):
+                self.admit(state, policy, **change)
+        self.admit(state, policy, tool_names=['finish'])
+
+    def test_full_41_prefix_and_first_approval_remain_required(self):
+        policy = self.approval()
+        for variant in ['truncate','mutate','reorder','unknown-washed-green']:
+            state = budget.extend_saved_ledger(self.state, self.first, policy)
+            if variant == 'truncate': state['attempts'].pop()
+            elif variant == 'mutate': state['attempts'][40]['maxTokens'] = 4095
+            elif variant == 'reorder': state['attempts'][-2:] = state['attempts'][-1:-3:-1]
+            else:
+                state['attempts'][1].update(state='received', httpStatus=200,
+                    finishedAtUTC='2026-11-19T00:00:20+00:00')
+            with self.subTest(variant=variant), self.assertRaises(budget.BudgetError):
+                self.admit(state, policy)
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_saved_ledger(self.state, {**self.first, 'approved':False}, policy)
+
+    def test_unknowns_and_all_prior_bodies_remain_protected(self):
+        policy = self.approval()
+        state = budget.extend_saved_ledger(self.state, self.first, policy)
+        with self.assertRaisesRegex(budget.BudgetError, 'UNKNOWN'):
+            self.admit(state, policy, permits=[])
+        for entry in state['attempts']:
+            with self.assertRaisesRegex(budget.BudgetError, 'REPLAY'):
+                self.admit(state, policy, body_sha=entry['bodySHA256'])
+        state['attempts'].append({**self.entry(42), 'state':'unknown'})
+        with self.assertRaisesRegex(budget.BudgetError, 'UNKNOWN'):
+            self.admit(state, policy)
+
+    def test_materials_must_be_two_distinct_saved_sources(self):
+        for materials in [[], self.materials[:1], self.materials*2,
+                          [self.materials[0], self.materials[0]],
+                          [{**self.materials[0], 'bytes':True},self.materials[1]]]:
+            with self.subTest(materials=materials), self.assertRaises(budget.BudgetError):
+                budget.prepare_saved_extension(self.state, self.first,
+                    runtime_source=self.runtime, materials=materials)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -237,9 +237,95 @@ def extend_ledger(state, extension):
     return migrated
 
 
-def seal_audit(state, audit_bytes, *, extension=None):
+def _saved_template(entries, runtime_source, materials):
+    _require(isinstance(runtime_source, str)
+             and re.fullmatch(r'[a-f0-9]{40}', runtime_source), 'INVALID_SAVED_RUNTIME')
+    _require(isinstance(materials, list) and len(materials) == 2, 'INVALID_SAVED_MATERIALS')
+    for item in materials:
+        _require(isinstance(item, dict) and set(item) == {'scope', 'name', 'bytes', 'sha256'}
+                 and item['scope'] in {'github-pr360', 'sheets-synthetic'}
+                 and isinstance(item['name'], str) and 0 < len(item['name']) <= 255
+                 and not any(c in item['name'] for c in '/\\\x00')
+                 and _integer(item['bytes'], 1, 100_000_000)
+                 and isinstance(item['sha256'], str)
+                 and re.fullmatch(r'[a-f0-9]{64}', item['sha256']), 'INVALID_SAVED_MATERIALS')
+    _require({item['scope'] for item in materials} == {'github-pr360', 'sheets-synthetic'}
+             and len({item['sha256'] for item in materials}) == 2, 'INVALID_SAVED_MATERIALS')
+    return {'schemaVersion': 1, 'baselineMaxAttempts': 41, 'baselineAttempts': 41,
+            'baselineSHA256': _digest(entries[:41]), 'additionalAttempts': 16,
+            'maxAttempts': 57, 'model': 'qwen3.8-max', 'maxOutputTokens': 4096,
+            'allowedScopes': ['github-pr360', 'sheets-synthetic'], 'automaticRetries': 0,
+            'freshOriginalDownloads': {'github-pr360': 0, 'sheets-synthetic': 0},
+            'allowedTools': ['read_task_file', 'analyze_task_table', 'create_file', 'finish'],
+            'runtimeSourceCommit': runtime_source,
+            'materials': sorted(copy.deepcopy(materials), key=lambda item: item['scope']),
+            'approved': False, 'authorizationRef': None}
+
+
+def prepare_saved_extension(state, extension, *, runtime_source, materials):
+    """Pure, unapproved second proposal for saved inputs; no live policy activation."""
+    entries = _extension_ledger(state, extension)
+    _require(state['maxAttempts'] == 41 and len(entries) == 41,
+             'EXHAUSTED_SAVED_BASELINE_REQUIRED')
+    return _saved_template(entries, runtime_source, materials)
+
+
+def _saved_request(policy, scope, model, max_tokens, material_sha, runtime_source, tool_names):
+    material = next((item for item in policy['materials'] if item['scope'] == scope), None)
+    _require(material is not None and model == policy['model']
+             and _integer(max_tokens, 1, 4096)
+             and material_sha == material['sha256']
+             and runtime_source == policy['runtimeSourceCommit']
+             and isinstance(tool_names, (list, tuple)) and bool(tool_names)
+             and all(isinstance(name, str) and name in policy['allowedTools'] for name in tool_names)
+             and len(set(tool_names)) == len(tool_names), 'SAVED_REQUEST_OUT_OF_SCOPE')
+
+
+def _saved_extension_ledger(state, extension, saved_extension):
+    _require(isinstance(state, dict) and type(state.get('maxAttempts')) is int
+             and state['maxAttempts'] in (41, 57), 'INVALID_LEDGER_POLICY')
+    entries = _ledger(state, state['maxAttempts'])
+    _require(len(entries) >= 41, 'SAVED_BASELINE_REQUIRED')
+    baseline = {**state, 'maxAttempts': 41, 'attempts': entries[:41]}
+    _extension_ledger(baseline, extension)
+    _require(isinstance(saved_extension, dict), 'INVALID_SAVED_EXTENSION_POLICY')
+    expected = _saved_template(entries, saved_extension.get('runtimeSourceCommit'),
+                               saved_extension.get('materials'))
+    _require(set(saved_extension) == set(expected), 'INVALID_SAVED_EXTENSION_POLICY')
+    _require(saved_extension['approved'] is True
+             and isinstance(saved_extension['authorizationRef'], str)
+             and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9:._/-]{0,159}',
+                              saved_extension['authorizationRef']),
+             'EXPLICIT_SAVED_EXTENSION_APPROVAL_REQUIRED')
+    _require(saved_extension['baselineSHA256'] == expected['baselineSHA256'],
+             'SAVED_EXTENSION_BASELINE_MISMATCH')
+    fields = set(expected) - {'approved', 'authorizationRef'}
+    _require(_digest({key:saved_extension[key] for key in fields})
+             == _digest({key:expected[key] for key in fields}), 'INVALID_SAVED_EXTENSION_POLICY')
+    seen = {entry['bodySHA256'] for entry in entries[:41]}
+    for entry in entries[41:]:
+        _saved_request(saved_extension, entry['scope'], entry['model'], entry['maxTokens'],
+                       entry.get('savedInputSHA256'), entry.get('runtimeSourceCommit'),
+                       entry.get('toolNames'))
+        _require(entry['bodySHA256'] not in seen, 'BODY_REPLAY_FORBIDDEN')
+        seen.add(entry['bodySHA256'])
+    return entries
+
+
+def extend_saved_ledger(state, extension, saved_extension):
+    """Return a separate value after explicit approval; caller owns any disk activation."""
+    _require(isinstance(state, dict) and state.get('maxAttempts') == 41,
+             'EXHAUSTED_SAVED_BASELINE_REQUIRED')
+    entries = _saved_extension_ledger(state, extension, saved_extension)
+    _require(len(entries) == 41, 'EXHAUSTED_SAVED_BASELINE_REQUIRED')
+    return {**copy.deepcopy(state), 'maxAttempts': 57}
+
+
+def seal_audit(state, audit_bytes, *, extension=None, saved_extension=None):
     """Seal only already verified, complete local metadata; does not alter any ledger."""
-    entries = _ledger(state) if extension is None else _extension_ledger(state, extension)
+    entries = (_saved_extension_ledger(state, extension, saved_extension)
+               if saved_extension is not None else
+               _ledger(state) if extension is None else _extension_ledger(state, extension))
     _require(bool(entries), 'EMPTY_AUDIT_PREFIX')
     audit = _json(audit_bytes)
     _audit(entries, audit)
@@ -247,11 +333,19 @@ def seal_audit(state, audit_bytes, *, extension=None):
             'auditSHA256': hashlib.sha256(audit_bytes).hexdigest()}
 
 
-def authorize(state, scope, body_sha, permits=(), *, extension=None, model=None, max_tokens=None):
+def authorize(state, scope, body_sha, permits=(), *, extension=None, model=None, max_tokens=None,
+              saved_extension=None, material_sha=None, runtime_source=None, tool_names=None):
     """Read-only admission for a new request, never permission to resume an old task."""
-    entries = _ledger(state) if extension is None else _extension_ledger(state, extension)
+    entries = (_saved_extension_ledger(state, extension, saved_extension)
+               if saved_extension is not None else
+               _ledger(state) if extension is None else _extension_ledger(state, extension))
     limit = 25
-    if extension is not None:
+    if saved_extension is not None:
+        _require(state['maxAttempts'] == 57, 'SAVED_EXTENSION_LEDGER_NOT_MIGRATED')
+        _saved_request(saved_extension, scope, model, max_tokens,
+                       material_sha, runtime_source, tool_names)
+        limit = 57
+    elif extension is not None:
         _require(state['maxAttempts'] == 41, 'EXTENSION_LEDGER_NOT_MIGRATED')
         _require(scope in extension['allowedScopes'] and model == extension['model']
                  and _integer(max_tokens, 1, 4096), 'EXTENSION_REQUEST_OUT_OF_SCOPE')

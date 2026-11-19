@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "browser-predeployment-review-only",
-  "preparedAtUTC": "2026-11-19T16:23:02.181177+00:00",
+  "preparedAtUTC": "2026-11-19T16:36:10.580166+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeInputCount": 1832,
@@ -146,7 +146,6 @@
     "stable Google subject and real snapshot bindings",
     "account save/rebuild/expiry/revoke/switch",
     "physical input and actual billing",
-    "current backend Linux startup binding",
     "protected final target/config/inventory/legacy/window/operator binding"
   ],
   "executionAllowed": false,
@@ -210,8 +209,9 @@
   "componentReuseProofSHA256": "9021abdb0602e8506de88130ebafb41d0ad95b128567504a7b93332913126f32",
   "kmsRealServiceAcceptance": {
     "executed": false,
-    "latestObservedState": "CloudShell console reloaded and still reported account verification; no environment deletion",
-    "effectiveProductionIdentityVerified": false
+    "latestObservedState": "authenticated console reloaded; CloudShell still reports account verification; no deletion/upload/crypto",
+    "effectiveProductionIdentityVerified": false,
+    "latestObservedAtUTC": "2026-11-19T16:36:10.580166+00:00"
   },
   "savedInputPreflight": {
     "sourceBytes": 1708,
@@ -237,8 +237,23 @@
   "currentCandidateStartup": {
     "backendBuildPassed": true,
     "localSqlPreflightPassed": true,
-    "linuxStartupForCurrentBackendAccepted": false,
+    "linuxStartupForCurrentBackendAccepted": true,
     "unchangedWorkbenchAndExtensionReused": true,
-    "previousLinuxEvidenceScope": "older b00 candidate; not silently relabeled as current backend"
+    "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+    "actualSourceEntrypointOnEmulatedX64": {
+      "passed": true,
+      "runtimeInputHashesVerified": 1832,
+      "node": "22.23.3",
+      "uid": 998,
+      "fullNetworkIsolation": true,
+      "samePidTwoPorts": true,
+      "closedBusinessStatus": 503,
+      "gracefulExitCode": 0,
+      "ownedContainerRemoved": true,
+      "nativeProductionProcessIdentityAccepted": false,
+      "connectedDatabaseAccepted": false,
+      "vaultEnabledAccepted": false,
+      "compiledBackendZipStartupAccepted": false
+    }
   }
 }
