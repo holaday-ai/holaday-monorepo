@@ -446,6 +446,50 @@ describe('background task tab preparation', () => {
     if (!selectionId) throw new Error('selection missing');
     return { ...target, selectionId };
   }
+  it('negotiates a loading receipt through the wire and later observes the same page ready', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const args = {
+      target: preparedTarget(),
+      preparationId: '58731392-fb39-48c0-9ea9-7431395567b1',
+      reportReadiness: true,
+    };
+    const first = call('task_tab', args, 15000);
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(await first).toMatchObject({
+      ok: true,
+      result: {
+        taskTabStatus: 'loading',
+        taskTabCreated: true,
+        preparationId: args.preparationId,
+        sourceTabId: 42,
+        sourceOrigin: 'https://work.example',
+        tabId: 73,
+      },
+    });
+    loading = false;
+    expect(await call('task_tab', args, 15000)).toMatchObject({
+      ok: true,
+      result: { tabId: 73, selectionId: expect.any(String) },
+    });
+    expect(browser.tabs.create).toHaveBeenCalledOnce();
+  });
+  it('advertises readiness as an explicit extension capability', async () => {
+    await readyBrowser();
+    expect(await call('tabs')).toMatchObject({
+      ok: true,
+      result: {
+        userBrowserProtocol: { capabilities: expect.arrayContaining(['task_tab_readiness_v1']) },
+      },
+    });
+  });
   it('observes a slow prepared tab again under the same preparation without creating another', async () => {
     vi.useFakeTimers();
     const browser = await readyBrowser();

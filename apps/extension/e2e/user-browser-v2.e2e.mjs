@@ -179,118 +179,136 @@ const protocol = {
 };
 const css = (value) => ({ description: 'model hint Search', strategies: [{ kind: 'css', value }] });
 const call = (session) => server.call(TASK_ID, 'session', { session });
-test(
-  'slow task-tab readiness observes the original created page after timeout',
-  { timeout: 45_000 },
-  async () => {
-    let sourcePage;
-    let userPage;
-    let taskPage;
-    let heldResponse;
-    let pageRequests = 0;
-    const fixture = createServer((req, res) => {
-      if (req.url !== '/slow.html') {
-        res.writeHead(204).end();
-        return;
-      }
-      pageRequests++;
-      res.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-store',
+for (const reportReadiness of [false, true])
+  test(
+    `slow task-tab readiness observes the original created page after timeout${reportReadiness ? ' with acknowledged loading' : ''}`,
+    { timeout: 45_000 },
+    async () => {
+      let sourcePage;
+      let userPage;
+      let taskPage;
+      let heldResponse;
+      let pageRequests = 0;
+      const fixture = createServer((req, res) => {
+        if (req.url !== '/slow.html') {
+          res.writeHead(204).end();
+          return;
+        }
+        pageRequests++;
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.write(
+          '<!doctype html><title>Slow preparation fixture</title><link rel="icon" href="data:,"><input id="query">',
+        );
+        if (pageRequests === 1) res.end();
+        else heldResponse = res;
       });
-      res.write(
-        '<!doctype html><title>Slow preparation fixture</title><link rel="icon" href="data:,"><input id="query">',
-      );
-      if (pageRequests === 1) res.end();
-      else heldResponse = res;
-    });
-    await new Promise((resolve) => fixture.listen(0, '127.0.0.1', resolve));
-    const origin = `http://127.0.0.1:${fixture.address().port}`;
-    try {
-      const connect = server.waitForConnection(1, 20_000);
-      for (let i = 0; i < 20 && !server.connections.some((c) => c.helloAt); i++) {
-        await serviceWorker.evaluate(
-          async (token) => chrome.storage.local.set({ 'holaday.access_token': token }),
-          TOKEN,
+      await new Promise((resolve) => fixture.listen(0, '127.0.0.1', resolve));
+      const origin = `http://127.0.0.1:${fixture.address().port}`;
+      try {
+        const connect = server.waitForConnection(1, 20_000);
+        for (let i = 0; i < 20 && !server.connections.some((c) => c.helloAt); i++) {
+          await serviceWorker.evaluate(
+            async (token) => chrome.storage.local.set({ 'holaday.access_token': token }),
+            TOKEN,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        await connect;
+        sourcePage = await context.newPage();
+        await sourcePage.goto(`${origin}/slow.html`);
+        await sourcePage.locator('#query').fill('original input stays');
+        userPage = await context.newPage();
+        await userPage.goto(`${server.origin}/page.html`);
+        await userPage.locator('#query').fill('user typing stays');
+        await userPage.bringToFront();
+        const discovery = await server.call(TASK_ID, 'tabs');
+        const source = discovery.result.tabs.find(
+          (tab) => tab.title === 'Slow preparation fixture',
         );
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-      await connect;
-      sourcePage = await context.newPage();
-      await sourcePage.goto(`${origin}/slow.html`);
-      await sourcePage.locator('#query').fill('original input stays');
-      userPage = await context.newPage();
-      await userPage.goto(`${server.origin}/page.html`);
-      await userPage.locator('#query').fill('user typing stays');
-      await userPage.bringToFront();
-      const discovery = await server.call(TASK_ID, 'tabs');
-      const source = discovery.result.tabs.find((tab) => tab.title === 'Slow preparation fixture');
-      const active = discovery.result.tabs.find((tab) => tab.active);
-      assert.ok(source && active);
-      const args = {
-        target: { tabId: source.tabId, expectedUrl: origin, selectionId: source.selectionId },
-        preparationId: '9f634472-29a6-43a1-80ac-c03050a6aa21',
-      };
-      const pagesBefore = context.pages().length;
-      const newPage = context.waitForEvent('page');
-      const first = await server.call(TASK_ID, 'task_tab', args, 15_000);
-      taskPage = await newPage;
-      assert.equal(
-        first.ok,
-        false,
-        'the deliberately incomplete response must exceed preparation readiness',
-      );
-      assert.ok(heldResponse);
-      assert.equal(pageRequests, 2);
-      heldResponse.end();
-      await taskPage.waitForLoadState('load');
-      const recovered = await server.call(TASK_ID, 'task_tab', args, 15_000);
-      assert.equal(recovered.ok, true, JSON.stringify(recovered.error));
-      assert.notEqual(recovered.result.tabId, source.tabId);
-      const repeated = await server.call(TASK_ID, 'task_tab', args, 15_000);
-      assert.deepEqual(repeated.result, recovered.result);
-      assert.equal(context.pages().length, pagesBefore + 1);
-      assert.equal(pageRequests, 2, 'retry must neither create nor reload a page');
-      assert.equal(await sourcePage.locator('#query').inputValue(), 'original input stays');
-      assert.equal(await userPage.locator('#query').inputValue(), 'user typing stays');
-      const activeAfter = await serviceWorker.evaluate(
-        async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
-      );
-      assert.equal(activeAfter, active.tabId);
-      const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
-      if (artifactDir) {
-        writeFileSync(
-          join(artifactDir, 'slow-preparation.json'),
-          JSON.stringify(
-            {
-              passed: true,
-              first: { ok: first.ok, error: first.error },
-              recovered: { ok: recovered.ok, tabId: recovered.result.tabId },
-              oneCreatedPage: true,
-              pageRequests,
-              samePreparationId: true,
-              sourceInputPreserved: true,
-              userInputPreserved: true,
-              activeTabPreserved: true,
-              modelCalls: 0,
-              websiteOriginalExports: 0,
-              realAccountAcceptance: false,
-            },
-            null,
-            2,
-          ),
+        const active = discovery.result.tabs.find((tab) => tab.active);
+        assert.ok(source && active);
+        const args = {
+          target: { tabId: source.tabId, expectedUrl: origin, selectionId: source.selectionId },
+          preparationId: reportReadiness
+            ? '9f634472-29a6-43a1-80ac-c03050a6aa22'
+            : '9f634472-29a6-43a1-80ac-c03050a6aa21',
+          ...(reportReadiness ? { reportReadiness: true } : {}),
+        };
+        const pagesBefore = context.pages().length;
+        const newPage = context.waitForEvent('page');
+        const first = await server.call(TASK_ID, 'task_tab', args, 15_000);
+        taskPage = await newPage;
+        assert.equal(
+          first.ok,
+          reportReadiness,
+          'only an opted-in caller receives acknowledged loading as success',
         );
+        if (reportReadiness) {
+          assert.equal(first.result.taskTabStatus, 'loading');
+          assert.equal(first.result.preparationId, args.preparationId);
+          assert.equal(first.result.sourceTabId, source.tabId);
+          assert.equal(first.result.sourceOrigin, origin);
+          assert.equal(first.result.selectionId, undefined);
+          assert.equal(first.result.url, undefined);
+        }
+        assert.ok(heldResponse);
+        assert.equal(pageRequests, 2);
+        heldResponse.end();
+        await taskPage.waitForLoadState('load');
+        const recovered = await server.call(TASK_ID, 'task_tab', args, 15_000);
+        assert.equal(recovered.ok, true, JSON.stringify(recovered.error));
+        assert.notEqual(recovered.result.tabId, source.tabId);
+        const repeated = await server.call(TASK_ID, 'task_tab', args, 15_000);
+        assert.deepEqual(repeated.result, recovered.result);
+        assert.equal(context.pages().length, pagesBefore + 1);
+        assert.equal(pageRequests, 2, 'retry must neither create nor reload a page');
+        assert.equal(await sourcePage.locator('#query').inputValue(), 'original input stays');
+        assert.equal(await userPage.locator('#query').inputValue(), 'user typing stays');
+        const activeAfter = await serviceWorker.evaluate(
+          async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id,
+        );
+        assert.equal(activeAfter, active.tabId);
+        const artifactDir = process.env.HOLADAY_E2E_ARTIFACT_DIR;
+        if (artifactDir) {
+          writeFileSync(
+            join(
+              artifactDir,
+              reportReadiness ? 'slow-preparation-loading.json' : 'slow-preparation.json',
+            ),
+            JSON.stringify(
+              {
+                passed: true,
+                first: { ok: first.ok, error: first.error, result: first.result },
+                reportReadiness,
+                recovered: { ok: recovered.ok, tabId: recovered.result.tabId },
+                oneCreatedPage: true,
+                pageRequests,
+                samePreparationId: true,
+                sourceInputPreserved: true,
+                userInputPreserved: true,
+                activeTabPreserved: true,
+                modelCalls: 0,
+                websiteOriginalExports: 0,
+                realAccountAcceptance: false,
+              },
+              null,
+              2,
+            ),
+          );
+        }
+      } finally {
+        if (heldResponse && !heldResponse.writableEnded) heldResponse.end();
+        await taskPage?.close().catch(() => {});
+        await userPage?.close().catch(() => {});
+        await sourcePage?.close().catch(() => {});
+        fixture.closeAllConnections();
+        await new Promise((resolve) => fixture.close(resolve));
       }
-    } finally {
-      if (heldResponse && !heldResponse.writableEnded) heldResponse.end();
-      await taskPage?.close().catch(() => {});
-      await userPage?.close().catch(() => {});
-      await sourcePage?.close().catch(() => {});
-      fixture.closeAllConnections();
-      await new Promise((resolve) => fixture.close(resolve));
-    }
-  },
-);
+    },
+  );
 test(
   'repository extension v2: real target, gate, revisions and protected task tabs',
   { timeout: 180_000 },

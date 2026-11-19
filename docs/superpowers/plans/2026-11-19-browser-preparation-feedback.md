@@ -51,9 +51,9 @@
 **Files:** `apps/extension/src/background/selected-tab-read.ts`、`task-tab-journal.ts`、`extension-tools.ts` 及各自测试；`apps/extension/e2e/user-browser-v2.e2e.mjs`。
 **Interfaces:** `prepareIndependentTaskTab`增加尾部可选 `reportReadiness`；新能力 `task_tab_readiness_v1`。`TaskTabJournal.prepare`增加可选readiness，loading内部值可用type guard识别；私有记录增加仅已确认导航才置真的 `navigationAcknowledged`。对外回执按Task2 schema序列化，绝不输出raw URL。
 
-- [ ] RED：已知created页超时返回loading；旧请求保留旧错误；缺创建/导航/存储回执、错owner/origin拒绝；持久化重入仍只观察或继续原唯一导航。
-- [ ] 最小实现ack与协商；保留未知创建记录、nonce、唯一marker及原八秒等待。
-- [ ] 原插件/Journal/协议回归和真实Chrome慢页回归通过，提交。
+- [x] RED：已知created页超时返回loading；旧请求保留旧错误；缺创建/导航/存储回执、错owner/origin拒绝；持久化重入仍只观察或继续原唯一导航。
+- [x] 最小实现ack与协商；保留未知创建记录、nonce、唯一marker及原八秒等待。
+- [x] 原插件/Journal/协议114/114；真实Chrome旧调用与协商loading各1项通过；类型通过、静态0错误/1个既存未用函数警告。日志native-readiness-related、native-readiness-checks、prepared-tab-readiness-chrome-v1。
 
 ### Task 4: 主机验证与客户端接线
 

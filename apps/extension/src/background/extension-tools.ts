@@ -900,6 +900,7 @@ async function computeExtensionToolResult(
             args?.resumeOnly,
             args?.taskTabMode,
             args?.launchBrowserSessionId,
+            args?.reportReadiness,
           ),
         ),
         operationBudgetMs,
@@ -939,6 +940,7 @@ async function computeExtensionToolResult(
                   capabilities: [
                     ...USER_BROWSER_PROTOCOL.capabilities,
                     'task_tab_start',
+                    'task_tab_readiness_v1',
                     USER_BROWSER_ACTIVITY_CAPABILITY,
                     'task_tab_recovery_v1',
                     ...(launchBrowserSessionId ? ['task_launch_recovery_v1'] : []),
