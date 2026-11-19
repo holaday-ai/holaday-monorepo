@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "browser-predeployment-review-only",
-  "preparedAtUTC": "2026-11-19T16:54:02.879737+00:00",
+  "preparedAtUTC": "2026-11-19T17:20:21.625946+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeInputCount": 1832,
@@ -274,5 +274,27 @@
     "browserConfigured": false,
     "actualModelAcceptance": false,
     "isolatedSchemaCleaned": true
+  },
+  "savedFileAppPreparation": {
+    "runtimeInputs": 1832,
+    "frozenWorkbenchUnchanged": true,
+    "actualPageFileUploads": 2,
+    "separateSyntheticOwners": true,
+    "submittedIntentsAndAttachmentsRetained": true,
+    "taskRequestsRejectedBeforeRouter": 2,
+    "sqlTasks": 0,
+    "sqlEvents": 0,
+    "sqlSteps": 0,
+    "quotaTasksUsed": 0,
+    "modelExecutionEnabled": false,
+    "actualModelCalls": 0,
+    "websiteExports": 0,
+    "appExitCode": 0,
+    "listenersClosed": true,
+    "isolatedSchemaAbsent": true,
+    "currentUploadBindingsUsable": false,
+    "reuploadSavedBytesOnNewBootRequired": true,
+    "realModelAcceptance": false,
+    "productionChanged": false
   }
 }
