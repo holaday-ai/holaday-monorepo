@@ -146,10 +146,18 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
     const ledgerPath = join(runtime, 'model-relay/requests.json');
     const ledgerBefore = await readFile(ledgerPath);
     const ledger = JSON.parse(ledgerBefore.toString());
-    expect(ledger.maxAttempts).toBe(25);
-    expect(ledger.attempts).toHaveLength(25);
-    expect(ledger.attempts[13].state).toBe('unknown');
-    expect(ledger.attempts.filter((a: { state: string }) => a.state === 'unknown')).toHaveLength(1);
+    // Pin the already-authorized and audited current ledger byte-for-byte.
+    // UI restoration cannot reserve a new attempt or turn a missing reply into a receipt.
+    expect(hash(ledgerBefore)).toBe(
+      'bd6c4a02fbf7f6a0811f621fae83f2f573eec6f2036f7d2ae12abc73ef941aa1',
+    );
+    expect(ledger.maxAttempts).toBe(41);
+    expect(ledger.attempts).toHaveLength(36);
+    expect(
+      ledger.attempts.flatMap((a: { state: string }, index: number) =>
+        a.state === 'unknown' ? [index + 1] : [],
+      ),
+    ).toEqual([14, 36]);
     const dump = await readFile(join(incident, 'owned-incident-sql.sql'));
     expect(hash(dump)).toBe('7f0950acc9c656ea7575b191ed1a47cacc9b931185bc2e120b3320ecef87bf9a');
     const probe = await openIsolatedMysqlProbe({
@@ -250,7 +258,20 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
     app.get(/.*/, (_req, res) => res.sendFile('index.html', { root: uiDir }));
     const server = createServer(app);
     const ingress = new Set<ReturnType<typeof connect>>();
+    const unexpectedProxyErrors: string[] = [];
+    let handledProxyDisconnects = 0;
+    const proxyError = (side: string, error: Error) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ECONNRESET' || code === 'EPIPE') handledProxyDisconnects++;
+      else unexpectedProxyErrors.push(`${side}:${code ?? error.message}`);
+    };
     server.on('upgrade', (req, socket, head) => {
+      // Browser navigation can reset the upgraded ingress before the WS close
+      // handshake. Own that local socket error; unexpected proxy failures still fail.
+      socket.on('error', (error) => {
+        proxyError('ingress', error);
+        socket.destroy();
+      });
       if (req.url !== '/ws') {
         socket.destroy();
         return;
@@ -267,7 +288,10 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
         ingress.delete(upstream);
         socket.destroy();
       });
-      upstream.on('error', () => socket.destroy());
+      upstream.on('error', (error) => {
+        proxyError('upstream', error);
+        socket.destroy();
+      });
       socket.on('close', () => upstream.destroy());
     });
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
@@ -282,6 +306,18 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
         server.close((error) => (error ? reject(error) : done())),
       );
       await probe.close();
+      await writeFile(
+        join(artifacts, 'proxy-closure.json'),
+        JSON.stringify(
+          {
+            handledProxyDisconnects,
+            unexpectedProxyErrors,
+          },
+          null,
+          2,
+        ),
+      );
+      expect(unexpectedProxyErrors).toEqual([]);
     };
     if (!candidateBinding) {
       const web = join(root, 'apps/web-workbench');

@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-18-browser-assistant-release-readiness.md`；原整体方案和Goal2身份连续性计划继续约束既有机制。
 
+**2026-11-19 12:50 UTC 当前进展：** 下方历史记录的25次上限及“尚未批准”已由用户后续明确追加授权取代；实际上限41、已用36、未知正文14/36不变，供应商36条已封存，剩余最多5次且不重放。运行时223a83aa的冻结工作台ZIP、1829项源码输入、双视口历史文件读取和实际Linux x64关闭启动已通过；x64客体为arm64宿主上的Rosetta执行，不能证明生产原生身份。手工历史读取入口修正当前账本绑定并局部处理升级连接断连；最终进程0退出，1/1，未新增模型或原件导出。当前候选的编译ZIP独立启动不作声明，生产实际路径为Node22.23.3加载TS源码。详见`docs/reports/2026-11-19-browser-current-candidate-validation.md`。完整Fresh100、真实时延、KMS、账号/主体/物理及生产有效配置仍待验，以下未勾选的整体范围保持。
+
 ## Global Constraints
 
 - 当前隔离工作树，开发分支codex/browser-assistant-release-readiness，基线91ba3cd6；原已合并分支保留。
