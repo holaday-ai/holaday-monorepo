@@ -2,6 +2,8 @@
 
 本次核查已有接线与已授权验收窗口，没有修改登录、探针、云配置或生产数据。账号保存、恢复和切换尚未通过。[机器记录](../reports/evidence/browser-site-identity-review-20261119.json)
 
+后续[Google 协议源码核查](browser-google-subject-protocol-review-20261119.md)已确认 ListAccounts 的原生 POST／二进制账号列表语义，不能直接用作现有探针或当前表格账号证明。下文模型额度及 Linux 未验记录是当时状态；当前上限 41 已用完，Linux 当前候选的模拟关闭启动已补齐，真实模型耗时与账号验收仍未完成。
+
 ## 已确认的实现边界
 
 `production-runtime.ts` 的 `subject.adapter` 是配置标签，不会选择或执行 Google／GitHub 身份解析器。`worker.ts` 在候选快照创建的上下文内导航到服务端配置的同源路径，再用主页面 `page.locator` 读取恰好一个元素的文本或属性；它没有框架查找、账号菜单操作或 OAuth 身份请求。找不到唯一主体时，只返回 connected，不签发 identityProof。

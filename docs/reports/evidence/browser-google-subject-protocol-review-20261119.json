@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "kind": "google-subject-protocol-source-review",
+  "observedDateUTC": "2026-11-19",
+  "reviewedHead": "b73dac5fd1c26d27e8ad572f478124d34f38c6a2",
+  "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+  "runtimeInputCount": 1832,
+  "conclusion": "Not admissible through the existing same-origin unique-element probe configuration; Google current-site subject remains unverified.",
+  "chromiumObservations": [
+    {
+      "url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main/google_apis/gaia/gaia_auth_fetcher.cc",
+      "observedBlob": "924dce7f6a2051319229dc967e1e49b3edf01c8c",
+      "symbol": "StartListAccounts",
+      "finding": "Native credentialed form POST, nonempty body, explicit Origin and internal cookie isolation context."
+    },
+    {
+      "url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main/google_apis/gaia/gaia_urls.cc",
+      "observedBlob": "085cf2c46b89d55b7ea466d29b4e5ecc2d5fa016",
+      "symbol": "kListAccountsSuffix",
+      "finding": "Observed URL includes the b64bin format parameter."
+    },
+    {
+      "url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/lkgr/google_apis/gaia/gaia_auth_util.cc",
+      "observedBlob": "d3e14040fc5eb4439ac3b0f05dabb19d6ed78d65",
+      "symbol": "ParseBinaryListAccountsData",
+      "finding": "Base64/protobuf account list with identifiers and session flags; first entry denotes cookie primary, not a verified current Sheets actor."
+    }
+  ],
+  "sourceVersionLimit": "Separate moving-branch observations, not one pinned tree or the verified installed browser version.",
+  "officialDocumentation": [
+    "https://developers.google.com/identity/openid-connect/openid-connect",
+    "https://support.google.com/accounts/answer/1721977?hl=en"
+  ],
+  "projectInference": "Cookie-list primary and application-login sub cannot independently prove the current spreadsheet actor in the candidate snapshot.",
+  "configureListAccountsAsExistingProbe": false,
+  "missingSubjectIssuesProof": false,
+  "newAuthenticatedProviderRequests": 0,
+  "cookieOrStorageReads": 0,
+  "cloudConfigurationChanges": 0,
+  "runtimeCodeChanges": 0,
+  "modelCalls": 0,
+  "websiteExports": 0,
+  "productionWrites": 0,
+  "stableGoogleSubjectVerified": false,
+  "realModelLatencyAccepted": false,
+  "releaseReady": false,
+  "goalComplete": false,
+  "executionAllowed": false
+}

@@ -77,6 +77,8 @@
   后续核查：用户已在正常“Holaday验收”配置登录GitHub。实际主页面body.logged-in及meta[name="octolytics-actor-id"]均核实1个匹配，主体ID/相邻login与连接器profile一致；只读草案通过实际服务端parser，未应用生产、未抓快照或签发恢复证明。Google来源和真实同快照生命周期仍未完成。另完成Node22.23.3/UID998的Linux arm64关闭入口冷启动，原生模块、同PID双端口、业务503、维护closed/idle、SIGTERM退出及清理通过；现网ELF只读确认x86_64，不能以arm64替代目标ABI。见`docs/operations/browser-github-probe-and-linux-entry-20261119.md`。
 
   已继续完成linux/amd64客体关闭启动：官方Node22.23.3实际二进制SHA与归档成员一致、pnpm锁定448包离线复用、UID998/root持有代码、原生模块/同PID双端口/业务503/原生维护closed-idle/退出清理通过，768MiB/半核/禁交换、无OOM。该环境在arm64宿主以Rosetta模拟，真实内核执行路径如实保留，不能冒认生产原生进程身份或真实配置/数据库/Vault验证；准备与路径假设失败原件保留，产品代码未改。见`docs/reports/2026-11-19-browser-linux-x64-entry.md`。
+  Google协议后续核查已完成：Chromium原生POST及Base64/protobuf列表只能说明Cookie账号集合，不能通过现有同源单元素配置证明当前Sheets账号。保留缺主体拒发证明，不新增账号接口请求或OAuth配置；同快照当前主体仍是未完成项。见`docs/operations/browser-google-subject-protocol-review-20261119.md`。
+
 - [ ] 验证真实服务加解封、错误身份/上下文/版本拒绝；记录费用与权限，不新增资源或权限。
 
   已准备CloudShell合成入口：8项本地测试、实际打包provider双OS进程mock通过（真实AWS0）。用户已明确批准固定包最多11次加解密尝试/3次DescribeKey、新增调用/传输预算0.01美元；打开us-east-2 CloudShell后AWS提示账户仍在验证，无法创建环境（新账户最长可能两天）。未上传包/运行命令/访问临时凭据，实际加解密0；等待外部验证，沿用此次授权，不新建IAM/访问密钥，不等于生产最小权限身份或另一IAM主体拒绝证据。
