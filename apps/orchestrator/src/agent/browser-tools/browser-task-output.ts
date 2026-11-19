@@ -62,10 +62,20 @@ function requestedCount(value: string): number {
 export function taskFileRequirements(intent: string): FileRequirement[] {
   // Only explicit delivery requests, not merely a mention of an input PDF/CSV.
   const request = intent
+    // A singular classifier after a delivery verb is not part of an ASCII
+    // filename: "生成一份summary.csv" still names summary.csv. Explicit
+    // filename/quoted-name clauses keep their literal names.
+    .replace(
+      /((?:生成|创建|导出|制作|交付|保存)\s*)(?:一|1)\s*(?:份|个|张|本)\s*(?=[a-z0-9_-]+\.[a-z0-9]+\b)/gi,
+      '$1',
+    )
     // A material the human provided is an input, not an imperative to provide
     // that same filename again. Keep a later explicit generation request.
     .replace(/(?:我|用户)(?:已|已经)?提供(?:给你)?的?|提供的/g, '')
-    .replace(/(?:不要|无需|不必|不)(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g, '')
+    .replace(
+      /(?:不要|无需|不必|不)(?:再|另|另外|额外)?(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g,
+      '',
+    )
     .replace(/(?:do not|don't|without)\s+(?:create|generate|export|save)[^,.;\n]*/gi, '');
   const delivery =
     /生成|创建|导出|制作|交付|给我|提供|输出|整理[成为]|保存为|转换成|转成|可下载|\b(?:create|generate|export|deliver|provide|save|convert|downloadable)\b/i.exec(
@@ -111,7 +121,7 @@ export function taskFileRequirements(intent: string): FileRequirement[] {
     ...[...counts.keys()].filter((format) => format === '*'),
   ].map((format) => ({ format, ...(counts.has(format) ? { count: counts.get(format)! } : {}) }));
   const names = outputRequest.matchAll(
-    /(?:^|[\s"'“（(、，,])([^\s"'”）)、，,;；:：/\\]+\.(csv|txt|md|json|xlsx|pdf|docx|pptx|zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz))\b/gi,
+    /(?:^|[\s"'“（(、，,])([^\s"'“”）)、，,;；:：/\\]+\.(csv|txt|md|json|xlsx|pdf|docx|pptx|zip|rar|7z|rtf|xls|ods|odt|html|xml|tar|gz))\b/gi,
   );
   for (const match of names) {
     if (match[1] && match[2])
@@ -140,7 +150,10 @@ export function taskOutputGap(
     ).length >= (required.count ?? 1);
   const missing = taskFileRequirements(intent).filter((required) => !matches(required));
   const generationRequest = intent
-    .replace(/(?:不要|无需|不必|不)(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g, '')
+    .replace(
+      /(?:不要|无需|不必|不)(?:再|另|另外|额外)?(?:生成|创建|导出|制作|交付|保存)[^，。；\n]*/g,
+      '',
+    )
     .replace(/(?:do not|don't|without)\s+(?:create|generate|export|save)[^,.;\n]*/gi, '');
   const generation = /生成|创建|制作|保存为|转换成|转成|\b(?:create|generate|convert)\b/i.exec(
     generationRequest,
@@ -155,7 +168,7 @@ export function taskOutputGap(
       // A final combined handoff describes originals plus new files. It must
       // not turn "generate analysis.csv, give me both files" into two new files.
       const handoff =
-        /[，,；;\n]\s*(?:(?:并|再|最后|然后)\s*)?(?:(?:把|将)\s*(?:这|上述|以上)?(?:[一二两三四五六七八九十\d]+|全部|所有)(?:个|份)?\s*(?:[a-z]+\s*)?(?:文件|附件)(?:一起|都)?(?:交给|交付|提供给|给|发给)|(?:and\s+)?(?:give|send|deliver|provide)\s+(?:me\s+)?(?:both|all|these|the|two|three|four|\d+)\s+(?:[a-z]+\s+)?(?:files?|attachments?))/i.exec(
+        /[，,；;。\n]\s*(?:(?:并|再|最后|然后)\s*)?(?:(?:交付|提供)\s*(?:原始|原件)|(?:把|将)\s*(?:这|上述|以上)?(?:[一二两三四五六七八九十\d]+|全部|所有)(?:个|份)?\s*(?:[a-z]+\s*)?(?:文件|附件)(?:一起|都)?(?:交给|交付|提供给|给|发给)|(?:and\s+)?(?:give|send|deliver|provide)\s+(?:me\s+)?(?:both|all|these|the|two|three|four|\d+)\s+(?:[a-z]+\s+)?(?:files?|attachments?))/i.exec(
           scope,
         );
       if (handoff) scope = scope.slice(0, handoff.index);
