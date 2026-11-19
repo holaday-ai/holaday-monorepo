@@ -4,6 +4,7 @@ Audit bytes are operator-verified local evidence, not provider-signed receipts.
 The relay loads them only from its fixed private directory, never from model input.
 """
 from datetime import datetime, timezone
+import copy
 import hashlib
 import json
 import math
@@ -42,12 +43,12 @@ def _utc(value):
         raise BudgetError('INVALID_AUDIT_TIME') from None
 
 
-def _ledger(state):
+def _ledger(state, limit=25):
     _require(isinstance(state, dict) and type(state.get('maxAttempts')) is int
-             and state['maxAttempts'] == 25 and state.get('providerCredentialsCopied') is False,
+             and state['maxAttempts'] == limit and state.get('providerCredentialsCopied') is False,
              'INVALID_LEDGER_POLICY')
     entries = state.get('attempts')
-    _require(isinstance(entries, list) and len(entries) <= 25, 'INVALID_LEDGER_POLICY')
+    _require(isinstance(entries, list) and len(entries) <= limit, 'INVALID_LEDGER_POLICY')
     for entry in entries:
         _require(isinstance(entry, dict)
                  and entry.get('scope') in {'connectivity-probe', 'github-pr360', 'sheets-synthetic'}
@@ -161,9 +162,71 @@ def _audit(prefix, audit):
     return index
 
 
-def seal_audit(state, audit_bytes):
-    """Seal only already verified, complete local metadata; does not alter any ledger."""
+def _extension_template(entries):
+    return {'schemaVersion': 1, 'baselineMaxAttempts': 25, 'baselineAttempts': 25,
+            'baselineSHA256': _digest(entries[:25]), 'additionalAttempts': 16,
+            'maxAttempts': 41, 'model': 'qwen3.8-max', 'maxOutputTokens': 4096,
+            'allowedScopes': ['github-pr360', 'sheets-synthetic'], 'automaticRetries': 0,
+            'freshOriginalDownloads': {'github-pr360': 1, 'sheets-synthetic': 1},
+            'approved': False, 'authorizationRef': None}
+
+
+def prepare_extension(state):
+    """Pure proposal; never records consent, writes a ledger, or opens a budget slot."""
     entries = _ledger(state)
+    _require(len(entries) == 25, 'EXHAUSTED_BASELINE_REQUIRED')
+    return _extension_template(entries)
+
+
+def _extension_ledger(state, extension):
+    # This is operator-owned policy, not a field accepted from model/request input.
+    # The reference records explicit consent; it is not a cryptographic signature.
+    _require(isinstance(state, dict) and type(state.get('maxAttempts')) is int
+             and state['maxAttempts'] in (25, 41), 'INVALID_LEDGER_POLICY')
+    entries = _ledger(state, state['maxAttempts'])
+    _require(len(entries) >= 25, 'EXTENSION_BASELINE_REQUIRED')
+    expected = _extension_template(entries)
+    _require(isinstance(extension, dict) and set(extension) == set(expected),
+             'INVALID_EXTENSION_POLICY')
+    _require(extension['approved'] is True
+             and isinstance(extension['authorizationRef'], str)
+             and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9:._/-]{0,159}', extension['authorizationRef']),
+             'EXPLICIT_EXTENSION_APPROVAL_REQUIRED')
+    for field in ['schemaVersion', 'baselineMaxAttempts', 'baselineAttempts',
+                  'additionalAttempts', 'maxAttempts', 'maxOutputTokens', 'automaticRetries']:
+        _require(type(extension[field]) is int and extension[field] == expected[field],
+                 'INVALID_EXTENSION_POLICY')
+    _require(extension['baselineSHA256'] == expected['baselineSHA256'],
+             'EXTENSION_BASELINE_MISMATCH')
+    _require(extension['model'] == expected['model']
+             and extension['allowedScopes'] == expected['allowedScopes']
+             and isinstance(extension['freshOriginalDownloads'], dict)
+             and set(extension['freshOriginalDownloads']) == set(expected['freshOriginalDownloads'])
+             and all(type(value) is int and value == 1
+                     for value in extension['freshOriginalDownloads'].values()),
+             'INVALID_EXTENSION_POLICY')
+    seen = {entry['bodySHA256'] for entry in entries[:25]}
+    for entry in entries[25:]:
+        _require(entry['scope'] in extension['allowedScopes'] and entry['model'] == extension['model'],
+                 'EXTENSION_HISTORY_OUT_OF_SCOPE')
+        _require(entry['bodySHA256'] not in seen, 'BODY_REPLAY_FORBIDDEN')
+        seen.add(entry['bodySHA256'])
+    return entries
+
+
+def extend_ledger(state, extension):
+    """Return a separate migrated value after operator approval; no disk activation."""
+    entries = _ledger(state)
+    _require(len(entries) == 25, 'EXHAUSTED_BASELINE_REQUIRED')
+    _extension_ledger(state, extension)
+    migrated = copy.deepcopy(state)
+    migrated['maxAttempts'] = 41
+    return migrated
+
+
+def seal_audit(state, audit_bytes, *, extension=None):
+    """Seal only already verified, complete local metadata; does not alter any ledger."""
+    entries = _ledger(state) if extension is None else _extension_ledger(state, extension)
     _require(bool(entries), 'EMPTY_AUDIT_PREFIX')
     audit = _json(audit_bytes)
     _audit(entries, audit)
@@ -171,15 +234,24 @@ def seal_audit(state, audit_bytes):
             'auditSHA256': hashlib.sha256(audit_bytes).hexdigest()}
 
 
-def authorize(state, scope, body_sha, permits=()):
+def authorize(state, scope, body_sha, permits=(), *, extension=None, model=None, max_tokens=None):
     """Read-only admission for a new request, never permission to resume an old task."""
-    entries = _ledger(state)
+    entries = _ledger(state) if extension is None else _extension_ledger(state, extension)
+    limit = 25
+    if extension is not None:
+        _require(state['maxAttempts'] == 41, 'EXTENSION_LEDGER_NOT_MIGRATED')
+        _require(scope in extension['allowedScopes'] and model == extension['model']
+                 and _integer(max_tokens, 1, 4096), 'EXTENSION_REQUEST_OUT_OF_SCOPE')
+        limit = 41
     _require(scope in {'connectivity-probe', 'github-pr360', 'sheets-synthetic'}
              and isinstance(body_sha, str) and re.fullmatch(r'[a-f0-9]{64}', body_sha),
              'INVALID_NEW_REQUEST')
     _require(not (scope == 'connectivity-probe'
                  and any(entry['scope'] == scope for entry in entries)), 'PROBE_ALREADY_ATTEMPTED')
-    _require(len(entries) < 25, 'BUDGET_EXHAUSTED')
+    _require(len(entries) < limit, 'BUDGET_EXHAUSTED')
+    if extension is not None:
+        _require(not any(entry['bodySHA256'] == body_sha for entry in entries),
+                 'BODY_REPLAY_FORBIDDEN')
     _require(not any(entry['state'] == 'unknown' and entry['bodySHA256'] == body_sha
                      for entry in entries), 'UNKNOWN_BODY_REPLAY_FORBIDDEN')
     reconciled = set()

@@ -171,5 +171,170 @@ class BudgetTest(unittest.TestCase):
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
 
 
+class ExtensionTest(unittest.TestCase):
+    """Synthetic operator approval only; never reads or writes the live relay."""
+
+    def setUp(self):
+        self.assertTrue(callable(getattr(budget, 'prepare_extension', None)),
+                        'an exhausted ledger has no evidence-bound extension preparation')
+        self.state, self.audit = fixture()
+        prefix = copy.deepcopy(self.state)
+        raw = encoded(self.audit)
+        self.permits = [(budget.seal_audit(prefix, raw), raw)]
+        for ordinal in range(3, 26):
+            self.state['attempts'].append(self.entry(ordinal))
+
+    def entry(self, ordinal):
+        return {'scope': 'github-pr360', 'model': 'qwen3.8-max', 'maxTokens': 4096,
+                'bodySHA256': f'{ordinal:064x}', 'state': 'received', 'httpStatus': 200,
+                'startedAtUTC': f'2026-11-19T00:{ordinal:02d}:00+00:00',
+                'finishedAtUTC': f'2026-11-19T00:{ordinal:02d}:10+00:00'}
+
+    def approval(self):
+        proposal = budget.prepare_extension(self.state)
+        proposal.update(approved=True, authorizationRef='synthetic-unit-test-approval')
+        return proposal
+
+    def admit(self, state, extension, **overrides):
+        args = {'scope': 'github-pr360', 'body_sha': 'f'*64, 'permits': self.permits,
+                'extension': extension, 'model': 'qwen3.8-max', 'max_tokens': 4096}
+        args.update(overrides)
+        return budget.authorize(state, **args)
+
+    def test_preparation_never_grants_or_mutates_the_exhausted_budget(self):
+        before = encoded(self.state)
+        proposal = budget.prepare_extension(self.state)
+        self.assertEqual(encoded(self.state), before)
+        self.assertIs(proposal['approved'], False)
+        self.assertIsNone(proposal['authorizationRef'])
+        self.assertEqual(proposal['baselineAttempts'], 25)
+        self.assertEqual(proposal['additionalAttempts'], 16)
+        self.assertEqual(proposal['maxAttempts'], 41)
+        with self.assertRaisesRegex(budget.BudgetError, 'APPROVAL'):
+            budget.extend_ledger(self.state, proposal)
+
+    def test_unapproved_or_unexhausted_state_cannot_be_migrated(self):
+        approval = self.approval()
+        for value in [False, 1, 'true']:
+            with self.subTest(value=value):
+                bad = {**approval, 'approved': value}
+                with self.assertRaises(budget.BudgetError):
+                    budget.extend_ledger(self.state, bad)
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_ledger(self.state, {**approval, 'authorizationRef': ''})
+        self.state['attempts'].pop()
+        with self.assertRaises(budget.BudgetError):
+            budget.prepare_extension(self.state)
+
+    def test_migration_preserves_every_original_attempt_and_unknown(self):
+        before = copy.deepcopy(self.state)
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        self.assertEqual(self.state, before)
+        self.assertEqual(migrated, {**before, 'maxAttempts': 41})
+        self.assertEqual(migrated['attempts'][1]['state'], 'unknown')
+        migrated['attempts'][0]['model'] = 'mutated-copy'
+        self.assertEqual(self.state, before)
+
+    def test_default_guard_remains_exhausted_and_extension_cannot_be_applied_twice(self):
+        approval = self.approval()
+        with self.assertRaisesRegex(budget.BudgetError, 'EXHAUSTED'):
+            budget.authorize(self.state, 'github-pr360', 'f'*64, self.permits)
+        migrated = budget.extend_ledger(self.state, approval)
+        with self.assertRaisesRegex(budget.BudgetError, 'POLICY'):
+            budget.authorize(migrated, 'github-pr360', 'f'*64, self.permits)
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_ledger(migrated, approval)
+        with self.assertRaises(budget.BudgetError):
+            self.admit(self.state, approval)
+
+    def test_only_sixteen_fresh_attempts_are_admitted_after_approval(self):
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        for ordinal in range(26, 42):
+            body = f'{ordinal:064x}'
+            self.admit(migrated, approval, body_sha=body)
+            migrated['attempts'].append(self.entry(ordinal))
+        self.assertEqual(len(migrated['attempts']), 41)
+        with self.assertRaisesRegex(budget.BudgetError, 'EXHAUSTED'):
+            self.admit(migrated, approval)
+
+    def test_historical_received_and_unknown_bodies_cannot_be_replayed(self):
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        for entry in migrated['attempts']:
+            with self.subTest(state=entry['state'], body=entry['bodySHA256']):
+                with self.assertRaisesRegex(budget.BudgetError, 'REPLAY'):
+                    self.admit(migrated, approval, body_sha=entry['bodySHA256'])
+
+    def test_cap_scope_model_tokens_and_retry_cannot_be_widened(self):
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        variants = [('maxAttempts', 42), ('additionalAttempts', 17), ('baselineAttempts', 24),
+                    ('baselineMaxAttempts', 26), ('model', 'qwen3.8-flash'),
+                    ('maxOutputTokens', 4097), ('automaticRetries', 1),
+                    ('allowedScopes', ['connectivity-probe', 'github-pr360', 'sheets-synthetic']),
+                    ('freshOriginalDownloads', {'github-pr360': 2, 'sheets-synthetic': 1}),
+                    ('schemaVersion', True)]
+        for key, value in variants:
+            with self.subTest(key=key), self.assertRaises(budget.BudgetError):
+                self.admit(migrated, {**approval, key: value})
+        for change in [{'scope': 'connectivity-probe'}, {'model': 'qwen3.8-flash'},
+                       {'max_tokens': 4097}, {'max_tokens': True}]:
+            with self.subTest(change=change), self.assertRaises(budget.BudgetError):
+                self.admit(migrated, approval, **change)
+
+    def test_changed_truncated_or_reordered_baseline_cannot_reset_budget(self):
+        approval = self.approval()
+        for variant in ['changed', 'truncated', 'reordered', 'unknown-washed-green']:
+            with self.subTest(variant=variant):
+                changed = budget.extend_ledger(self.state, approval)
+                if variant == 'changed': changed['attempts'][0]['maxTokens'] = 63
+                elif variant == 'truncated': changed['attempts'].pop()
+                elif variant == 'reordered': changed['attempts'][0:2] = changed['attempts'][1::-1]
+                else: changed['attempts'][1] = copy.deepcopy(changed['attempts'][0])
+                with self.assertRaises(budget.BudgetError):
+                    self.admit(changed, approval)
+
+    def test_approval_never_substitutes_for_provider_reconciliation(self):
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        with self.assertRaisesRegex(budget.BudgetError, 'UNKNOWN'):
+            self.admit(migrated, approval, permits=[])
+        self.admit(migrated, approval)
+        migrated['attempts'].append({**self.entry(26), 'state': 'unknown'})
+        with self.assertRaisesRegex(budget.BudgetError, 'UNKNOWN'):
+            self.admit(migrated, approval)
+
+    def test_new_history_cannot_hide_out_of_scope_or_duplicate_attempts(self):
+        approval = self.approval()
+        for change in [{'scope': 'connectivity-probe'}, {'model': 'qwen3.8-flash'},
+                       {'bodySHA256': self.state['attempts'][0]['bodySHA256']}]:
+            with self.subTest(change=change):
+                migrated = budget.extend_ledger(self.state, approval)
+                migrated['attempts'].append({**self.entry(26), **change})
+                with self.assertRaises(budget.BudgetError):
+                    self.admit(migrated, approval)
+
+    def test_extended_audit_can_seal_complete_metadata_without_changing_old_unknown(self):
+        approval = self.approval()
+        migrated = budget.extend_ledger(self.state, approval)
+        migrated['attempts'].append(self.entry(26))
+        audit = copy.deepcopy(self.audit)
+        for index, entry in enumerate(migrated['attempts'][2:], 3):
+            audit['matches'].append({'attempt': index, 'scope': entry['scope'], 'model': entry['model'],
+                'bodySHA256': entry['bodySHA256'], 'localState': entry['state'],
+                'localStartedAtUTC': entry['startedAtUTC'], 'localFinishedAtUTC': entry['finishedAtUTC'],
+                'providerRequestId': f'00000000-0000-4000-8000-{index:012d}',
+                'providerUTCStartToSecond': f'2026-11-19T00:{index:02d}:01+00:00',
+                'providerStatus': 200, 'providerDurationSeconds': 1.0, 'providerReportedTotalTokens': 83})
+        audit['rowCount'] = 26
+        before = encoded(migrated)
+        seal = budget.seal_audit(migrated, encoded(audit), extension=approval)
+        self.assertEqual(seal['prefixCount'], 26)
+        self.assertEqual(encoded(migrated), before)
+        self.assertEqual(migrated['attempts'][1]['state'], 'unknown')
+
+
 if __name__ == '__main__':
     unittest.main()
