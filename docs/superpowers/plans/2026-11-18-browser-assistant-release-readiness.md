@@ -58,6 +58,8 @@
 
   2026-11-19更新：已绑定运行时81d1948e的三个候选包、1827项输入、新鲜只读生产进程/库身份观察、73表/549列契约差异和完整72项迁移清单，见`docs/operations/browser-assistant-predeployment-review-20261119.md`。生产写入/业务行读取/模型调用均0。维护状态目录仍不存在，只读probe不返回ready。执行许可为false，正式协议摘要与窗口仍为null；真实有效配置、现场主机/来源/批准绑定齐备前，此项继续未完成，不以观察哈希替代批准摘要。
 
+  最新审阅绑定：2026-11-19 15:21 UTC重新只读核对生产进程/启动tick/目录/Node和数据库身份；仍仅0071缺列、完整72项迁移清单不变，业务行读取/生产写入0。候选更新为f3a2c73d、1830输入；后端重新构建，工作台/插件按唯一后端输入差异复用并逐文件核对。维护探针仍无可用状态，批准摘要/窗口保持null，当前后端Linux启动未验，执行许可仍false。
+
 ## Task 3: 真实加密服务与可信站点启动接线
 
 **Files:** `apps/orchestrator/src/application-main.ts`、`browser-session-vault/{crypto,runtime,worker}.ts`及新增的最小生产适配模块/对应测试；用户已选择AWS KMS准备路线；新增aws-kms-key-provider、生产配置/探针启动工厂及对应聚焦测试，使用SDKv3和专用命名profile。测试key已创建留证，固定CloudShell包已获限额运行授权；实际执行及生产服务身份仍待核实。
