@@ -3,11 +3,16 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WS_SUBPROTOCOL } from '@holaday/shared-types';
+import { drizzle } from 'drizzle-orm/mysql2';
+import type { Connection } from 'mysql2/promise';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { TaskController } from '../agent/task-controller.js';
 import { runQueueDatabase } from '../agent/task-queue-persistence.js';
 import { TaskRepository } from '../agent/task-repository.js';
+import { signAccessToken } from '../auth/jwt.js';
+import { authenticateAccessToken } from '../auth/middleware.js';
+import type { DB } from '../db/client.js';
 import { DrainController } from '../execution/drain-controller.js';
 import {
   currentOperationLifetime,
@@ -185,6 +190,33 @@ it('rejects a closed connection before invoking its authenticator', async () => 
   await vi.waitFor(() => expect(c.client.readyState).toBe(WebSocket.CLOSED));
   expect(calls).toBe(0);
   expect(f.controller.state.read().dirty).toBe(false);
+});
+
+it('keeps a rejected old token known before a valid token authenticates on the same authority', async () => {
+  const f = await control();
+  const userId = 'synthetic-auth-transition';
+  const raw = {
+    query: vi.fn(async () => [[[userId, 'active', 0]], []]),
+  };
+  const database = drizzle(raw as unknown as Connection) as unknown as DB;
+  const authenticate = (token: string) => authenticateAccessToken(database, token);
+  const rejected = await connect(f.controller, authenticate);
+  rejected.client.send(JSON.stringify({ type: 'client.hello', token: 'old-invalid-synthetic' }));
+  await vi.waitFor(() => expect(rejected.client.readyState).toBe(WebSocket.CLOSED));
+  expect(raw.query).not.toHaveBeenCalled();
+  expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0 });
+
+  const accepted = await connect(f.controller, authenticate);
+  const token = await signAccessToken({ sub: userId, plan: 'pro' });
+  accepted.client.send(JSON.stringify({ type: 'client.hello', token }));
+  await vi.waitFor(() =>
+    expect(accepted.messages.some((m) => m.type === 'server.welcome')).toBe(true),
+  );
+  expect(raw.query).toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }),
+  );
+  f.close();
 });
 
 it('server-work stop during root reservation cannot finish before the original root', async () => {
