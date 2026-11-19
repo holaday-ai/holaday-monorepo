@@ -118,6 +118,7 @@ it.runIf(enabled)(
     );
     const relayFetch = relay.createExistingModelFetch(descriptor, () => scope);
     let scope: 'github-pr360' | 'sheets-synthetic' = 'github-pr360';
+    let lastDrainUncertainty = '';
     const probe = await openIsolatedMysqlProbe({
       allTableStructures: true,
       artifactPath: join(artifacts, 'mysql-evidence.json'),
@@ -340,6 +341,19 @@ it.runIf(enabled)(
           browserSource: taskFiles.browserSource,
         })
         .from(taskFiles);
+      const executionDrainSnapshot = drain.snapshot();
+      const uncertainty = JSON.stringify({
+        mode: executionDrainSnapshot.mode,
+        unknown: executionDrainSnapshot.unknown,
+      });
+      if (uncertainty !== lastDrainUncertainty) {
+        await appendFile(
+          join(artifacts, 'drain-observations.ndjson'),
+          `${JSON.stringify({ at: new Date().toISOString(), phase, ...executionDrainSnapshot })}\n`,
+          { mode: 0o600 },
+        );
+        lastDrainUncertainty = uncertainty;
+      }
       const mask = (text: string) => text.replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email]');
       await writeFile(
         join(artifacts, 'state.json'),
@@ -350,6 +364,7 @@ it.runIf(enabled)(
               pid: process.pid,
               updatedAt: new Date().toISOString(),
               scope,
+              executionDrainSnapshot,
               origin,
               wsPort,
               extensions: Object.fromEntries(
