@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "kind": "browser-predeployment-review-only",
+  "preparedAtUTC": "2026-11-19T07:56:25.834890+00:00",
+  "preparedAtSourceHead": "021596f4bf8d24173d086b44574000664c5c9414",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "runtimeInputCount": 1827,
+  "runtimeInputsEquivalent": true,
+  "candidateManifestSHA256": "d20e862021be22a8852ff4b0e03339093bd9087356e1b5fdfebb69dc87eae2fe",
+  "artifacts": {
+    "backend": {
+      "archive": "backend-81d1948e.zip",
+      "bytes": 4251027,
+      "sha256": "cf74204896817449ad8928436e0d20735a3dc65b08eeac105535c02f3beaf011",
+      "files": 1608,
+      "fileManifest": "backend-files.json",
+      "fileManifestSHA256": "3964d4e569a5c9a08b23a2fea545c36cfd469f34c64fbed7f041cad0234188c6"
+    },
+    "workbench": {
+      "archive": "workbench-81d1948e.zip",
+      "bytes": 33107532,
+      "sha256": "0b4a123549fbb9d019f8fa0598f34925d9b32b234b0be96f0485e02b92176b23",
+      "files": 332,
+      "fileManifest": "workbench-files.json",
+      "fileManifestSHA256": "f798a7e2a2ef34677cb32244b38eb330cc742135ad5100f9b5b10bbe7d84b846"
+    },
+    "extension": {
+      "archive": "extension-81d1948e.zip",
+      "bytes": 999854,
+      "sha256": "a73b59e988ede454eb0d415336d3246a711bd962ae6f3947493fe284f933d73a",
+      "files": 18,
+      "fileManifest": "extension-files.json",
+      "fileManifestSHA256": "e16bf37855ad1d29033bf1329b0c966145d358946ee81ceaffc12ce42423e3cf"
+    }
+  },
+  "observedEvidenceBindings": {
+    "production-inventory.json": {
+      "filename": "production-inventory.json",
+      "bytes": 766082,
+      "sha256": "98bded8976f5e6df04d12566813c4eab8bceeed877240a73e141580cfcca8543"
+    },
+    "schema-audit.json": {
+      "filename": "schema-audit.json",
+      "bytes": 6239,
+      "sha256": "4341cc3f08b4c1d2039113a7fdf7fdf0aab6401b73060528ddfe4ddb0590b2df"
+    },
+    "host-binding.json": {
+      "filename": "host-binding.json",
+      "bytes": 2226,
+      "sha256": "5358df70977779fe281b53a860dcf690e2d38c15daf259d4c995cf453e8aaf40"
+    },
+    "migration-manifest.json": {
+      "filename": "migration-manifest.json",
+      "bytes": 11164,
+      "sha256": "be8a61ea6e68629f75cf442aac186cebb5d7708403ac71635c88a8a4620512fe"
+    }
+  },
+  "databaseIdentitySHA256": "bd8c81290954c251844d41d6ddc4a4320f7ca05a483dc648f8b96c413feb21a2",
+  "schema": {
+    "checkedAtUTC": "2026-11-19T07:42:25.738563+00:00",
+    "contractSHA256": "bbedb337f731696c9b81a11070fc5f2af934026b19af3853c70241aac0bfcbb0",
+    "requiredTables": 73,
+    "requiredColumns": 549,
+    "actualTables": 96,
+    "missingTables": [],
+    "missingColumns": [
+      "task_files.browser_source"
+    ],
+    "missingIndexes": [],
+    "lifecycleViolations": [],
+    "accountingViolations": []
+  },
+  "productionObservation": {
+    "checkedAtUTC": "2026-11-19T07:42:25.738563+00:00",
+    "node": "v22.23.3",
+    "mysql": "8.0.46-0ubuntu0.22.04.5",
+    "servingProcessIdentityPinnedBeforeAndAfter": true,
+    "sourceType": "disk source TS entry; loaded heap not attested",
+    "inheritedFlags": {
+      "BROWSER_HOME_ENABLED": "true",
+      "BROWSER_OBSERVATION_V2": "true"
+    },
+    "kmsVariableNames": [],
+    "effectiveFlagsCaveat": "Inherited environment and current dotenv source resolution; does not read live JS heap or attest flags changed after boot.",
+    "businessRowsRead": 0,
+    "productionWrites": 0
+  },
+  "migration": {
+    "target": {
+      "name": "0071_task_files_browser_source.sql",
+      "sha256": "f0ad7abd955d6c14957ed429165c72d95631791293dc73f25984cf4ad7237855"
+    },
+    "numberedSqlFiles": 72,
+    "manifestSHA256": "60aa687e0583a82c2507d50e08ed688af44a0210aaf3cdb2ccb6f018e1279ae0",
+    "runnerSHA256": "07045e71c3b65542d750845017ba2b9caf51a6c8470f6e0588e31e3e2e42db11",
+    "runnerReplaysNumberedSql": true,
+    "productionExecuted": false,
+    "historicalSameBytesMysql8046": {
+      "clonedTables": 96,
+      "legacyRowPreserved": true,
+      "jsonReadWrite": true,
+      "duplicateRawCode": "ER_DUP_FIELDNAME",
+      "existingWrapperClassifiesAlreadyApplied": true,
+      "schemaCleaned": true
+    },
+    "all72CurrentProductionExecutionAccepted": false
+  },
+  "maintenance": {
+    "checkedAtUTC": "2026-11-19T07:44:09.504730+00:00",
+    "statusStoreExists": false,
+    "readOnlyProbeSHA256": "525487b9c1104577e67191b6a3a4e728f5d77bc167762019b9229026ff842986",
+    "probeMatchesCurrentSource": true,
+    "probeExitCode": 1,
+    "probeStdoutBytes": 0,
+    "probeStderrBytes": 0,
+    "executableMaintenanceCapabilityAccepted": false
+  },
+  "configuration": {
+    "exampleSHA256": "7e41d85e4ff13a140e24745d3bd2e27c0896ff10d4637568facd3023ce2fd12b",
+    "exampleIsIncompleteAndNotSourced": true,
+    "effectiveProductionConfigurationAttested": false,
+    "productionAwsServiceIdentityVerified": false,
+    "trustedSiteStableSubjectsVerified": false
+  },
+  "kmsAuthorization": {
+    "region": "us-east-2",
+    "keyAlias": "alias/holaday-browser-vault-test",
+    "scope": "existing fixed synthetic package only",
+    "maxCryptoAttempts": 11,
+    "maxDescribeKey": 3,
+    "incrementalCallTransferBudgetUSD": "0.01",
+    "credentialsRemainInAWS": true,
+    "newIAMOrAccessKeysAllowed": false,
+    "productionConnectionAllowed": false,
+    "sameScopeReapprovalRequired": false,
+    "fixedPackageExecuted": false,
+    "liveAuthObserved": "IAM user sign in",
+    "authObservationSource": "current CUA DOM of existing AWS tab; read-only"
+  },
+  "modelBudget": {
+    "attempts": 25,
+    "received": 24,
+    "oldUnknownOrdinal": 14,
+    "activeCap": 25,
+    "ledgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+    "additional16CallsPending": true,
+    "additionalCallsAuthorized": false,
+    "providerRequestsThisTurn": 0
+  },
+  "protectedApprovalBindings": {
+    "candidate": null,
+    "configDigest": null,
+    "migrationDigest": null,
+    "inventoryDigest": null,
+    "legacyDigest": null,
+    "maintenanceEndsAtMs": null,
+    "reconcileByMs": null,
+    "operatorRef": null
+  },
+  "observationHashesAreNotApprovalDigests": true,
+  "remaining": [
+    "actual KMS cross-process and refusal evidence",
+    "effective runtime configuration and service identity",
+    "stable unique GitHub/Sheets subjects",
+    "real project-plugin/site task acceptance",
+    "account save/rebuild/expiry/revoke/switch",
+    "physical input and actual billing",
+    "exact Linux dependency installation/compiled startup",
+    "protected final target/config/inventory/legacy/window/operator binding"
+  ],
+  "executionAllowed": false,
+  "releaseReady": false,
+  "goalComplete": false,
+  "pr361Merged": false,
+  "productionChanged": false,
+  "deployed": false,
+  "preparedSheetsFixture": {
+    "dataRows": 100,
+    "amountRule": "record_id+0.25",
+    "expectedAmountSum": "5075.00",
+    "range": "RawData!A1:C101",
+    "caseIdentifierColumn": true,
+    "all303CellsReadBack": true,
+    "nativeHeaderAndLastRowVerified": true,
+    "originalSheetOrExportReplayed": false,
+    "newSheetExported": false,
+    "actualProjectPluginTaskAccepted": false,
+    "preparationOnly": true,
+    "verificationSHA256": "30273f976cea973d4c8a57b5ed73efcf762b742595c4e95c053a01176ea81fb0",
+    "supersedesPrepared37Rows": true
+  }
+}
