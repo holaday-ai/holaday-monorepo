@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "browser-predeployment-review-only",
-  "preparedAtUTC": "2026-11-19T16:36:10.580166+00:00",
+  "preparedAtUTC": "2026-11-19T16:54:02.879737+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
   "runtimeInputCount": 1832,
@@ -255,5 +255,24 @@
       "vaultEnabledAccepted": false,
       "compiledBackendZipStartupAccepted": false
     }
+  },
+  "githubSavedInputPreflight": {
+    "sourceBytes": 7560,
+    "scriptedModelOnly": true,
+    "actualModelCalls": 0,
+    "websiteExports": 0,
+    "sourceReadComplete": true,
+    "generatedSummaryBytes": 304,
+    "generatedSummarySHA256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+    "distinctHistoricalRows": 8,
+    "originalFailureCountsRetained": true,
+    "unspecifiedFieldsBlank": true,
+    "overlappingBatchesNotSummed": true,
+    "newSqlConnectionStatus": "completed",
+    "persistedFileSteps": 4,
+    "scriptedTurns": 5,
+    "browserConfigured": false,
+    "actualModelAcceptance": false,
+    "isolatedSchemaCleaned": true
   }
 }
