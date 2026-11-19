@@ -320,7 +320,12 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
     }
   }, 15_000);
 
-  async function uploadFixture(taskId: string, initial = true, credential = false) {
+  async function uploadFixture(
+    taskId: string,
+    initial = true,
+    credential = false,
+    csv = 'sku,qty\nA-731,31\n',
+  ) {
     const f = await browserOutputFixture();
     const page = await browser.newPage({ acceptDownloads: true });
     const before = env.BROWSER_TASK_FILES_V1;
@@ -330,7 +335,7 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       userExternalId: 'usr_alice',
       filename: 'report.csv',
       mimetype: 'text/csv',
-      buffer: Buffer.from('sku,qty\nA-731,31\n'),
+      buffer: Buffer.from(csv),
     });
     const loaded = await f.service.loadMany([row.externalId], 7);
     const scope = new BrowserTaskFiles({
@@ -754,6 +759,78 @@ describe('BROWSER_EXECUTOR switch at the supercar entry', () => {
       await c.cleanup();
     }
   });
+  it.each([false, true])(
+    'honors explicit analysis correction and invalidates its old fact ids (stale=%s)',
+    async (stale) => {
+      const c = await uploadFixture(
+        `t_corrected_analysis_${stale}`,
+        true,
+        false,
+        'phase,files\ninitial,2\nrecheck,\n',
+      );
+      let analysisId = '';
+      let oldFactId = '';
+      let currentFactId = '';
+      const final = () =>
+        call('finish', {
+          status: 'completed',
+          summary: '已核对两条记录，files空值保留。',
+          fields: [
+            {
+              name: '记录数',
+              value: '2',
+              fileId: c.row.externalId,
+              tableFactId: stale ? oldFactId : currentFactId,
+            },
+          ],
+        });
+      try {
+        const outcome = await runSupercarTask({
+          taskId: `t_corrected_analysis_${stale}`,
+          intent: '读取提供的CSV，完整核对每组记录数量，允许files留空',
+          browserTaskFiles: c.scope,
+          executor: { getPage: async () => c.page } as never,
+          messagesAdapter: scripted([
+            () => [call('snapshot', {})],
+            () => [
+              call('analyze_task_table', {
+                fileId: c.row.externalId,
+                mode: 'aggregate',
+                groupBy: ['A'],
+                metrics: [{ op: 'count_rows' }, { op: 'sum', column: 'B' }],
+              }),
+            ],
+            (r) => {
+              const text = JSON.stringify(r.messages.at(-1));
+              analysisId = text.match(/tbl_[a-f0-9]{32}/)?.[0] ?? '';
+              oldFactId = text.match(/tbf_[a-f0-9]{32}/)?.[0] ?? '';
+              return [
+                call('analyze_task_table', {
+                  fileId: c.row.externalId,
+                  mode: 'aggregate',
+                  groupBy: ['A'],
+                  supersedesAnalysisId: analysisId,
+                  metrics: [{ op: 'count_rows' }, { op: 'count_nonempty', column: 'B' }],
+                }),
+              ];
+            },
+            (r) => {
+              currentFactId =
+                JSON.stringify(r.messages.at(-1)).match(/tbf_[a-f0-9]{32}/)?.[0] ?? '';
+              return [final()];
+            },
+            () => [final()],
+          ]),
+        });
+        expect(analysisId).toMatch(/^tbl_/);
+        expect(currentFactId).not.toBe(oldFactId);
+        expect(outcome.status, JSON.stringify(outcome)).toBe(stale ? 'failed' : 'completed');
+        if (!stale) expect(outcome.partial).toBeUndefined();
+      } finally {
+        await c.cleanup();
+      }
+    },
+  );
   it.each(['read_task_file', 'analyze_task_table'] as const)(
     'does not finish a file analysis after %s parameters were rejected before reaching the host',
     async (tool) => {

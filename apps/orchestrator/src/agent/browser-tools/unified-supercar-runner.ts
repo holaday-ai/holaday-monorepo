@@ -1143,6 +1143,9 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
                 ...(result.mode === 'aggregate'
                   ? {
                       analysisId: result.analysisId,
+                      ...(result.supersededAnalysisId
+                        ? { supersededAnalysisId: result.supersededAnalysisId }
+                        : {}),
                       overall: result.overall,
                       groups: result.groups,
                       page: result.page,

@@ -1142,6 +1142,11 @@ async function processTools(
         fileWork.pending.delete(operation);
         if ('text' in result) fileWork.materials.push({ fileId: result.fileId, text: result.text });
         else {
+          if (result.mode === 'aggregate' && result.supersededAnalysisId) {
+            for (const [id, fact] of fileWork.facts) {
+              if (fact.analysisId === result.supersededAnalysisId) fileWork.facts.delete(id);
+            }
+          }
           for (const fact of taskTableFacts(result)) fileWork.facts.set(fact.id, fact);
           if (result.mode === 'aggregate') fileWork.pending.delete('describe');
         }
@@ -1839,7 +1844,7 @@ async function processTools(
           await publish(
             errorResult(tool.id, 'file_analysis_unverified', {
               message:
-                '文件正文或统计分组尚未完整读取，统计存在缺失/无效值，或未提供原统计回执的 fields(name/value/fileId/tableFactId)。继续分页和核对，无法补齐时如实报告失败或部分完成。',
+                '文件正文或统计分组尚未完整读取，统计存在缺失/无效值，或未提供原统计回执的 fields(name/value/fileId/tableFactId)。继续分页和核对；纠正多余或错误的统计指标时，可用supersedesAnalysisId显式替换同一范围的旧查询，新结果必须完整，旧fields随即失效。无法补齐时如实报告失败或部分完成。',
             }),
           );
           continue;

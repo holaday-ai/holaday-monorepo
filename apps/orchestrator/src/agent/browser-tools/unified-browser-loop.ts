@@ -2716,6 +2716,12 @@ async function browserLoop(input: UnifiedBrowserLoopInput): Promise<UnifiedBrows
           if (!input.analyzeTaskTable) throw new Error('当前环境没有任务表格统计能力。');
           const result = await input.analyzeTaskTable(taskTableRequestSchema.parse(args));
           if (input.signal?.aborted) return cancelled(step + 1);
+          if (result.mode === 'aggregate' && result.supersededAnalysisId) {
+            for (let i = tableFacts.length - 1; i >= 0; i--) {
+              if (tableFacts[i]?.analysisId === result.supersededAnalysisId)
+                tableFacts.splice(i, 1);
+            }
+          }
           const computedFacts = taskTableFacts(result);
           const newFacts = computedFacts.some(
             (value) => !tableFacts.some((prior) => prior.id === value.id),

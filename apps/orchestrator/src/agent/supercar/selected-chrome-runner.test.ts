@@ -11,6 +11,7 @@ import type {
 import { MessagesAdapterError } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
+import type { TableAggregate } from '../browser-tools/browser-task-table.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
 import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
@@ -1950,6 +1951,53 @@ describe('selected Chrome task file reading and statistics', () => {
       coverage: { complete: true },
     });
   });
+  it.each(['corrected', 'superseded-fact'])(
+    'finishes only with facts from the explicitly corrected analysis: %s',
+    async (variant) => {
+      const f = await owned('phase,files,total\ninitial,2,5\nrecheck,,3\n');
+      const h = createHarness([]);
+      let turn = 0;
+      let first: TableAggregate | undefined;
+      h.messagesAdapter.create = async (request) => {
+        h.requests.push(request);
+        if (++turn === 1)
+          return call(
+            'analyze_task_table',
+            {
+              fileId: f.fileId,
+              mode: 'aggregate',
+              groupBy: ['A'],
+              metrics: [{ op: 'count_rows' }, { op: 'sum', column: 'B' }],
+            },
+            'initial-analysis',
+          );
+        if (turn === 2) {
+          first = results(request).at(-1)! as TableAggregate;
+          return call(
+            'analyze_task_table',
+            {
+              fileId: f.fileId,
+              mode: 'aggregate',
+              groupBy: ['A'],
+              supersedesAnalysisId: first!.analysisId,
+              metrics: [{ op: 'count_rows' }, { op: 'count_nonempty', column: 'B' }],
+            },
+            'corrected-analysis',
+          );
+        }
+        const latest = results(request).at(-1)! as TableAggregate;
+        const metric = (variant === 'corrected' ? latest : first!).overall[0]!;
+        return done({
+          fields: [
+            { name: metric.name, value: metric.value, fileId: f.fileId, tableFactId: metric.id },
+          ],
+        });
+      };
+      expect((await run(h, f.scope, 3)).status).toBe(
+        variant === 'corrected' ? 'completed' : 'failed',
+      );
+    },
+  );
   it('publishes file progress from actual read and table receipts, including incomplete reads', async () => {
     const f = await owned();
     const h = createHarness([
