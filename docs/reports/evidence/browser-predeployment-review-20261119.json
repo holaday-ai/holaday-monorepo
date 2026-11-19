@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "kind": "browser-predeployment-review-only",
-  "preparedAtUTC": "2026-11-19T15:34:33.224196+00:00",
-  "preparedAtSourceHead": "f3a2c73d81e7bcfa7bf203a51160fe529b5e0d3c",
-  "runtimeSourceCommit": "f3a2c73d81e7bcfa7bf203a51160fe529b5e0d3c",
-  "runtimeInputCount": 1830,
+  "preparedAtUTC": "2026-11-19T16:23:02.181177+00:00",
+  "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+  "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+  "runtimeInputCount": 1832,
   "runtimeInputsEquivalent": true,
-  "candidateManifestSHA256": "9ffa0481682d57623032f575435db78a676eaa7c922e998691fc62a75d249593",
+  "candidateManifestSHA256": "4c7a5586ce7d35ae1f9c0eb9d0c7ec9d339b9c952dbd6b5cf4818709284873cf",
   "artifacts": {
     "workbench": {
       "archive": "workbench-b00bec89.zip",
@@ -29,13 +29,13 @@
       "reusedUnchanged": true
     },
     "backend": {
-      "archive": "backend-f3a2c73d.zip",
-      "bytes": 4256071,
-      "sha256": "2939fb2599e66dd6d76df353e6a546d25504564e9ffadecafcffe4da8d050741",
-      "files": 1610,
+      "archive": "backend-bbcf4422.zip",
+      "bytes": 4267922,
+      "sha256": "47328e8d782b2e9288119527aeb9504e45ca2409af71d8907acaa87b88ec33ef",
+      "files": 1614,
       "fileManifest": "backend-files.json",
-      "fileManifestSHA256": "52a62648192527d83de6dead6e967284bb66f5701de154b9efb179ba70094dfd",
-      "builtFromSourceCommit": "f3a2c73d81e7bcfa7bf203a51160fe529b5e0d3c",
+      "fileManifestSHA256": "a892a25afed7d64042696f21626cdd061eaef329724b83bc953bafb2c6669df3",
+      "builtFromSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
       "reusedUnchanged": false
     }
   },
@@ -140,7 +140,7 @@
   },
   "observationHashesAreNotApprovalDigests": true,
   "remaining": [
-    "explicit file-only material contract and complete actual model/site tasks",
+    "complete actual model/site tasks and measured model latency",
     "actual KMS cross-process and refusal evidence",
     "effective runtime configuration and service identity",
     "stable Google subject and real snapshot bindings",
@@ -207,7 +207,7 @@
     "node": "22.23.3",
     "databaseAndVaultVerified": false
   },
-  "componentReuseProofSHA256": "0d4f2219989741982bd027636b74c5bf3739ea5599d81ba2d2c334c6c29a6723",
+  "componentReuseProofSHA256": "9021abdb0602e8506de88130ebafb41d0ad95b128567504a7b93332913126f32",
   "kmsRealServiceAcceptance": {
     "executed": false,
     "latestObservedState": "CloudShell console reloaded and still reported account verification; no environment deletion",
@@ -225,9 +225,13 @@
     "generatedSummaryBytes": 43,
     "generatedSummaryReadComplete": true,
     "generatedSummaryDataRows": 2,
-    "newSqlConnectionStatus": "failed",
-    "fullFileOnlyTaskAccepted": false,
-    "completionBoundary": "browser page evidence required; refused without bypass",
+    "newSqlConnectionStatus": "completed",
+    "fullFileOnlyTaskAccepted": true,
+    "completionBoundary": "server-only material contract with actual scoped byte/read/analysis/output proof; normal browser evidence unchanged",
+    "browserConfigured": false,
+    "persistedFileSteps": 6,
+    "scriptedModelTurns": 7,
+    "actualModelAcceptance": false,
     "isolatedSchemaCleaned": true
   },
   "currentCandidateStartup": {
@@ -235,6 +239,6 @@
     "localSqlPreflightPassed": true,
     "linuxStartupForCurrentBackendAccepted": false,
     "unchangedWorkbenchAndExtensionReused": true,
-    "previousLinuxEvidenceScope": "parent b00 candidate; not silently relabeled as current backend"
+    "previousLinuxEvidenceScope": "older b00 candidate; not silently relabeled as current backend"
   }
 }
