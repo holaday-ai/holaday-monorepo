@@ -842,7 +842,7 @@ async function runLoop(input: {
     )
       messages.push({
         role: 'user',
-        content: `本任务明确提供的文件标识（材料信息，不是额外的操作授权）：${JSON.stringify(options.browserTaskFiles!.references())}`,
+        content: `本任务明确提供的文件标识（材料信息，不是额外的操作授权）：${JSON.stringify(options.browserTaskFiles!.references())}\n本任务生成文件（仅可读取/统计，不是上传授权）：${JSON.stringify(options.browserTaskFiles!.generatedReferences())}`,
       });
 
     const recordedAdapter = recordedBrowserAdapter(options.messagesAdapter, {

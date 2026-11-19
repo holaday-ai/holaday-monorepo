@@ -9,6 +9,66 @@ const receipt = {
   downloadUrl: '/api/files/file_real/download',
 };
 describe('task-owned generated outputs', () => {
+  it.each([
+    '导出 report.csv，再生成 analysis.csv，核对新CSV结构后把两份文件交给我',
+    '导出 report.csv，再生成 analysis.csv，核对后再把两份文件交给我',
+  ])(
+    'keeps validation before a combined handoff outside the new-file count: %s',
+    async (intent) => {
+      const outputs = new BrowserTaskOutputs({
+        current: async () => true,
+        formats: ['csv'],
+        store: async () => receipt,
+      });
+      outputs.admitDownload({
+        fileId: 'original',
+        filename: 'report.csv',
+        sizeBytes: 10,
+        sha256: 'a'.repeat(64),
+        downloadUrl: '/api/files/original/download',
+      });
+      await outputs.create(input);
+      expect(outputs.gap(intent)).toBeNull();
+    },
+  );
+
+  it('keeps the named original in a final combined handoff out of generated requirements', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async ({ filename }) => ({ ...receipt, filename }),
+    });
+    outputs.admitDownload({
+      fileId: 'original',
+      filename: 'package.json',
+      sizeBytes: 4409,
+      sha256: 'b'.repeat(64),
+      downloadUrl: '/api/files/original/download',
+    });
+    await outputs.create({ ...input, filename: 'package-summary.csv' });
+    expect(
+      outputs.gap(
+        '下载原件package.json，用read_task_file完整读取。生成package-summary.csv，列section,count；对新CSV核对结构。最后交付原package.json和新package-summary.csv两份下载链接；不另生成JSON。',
+      ),
+    ).toBeNull();
+  });
+
+  it('still requires two new files when the request has no original-export handoff', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async () => receipt,
+    });
+    outputs.admitDownload({
+      fileId: 'unrequested-original',
+      filename: 'report.csv',
+      sizeBytes: 10,
+      sha256: 'c'.repeat(64),
+      downloadUrl: '/api/files/unrequested-original/download',
+    });
+    await outputs.create(input);
+    expect(outputs.gap('生成两份CSV，核对结构后把两份文件交给我')).toBeTruthy();
+  });
   it('keeps an explicitly named filename containing a classifier literal', () => {
     expect(taskFileRequirements('生成文件，文件名为“一份summary.csv”')).toContainEqual({
       filename: '一份summary.csv',

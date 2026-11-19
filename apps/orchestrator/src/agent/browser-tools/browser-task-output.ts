@@ -168,7 +168,7 @@ export function taskOutputGap(
       // A final combined handoff describes originals plus new files. It must
       // not turn "generate analysis.csv, give me both files" into two new files.
       const handoff =
-        /[，,；;。\n]\s*(?:(?:并|再|最后|然后)\s*)?(?:(?:交付|提供)\s*(?:原始|原件)|(?:把|将)\s*(?:这|上述|以上)?(?:[一二两三四五六七八九十\d]+|全部|所有)(?:个|份)?\s*(?:[a-z]+\s*)?(?:文件|附件)(?:一起|都)?(?:交给|交付|提供给|给|发给)|(?:and\s+)?(?:give|send|deliver|provide)\s+(?:me\s+)?(?:both|all|these|the|two|three|four|\d+)\s+(?:[a-z]+\s+)?(?:files?|attachments?))/i.exec(
+        /(?:[，,；;。\n]\s*|(?:之|以)?后\s*)(?:(?:并|再|最后|然后)\s*)?(?:(?:交付|提供)\s*(?:原始|原件|原(?=[a-z0-9_-][a-z0-9_.-]*\.[a-z0-9]+\b))|(?:把|将)\s*(?:这|上述|以上)?(?:[一二两三四五六七八九十\d]+|全部|所有)(?:个|份)?\s*(?:[a-z]+\s*)?(?:文件|附件)(?:一起|都)?(?:交给|交付|提供给|给|发给)|(?:and\s+)?(?:give|send|deliver|provide)\s+(?:me\s+)?(?:both|all|these|the|two|three|four|\d+)\s+(?:[a-z]+\s+)?(?:files?|attachments?))/i.exec(
           scope,
         );
       if (handoff) scope = scope.slice(0, handoff.index);

@@ -20,6 +20,18 @@ export function createBrowserTaskFileScope(options: {
     taskId: options.taskId,
     userId: options.userId,
     files: options.files,
+    taskInternalId: async () => {
+      const [task] = await options.db
+        .select({ id: tasks.id, userId: tasks.userId, status: tasks.status, origin: tasks.origin })
+        .from(tasks)
+        .where(eq(tasks.externalId, options.taskId))
+        .limit(1);
+      return task?.userId === options.userId &&
+        task.origin === options.origin &&
+        ['executing', 'awaiting_user'].includes(task.status)
+        ? task.id
+        : null;
+    },
     active: async () => {
       const [owner] = await options.db
         .select({ status: users.status })

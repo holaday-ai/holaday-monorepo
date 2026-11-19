@@ -77,7 +77,7 @@ const payload = Buffer.from(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,
 const expectedAnalysis = 'metric,value\nsum,1099.9\nrows,10001\n';
 const captureScreenshot = process.env.HOLADAY_CHROME_APP_SCREENSHOT === '1';
 const browserChannel = process.env.HOLADAY_CHROME_APP_CHANNEL ?? 'chromium';
-const intent = `从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我${captureScreenshot ? '，另外截图并一并交付截图文件' : ''}`;
+const intent = `从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，核对新CSV结构后把两份文件交给我${captureScreenshot ? '，另外截图并一并交付截图文件' : ''}`;
 const hash = (buffer: Uint8Array) => createHash('sha256').update(buffer).digest('hex');
 const originalEnv = { ...env };
 let context: BrowserContext | undefined;
@@ -521,6 +521,16 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
               : [],
           );
         let name = 'browser_download_file';
+        if (turn === 6)
+          await writeFile(
+            join(artifacts, 'generated-csv-table-receipt.json'),
+            JSON.stringify(toolResults.at(-1), null, 2),
+          );
+        if (turn >= 7)
+          await writeFile(
+            join(artifacts, `finish-followup-${turn}.json`),
+            JSON.stringify(toolResults.at(-1), null, 2),
+          );
         let input: Record<string, unknown> = {
           selector: {
             description: 'Export report',
@@ -565,24 +575,34 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
               format: 'csv',
               content: `metric,value\nsum,${analysis.overall[0]!.value}\nrows,${analysis.overall[1]!.value}\n`,
             };
-          } else if (captureScreenshot && turn === 5) {
+          } else if (turn === 5) {
+            const created = toolResults.at(-1)!;
+            expect(created).toMatchObject({ ok: true, file: { filename: 'analysis.csv' } });
+            name = 'analyze_task_table';
+            input = { fileId: created.file.fileId, mode: 'describe' };
+          } else if (captureScreenshot && turn === 6) {
             expect(request.tools?.some((tool) => tool.name === 'browser_screenshot')).toBe(true);
             expect(toolResults.at(-1)).toMatchObject({
-              ok: true,
-              file: { filename: 'analysis.csv' },
+              mode: 'describe',
+              source: { kind: 'task_generated' },
+              scope: { scannedRows: 2 },
             });
             name = 'browser_screenshot';
             input = {};
           } else {
-            expect(turn).toBe(captureScreenshot ? 6 : 5);
-            expect(toolResults.at(-1)).toMatchObject({
-              ok: true,
-              file: {
-                filename: captureScreenshot
-                  ? expect.stringMatching(/^screenshot-.*\.jpg$/)
-                  : 'analysis.csv',
-              },
-            });
+            expect(turn).toBe(captureScreenshot ? 7 : 6);
+            expect(toolResults.at(-1)).toMatchObject(
+              captureScreenshot
+                ? {
+                    ok: true,
+                    file: { filename: expect.stringMatching(/^screenshot-.*\.jpg$/) },
+                  }
+                : {
+                    mode: 'describe',
+                    source: { kind: 'task_generated' },
+                    scope: { scannedRows: 2 },
+                  },
+            );
             name = 'browser_finish';
             input = {
               status: 'completed',
@@ -999,7 +1019,7 @@ it.runIf(realSql || isBuiltin('node:sqlite'))(
       site,
     );
     expect(modelRequests.join('\n')).not.toContain('PRIVATE-');
-    expect(modelRequests).toHaveLength(captureScreenshot ? 6 : 5);
+    expect(modelRequests).toHaveLength(captureScreenshot ? 7 : 6);
     const fileRecords = await readFileRecords();
     const file = fileRecords.find((row) => row.filename === 'report.csv')!;
     const generated = fileRecords.find((row) => row.filename === 'analysis.csv')!;

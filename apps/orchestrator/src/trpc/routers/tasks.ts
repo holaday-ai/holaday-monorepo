@@ -6918,12 +6918,14 @@ export const tasksRouter = router({
                         mimetype: rendered.mimetype,
                         buffer: rendered.buffer,
                       });
-                      return {
+                      const receipt = {
                         fileId: stored.externalId,
                         filename: stored.filename,
                         size: stored.sizeBytes,
                         downloadUrl: `/api/files/${stored.externalId}/download`,
                       };
+                      await supercarArgs.browserTaskFiles?.admitGenerated(receipt);
+                      return receipt;
                     } catch (err) {
                       return {
                         error: err instanceof Error ? err.message : String(err),

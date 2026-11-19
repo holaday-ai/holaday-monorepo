@@ -128,7 +128,7 @@ export type TaskTableResult = TableDescription | TableAggregate;
 export const ANALYZE_TASK_TABLE_TOOL: NeutralToolDefinition = {
   name: 'analyze_task_table',
   description:
-    '按真实任务CSV/TSV文件统计；先 describe 读取列位置ID和样本，再 aggregate。数值仅支持明确的十进制（可带科学计数法）；不猜货币/百分号/千分位，不把空白或错误当0。原文件完整扫描，返回行数、筛选、质量与分组分页；只能报告回执中的统计，finish fields 绑定 fileId/tableFactId。当前不支持Excel二进制工作簿，请先导出CSV。',
+    '按本任务提供、下载或已生成的CSV/TSV文件统计；生成文件可读/统计，不增加上传授权。先 describe 读取列位置ID和样本，再 aggregate。数值仅支持明确的十进制（可带科学计数法）；不猜货币/百分号/千分位，不把空白或错误当0。原文件完整扫描，返回行数、筛选、质量与分组分页；只能报告回执中的统计，finish fields 绑定 fileId/tableFactId。当前不支持Excel二进制工作簿，请先导出CSV。',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -334,7 +334,7 @@ export class BrowserTaskTable {
     const request = taskTableRequestSchema.parse(value);
     try {
       if (signal?.aborted) throw new Error('统计已取消。');
-      const [file] = await this.files.resolve(this.files.taskId, [request.fileId]);
+      const [file] = await this.files.resolveReadable(this.files.taskId, [request.fileId]);
       if (!file || !/\.(csv|tsv)$/i.test(file.name))
         throw new Error('当前统计工具只接收CSV/TSV文件；请将工作簿导出为CSV后提供。');
       if (file.buffer.length > TASK_TABLE_LIMITS.bytes)

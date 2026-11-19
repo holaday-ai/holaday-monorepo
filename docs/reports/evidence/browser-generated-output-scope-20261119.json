@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "kind": "local_generated_output_scope_fix",
+  "verifiedAtUTC": "2026-11-19T07:20:48.348036+00:00",
+  "parentCommit": "b41a9a2b051a2a5c3b0c83472ced726597fa68fb",
+  "sourceFiles": [
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/browser-task-file-reader.ts",
+      "sha256": "43d4c0fcb6b38445f269981a53a5f044a5c315b2d476353d6eeb58a32dee8eb7"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/browser-task-files.ts",
+      "sha256": "740281c853aa6618f4dd2d29185f544139f9a3625fc3aa1629d885fa70dd68ed"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/browser-task-output.test.ts",
+      "sha256": "47039a48abccc39e4122c6c79a5c232aceb48eb2d35c7378c4f20c57e2cb1cc9"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/browser-task-output.ts",
+      "sha256": "42f2d6a1fab4a48fc2b5199908e8876b2acb3beb13e85fd0842a7862abc439f6"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/browser-task-table.ts",
+      "sha256": "6332e1cfbc34102795bb64a385dbfff4ae70d496f2c7c604811c8d361cba14db"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/browser-tools/unified-supercar-runner.ts",
+      "sha256": "3c5ecb8d18cd50a560f69ef137feb2893c22eed7a5145ddc77dc43012df36ee0"
+    },
+    {
+      "path": "apps/orchestrator/src/agent/supercar/selected-chrome-runner.ts",
+      "sha256": "10a049dcae5f3e5dcfc63a0aefda65901d05f255363158cfbbf5cb2336952966"
+    },
+    {
+      "path": "apps/orchestrator/src/files/browser-task-file-scope.test.ts",
+      "sha256": "518d85b70245d34c17ef590685b1a85eff53f457ab849a17665b717b00187c0e"
+    },
+    {
+      "path": "apps/orchestrator/src/files/browser-task-file-scope.ts",
+      "sha256": "f14800813a4703fd7b39fcd0bb3a8567bdc07f7df004522b24241954b7fc56e5"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.chrome-full-app-http.test.ts",
+      "sha256": "02c160e6555e0a337bd11817b4c8fcbaf9339134da141540269f83a3c6f21c5b"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/tasks.ts",
+      "sha256": "0e4eb07237369c8d6f2fab9ea738744bb2522175dafee64e2ca8bd964d2a862a"
+    }
+  ],
+  "checks": {
+    "scopeInitialRed": {
+      "receipt": {
+        "exitCode": 1,
+        "seconds": 2.52,
+        "passed": 5,
+        "failed": 11,
+        "total": 16,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "113d0dd938b1140f28d52cbc2fda855d631fd623c7cfd57fb01e20d2d32a820d"
+    },
+    "scopeInitialGreen": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 1.98,
+        "passed": 16,
+        "failed": 0,
+        "total": 16,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "028d396e40828a9bf48a2a9cd82156b6c25a8f60ce4c94b6b97641990c94bd89"
+    },
+    "bindingRed": {
+      "receipt": {
+        "exitCode": 1,
+        "seconds": 2.02,
+        "passed": 17,
+        "failed": 2,
+        "total": 19,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "7277317588d182877e311618fe51d30985bc00976b5e2bbe531037905910d17a"
+    },
+    "bindingGreen": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 1.92,
+        "passed": 19,
+        "failed": 0,
+        "total": 19,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "04a7507888f8dd6bd1fa71e2347ea7ad71c3a5463a87db73c8a574448e9a655b"
+    },
+    "handoffRed": {
+      "receipt": {
+        "exitCode": 1,
+        "seconds": 1.14,
+        "passed": 29,
+        "failed": 3,
+        "total": 32,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "5bc5c45d487104bf14cae14dfe76affef54b2f609f9d61d384d606fdd06172f7"
+    },
+    "handoffGreen": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 1.3,
+        "passed": 32,
+        "failed": 0,
+        "total": 32,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "ecba3ee9785236e9c2f234fb8e0927a3dd8c0858b01f17d2af6ad2b0ca83f7e4"
+    },
+    "regression": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 57.01,
+        "passed": 312,
+        "failed": 0,
+        "total": 312,
+        "heapMB": 1536
+      },
+      "receiptSHA256": "73d41684ca8c75a5685f9963bc762963615be274675f2b951cbc77d195e41afd"
+    },
+    "strictTypes": {
+      "receipt": {
+        "mode": "types",
+        "exitCode": 0,
+        "seconds": 13.14,
+        "heapMB": 2048
+      },
+      "receiptSHA256": "0cc648f1b0952e163c66dd77f3467a81a43f860e02d5a83c2212e0d464b4ace0"
+    },
+    "static": {
+      "receipt": {
+        "mode": "static",
+        "exitCode": 0,
+        "seconds": 0.38,
+        "heapMB": 512
+      },
+      "receiptSHA256": "48557fa2eb87008037b44b32001dcdd59237a09787ef59c0a0f26ee194755617"
+    },
+    "fullAppValidRed": {
+      "receipt": {
+        "exitCode": 1,
+        "seconds": 29.22,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0
+      },
+      "receiptSHA256": "b45d1ffa5f8fa9ea5afa6420b19f6ad7b831a0c1b0b0dd74a03f89ed4072c2d9"
+    },
+    "fullAppGreen": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 33.73,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "receiptSHA256": "169b92e646c6a2bd394f9f99d50c958bc50fa5f916570f8ceab338b27a83c6ec"
+    }
+  },
+  "semantics": {
+    "generatedReadStatistics": true,
+    "generatedProvenance": "task_generated",
+    "generatedUploadGranted": false,
+    "sameLiveTaskOwnerKindExpiryReceiptAndSHARequired": true,
+    "bindingRecheckedOnEachRead": true,
+    "combinedHandoffDoesNotRequireOriginalRegeneration": true,
+    "explicitTwoNewFilesStillRequired": true
+  },
+  "fullApp": {
+    "actualIsolatedMySQL": true,
+    "taskStatus": "completed",
+    "generatedTableReceiptSHA256": "71543f7d258f021ceb054737fc0b4de7c923fea3720c53af93da92ca73fb13c7",
+    "rawRows": 10001,
+    "sum": "1099.9",
+    "generatedRows": 2,
+    "originalExportRequests": 1,
+    "historyReload": true,
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900,
+        "files": 2
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "files": 2
+      }
+    ],
+    "sourceUserPageUnchanged": true,
+    "otherTabUnchanged": true,
+    "errors": [],
+    "consoleErrors": [],
+    "modelAPICalls": 0,
+    "testSchemaCleaned": true,
+    "scriptedModelNotRealSiteAcceptance": true
+  },
+  "priorRealV6": {
+    "sourceBytes": 4409,
+    "sourceSHA256": "02d7257ef1e48607061ba094fab2dd3ea8237c2fdff8ff2ec4e4a842779e5ed8",
+    "actualSourceReadComplete": true,
+    "summaryBytes": 60,
+    "summarySHA256": "e8c74c3265f391cf1da7b134db5f0544983280db1dbb607e97c9f212e6e1ffab",
+    "sourceCounts": {
+      "dependencies": 41,
+      "devDependencies": 10,
+      "scripts": 39
+    },
+    "actualGeneratedReadStatisticsPassed": false,
+    "preservedSQLTaskStatus": "executing",
+    "oldTaskReplayed": false
+  },
+  "modelBudget": {
+    "attempts": 25,
+    "received": 24,
+    "oldClientUnknown": 1,
+    "oldUnknownOrdinal": 14,
+    "maxAttempts": 25,
+    "remaining": 0,
+    "ledgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+    "reset": false,
+    "newPaidCallsDuringFix": 0,
+    "additionalBudgetAuthorized": false
+  },
+  "staticBaselineWarnings": 1,
+  "limits": [
+    "Local scripted-model success is not real GitHub/Sheets acceptance.",
+    "Prior real v6 terminal/unknown state is retained; local success does not rewrite it.",
+    "Formal candidate8251bc1f is historical and omits these runtime changes.",
+    "Real sites, stable subjects, account lifecycle, physical input, AWS KMS and billing remain open."
+  ],
+  "fullGoalComplete": false,
+  "pr361Merged": false,
+  "deployed": false,
+  "productionChanged": false
+}

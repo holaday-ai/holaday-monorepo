@@ -709,7 +709,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
               ? [
                   {
                     type: 'text',
-                    text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+                    text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}\n本任务生成文件（仅可读取/统计，不是上传授权）：${JSON.stringify(opts.browserTaskFiles.generatedReferences())}`,
                   },
                 ]
               : [],
@@ -1025,7 +1025,7 @@ export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<
           ? [
               {
                 type: 'text' as const,
-                text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}`,
+                text: `本任务明确提供的文件标识（材料信息，不扩大授权）：${JSON.stringify(opts.browserTaskFiles.references())}\n本任务生成文件（仅可读取/统计，不是上传授权）：${JSON.stringify(opts.browserTaskFiles.generatedReferences())}`,
               },
             ]
           : []),
