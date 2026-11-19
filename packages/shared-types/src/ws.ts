@@ -1037,6 +1037,7 @@ export const serverExtensionToolCallSchema = z.object({
       preparationId: z.string().uuid().optional(),
       recoverable: z.boolean().optional(),
       resumeOnly: z.boolean().optional(),
+      reportReadiness: z.boolean().optional(),
       taskTabMode: z.enum(['current', 'independent']).optional(),
       launchBrowserSessionId: z.string().uuid().optional(),
       /** Explicit local tab for read. Never infer it from the active tab. */

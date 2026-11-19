@@ -43,6 +43,8 @@ export interface BrowserLaunchTarget {
   expectedUrl: string;
   selectionId: string;
   launchBrowserSessionId?: string;
+  /** UI negotiation only. Remove before sending an authoritative selection. */
+  preparationReadiness?: boolean;
 }
 export type BrowserLaunchCreationReceipt =
   | { state: 'absent' | 'pending' | 'unknown' }
@@ -91,6 +93,9 @@ export function resolveBrowserLaunchTarget(
     expectedUrl: source.origin,
     selectionId: source.selectionId,
     launchBrowserSessionId: source.browserSessionId,
+    ...(matching.some((target) => target.preparationReadiness === true)
+      ? { preparationReadiness: true }
+      : {}),
   };
 }
 function canonical(value: unknown): string {

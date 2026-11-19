@@ -42,9 +42,9 @@
 
 `prepare(target, preparationId)`只接收固定的原来源快照和原编号，返回unknown供helper校验。loading原始字段为taskTabStatus=loading、taskTabCreated=true、preparationId、sourceTabId、sourceOrigin、tabId及可选launchBrowserSessionId；主机输出用preparationState=loading替换taskTabStatus并加入extensionClientId。unsupported只有preparationState=unsupported，不是页面句柄。ready输出由既有BrowserLaunchTarget字段构成，去掉UI能力。
 
-- [ ] RED：最多3次、间隔1000、原编号不变；ready后返回句柄；未知拒绝不重试；错绑定/切账号不返回；超过上限抛明确pending错误。
-- [ ] 最小实现Zod契约、固定核对上限和会话校验，输出剥离UI字段的ready target。
-- [ ] shared-types相关回归/严格类型通过并提交。
+- [x] RED：最多3次、间隔1000、原编号不变；ready后返回句柄；未知拒绝不重试；错绑定/切账号不返回；超过上限抛明确pending错误。
+- [x] 最小实现Zod契约、固定核对上限和会话校验，输出剥离UI字段的ready target。
+- [x] shared-types相关回归23/23、严格类型与静态通过；日志shared-preparation-final、shared-preparation-checks。
 
 ### Task 3: 插件确认加载状态
 
