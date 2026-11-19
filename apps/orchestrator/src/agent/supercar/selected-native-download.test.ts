@@ -36,7 +36,8 @@ const server = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     requests.push({ method: request.method!, body: Buffer.concat(chunks).toString() });
     response.setHeader('Content-Type', 'text/csv');
-    response.setHeader('Content-Disposition', 'attachment; filename="report.csv"');
+    if (!request.url.includes('without-disposition'))
+      response.setHeader('Content-Disposition', 'attachment; filename="report.csv"');
     response.end(bytes);
   } else {
     response.setHeader('Content-Type', 'text/html');
@@ -138,6 +139,82 @@ afterAll(async () => {
 });
 
 describe('original downloads through the bound selected target', () => {
+  it('captures a bound download link without Content-Disposition in the response', async () => {
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/export?without-disposition">Export report</a>',
+    );
+    const value = resolver();
+    const observed: Array<Record<string, unknown>> = [];
+    const stop = subscribe((method, params) => {
+      const request = params.request as { url?: string } | undefined;
+      observed.push({
+        method,
+        requestId: params.requestId,
+        networkId: params.networkId,
+        frameId: params.frameId,
+        resourceType: params.resourceType ?? params.type,
+        url: request?.url,
+        state: params.state,
+        responseStatusCode: params.responseStatusCode,
+      });
+    });
+    const file = await value.captureDownload(click, await prepare(value), () => live);
+    stop();
+    if (file.status !== 'captured') throw new Error(JSON.stringify({ result: file, observed }));
+    expect(
+      Buffer.from(await value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live)),
+    ).toEqual(bytes);
+    expect(file.metadata).toMatchObject({
+      filename: 'report.csv',
+      sizeBytes: bytes.length,
+      sha256,
+    });
+    expect(requests).toEqual([{ method: 'GET', body: '' }]);
+    value.releaseDownload(file.downloadId);
+  });
+
+  it('does not publish an ordinary response without a native download receipt', async () => {
+    await page.setContent(
+      '<button id="export" onclick="fetch(\'/ordinary-document\')">Fetch document</button>',
+    );
+    const value = resolver();
+    const result = await value
+      .captureDownload(click, await prepare(value), () => live)
+      .catch((error: Error) => ({ status: 'rejected', error: error.message }));
+    expect(result.status).not.toBe('captured');
+    expect('downloadId' in result).toBe(false);
+    expect(page.url()).toBe(`${origin}/`);
+  });
+
+  it('captures the exact approved redirect of the bound native download link', async () => {
+    vi.spyOn(downloadSources, 'nativeDownloadResponseSourcesForPage').mockReturnValue({
+      patterns: [`${exportOrigin}/*`],
+      accepts: (url) => url === `${exportOrigin}/export`,
+    });
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/redirect">Export report</a>',
+    );
+    const value = resolver();
+    const file = await capture(value);
+    expect(
+      Buffer.from(await value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live)),
+    ).toEqual(bytes);
+    expect(file.source).toMatchObject({ origin, originBasis: 'owning_page' });
+    expect(requests).toHaveLength(1);
+    value.releaseDownload(file.downloadId);
+  });
+
+  it('rejects the unapproved redirect of a bound native download link', async () => {
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/redirect">Export report</a>',
+    );
+    const value = resolver();
+    const result = await value.captureDownload(click, await prepare(value), () => live);
+    expect(result).toMatchObject({ status: 'clicked', clickOutcome: 'applied' });
+    expect('downloadId' in result).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
   it("does not attribute a person's download in another same-origin child frame to the root task click", async () => {
     await page.setContent(
       '<iframe src="/human-other"></iframe><button id="export" onclick="document.body.dataset.clicks=\'1\'">Export task report</button>',

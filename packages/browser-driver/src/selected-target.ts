@@ -1437,6 +1437,14 @@ export class SelectedTargetResolver {
                 })
             )
               throw new Error('target_changed');
+            const link = (await this.cdp('Runtime.callFunctionOn', {
+              objectId: target.objectId,
+              functionDeclaration:
+                'function(){const a=this.closest("a[download]");return a&&typeof a.href==="string"?a.href:null;}',
+              returnByValue: true,
+            })) as { result?: { value?: unknown } };
+            const downloadLink =
+              typeof link.result?.value === 'string' ? link.result.value : undefined;
             try {
               this.blobLease = await captureNativeBlobSources({
                 owner: this.page,
@@ -1468,6 +1476,7 @@ export class SelectedTargetResolver {
               frameId: target.frameId,
               origin: context.origin,
               responseSources: nativeDownloadResponseSourcesForPage(ticket.frame.url()),
+              downloadLink,
               current,
               prepare: async () => {
                 await checkInput(false);

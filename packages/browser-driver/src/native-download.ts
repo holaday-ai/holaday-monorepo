@@ -46,6 +46,8 @@ export interface NativeDownloadCaptureOptions {
   maxBytes?: number;
   /** Host-owned native-export policy; grants response bytes, never DOM access. */
   responseSources?: NativeDownloadResponseSources;
+  /** Actual bound DOM anchor with a download attribute; never a tool-supplied URL. */
+  downloadLink?: string;
 }
 const owners = new WeakMap<object, NativeDownloadCaptureController>();
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -149,7 +151,7 @@ export class NativeDownloadCaptureController {
     let totalBytes = 0;
     const requests = new Map<
       string,
-      { url: string; frameId: string; method: string; pending: boolean }
+      { url: string; frameId: string; method: string; pending: boolean; declaredDownload: boolean }
     >();
     // Only the clicked frame's own subtree can supply a native receipt. This
     // includes same-origin export iframes created by its click handler, never
@@ -173,6 +175,15 @@ export class NativeDownloadCaptureController {
         return false;
       }
     };
+    const declaredLinks = new Set<string>();
+    if (
+      typeof options.downloadLink === 'string' &&
+      options.downloadLink.length <= 8192 &&
+      sameOrigin(options.downloadLink, options.origin)
+    ) {
+      const link = new URL(options.downloadLink);
+      if (!link.hash) declaredLinks.add(link.href);
+    }
     const bodies: NetworkBody[] = [];
     const jobs = new Set<Promise<void>>();
     let notify: (() => void) | undefined;
@@ -365,15 +376,60 @@ export class NativeDownloadCaptureController {
         const id = params.requestId;
         if (typeof id !== 'string') return;
         const networkId = params.networkId;
-        const request = typeof networkId === 'string' ? requests.get(networkId) : undefined;
-        const requestData = params.request as { url?: unknown } | undefined;
+        let request = typeof networkId === 'string' ? requests.get(networkId) : undefined;
+        const requestData = params.request as { url?: unknown; method?: unknown } | undefined;
         const headers = params.responseHeaders as
           | Array<{ name: string; value: string }>
           | undefined;
         const status = params.responseStatusCode;
+        // Native <a download> requests can omit Network events/networkId.
+        // Correlate only the already-bound same-document anchor or its exact
+        // allowed redirect chain, never an arbitrary paused response.
+        if (
+          !request &&
+          started &&
+          !retired &&
+          current() &&
+          params.frameId === options.frameId &&
+          requestData?.method === 'GET' &&
+          typeof requestData.url === 'string' &&
+          declaredLinks.has(requestData.url)
+        )
+          request = {
+            url: requestData.url,
+            frameId: options.frameId,
+            method: 'GET',
+            pending: false,
+            declaredDownload: true,
+          };
         if (request) {
           request.pending = false;
           wake();
+        }
+        if (
+          request?.declaredDownload &&
+          started &&
+          !retired &&
+          current() &&
+          request.url === requestData?.url &&
+          params.frameId === request.frameId &&
+          typeof status === 'number' &&
+          status >= 300 &&
+          status < 400 &&
+          Array.isArray(headers) &&
+          declaredLinks.size < 8
+        ) {
+          const location = headers.find(
+            (header) => header.name.toLowerCase() === 'location',
+          )?.value;
+          if (typeof location === 'string') {
+            try {
+              const next = new URL(location, request.url);
+              if (!next.hash && allowedResponse(next.href)) declaredLinks.add(next.href);
+            } catch {
+              /* Invalid redirects confer no file authority. */
+            }
+          }
         }
         const attachment =
           Array.isArray(headers) &&
@@ -391,7 +447,8 @@ export class NativeDownloadCaptureController {
           request.url !== requestData?.url ||
           params.frameId !== request.frameId ||
           !['Document', 'Other'].includes(String(params.resourceType)) ||
-          !attachment ||
+          !Array.isArray(headers) ||
+          (!attachment && !request.declaredDownload) ||
           typeof status !== 'number' ||
           status < 200 ||
           status >= 300 ||
@@ -419,7 +476,7 @@ export class NativeDownloadCaptureController {
         const body: NetworkBody = {
           frameId: request.frameId,
           requestId: id,
-          networkId: networkId as string,
+          networkId: typeof networkId === 'string' ? networkId : id,
           url: request.url,
           mimeType,
           taken: false,
@@ -456,6 +513,7 @@ export class NativeDownloadCaptureController {
             frameId: params.frameId,
             method: request.method,
             pending: true,
+            declaredDownload: params.frameId === options.frameId && declaredLinks.has(request.url),
           });
         return;
       }

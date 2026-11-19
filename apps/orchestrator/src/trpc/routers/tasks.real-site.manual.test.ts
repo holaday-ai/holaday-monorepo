@@ -6,13 +6,14 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
 import { afterAll, expect, it, vi } from 'vitest';
+import { SelectedChromeClient } from '../../agent/supercar/selected-chrome-client.js';
 import { signAccessToken } from '../../auth/jwt.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
@@ -76,6 +77,39 @@ it.runIf(enabled)(
       }),
       { flag: 'wx', mode: 0o600 },
     );
+    const downloadAudit = join(artifacts, 'native-download-operation-audit.ndjson');
+    await writeFile(downloadAudit, '', { flag: 'wx', mode: 0o600 });
+    let downloadAuditWriteFailed = false;
+    const actualOpenDownload = SelectedChromeClient.prototype.openFileDownload;
+    vi.spyOn(SelectedChromeClient.prototype, 'openFileDownload').mockImplementation(async function (
+      this: SelectedChromeClient,
+      ...args
+    ) {
+      const reply = await actualOpenDownload.call(this, ...args);
+      const selector = JSON.stringify('selector' in args[0] ? (args[0].selector ?? null) : null);
+      const state = reply.ok ? reply.downloadState : undefined;
+      const error = reply.ok ? undefined : reply.error;
+      await appendFile(
+        downloadAudit,
+        `${JSON.stringify({
+          at: new Date().toISOString(),
+          actualResultUnmodified: true,
+          selectorSHA256: createHash('sha256').update(selector).digest('hex'),
+          mentionsDownloadRawFile: selector.includes('Download raw file'),
+          expectedRevision: args[1],
+          ok: reply.ok,
+          actionOutcome: reply.actionOutcome,
+          error: error && /^[a-z0-9_]{1,80}$/.test(error) ? error : undefined,
+          state: state?.status,
+          reason: state && 'reason' in state ? state.reason : undefined,
+          capturedBytes: state?.status === 'captured' ? state.metadata.sizeBytes : undefined,
+          capturedSHA256: state?.status === 'captured' ? state.metadata.sha256 : undefined,
+        })}\n`,
+      ).catch(() => {
+        downloadAuditWriteFailed = true;
+      });
+      return reply;
+    });
     const descriptor = JSON.parse(
       await readFile(join(runtime, 'model-relay/descriptor.json'), 'utf8'),
     );
@@ -324,6 +358,7 @@ it.runIf(enabled)(
                   extensionWs.getConnectedExtensionClientIds(user),
                 ]),
               ),
+              downloadAuditWriteFailed,
               taskRows,
               files,
             },

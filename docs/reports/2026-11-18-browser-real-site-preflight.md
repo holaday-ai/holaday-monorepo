@@ -1,5 +1,7 @@
 # GitHub / Sheets 真实站点验收前置核对
 
+最新进度（2026-11-19）：真实v5任务收到4次新响应，累计18/25尝试；原生4015字节已取证但任务文件0、SQL未知态保留。新确认并修复Fetch-only下载链接关联，92项原生回归通过，当前真实闭环仍待验证；见[原生链接更新](2026-11-19-browser-native-link-capture.md)。8251bc1f候选保留为历史包，尚不含新修复。
+
 本记录包括只读源文件比对、文件校验器准备、Chrome157候选加载及随后一次真实Sheets任务的故障证据。真实文件闭环尚未通过；账号、物理操作和上线验收也未通过。
 
 机器摘要：[browser-real-site-preflight-20261118.json](evidence/browser-real-site-preflight-20261118.json)。精确测试表URL、源文件、用例提示词、预期摘要和校验器保存在既有私有恢复目录的 `release-readiness-20261118/real-site-preflight`，不公开账号或业务数据。
