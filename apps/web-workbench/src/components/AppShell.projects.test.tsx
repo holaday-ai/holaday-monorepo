@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   authMe: vi.fn<Client['auth']['me']['query']>(),
   unsuccessfulCount: vi.fn<Client['tasks']['unsuccessfulCount']['query']>(),
   tasksList: vi.fn<Client['tasks']['list']['query']>(),
+  tasksDetail: vi.fn<Client['tasks']['detail']['query']>(),
   organizationsList: vi.fn<Client['organizations']['list']['query']>(),
   organizationMembers: vi.fn<Client['organizations']['members']['query']>(),
   projectsList: vi.fn<Client['projects']['list']['query']>(),
@@ -42,6 +43,7 @@ vi.mock('@/lib/trpc', () => ({
     tasks: {
       unsuccessfulCount: { query: api.unsuccessfulCount },
       list: { query: api.tasksList },
+      detail: { query: api.tasksDetail },
     },
     organizations: {
       list: { query: api.organizationsList },
@@ -134,6 +136,7 @@ const TASKS = {
     {
       executionId: null,
       executionRevision: 0,
+      executionObservation: null,
       taskId: 'tsk_personal',
       intent: '整理个人研究',
       title: '个人项目任务',
@@ -174,6 +177,52 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useTaskStore.getState().reset();
+  vi.useRealTimers();
+});
+
+it('reconciles a visible running local task within five seconds when live events are missing', async () => {
+  vi.useFakeTimers();
+  const row = {
+    ...TASKS.tasks[0]!,
+    taskId: 'tsk_live',
+    status: 'executing' as const,
+    browserSource: 'local-chrome' as const,
+    result: null,
+    completedAt: null,
+  };
+  api.tasksList.mockResolvedValue({ tasks: [row], nextCursor: null });
+  api.tasksDetail.mockResolvedValue({ ...row, executionObservation: null, steps: [] } as never);
+  const router = createMemoryRouter(
+    [{ element: <AppShell />, children: [{ path: '/', element: <main>任务工作台</main> }] }],
+    { initialEntries: ['/?task=tsk_live'] },
+  );
+  render(
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  const initialReads = api.tasksDetail.mock.calls.length;
+  expect(initialReads).toBeGreaterThan(0);
+  api.tasksDetail.mockResolvedValue({
+    ...row,
+    executionObservation: { state: 'unconfirmed', reason: 'session_finishing' },
+    steps: [],
+  } as never);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.tasksDetail.mock.calls.length).toBeGreaterThan(initialReads);
+  expect(
+    useTaskStore.getState().tasks.find((task) => task.taskId === row.taskId)?.executionObservation,
+  ).toEqual({ state: 'unconfirmed', reason: 'session_finishing' });
+  const settledReads = api.tasksDetail.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  expect(api.tasksDetail).toHaveBeenCalledTimes(settledReads);
 });
 
 describe('AppShell personal project collection isolation', () => {

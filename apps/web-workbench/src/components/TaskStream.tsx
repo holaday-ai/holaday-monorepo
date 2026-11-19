@@ -426,6 +426,7 @@ function AgentBlock({
             <p className="text-muted-foreground">
               当前服务无法确认任务仍在执行。已有步骤和文件已保留，请先核对结果，避免重复操作。
             </p>
+            <Timeline lines={timeline.slice(-3)} />
           </section>
         )}
         {!executionUnconfirmed &&

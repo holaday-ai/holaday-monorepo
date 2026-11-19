@@ -134,6 +134,47 @@ it('while running: one live status line from the steps, not a stack of tool rows
   expect(screen.queryByText(/snapshot|navigate/)).toBeNull();
 });
 
+it('shows recent receipt-backed progress without opening the status disclosure', () => {
+  show(
+    { taskId: 'tsk_progress', intent: '读取导出文件', status: 'executing' },
+    {
+      stepsByTask: {
+        tsk_progress: [
+          { tickIndex: 1, status: 'done', actionKind: 'selected_chrome_download', startedAt: 1 },
+          { tickIndex: 2, status: 'done', actionKind: 'read_task_file', startedAt: 2 },
+          { tickIndex: 3, status: 'done', actionKind: 'create_file', startedAt: 3 },
+          { tickIndex: 4, status: 'failed', actionKind: 'selected_chrome_finish', startedAt: 4 },
+        ],
+      },
+    },
+  );
+  const timeline = screen.getByTestId('process-timeline');
+  expect(timeline.querySelectorAll('li')).toHaveLength(3);
+  expect(timeline.textContent).toContain('已读取任务文件');
+  expect(timeline.textContent).toContain('已生成任务文件');
+  expect(timeline.textContent).toContain('最终结果尚未核实');
+  expect(screen.queryByText('selected_chrome_finish')).toBeNull();
+});
+
+it('keeps the recent evidence visible after execution becomes unconfirmed', () => {
+  show(
+    {
+      taskId: 'tsk_stopped',
+      intent: '文件验收',
+      status: 'executing',
+      browserSource: 'local-chrome',
+      executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+    },
+    {
+      stepsByTask: {
+        tsk_stopped: [{ tickIndex: 1, status: 'done', actionKind: 'create_file', startedAt: 1 }],
+      },
+    },
+  );
+  expect(screen.getByTestId('process-timeline').textContent).toContain('已生成任务文件');
+  expect(screen.queryByTestId('live-status-line')).toBeNull();
+});
+
 function terminalFileCase({ unavailable = false, sameFilename = false } = {}) {
   const payload = {
     fileId: 'file_shared',

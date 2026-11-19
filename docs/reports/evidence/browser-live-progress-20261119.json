@@ -1,0 +1,39 @@
+{
+  "scope": "local Chrome task progress and exact duplicate model context",
+  "incident": {
+    "executorStoppedAtUTC": "2026-11-19T11:23:01.646Z",
+    "sqlStatusPreserved": "executing",
+    "terminalPersistenceError": "QUEUE_PERSISTENCE_UNKNOWN",
+    "savedFileCount": 2,
+    "sqlStepCount": 10,
+    "taskEventCount": 1,
+    "taskQuotaUsed": 1,
+    "taskAcceptancePassed": false
+  },
+  "verification": {
+    "webTests": { "files": 5, "total": 262, "passed": 262 },
+    "runnerContextTests": { "files": 2, "total": 121, "passed": 121 },
+    "webScopedStrictTypes": true,
+    "backendProductionTypes": true,
+    "staticErrors": 0,
+    "existingStaticWarnings": 4,
+    "localFrontendBuildPassed": true,
+    "nativeChromeSameTaskReadOnly": true,
+    "mobileLayout": { "width": 390, "height": 844, "bothFileButtonsWithinViewport": true }
+  },
+  "offlineRepeatedPageMeasurement": {
+    "turns": 10,
+    "originalBytes": 3807676,
+    "projectedBytes": 195490,
+    "reductionPercent": 94.87,
+    "toolPairsRetained": 10,
+    "realLatencyMeasured": false
+  },
+  "optimizationModelCalls": 0,
+  "optimizationOriginalExports": 0,
+  "optimizationKmsCalls": 0,
+  "modelLedger": { "used": 36, "maxAttempts": 41, "latestClientBodyUnknown": true },
+  "productionChanged": false,
+  "deployed": false,
+  "goalComplete": false
+}

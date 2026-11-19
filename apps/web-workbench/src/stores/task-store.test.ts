@@ -79,6 +79,114 @@ it('hydrates scoped execution uncertainty from list and detail without changing 
   expect(replyMutate).not.toHaveBeenCalled();
 });
 
+it('refreshes the selected local task read-only so missed events cannot leave a false running view', async () => {
+  const row = {
+    taskId: 'tsk_live',
+    intent: '读取文件',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    tickCount: 0,
+    createdAt: new Date(),
+  } as UiTask;
+  useTaskStore.setState({ tasks: [row], selectedTaskId: row.taskId });
+  detailQuery.mockResolvedValueOnce({
+    ...row,
+    executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+    steps: [],
+  } as never);
+  expect(typeof useTaskStore.getState().refreshSelectedTask).toBe('function');
+  await useTaskStore.getState().refreshSelectedTask(row.taskId);
+  expect(detailQuery).toHaveBeenCalledWith({ taskId: row.taskId });
+  expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    status: 'executing',
+    executionObservation: { state: 'unconfirmed' },
+  });
+  expect(createMutate).not.toHaveBeenCalled();
+  expect(replyMutate).not.toHaveBeenCalled();
+  expect(abortMutate).not.toHaveBeenCalled();
+});
+
+it('coalesces background detail reads and ignores a task that is no longer selected', async () => {
+  const row = {
+    taskId: 'tsk_live',
+    intent: '读取文件',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    tickCount: 0,
+    createdAt: new Date(),
+  } as UiTask;
+  useTaskStore.setState({ tasks: [row], selectedTaskId: row.taskId });
+  let resolve!: (value: never) => void;
+  detailQuery.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  expect(typeof useTaskStore.getState().refreshSelectedTask).toBe('function');
+  const first = useTaskStore.getState().refreshSelectedTask(row.taskId);
+  await useTaskStore.getState().refreshSelectedTask(row.taskId);
+  await useTaskStore.getState().refreshSelectedTask('tsk_other');
+  expect(detailQuery).toHaveBeenCalledTimes(1);
+  resolve({ ...row, steps: [] } as never);
+  await first;
+});
+
+it('does not turn a background refresh failure into repeated task errors or retries', async () => {
+  const row = {
+    taskId: 'tsk_live',
+    intent: '读取文件',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    tickCount: 0,
+    createdAt: new Date(),
+  } as UiTask;
+  useTaskStore.setState({ tasks: [row], selectedTaskId: row.taskId });
+  detailQuery.mockRejectedValueOnce(new Error('synthetic network failure'));
+  expect(typeof useTaskStore.getState().refreshSelectedTask).toBe('function');
+  await useTaskStore.getState().refreshSelectedTask(row.taskId);
+  expect(useTaskStore.getState().error).toBeNull();
+  expect(useTaskStore.getState().tasks[0].status).toBe('executing');
+  expect(createMutate).not.toHaveBeenCalled();
+});
+
+it('does not erase a newer live tool receipt when an older background detail read returns', async () => {
+  const row = {
+    taskId: 'tsk_live',
+    intent: '读取文件',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    tickCount: 0,
+    createdAt: new Date(),
+  } as UiTask;
+  useTaskStore.setState({ tasks: [row], selectedTaskId: row.taskId });
+  let resolve!: (value: never) => void;
+  detailQuery.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const pending = useTaskStore.getState().refreshSelectedTask(row.taskId);
+  useTaskStore.getState().applyServerMessage({
+    type: 'server.vision.tick.end',
+    taskId: row.taskId,
+    tickIndex: 1,
+    mode: 'screenshot',
+    ok: true,
+    durationMs: 100,
+    actionKind: 'read_task_file',
+    actionSummary: '读取任务文件',
+  });
+  resolve({ ...row, steps: [] } as never);
+  await pending;
+  expect(useTaskStore.getState().stepsByTask[row.taskId]).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ tickIndex: 1, actionKind: 'read_task_file', status: 'done' }),
+    ]),
+  );
+});
+
 beforeEach(() => {
   vi.mocked(trpc.taskRecovery.failureContext.query)
     .mockReset()

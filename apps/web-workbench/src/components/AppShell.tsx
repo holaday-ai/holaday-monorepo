@@ -23,6 +23,7 @@ import {
 // so it's available globally even before the user opens /scheduled.
 import '@/pages/scheduled-calendar/calendar-styles.css';
 import { useToast } from '@/components/ui/toast';
+import { useActiveTaskRefresh } from '@/hooks/useActiveTaskRefresh';
 import { loadAppShellPersonalProjects } from '@/lib/app-shell-projects';
 import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
@@ -198,6 +199,11 @@ export function AppShell(): JSX.Element {
   const enterNewTaskMode = useTaskStore((s) => s.enterNewTaskMode);
   const composerMode = useTaskStore((s) => s.composerMode);
   const refreshTaskList = useTaskStore((s) => s.refreshTaskList);
+  const refreshSelectedTask = useTaskStore((s) => s.refreshSelectedTask);
+  useActiveTaskRefresh(
+    tasks.find((task) => task.taskId === selectedTaskId),
+    refreshSelectedTask,
+  );
   const rerunTask = useTaskStore((s) => s.rerunTask);
   const deleteTask = useTaskStore((s) => s.deleteTask);
   const renameTask = useTaskStore((s) => s.renameTask);

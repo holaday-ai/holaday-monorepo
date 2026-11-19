@@ -266,6 +266,8 @@ export interface TaskStore {
    *     the newest task as a UI default.
    */
   selectTask(taskId: string, source?: 'url' | 'ui'): void;
+  /** Reconcile only the selected view; never submit, resume, cancel or navigate. */
+  refreshSelectedTask(taskId: string): Promise<void>;
   enterNewTaskMode(): void;
   refreshTaskList(): Promise<void>;
   /** Legacy alias — routes through selectTask / enterNewTaskMode. */
@@ -687,6 +689,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   // the current one and bails if superseded. Cheaper + more
   // portable than threading AbortControllers through tRPC.
   let hydrateToken = 0;
+  let activeHydrate: { taskId: string; token: number } | undefined;
   let sessionGeneration = 0;
   const pendingReplies = new Map<string, number>();
   const failedLocalReplies = new Map<string, Array<{ at: number; text: string }>>();
@@ -936,6 +939,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   function abortInFlightHydrate(): void {
     hydrateToken += 1;
+    activeHydrate = undefined;
   }
 
   function captureSessionGeneration(): number {
@@ -946,12 +950,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     return generation === sessionGeneration;
   }
 
-  async function hydrateDetail(taskId: string): Promise<void> {
+  async function hydrateDetail(taskId: string, options: { silent?: boolean } = {}): Promise<void> {
     if ((pendingReplies.get(taskId) ?? 0) > 0) return;
     seedExecutionOrder(taskId);
     const myToken = ++hydrateToken;
+    activeHydrate = { taskId, token: myToken };
     const generation = captureSessionGeneration();
     const suggestionsAtRequestStart = get().suggestionsByTask[taskId];
+    const stepsAtRequestStart = get().stepsByTask[taskId];
     const versionAtRequestStart = executionOrder.version(taskId);
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
@@ -975,6 +981,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const detailStatus = rawDetailStatus
           ? normaliseStatus(rawDetailStatus)
           : (existingTask?.status ?? 'unknown');
+        // A read-only refresh can race live receipts or persistence. Keep same-round
+        // live-only steps and updates received after this request began. A new
+        // execution or terminal snapshot still replaces the prior round normally.
+        const mergedSteps = new Map(steps.map((step) => [step.tickIndex, step]));
+        if (detailOrder !== 'new' && !isTerminalStatus(detailStatus)) {
+          const before = new Map((stepsAtRequestStart ?? []).map((step) => [step.tickIndex, step]));
+          for (const step of prev.stepsByTask[taskId] ?? []) {
+            if (!mergedSteps.has(step.tickIndex) || before.get(step.tickIndex) !== step)
+              mergedSteps.set(step.tickIndex, step);
+          }
+        }
+        const hydratedSteps = [...mergedSteps.values()].sort((a, b) => a.tickIndex - b.tickIndex);
         if (
           detailOrder !== 'new' &&
           hasFinalTaskRow(prev, taskId) &&
@@ -1245,7 +1263,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
           ...roundPatch,
-          stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+          stepsByTask: { ...prev.stepsByTask, [taskId]: hydratedSteps },
           ...(savedPlanReplies !== null
             ? {
                 userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
@@ -1289,7 +1307,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
     } catch (err) {
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
-      set({ error: taskStoreError(err) });
+      if (!options.silent) set({ error: taskStoreError(err) });
+    } finally {
+      if (activeHydrate?.token === myToken) activeHydrate = undefined;
     }
   }
 
@@ -1374,6 +1394,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (source !== 'url') {
         storeNavigate?.(taskId);
       }
+    },
+
+    async refreshSelectedTask(taskId) {
+      if (get().selectedTaskId !== taskId || activeHydrate?.taskId === taskId) return;
+      await hydrateDetail(taskId, { silent: true });
     },
 
     enterNewTaskMode() {

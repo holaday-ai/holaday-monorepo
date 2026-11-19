@@ -93,6 +93,15 @@ describe('FIX-57 #3 · the live status line', () => {
     expect(elapsedLabel(21)).toBe('21 秒');
     expect(elapsedLabel(125)).toBe('2 分 05 秒');
   });
+  it('does not turn legacy unclassified file receipts into a claim that the page changed', () => {
+    expect(
+      stepTimeline([
+        step(1, 'create_file'),
+        step(2, 'selected_chrome_plan_discarded', '计划未执行'),
+        step(3, 'selected_chrome_finish'),
+      ]).map((line) => line.text),
+    ).not.toContain('页面已变化，已弃用旧计划');
+  });
 });
 
 describe('FIX-57 #2 · the answer footer', () => {
