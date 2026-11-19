@@ -65,6 +65,8 @@
 - [ ] 在已授权的GitHub和Sheets页面核实稳定主体来源，再固定只读probe；不猜选择器。
 
   2026-11-19来源核查：当前subject.adapter只是标签，worker仅支持主页面唯一元素文本/属性。Google合成表账号菜单实际显示名称位于account框架内，所检查分支未取得稳定主体；单次ListAccounts直接访问400，未重试。已确认既有HOLA DAY Web OAuth客户端与现网公开client_id摘要匹配，两个已登记回调均非本机；没有修改配置、兑换token、调用callback或创建用户。已有OAuth不能直接替代同一候选快照的站点主体证明，本项仍未完成。见`docs/operations/browser-site-identity-review-20261119.md`。
+
+  后续核查：用户已在正常“Holaday验收”配置登录GitHub。实际主页面body.logged-in及meta[name="octolytics-actor-id"]均核实1个匹配，主体ID/相邻login与连接器profile一致；只读草案通过实际服务端parser，未应用生产、未抓快照或签发恢复证明。Google来源和真实同快照生命周期仍未完成。另完成Node22.23.3/UID998的Linux arm64关闭入口冷启动，原生模块、同PID双端口、业务503、维护closed/idle、SIGTERM退出及清理通过；现网ELF只读确认x86_64，不能以arm64替代目标ABI。见`docs/operations/browser-github-probe-and-linux-entry-20261119.md`。
 - [ ] 验证真实服务加解封、错误身份/上下文/版本拒绝；记录费用与权限，不新增资源或权限。
 
   已准备CloudShell合成入口：8项本地测试、实际打包provider双OS进程mock通过（真实AWS0）。用户已明确批准固定包最多11次加解密尝试/3次DescribeKey、新增调用/传输预算0.01美元；打开us-east-2 CloudShell后AWS提示账户仍在验证，无法创建环境（新账户最长可能两天）。未上传包/运行命令/访问临时凭据，实际加解密0；等待外部验证，沿用此次授权，不新建IAM/访问密钥，不等于生产最小权限身份或另一IAM主体拒绝证据。

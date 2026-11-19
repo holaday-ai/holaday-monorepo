@@ -165,7 +165,7 @@
     "real project-plugin/site task acceptance",
     "account save/rebuild/expiry/revoke/switch",
     "physical input and actual billing",
-    "exact Linux workspace, native dependencies and reviewed node --import tsx src/index.ts cold start",
+    "production x86_64 exact dependencies and reviewed configured closed entry; local arm64 cold start passed separately",
     "protected final target/config/inventory/legacy/window/operator binding"
   ],
   "executionAllowed": false,
@@ -188,5 +188,26 @@
     "preparationOnly": true,
     "verificationSHA256": "30273f976cea973d4c8a57b5ed73efcf762b742595c4e95c053a01176ea81fb0",
     "supersedesPrepared37Rows": true
+  },
+  "localLinuxEntrypointVerification": {
+    "report": "browser-github-probe-and-linux-entry-20261119.json",
+    "passed": true,
+    "architecture": "arm64",
+    "mode": "closed maintenance",
+    "node": "22.23.3",
+    "productionArchitectureEquivalent": false,
+    "databaseAndVaultVerified": false
+  },
+  "actualServingExecutableArchitecture": {
+    "observedAtUTC": "2026-11-19T09:18:58.283913+00:00",
+    "actualServingProcessPinnedBeforeAndAfter": true,
+    "actualExecutableHeaderReadOnlyBytes": 20,
+    "elfMachine": 62,
+    "executableArchitecture": "x86_64",
+    "environmentOrHeapRead": false,
+    "businessRowsRead": 0,
+    "productionWrites": 0,
+    "modelCalls": 0,
+    "kmsCalls": 0
   }
 }
