@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "scope": "acceptance tooling only",
+  "productRuntimeChanged": false,
+  "runtimeSourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+  "checks": {
+    "budget": 16,
+    "localHttp": 7,
+    "nodeChildAndEnvelope": 9,
+    "explicitPrivateWiring": 7,
+    "passedTotal": 39,
+    "optOutSkipped": 7,
+    "staticExitCode": 0
+  },
+  "admission": {
+    "attempts": 14,
+    "received": 13,
+    "clientUnknown": 1,
+    "maxAttempts": 25,
+    "providerRequestsSentByThisChange": 0,
+    "canonicalLedgerChanged": false,
+    "actualPrivateDryRunAdmitted": true,
+    "dryRunExecutionAllowed": false
+  },
+  "guards": {
+    "originalUnknownBodyReplayAllowed": false,
+    "newUnknownStillBlocks": true,
+    "auditPrefixBound": true,
+    "auditProviderSigned": false,
+    "auditAuthority": "operator verified provider metadata, sealed local sidecar",
+    "credentialsCopied": false,
+    "providerDeadlineSeconds": 75,
+    "sshDeadlineSeconds": 95,
+    "nodeDeadlineSeconds": 105,
+    "retries": 0,
+    "redirects": 0,
+    "responseLimitBytes": 2097152
+  },
+  "acceptance": {
+    "originalTaskRecovered": false,
+    "fullRealSiteAcceptancePassed": false,
+    "kmsPassed": false,
+    "billingVerified": false,
+    "goalComplete": false,
+    "productionChanged": false
+  }
+}
