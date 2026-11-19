@@ -146,7 +146,9 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
     const ledgerPath = join(runtime, 'model-relay/requests.json');
     const ledgerBefore = await readFile(ledgerPath);
     const ledger = JSON.parse(ledgerBefore.toString());
-    expect(ledger.attempts).toHaveLength(14);
+    expect(ledger.maxAttempts).toBe(25);
+    expect(ledger.attempts).toHaveLength(25);
+    expect(ledger.attempts[13].state).toBe('unknown');
     expect(ledger.attempts.filter((a: { state: string }) => a.state === 'unknown')).toHaveLength(1);
     const dump = await readFile(join(incident, 'owned-incident-sql.sql'));
     expect(hash(dump)).toBe('7f0950acc9c656ea7575b191ed1a47cacc9b931185bc2e120b3320ecef87bf9a');
