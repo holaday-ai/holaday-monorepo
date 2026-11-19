@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import express from 'express';
@@ -73,6 +73,76 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       { flag: 'wx', mode: 0o600 },
     );
     const hash = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
+    const candidatePath = process.env.HOLADAY_SAVED_FILE_RECOVERY_CANDIDATE;
+    let candidateBinding: Record<string, unknown> | null = null;
+    const uiDir = join(artifacts, 'workbench');
+    if (candidatePath) {
+      const manifestPath = resolve(candidatePath);
+      expect(manifestPath.startsWith('/private/tmp/pr360-readiness/candidate-')).toBe(true);
+      const candidateRoot = dirname(manifestPath);
+      const manifestBytes = await readFile(manifestPath);
+      const candidate = JSON.parse(manifestBytes.toString());
+      expect(candidate.kind).toBe('local_review_build_only');
+      expect(candidate.sourceCommit).toMatch(/^[a-f0-9]{40}$/);
+      expect(candidate.executionAllowed).toBe(false);
+      expect(candidate.runtimeInputs).toBe('runtime-inputs.json');
+      const inputBytes = await readFile(join(candidateRoot, 'runtime-inputs.json'));
+      expect(hash(inputBytes)).toBe(candidate.runtimeInputsSHA256);
+      const inputs = JSON.parse(inputBytes.toString()) as Array<{ path: string; sha256: string }>;
+      expect(inputs.length).toBe(candidate.runtimeInputCount);
+      expect(inputs.length).toBeLessThan(5000);
+      for (const input of inputs) {
+        const path = resolve(root, input.path);
+        expect(path.startsWith(`${resolve(root)}/`)).toBe(true);
+        expect(hash(await readFile(path)), input.path).toBe(input.sha256);
+      }
+      const artifact = candidate.artifacts.workbench;
+      expect(artifact.archive).toMatch(/^workbench-[a-f0-9]{8}\.zip$/);
+      expect(artifact.fileManifest).toBe('workbench-files.json');
+      const archivePath = join(candidateRoot, artifact.archive);
+      expect(hash(await readFile(archivePath))).toBe(artifact.sha256);
+      const fileBytes = await readFile(join(candidateRoot, artifact.fileManifest));
+      expect(hash(fileBytes)).toBe(artifact.fileManifestSHA256);
+      const extracted = spawnSync(
+        'python3',
+        [
+          '-c',
+          [
+            'from pathlib import Path, PurePosixPath',
+            'import sys, zipfile, stat',
+            'with zipfile.ZipFile(sys.argv[1]) as archive:',
+            ' entries = archive.infolist()',
+            ' assert len(entries) < 5000 and sum(e.file_size for e in entries) < 256*1024*1024',
+            ' for entry in entries:',
+            '  path = PurePosixPath(entry.filename)',
+            '  assert not path.is_absolute() and ".." not in path.parts and "\\\\" not in entry.filename',
+            '  assert not stat.S_ISLNK(entry.external_attr >> 16)',
+            ' assert archive.testzip() is None',
+            ' archive.extractall(sys.argv[2])',
+          ].join('\n'),
+          archivePath,
+          uiDir,
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(extracted.status, extracted.stderr).toBe(0);
+      const entries = JSON.parse(fileBytes.toString()) as Array<{ path: string; sha256: string }>;
+      expect(entries.length).toBe(artifact.files);
+      for (const entry of entries) {
+        const path = resolve(uiDir, entry.path);
+        expect(path.startsWith(`${uiDir}/`)).toBe(true);
+        expect(hash(await readFile(path)), entry.path).toBe(entry.sha256);
+      }
+      candidateBinding = {
+        sourceCommit: candidate.sourceCommit,
+        manifestSHA256: hash(manifestBytes),
+        workbenchZIP_SHA256: artifact.sha256,
+        runtimeInputsVerified: inputs.length,
+        extractedFilesVerified: entries.length,
+        scope:
+          'actual frozen workbench ZIP with equivalent source backend; compiled backend boot not claimed',
+      };
+    }
     const ledgerPath = join(runtime, 'model-relay/requests.json');
     const ledgerBefore = await readFile(ledgerPath);
     const ledger = JSON.parse(ledgerBefore.toString());
@@ -149,7 +219,6 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
     const address = ws.wss.address();
     if (!address || typeof address === 'string') throw new Error('No owned WS listener');
     const wsPort = address.port;
-    const uiDir = join(artifacts, 'workbench');
     const app = express();
     let blockedMutations = 0;
     app.use('/api', (req, res, next) => {
@@ -162,7 +231,7 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
     });
     app.use('/api', createHttpApp({ planner: {} as never }));
     app.use(express.static(uiDir));
-    app.use(express.static(join(root, 'apps/web-workbench/public')));
+    if (!candidateBinding) app.use(express.static(join(root, 'apps/web-workbench/public')));
     const tokens = {
       owner: await signAccessToken({ sub: 'usr_acceptance_github', plan: 'pro' }),
       other: await signAccessToken({ sub: 'usr_acceptance_sheets', plan: 'pro' }),
@@ -212,29 +281,31 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       );
       await probe.close();
     };
-    const web = join(root, 'apps/web-workbench');
-    const entry = join(artifacts, 'ui-entry');
-    await mkdir(entry);
-    await writeFile(
-      join(entry, 'index.html'),
-      '<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Holaday 文件恢复验收</title></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>',
-    );
-    await writeFile(join(entry, 'entry.tsx'), `import '${web}/src/main.tsx';`);
-    const config = join(entry, 'vite.config.mjs');
-    await writeFile(
-      config,
-      `import app from '${web}/vite.config.ts';export default {...app,root:${JSON.stringify(entry)},resolve:{alias:{'@':${JSON.stringify(join(web, 'src'))},'react':${JSON.stringify(join(web, 'node_modules/react'))},'react-dom':${JSON.stringify(join(web, 'node_modules/react-dom'))}}},css:{postcss:${JSON.stringify(web)}},build:{...app.build,outDir:${JSON.stringify(uiDir)},emptyOutDir:true}};`,
-    );
-    const build = spawnSync(
-      process.execPath,
-      [join(web, 'node_modules/vite/bin/vite.js'), 'build', '--config', config],
-      { cwd: web, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' } },
-    );
-    await writeFile(
-      join(artifacts, 'workbench-build.log'),
-      (build.stdout ?? '') + (build.stderr ?? ''),
-    );
-    expect(build.status).toBe(0);
+    if (!candidateBinding) {
+      const web = join(root, 'apps/web-workbench');
+      const entry = join(artifacts, 'ui-entry');
+      await mkdir(entry);
+      await writeFile(
+        join(entry, 'index.html'),
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Holaday 文件恢复验收</title></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>',
+      );
+      await writeFile(join(entry, 'entry.tsx'), `import '${web}/src/main.tsx';`);
+      const config = join(entry, 'vite.config.mjs');
+      await writeFile(
+        config,
+        `import app from '${web}/vite.config.ts';export default {...app,root:${JSON.stringify(entry)},resolve:{alias:{'@':${JSON.stringify(join(web, 'src'))},'react':${JSON.stringify(join(web, 'node_modules/react'))},'react-dom':${JSON.stringify(join(web, 'node_modules/react-dom'))}}},css:{postcss:${JSON.stringify(web)}},build:{...app.build,outDir:${JSON.stringify(uiDir)},emptyOutDir:true}};`,
+      );
+      const build = spawnSync(
+        process.execPath,
+        [join(web, 'node_modules/vite/bin/vite.js'), 'build', '--config', config],
+        { cwd: web, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' } },
+      );
+      await writeFile(
+        join(artifacts, 'workbench-build.log'),
+        (build.stdout ?? '') + (build.stderr ?? ''),
+      );
+      expect(build.status).toBe(0);
+    }
     browser = await chromium.launch({
       channel: 'chrome',
       headless: true,
@@ -297,7 +368,7 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       await page.getByText('文件已保存，任务结果尚未确认。').waitFor({ timeout: 10000 });
       await page.getByRole('region', { name: '执行结果待核实' }).waitFor();
       expect(await page.getByTestId('live-status-line').count()).toBe(0);
-      expect(await page.title()).toBe('Holaday 文件恢复验收');
+      expect(await page.title()).toBe(candidateBinding ? 'HOLA DAY' : 'Holaday 文件恢复验收');
       expect(await page.locator('vite-error-overlay').count()).toBe(0);
       expect(await page.getByTestId('assistant-answer').count()).toBe(0);
       const downloads = [];
@@ -361,6 +432,7 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
           scope:
             'historical actual saved-file recovery only; original task result remains unresolved',
           browser: browser.version(),
+          candidateBinding,
           browserPlugin: 'Browser plugin not available; existing project Playwright workflow',
           readOnlyHTTP: true,
           origin,
