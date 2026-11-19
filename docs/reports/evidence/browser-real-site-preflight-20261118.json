@@ -65,10 +65,10 @@
   "actualProjectPluginTaskRun": false,
   "realKmsCryptoCalls": 0,
   "awsExecutionApproval": "explicitly approved; 11crypto attempts /3DescribeKey /0.01USD incremental cap",
-  "modelAPICalls": 0,
+  "modelAPICalls": 1,
   "productionChanged": false,
   "deployed": false,
-  "updatedAtUTC": "2026-11-18T23:15:59.930194+00:00",
+  "updatedAtUTC": "2026-11-19T01:13:04.215840+00:00",
   "isolatedChromeCandidate": {
     "finishedAtUTC": "2026-11-18T16:18:03.651Z",
     "extensionId": "olmdjdkljgkmpodheoanlfaahnfllopj",
@@ -114,5 +114,8 @@
   "cloudshellAttemptEvidence": "browser-vault-cloudshell-attempt-20261118.json",
   "chrome157LocalAcceptanceEvidence": "browser-chrome157-local-acceptance-20261118.json",
   "actualProjectPluginTaskRunScope": "real GitHub/Sheets tasks; local fixture tasks have separate evidence",
-  "localProjectPluginTaskRun": true
+  "localProjectPluginTaskRun": true,
+  "googleManualLoginObserved": true,
+  "realModelConnectivityPassed": true,
+  "loginAndModelPreflightEvidence": "browser-real-site-login-and-model-20261118.json"
 }

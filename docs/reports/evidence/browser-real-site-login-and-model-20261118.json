@@ -1,0 +1,94 @@
+{
+  "kind": "holaday-real-site-login-and-model-preflight-v1",
+  "observedAtUTC": "2026-11-19T01:13:04.215840+00:00",
+  "scope": "human website login and one actual SDK connectivity request only; not full candidate App or real site task acceptance",
+  "google": {
+    "automatedProfileLoginRejected": true,
+    "screenshotAlsoShowsChromeSyncSignInFlow": true,
+    "supportedBrowserGuidance": "https://support.google.com/accounts/answer/7675428?co=GENIE.Platform%3DDesktop&hl=zh-Hans",
+    "normalProfileCreatedViaChromeUI": true,
+    "normalProfileName": "Holaday 验收",
+    "normalVisibleCommandLineHasAutomationOrDebuggingFlags": false,
+    "ownerPerformedLogin": true,
+    "sheetTitleObserved": "Holaday PR360 Acceptance 20261118",
+    "rawDataTabObserved": true,
+    "loginFormNoLongerVisible": true,
+    "switchToExistingProfileDeclined": true,
+    "optionalProfilePhotoSkipped": true,
+    "syncEnableActionPerformed": false,
+    "stableSubjectVerified": false,
+    "actualProjectTaskRun": false
+  },
+  "github": {
+    "ownerReportedLoggedIn": true,
+    "agentLivePageVerified": false
+  },
+  "realModel": {
+    "kind": "holaday-real-model-connectivity-v1",
+    "sourceRuntime": "2f22be1d",
+    "region": "cn",
+    "realProvider": true,
+    "providerCredentialValuesReturned": false,
+    "model": "qwen3.8-flash",
+    "requestedMaxTokens": 32,
+    "maxRetries": 0,
+    "syntheticOnly": true,
+    "productionConfigChanged": false,
+    "siteTaskRun": false,
+    "ready": true,
+    "usage": {
+      "inputTokens": 29,
+      "outputTokens": 1,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "complete": true
+    },
+    "stopReason": "end_turn",
+    "metadata": {
+      "provider": "alibaba-model-studio",
+      "region": "cn",
+      "deploymentScope": "china_mainland",
+      "model": "qwen3.8-flash",
+      "endpointKind": "workspace_dedicated",
+      "protocol": "messages"
+    },
+    "localHttpTransportAttempts": 1,
+    "finishedAtUTC": "2026-11-19T01:07:51.437Z"
+  },
+  "modelHTTPAttempts": 1,
+  "relay": {
+    "credentialValuesRemainOnExistingServer": true,
+    "plaintextModelCredentialsCopied": false,
+    "newCredentialsCreated": false,
+    "threeOfflineScopeAndBudgetGuardsPass": true,
+    "redirectFollowingDisabledAfterProbe": true,
+    "postHardeningAdditionalProviderRequests": 0,
+    "temporaryTestTransportOnly": true
+  },
+  "sdkModuleHashesMatchFrozenRuntime2f22be1d": {
+    "llm/messages-adapter.js": "f8b4201629b38fe99bb0792899c4f28e6d73e0bc1d0910ed3f9729511ae2bfe6",
+    "llm/qwen-messages-transport.js": "0e9526f84e22b31288787d060063f3e1673d5ce451cbd9bd1ef3734f0944cebc",
+    "llm/qwen-route.js": "62a1ffadb4f2a7ebe88be37b437d049c7241393c2549ec68e18251b5edbcb01b",
+    "config/env.js": "3e7ee1bdc32047647fffbf83b42b788960d90ca283decf447fdef3423490c720"
+  },
+  "candidateAppModelBackendConnected": false,
+  "projectExtensionConnectedInNormalGoogleProfile": false,
+  "actualGithubSheetsTaskRun": false,
+  "realAccountSaveRestorePassed": false,
+  "physicalOsInputAcceptance": false,
+  "awsCryptoCalls": 0,
+  "productionConfigChanged": false,
+  "productionDataWrites": 0,
+  "deployed": false,
+  "localSqlPreparation": {
+    "phase": "schema-template-ready",
+    "version": "8.0.46",
+    "clonedTableStructures": 96,
+    "businessDataCopied": 0,
+    "memoryBytes": 402653184,
+    "cpus": 0.5,
+    "sourceSnapshotAtUTC": "2026-11-18T14:05:17.851842+00:00",
+    "sourceStructuresSHA256": "85a0fd6ffa920525c07264dc5142a97c9999dc048e8031d066ef6e934fca7646",
+    "actualAppTaskRun": false
+  }
+}
