@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 1,
+  "kind": "Linux x86_64 emulated functional closed-entry verification",
+  "preparedAtUTC": "2026-11-19T10:05:19.636932+00:00",
+  "preparedAtSourceHead": "403ff77716205f585119f1b5c796c47d6369ca9b",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "frozenTestSourceHead": "01d388ddb99a30a784876c60abc3d7ead2026d00",
+  "runtimeInputsVerified": 1827,
+  "runtimeInputsManifestSHA256": "b4f7788fb6c002246b94ffbd536a42314a98a8bbbf0ad2433ecb89397537c371",
+  "runtimeCodeChanges": 0,
+  "targetGuestArchitecture": "x64",
+  "arm64HostCpuEmulation": true,
+  "kernelExecutable": "/run/rosetta/rosetta",
+  "kernelNodePathNative": false,
+  "nativeProductionProcessIdentityAcceptance": false,
+  "guestNodeArchiveSHA256": "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de",
+  "guestNodeExecutableSHA256": "fde6a4bf8d0562f7751d1a2d6cb9b417c4cfe107bbcb0aa3e9a24e125e348f48",
+  "guestExecutableMatchesOfficialArchiveMember": true,
+  "toolchain": {
+    "officialUbuntuIndex": "ubuntu@sha256:9abcaffc92a5279fff3a6a41635c0800ea33e528425fb389658806476e7defde",
+    "localQaImageId": "sha256:f05d4ec2cc49f65c979ab1a9e1cb2c05b480525436722aac988bead3b8c223b0",
+    "localQaTag": "holaday-browser-x64-kit:node22-23-3-13e95c491b",
+    "node": "v22.23.3",
+    "pnpm": "10.33.0",
+    "architecture": "amd64",
+    "applicationSourceIncluded": false,
+    "realCredentialsIncluded": false,
+    "ownedBuildContainerRemoved": true,
+    "productionArtifact": false
+  },
+  "functionalColdStart": {
+    "passed": true,
+    "finalRun": "v4",
+    "actualEntrypointCmdlineVerified": true,
+    "uid": 998,
+    "rootOwnedGuestNodeAndCandidateVerified": true,
+    "networkNoneThroughout": true,
+    "offlineDependencies": {
+      "resolved": 448,
+      "reused": 448,
+      "downloaded": 0,
+      "frozenLockfile": true,
+      "installScriptsRun": false
+    },
+    "nativeBindings": {
+      "argon2SyntheticHashVerify": true,
+      "sharpSyntheticOnePixelPng": true
+    },
+    "healthStatus": 200,
+    "businessRequestStatus": 503,
+    "sameManagedPidOwnsHttpAndWs": true,
+    "listenerPorts": [
+      31011,
+      31012
+    ],
+    "maintenanceStatus": {
+      "mode": "closed",
+      "idle": true,
+      "needsReconciliation": false,
+      "newBootIdentity": true
+    },
+    "gracefulExit": {
+      "code": 0,
+      "signal": null
+    },
+    "writerLockRemoved": true,
+    "controlSocketRemoved": true,
+    "finalJournalClosed": true,
+    "httpListenerClosed": true,
+    "ownedContainerRemoved": true,
+    "resourceLimits": {
+      "Memory": 805306368,
+      "MemorySwap": 805306368,
+      "NanoCpus": 500000000,
+      "PidsLimit": 128
+    },
+    "peakMemoryBytes": 805310464,
+    "oom": 0,
+    "oomKill": 0,
+    "connectedDatabaseAcceptance": false,
+    "vaultEnabledAcceptance": false,
+    "fullReleaseAcceptance": false
+  },
+  "retainedEarlierResults": [
+    {
+      "stage": "initial public pull",
+      "result": "owned client/helper terminated by agent; anonymous temp config subsequently succeeded; root cause not established",
+      "userDockerConfigChanged": false
+    },
+    {
+      "stage": "v1 preparation",
+      "result": "index/selected-image addressing refused before App creation; original files retained",
+      "applicationStarts": 0
+    },
+    {
+      "stage": "v2 preparation",
+      "result": "Node PATH absent from Ubuntu base; App never started; container removed",
+      "applicationStarts": 0
+    },
+    {
+      "stage": "v3 App validation",
+      "result": "native-only proc/exe fixture assertion rejected actual Rosetta path; App exited0; receipt remains failed",
+      "applicationStarts": 1,
+      "ownedContainerRemoved": true
+    }
+  ],
+  "privateReceiptBindings": [
+    {
+      "path": "linux-x64-entry-20261119-v1/node-provenance.json",
+      "bytes": 267,
+      "sha256": "dfda16f495082d0fa307a2a01a4f5f65d9736535c3a7f2fc3553b766a2eda51a"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/pnpm-provenance.json",
+      "bytes": 369,
+      "sha256": "fae73489ade3e2e28bc581f983cdb7aecfd13d77e4a509d1d12fb4a025bef65d"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/pnpm-files.json",
+      "bytes": 187059,
+      "sha256": "1a20b337301558a6a5a49793329cabdadb103f79c54054e57b02ad8f6599f9ba"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/initial-pull-cancel.json",
+      "bytes": 405,
+      "sha256": "819e7c57ab63aea671e289ce1c7268bd73bb8e26523625b800f10abb786369f3"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/image-pull.json",
+      "bytes": 177,
+      "sha256": "85dc6431e31115ddffd029330a4478be18512b7d6565bd87d8cddc7c1e4f8979"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/image-pull.log",
+      "bytes": 317,
+      "sha256": "7719f6790d28522a4f23e1cd2bced0c05628868844d1d12f0126b82d53b21069"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/run-before-platform-selection.py",
+      "bytes": 7736,
+      "sha256": "f8612fe049bc20478c4241fb97c1fd6f635329ef1f5599f7fcc0b68762340b97"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/run.py",
+      "bytes": 7763,
+      "sha256": "559614cd88ea90a2dd17be9d6aeffe4e85dc231753ba785e7f630bc77e81b79e"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/receipt.json",
+      "bytes": 2913,
+      "sha256": "aa93ef2a0f7d59505f81eb4ea946e90140c0cccf601be4f4fac3d0049494bf11"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/image-provenance.json",
+      "bytes": 244,
+      "sha256": "ea6e817399d08eab3a4877004e096aa63274bc63fd66757c3a702890cb59d99f"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/platform-selection-note.json",
+      "bytes": 389,
+      "sha256": "4d97086519e557b15f9a1331131ac3c99085efd0fdcc35b3c2309b2c942f7e06"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/index-container-probe.json",
+      "bytes": 346,
+      "sha256": "cbf54635bb64b675099212f2f870d04d62663857979dcf8fa34e9f40c777c15d"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/prepare-kit.py",
+      "bytes": 5163,
+      "sha256": "ad20b5fe7f69187bb23cd05e42dad02f0612c96b434e52983515a99d3b2745c2"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/toolchain-receipt.json",
+      "bytes": 1161,
+      "sha256": "7863b1cbccc50f93cf0054be80a9bbda33440e04c9b355f665fbd32638e0e623"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v1/toolchain-build.log",
+      "bytes": 12736,
+      "sha256": "f3c6dbf47a62d25bdde11f7d98f4727b2f2884b7cba6559819862e0ddc007feb"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v2/run.py",
+      "bytes": 8045,
+      "sha256": "ffbd16bdc65cae13998330b83fcb1a1ab4cc099d68838f19475728f0a75fbc05"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v2/cold-start.mjs",
+      "bytes": 9247,
+      "sha256": "96a1f1956c658601134b17ff43fcb0d6f6d5736d3fd848f70b4fbed97acdb3da"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v2/install.log",
+      "bytes": 12890,
+      "sha256": "1c4f63a213f3157aefc2f6994649053b8cb71d7168315d3e4672b19966125533"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v2/receipt.json",
+      "bytes": 765,
+      "sha256": "53974fe46c233a76bd264f24f3768d30d284fbb64b8b673284a134bbae44bb83"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v2/container-absence.json",
+      "bytes": 212,
+      "sha256": "65373bde88452369d1b05a7be929a19c68184bad7fb1f66e0aaab94a5d21d55a"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/run.py",
+      "bytes": 7509,
+      "sha256": "a9959288d25fbac08300d55b356c03964f5204739faf643ac8e575ba40e16333"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/cold-start.mjs",
+      "bytes": 9247,
+      "sha256": "96a1f1956c658601134b17ff43fcb0d6f6d5736d3fd848f70b4fbed97acdb3da"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/install.log",
+      "bytes": 2170,
+      "sha256": "f981f9d8e9ea2bdb07fbc2e6ee9dc8ab691a1f74f58ed4e054f8f65563a5e204"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/runtime.log",
+      "bytes": 758,
+      "sha256": "2c1409928f4df5e7ffbab7ebfb59df6b401c505753d672daa72ba0ebaaf3d153"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/receipt.json",
+      "bytes": 2126,
+      "sha256": "4f7a497e862ebe1f3dfe09bd3b0ebaece79622c8fdb84cf05d9edfc4e9c5fee1"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/cold-start-result.json",
+      "bytes": 869,
+      "sha256": "252d2ef9655505c6971aeb6e96183b45da09a012e57ad1ee19956fff46ab9ad5"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/cold-start-application.log",
+      "bytes": 1121,
+      "sha256": "c69e46b1b1574e660f23470be286a0de6f83ed81056303c22abaf6a0cdb02428"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/cold-start-progress.json",
+      "bytes": 71,
+      "sha256": "7aeedc4960289c9539c869682d34f29f37899e4a11e94d16aa9c363c0283e03c"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v3/container-absence.json",
+      "bytes": 212,
+      "sha256": "e488f5f91b6911ae1ff194c970ae6a7ef807fe55660427cbcce6a080b4e53fb3"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/run.py",
+      "bytes": 7344,
+      "sha256": "8d9f79e6f603b7dce9d0068987a95be678d47796395fa0c5c2b67799495b0c87"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/cold-start.mjs",
+      "bytes": 9940,
+      "sha256": "a5b8e8dda1631265565bcf2e7ea1ba67d54da68f925bfb629902831a964c5ca4"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/guest-node-provenance.json",
+      "bytes": 267,
+      "sha256": "0ac42e3bbe0a0f6ea174ae4c10b1931bf10f4b15b8cf32dd45abc5e16e20d37d"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/install.log",
+      "bytes": 1435,
+      "sha256": "593422a468d5d6ff81cc27641896fcb43ac549d89149c0ebd3b4ee1c2c694c1c"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/runtime.log",
+      "bytes": 1243,
+      "sha256": "839b3b5919e370004dac33c25569857aef7fc1d716ca7e609141faf1d8ec670b"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/receipt.json",
+      "bytes": 2676,
+      "sha256": "838e7d757780fb6a7ccd98d49e9e347239a212a93b5842f677e9a381dd010b30"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/cold-start-result.json",
+      "bytes": 1465,
+      "sha256": "ea4ba3fc3a74888a205954718e8f86a899971d44ef263c2fea6dc57450c47f39"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/cold-start-application.log",
+      "bytes": 1121,
+      "sha256": "11ac5dd3a897498a2338dd2519da7aae4d8677252daea9bf3c79aeb780de7e65"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/cold-start-progress.json",
+      "bytes": 71,
+      "sha256": "325818bc25c25d1835ba192bf0841f5d01ec3004f2d294c20a8800c49d396dd9"
+    },
+    {
+      "path": "linux-x64-entry-20261119-v4/container-absence.json",
+      "bytes": 212,
+      "sha256": "b77ee72add9cd3096f1f03100767a038cd81b97262b3ce2cfa24e6f6266dc41d"
+    }
+  ],
+  "effects": {
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "productionBusinessWrites": 0,
+    "productionConfigurationChanges": 0,
+    "originalOrFreshSheetExports": 0,
+    "userDockerLoginConfigChanged": false,
+    "deployment": false
+  },
+  "modelLedgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+  "modelAttempts": 25,
+  "additionalModelBudgetAuthorized": false,
+  "remaining": [
+    "actual production effective configuration and dedicated KMS service identity",
+    "Google trusted stable subject and both sites same-snapshot lifecycle proof",
+    "real approved KMS package, original full PR360 JSON and full100-row Sheets workflows",
+    "physical input, real billing evidence and protected on-host release bindings"
+  ],
+  "goalComplete": false,
+  "releaseReady": false,
+  "executionAllowed": false,
+  "productionChanged": false
+}

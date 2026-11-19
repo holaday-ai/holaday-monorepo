@@ -165,7 +165,7 @@
     "real project-plugin/site task acceptance",
     "account save/rebuild/expiry/revoke/switch",
     "physical input and actual billing",
-    "production x86_64 exact dependencies and reviewed configured closed entry; local arm64 cold start passed separately",
+    "actual production service configuration, KMS identity and protected native-host bindings; arm64 and x64-emulated local closed-entry checks passed separately",
     "protected final target/config/inventory/legacy/window/operator binding"
   ],
   "executionAllowed": false,
@@ -209,5 +209,17 @@
     "productionWrites": 0,
     "modelCalls": 0,
     "kmsCalls": 0
+  },
+  "localLinuxX64EmulatedEntrypointVerification": {
+    "report": "browser-linux-x64-entry-20261119.json",
+    "passed": true,
+    "architecture": "x64",
+    "cpuEmulatedOnArm64Host": true,
+    "kernelExecutable": "/run/rosetta/rosetta",
+    "officialGuestNodeHashVerified": true,
+    "nativeProductionProcessIdentityAcceptance": false,
+    "mode": "closed maintenance",
+    "node": "22.23.3",
+    "databaseAndVaultVerified": false
   }
 }
