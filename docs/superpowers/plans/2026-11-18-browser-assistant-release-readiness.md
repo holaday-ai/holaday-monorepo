@@ -63,6 +63,8 @@
 - [x] AWS供应商确定后，先完成配置/拒绝/上下文/版本、启动次序和关闭/迟到明文的RED→GREEN；45项fixture测试通过，真实跨进程KMS仍待恢复登录/账号可用并实际执行。
 - [x] 接入真实供应商SDK和命名profile启动工厂；缺输入拒启动，无测试provider回退。已有授权运行身份尚未确认，不能计为真实服务可用。
 - [ ] 在已授权的GitHub和Sheets页面核实稳定主体来源，再固定只读probe；不猜选择器。
+
+  2026-11-19来源核查：当前subject.adapter只是标签，worker仅支持主页面唯一元素文本/属性。Google合成表账号菜单实际显示名称位于account框架内，所检查分支未取得稳定主体；单次ListAccounts直接访问400，未重试。已确认既有HOLA DAY Web OAuth客户端与现网公开client_id摘要匹配，两个已登记回调均非本机；没有修改配置、兑换token、调用callback或创建用户。已有OAuth不能直接替代同一候选快照的站点主体证明，本项仍未完成。见`docs/operations/browser-site-identity-review-20261119.md`。
 - [ ] 验证真实服务加解封、错误身份/上下文/版本拒绝；记录费用与权限，不新增资源或权限。
 
   已准备CloudShell合成入口：8项本地测试、实际打包provider双OS进程mock通过（真实AWS0）。用户已明确批准固定包最多11次加解密尝试/3次DescribeKey、新增调用/传输预算0.01美元；打开us-east-2 CloudShell后AWS提示账户仍在验证，无法创建环境（新账户最长可能两天）。未上传包/运行命令/访问临时凭据，实际加解密0；等待外部验证，沿用此次授权，不新建IAM/访问密钥，不等于生产最小权限身份或另一IAM主体拒绝证据。

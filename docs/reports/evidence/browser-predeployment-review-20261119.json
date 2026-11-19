@@ -165,7 +165,7 @@
     "real project-plugin/site task acceptance",
     "account save/rebuild/expiry/revoke/switch",
     "physical input and actual billing",
-    "exact Linux dependency installation/compiled startup",
+    "exact Linux workspace, native dependencies and reviewed node --import tsx src/index.ts cold start",
     "protected final target/config/inventory/legacy/window/operator binding"
   ],
   "executionAllowed": false,

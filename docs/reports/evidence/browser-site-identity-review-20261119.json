@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "kind": "browser-site-identity-source-review",
+  "observedDateUTC": "2026-11-19",
+  "reviewedHead": "040e8ba2d77c22610901864d504daa1ccf20e5f2",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "probeContract": {
+    "configurationSource": "server only",
+    "adapterFieldIsLabelOnly": true,
+    "navigation": "configured same-origin canonical path without query or fragment",
+    "subjectRead": "one main-document locator text or attribute",
+    "frameOrMenuResolverImplemented": false,
+    "oauthResolverImplemented": false,
+    "missingOrNonuniqueSubjectIssuesProof": false,
+    "proofBindingsWeakened": false
+  },
+  "productionLoginObservation": {
+    "observedAtUTC": "2026-11-19T08:17:27.662723+00:00",
+    "servingProcessAndSocketPinned": true,
+    "health200": true,
+    "publicLoginOptions200": true,
+    "googleLoginConfigured": true,
+    "credentialValuesReturned": false,
+    "credentialValuesPersisted": false
+  },
+  "existingGoogleClient": {
+    "observedAtUTC": "2026-11-19T08:25:37.768407+00:00",
+    "existingClientMatchesLivePublicAuthorizationClient": true,
+    "publicClientIdSHA256": "a2510927924828ed68bf84cc94d510c51f2acec39403991691e7ab2293ee1168",
+    "authorizationResponseStatus": 302,
+    "redirectFollowed": false,
+    "nonceOrCookieValuesReturned": false,
+    "serverProcessEnvironmentReadForPort": true,
+    "credentialValuesReturned": false,
+    "credentialValuesPersisted": false,
+    "clientSecretValueSelectedForComparison": false,
+    "asProducedReceiptPreservedWithSeparateMetadataCorrection": true,
+    "observedRegisteredRedirectUris": [
+      "https://holaday.ai/api/auth/google/callback",
+      "https://hd-app.orangebench.tech/api/auth/google/callback"
+    ],
+    "registeredLocalCallbackObserved": false,
+    "alternateHostnameIsolationVerified": false,
+    "consoleConfigurationChanged": false,
+    "credentialsRevealedOrDownloaded": false,
+    "newOAuthResourceCreated": false
+  },
+  "googleBrowserObservation": {
+    "profile": "independent Holaday acceptance profile",
+    "surface": "Fresh100 synthetic spreadsheet account menu",
+    "inspectionMethod": "native DevTools Elements UI",
+    "displayNameElementInsideAccountFrame": true,
+    "stableSubjectEstablished": false,
+    "observationScope": "inspected display-name DOM branch; no claim about all site DOM",
+    "listAccountsDirectNavigation": {
+      "attempts": 1,
+      "httpStatus": 400,
+      "identityPayloadReturned": false,
+      "retriedVariantsOrForgedHeaders": false
+    },
+    "pageScriptExecuted": false,
+    "cookieOrStorageInspected": false,
+    "opaqueAppDataDecoded": false,
+    "devtoolsClosedAndFixturePageRestored": true
+  },
+  "startupContract": {
+    "reviewedEntrypoint": "scripts/start-orchestrator-production.sh",
+    "applicationCommand": "node --import tsx src/index.ts",
+    "workspaceRuntimeExportsPointToTypeScript": true,
+    "backendZipIsStandaloneInstaller": false,
+    "completeLinuxEntrypointColdStartVerified": false,
+    "cachedQaImageInspection": "network none; read-only filesystem; 128MiB; 0.5CPU; removed on exit; Node path and workspace directory only"
+  },
+  "effects": {
+    "googleTokenOrUserinfoRequests": 0,
+    "oauthCallbackInvocations": 0,
+    "realUsersCreated": 0,
+    "productionBusinessWrites": 0,
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "originalOrFreshSheetExports": 0,
+    "newIamOrAccessKeys": 0,
+    "runtimeCodeChanges": 0,
+    "deployment": false
+  },
+  "remaining": [
+    "GitHub and Google stable current-site subjects bound to the same restored snapshot",
+    "Actual KMS fixed-package execution and production service identity",
+    "Approved fresh real-site model tasks and original full acceptance scope",
+    "Real account lifecycle and physical input acceptance",
+    "Linux exact workspace and reviewed application entrypoint cold start",
+    "Final effective configuration and protected release bindings"
+  ],
+  "releaseReady": false,
+  "goalComplete": false,
+  "executionAllowed": false,
+  "productionChanged": false,
+  "sources": [
+    "https://developers.google.com/identity/openid-connect/openid-connect",
+    "https://docs.github.com/en/account-and-profile/concepts/username-changes",
+    "https://chromium.googlesource.com/chromium/src/+/refs/heads/main/google_apis/gaia/gaia_urls.cc"
+  ],
+  "sourceInputs": [
+    {
+      "path": "apps/orchestrator/src/browser-session-vault/production-runtime.ts",
+      "sha256": "6b247db03f75145f271b7ec10e74e0e243ae9468e54392379f8d773926570cdb"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-session-vault/worker.ts",
+      "sha256": "1c543982c6ff1acead4e0afa577cfe891df81aebb7afa51c29144e58fa724fe1"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-session-vault/profile-snapshot.ts",
+      "sha256": "cd9a4a26a772d35efe43d9fbc0dfd909e9929276ddb13e798b7612a8ef308e45"
+    },
+    {
+      "path": "apps/orchestrator/src/http.ts",
+      "sha256": "7b618bf5930a0d1cb1361543371424535c185ad8acc60a157904a39508667e8b"
+    },
+    {
+      "path": "apps/orchestrator/src/trpc/routers/auth.ts",
+      "sha256": "c3be797990b18eb85486a5d64f22f11098003eaa7798a4d21b5675b57abbb1bd"
+    },
+    {
+      "path": "scripts/start-orchestrator-production.sh",
+      "sha256": "fa3c0258852893910e14853687e0df478c8bfe75464d9dd688328bf135118d65"
+    },
+    {
+      "path": "packages/shared-types/package.json",
+      "sha256": "975ee868ceea673c1e966784b089b9325793d1a87dba0a125350a077fa69e9e7"
+    },
+    {
+      "path": "packages/skill-sdk/package.json",
+      "sha256": "a703b6d066859700e514261af2d374c52b8b281f1f571f7e8818bdaa914e5839"
+    }
+  ],
+  "privateReceiptBindings": [
+    {
+      "filename": "production-login-options.json",
+      "sha256": "b5cd36cf6541f3844043907be25716860ca080c323c397d008b388083f6738be"
+    },
+    {
+      "filename": "existing-oauth-client-binding.as-produced.json",
+      "sha256": "e29fdabfb679ca59d38b5a23a1cc4c0b84c7a84f184f7636cad89f6089d4a68f"
+    },
+    {
+      "filename": "existing-oauth-client-binding.json",
+      "sha256": "05a1a386c8f3594371cb2617a907b9c5b65d55cb3f66e0ec33b221eb2a75e00f"
+    }
+  ]
+}
