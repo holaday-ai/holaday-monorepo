@@ -3,10 +3,11 @@ import {
   type BrowserLaunchCreationReceipt,
   BrowserLaunchJournal,
   type BrowserLaunchJournalDependencies,
+  pollBrowserTaskPreparation,
   resolveBrowserLaunchTarget,
 } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
-import type { ChromeDiscovery, ChromeLaunchTarget } from './task-launch.js';
+import type { ChromeDiscovery } from './task-launch.js';
 
 export const sidePanelLaunchJournal = new BrowserLaunchJournal({
   all: async () =>
@@ -42,6 +43,7 @@ export type SidePanelBrowserRequest = <T>(
 export function sidePanelLaunchDependencies(
   request: SidePanelBrowserRequest,
   current: () => Promise<void>,
+  onLoading?: () => void,
 ): BrowserLaunchJournalDependencies<{ taskId: string; status?: string }> {
   const resolve: BrowserLaunchJournalDependencies<{ taskId: string }>['resolve'] = async (
     source,
@@ -56,11 +58,19 @@ export function sidePanelLaunchDependencies(
       request<BrowserLaunchCreationReceipt>('localChromeLaunchReceipt', { clientRequestId }, true),
     resolve,
     prepare: (selection, preparationId, resumeOnly, mode) =>
-      request<ChromeLaunchTarget>('localChromeTaskTab', {
-        selection,
+      pollBrowserTaskPreparation({
+        source: selection,
         preparationId,
-        resumeOnly,
-        mode,
+        current,
+        onLoading,
+        prepare: ({ preparationReadiness, ...target }, id) =>
+          request('localChromeTaskTab', {
+            selection: target,
+            preparationId: id,
+            resumeOnly,
+            mode,
+            ...(preparationReadiness ? { reportReadiness: true } : {}),
+          }),
       }),
     create: (body) => request<{ taskId: string; status?: string }>('create', body),
     release: async (entry) => {

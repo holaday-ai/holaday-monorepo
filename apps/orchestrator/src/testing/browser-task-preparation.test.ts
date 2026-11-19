@@ -216,3 +216,11 @@ it('restores readiness only from the original browser session connection', () =>
     ]),
   ).toThrow();
 });
+
+it('refuses a loading state that the source connection did not negotiate', async () => {
+  const prepare = vi.fn(async () => loading);
+  await expect(
+    run(prepare, { source: { ...source, preparationReadiness: undefined } }),
+  ).rejects.toThrow('尚未核实');
+  expect(prepare).toHaveBeenCalledOnce();
+});

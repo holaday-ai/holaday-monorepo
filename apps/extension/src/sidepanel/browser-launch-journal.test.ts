@@ -5,6 +5,7 @@ import {
   type BrowserLaunchTarget,
 } from '@holaday/shared-types';
 import { expect, it, vi } from 'vitest';
+import { sidePanelLaunchDependencies } from './durable-launch.js';
 
 const profile = '82cf0bca-b78c-4f12-af23-035421ab959c';
 const source = {
@@ -230,4 +231,59 @@ it('does not mint another operation after model options or page mode change on a
   ).rejects.toThrow('已改变');
   expect(h.records.size).toBe(1);
   expect(h.deps.prepare).toHaveBeenCalledOnce();
+});
+
+it('wires durable sidepanel loading checks with fixed source and id and strips UI capabilities', async () => {
+  vi.useFakeTimers();
+  try {
+    let calls = 0;
+    const requests: unknown[] = [];
+    const target = {
+      extensionClientId: 'socket-first',
+      tabId: 42,
+      expectedUrl: source.origin,
+      selectionId: source.selectionId,
+      launchBrowserSessionId: profile,
+      preparationReadiness: true,
+    };
+    const deps = sidePanelLaunchDependencies(
+      async <T>(procedure: string, body?: unknown): Promise<T> => {
+        expect(procedure).toBe('localChromeTaskTab');
+        requests.push(body);
+        calls++;
+        return (
+          calls === 1
+            ? {
+                preparationState: 'loading',
+                taskTabCreated: true,
+                extensionClientId: target.extensionClientId,
+                preparationId: '61c56349-421b-4a44-b946-507476393185',
+                sourceTabId: 42,
+                sourceOrigin: source.origin,
+                tabId: 100,
+                launchBrowserSessionId: profile,
+              }
+            : { ...target, tabId: 100 }
+        ) as T;
+      },
+      async () => {},
+    );
+    const operation = deps.prepare(
+      target,
+      '61c56349-421b-4a44-b946-507476393185',
+      true,
+      'independent',
+    );
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await operation).toMatchObject({ tabId: 100 });
+    expect(calls).toBe(2);
+    expect(requests[0]).toEqual(requests[1]);
+    expect(requests[0]).toHaveProperty('resumeOnly', true);
+    expect(requests[0]).toHaveProperty('reportReadiness', true);
+    expect((requests[0] as { selection: object }).selection).not.toHaveProperty(
+      'preparationReadiness',
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });

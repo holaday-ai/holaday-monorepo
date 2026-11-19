@@ -60,16 +60,20 @@
 **Files:** `apps/orchestrator/src/trpc/routers/local-chrome-selection.ts`及其测试；`apps/web-workbench/src/stores/task-store.ts`、`lib/browser-launch-journal.ts`；`apps/extension/src/sidepanel/task-launch.ts`、`durable-launch.ts`及各自测试。
 **Interfaces:** 发现结果携带 `preparationReadiness`；准备input可选 `reportReadiness`。仅原握手支持能力且严格绑定的原始loading回执产生HTTP成功的 `preparationState: loading`。协商失效返回不创建页面的unsupported状态；不请求新契约时保留旧ready形状。两个客户端使用Task2 helper，并剥离UI能力字段后发送selection。
 
-- [ ] RED：可靠loading的真实HTTP回归unknown保持0；旧泛化错误仍unknown、仍拒绝业务写入；所有错绑定、旧版本/旧客户端边界。
-- [ ] RED：两个客户端loading只核对原编号，ready后create一次；helper拒绝时create零次；持久化恢复不改幂等编号。
-- [ ] 实现协商、主机验证、两个客户端及后台恢复接线；原共享journal与客户端回归通过，提交。
+- [x] RED：可靠loading的真实HTTP回归unknown保持0；旧泛化错误仍unknown、仍拒绝业务写入；所有错绑定、旧版本/旧客户端边界。
+- [x] RED：两个客户端loading只核对原编号，ready后create一次；helper拒绝时create零次；持久化恢复不改幂等编号。
+- [x] 实现协商、主机验证、两个客户端及后台恢复接线；与Task5反馈一起提交以保持store字段与消费端一致。主机/HTTP57项、共享回执24项、插件/侧栏145项通过，三包定向严格类型/静态通过；完整自有空白Chrome14项通过，包括侧栏关闭/worker重启后同编号恢复。
 
 ### Task 5: 持续反馈与完整验收
 
 **Files:** `apps/web-workbench/src/components/InputArea.tsx`及其测试；`stores/task-store.ts`及创建相关测试；必要的 `apps/extension/src/sidepanel/App.tsx`反馈；既有项目验收入口与报告。
 **Interfaces:** 工作台提交中使用当前准备进度；加载超上限保留输入/原准备记录；真正创建未知的乐观行命名“任务创建待核实”。错误用持续role=alert显示，改变输入或成功提交后清理；未知创建不自动重发。
 
-- [ ] RED：toast过期后错误仍显示、输入保留；准备阶段不假称已收到任务；未知行停止虚假创建文案；loading时有明确进度。
-- [ ] 实现以上反馈，保留既有布局、输入/焦点及账号边界。
+- [x] RED：toast过期后错误仍显示、输入保留；准备阶段不假称已收到任务；未知行停止虚假创建文案；loading时有明确进度。
+- [x] 实现以上反馈，保留既有布局、输入/焦点及账号边界。准备超过上限停止自动恢复；60秒无额外尝试的回归通过。输入/完整TaskStore227项通过。
 - [ ] 相关单元/严格类型/静态、必要组件构建及真实Chrome/HTTP结合验证；不把合成通过当真实站点验收。
 - [ ] 刷新必要候选、正常推送草稿PR；私有更新准确交接，再按原完整Fresh100与其余Goal推进，不上线。
+
+## 当前验证记录
+
+Task4/Task5共用store准备状态，源码与UI消费端作一次原子提交。HTTP的成功写入只使用固定Drizzle与合成raw回执；Chrome慢页2项、完整插件14项均为项目自有空白配置与回环站点，不是已授权账号/真实Fresh100或KMS验收。新协议与持续提示已做本地验证，候选刷新与完整真实站点仍待推进。全局未知保护三文件未改动。所有检查单路、文件日志、模型调用0、旧原件重导出0，不上线。

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { userBrowserProtocolSchema } from '@holaday/shared-types';
+import { taskTabLoadingReceiptSchema, userBrowserProtocolSchema } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -52,6 +52,10 @@ export function backgroundTaskTabsEnabled(userId: string): boolean {
 function supportsTaskTabStart(raw: unknown): boolean {
   const protocol = userBrowserProtocolSchema.safeParse(raw);
   return protocol.success && protocol.data.capabilities.includes('task_tab_start');
+}
+function supportsPreparationReadiness(raw: unknown): boolean {
+  const protocol = userBrowserProtocolSchema.safeParse(raw);
+  return protocol.success && protocol.data.capabilities.includes('task_tab_readiness_v1');
 }
 export function launchRecoveryEnabled(userId: string): boolean {
   const configured = process.env.BROWSER_LAUNCH_RECOVERY_ENABLED;
@@ -163,6 +167,9 @@ export const localChromeTabsProcedure = protectedProcedure.query(async ({ ctx })
           ...(backgroundTaskTabsEnabled(ctx.userId)
             ? {
                 backgroundTaskTabs: true,
+                preparationReadiness: supportsPreparationReadiness(
+                  (reply.result as Record<string, unknown>)?.userBrowserProtocol,
+                ),
                 taskTabStart:
                   supportsTaskTabStart(
                     (reply.result as Record<string, unknown>)?.userBrowserProtocol,
@@ -267,6 +274,7 @@ export const localChromeTaskTabProcedure = protectedProcedure
         preparationId: z.string().uuid(),
         mode: z.enum(['current', 'independent']).optional(),
         resumeOnly: z.boolean().optional(),
+        reportReadiness: z.boolean().optional(),
       })
       .strict(),
   )
@@ -302,6 +310,18 @@ export const localChromeTaskTabProcedure = protectedProcedure
       timeoutMs: 5000,
     });
     if (
+      input.reportReadiness &&
+      handshake.ok &&
+      handshake.extensionClientId === extensionClientId &&
+      (!launchBrowserSessionId ||
+        (handshake.result as Record<string, unknown>)?.launchBrowserSessionId ===
+          launchBrowserSessionId) &&
+      !supportsPreparationReadiness(
+        (handshake.result as Record<string, unknown>)?.userBrowserProtocol,
+      )
+    )
+      return { preparationState: 'unsupported' as const };
+    if (
       !handshake.ok ||
       handshake.extensionClientId !== extensionClientId ||
       (launchBrowserSessionId &&
@@ -332,9 +352,33 @@ export const localChromeTaskTabProcedure = protectedProcedure
         ...(input.resumeOnly ? { resumeOnly: true } : {}),
         ...(input.mode ? { taskTabMode: input.mode } : {}),
         ...(launchBrowserSessionId ? { launchBrowserSessionId } : {}),
+        ...(input.reportReadiness ? { reportReadiness: true } : {}),
       },
       timeoutMs: 15000,
     });
+    if (reply.result && typeof reply.result === 'object' && 'taskTabStatus' in reply.result) {
+      const pending = taskTabLoadingReceiptSchema.safeParse(reply.result);
+      if (
+        !input.reportReadiness ||
+        !reply.ok ||
+        reply.extensionClientId !== extensionClientId ||
+        !supportsPreparationReadiness(
+          (handshake.result as Record<string, unknown>)?.userBrowserProtocol,
+        ) ||
+        !pending.success ||
+        input.mode === 'current' ||
+        pending.data.preparationId !== input.preparationId ||
+        pending.data.sourceTabId !== target.tabId ||
+        pending.data.sourceOrigin !== new URL(target.expectedUrl).origin ||
+        pending.data.launchBrowserSessionId !== launchBrowserSessionId
+      )
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '网页准备回执尚未核实，请保留输入并先核对。',
+        });
+      const { taskTabStatus: _status, selectedSessionVersion: _version, ...receipt } = pending.data;
+      return { ...receipt, extensionClientId, preparationState: 'loading' as const };
+    }
     const parsed = z
       .object({
         taskTabCreated: z.boolean(),

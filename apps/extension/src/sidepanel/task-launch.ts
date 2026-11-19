@@ -1,6 +1,7 @@
 import {
   type BrowserTaskLaunches,
   type BrowserTaskModeChoice,
+  pollBrowserTaskPreparation,
   resolveBrowserTaskMode,
 } from '@holaday/shared-types';
 import { type PageContext, composeContextTail } from '../shared/page-context.js';
@@ -11,6 +12,7 @@ export interface ChromeLaunchTarget {
   expectedUrl: string;
   selectionId: string;
   launchBrowserSessionId?: string;
+  preparationReadiness?: boolean;
 }
 export interface ChromeDiscovery {
   backgroundTaskTabs?: boolean;
@@ -20,7 +22,8 @@ export interface ChromeDiscovery {
 export interface SidePanelLaunchDependencies {
   discover(): Promise<ChromeDiscovery>;
   connection(): Promise<string | null>;
-  prepare(selection: ChromeLaunchTarget, preparationId: string): Promise<ChromeLaunchTarget>;
+  prepare(selection: ChromeLaunchTarget, preparationId: string): Promise<unknown>;
+  onLoading?(): void;
   assertSession(): Promise<void>;
   legacyContext(): Promise<PageContext | null>;
   launches: BrowserTaskLaunches<ChromeLaunchTarget>;
@@ -81,7 +84,13 @@ export async function prepareSidePanelLaunch(
   const target = await deps.launches.prepare(key, (id) =>
     mode === 'current'
       ? Promise.resolve(chromeLaunchTarget(source))
-      : deps.prepare(chromeLaunchTarget(source), id),
+      : pollBrowserTaskPreparation({
+          source,
+          preparationId: id,
+          prepare: deps.prepare,
+          current: deps.assertSession,
+          onLoading: deps.onLoading,
+        }),
   );
   await deps.assertSession();
   return {

@@ -20,6 +20,7 @@
 import {
   BrowserTaskLaunches,
   type BrowserTaskModeChoice,
+  BrowserTaskPreparationPendingError,
   resolveBrowserTaskMode,
 } from '@holaday/shared-types';
 import { useEffect, useRef, useState } from 'react';
@@ -418,7 +419,10 @@ export function App() {
       } catch (err) {
         if (!cancelled && seq === authSyncSeq.current) {
           setError(humanizeExtensionError(err));
-          if (recoveryAttempts.current++ < 12) {
+          if (
+            !(err instanceof BrowserTaskPreparationPendingError) &&
+            recoveryAttempts.current++ < 12
+          ) {
             recoveryTimer.current = setTimeout(
               () => {
                 recoveryTimer.current = null;
@@ -432,6 +436,9 @@ export function App() {
         if (!cancelled) {
           recoveryInFlight.current = false;
           setSubmitting(false);
+          setLaunchNotice((notice) =>
+            notice === '独立页面已创建，仍在加载；正在核对原页面…' ? null : notice,
+          );
         }
       }
     })();
@@ -504,6 +511,10 @@ export function App() {
       <T,>(procedure: string, input?: unknown, query?: boolean) =>
         browserRequest<T>(authToken, procedure, input, query),
       () => assertLaunchSession(authToken, seq),
+      () => {
+        if (mountedRef.current && seq === authSyncSeq.current)
+          setLaunchNotice('独立页面已创建，仍在加载；正在核对原页面…');
+      },
     );
   }
 
@@ -664,11 +675,13 @@ export function App() {
             }>({ type: 'holaday.status' });
             return status?.ws?.connected === true ? (status.extensionClientId ?? null) : null;
           },
-          prepare: (selection, preparationId) =>
-            browserRequest<ChromeLaunchTarget>(token, 'localChromeTaskTab', {
+          prepare: ({ preparationReadiness, ...selection }, preparationId) =>
+            browserRequest(token, 'localChromeTaskTab', {
               selection,
               preparationId,
+              ...(preparationReadiness ? { reportReadiness: true } : {}),
             }),
+          onLoading: () => setLaunchNotice('独立页面已创建，仍在加载；正在核对原页面…'),
           assertSession,
           legacyContext: getActivePageContext,
           launches: launches.current,
@@ -738,12 +751,17 @@ export function App() {
       if (!mountedRef.current) return;
       if (launchRecovery) {
         setPendingLaunchId('unconfirmed');
-        reconcileAfterFailure = true;
+        reconcileAfterFailure = !(err instanceof BrowserTaskPreparationPendingError);
       }
       setError(humanizeExtensionError(err));
     } finally {
       taskSubmitInFlight.current = false;
-      if (mountedRef.current) setSubmitting(false);
+      if (mountedRef.current && seq === authSyncSeq.current) {
+        setSubmitting(false);
+        setLaunchNotice((notice) =>
+          notice === '独立页面已创建，仍在加载；正在核对原页面…' ? null : notice,
+        );
+      }
       if (reconcileAfterFailure && mountedRef.current) setRecoveryRetry((n) => n + 1);
     }
   }

@@ -1,6 +1,6 @@
 import { BrowserTaskLaunches, resolveBrowserTaskMode } from '@holaday/shared-types';
 import { describe, expect, it, vi } from 'vitest';
-import { prepareSidePanelLaunch } from './task-launch.js';
+import { type ChromeLaunchTarget, prepareSidePanelLaunch } from './task-launch.js';
 
 describe('browser launch mode', () => {
   it.each([
@@ -46,11 +46,11 @@ const source = {
   extensionClientId: 'this-profile',
   tabId: 42,
   expectedUrl: 'https://work.example',
-  selectionId: 'source-nonce',
+  selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
   title: 'Work',
   taskTabStart: true,
 };
-const prepared = { ...source, tabId: 91, selectionId: 'task-nonce' };
+const prepared = { ...source, tabId: 91, selectionId: '4488c303-9880-44d9-885e-51e13755933b' };
 function fixture() {
   return {
     discover: vi.fn(async () => ({
@@ -58,7 +58,7 @@ function fixture() {
       tabs: [source, { ...source, extensionClientId: 'other-profile' }],
     })),
     connection: vi.fn(async () => 'this-profile'),
-    prepare: vi.fn(async () => prepared),
+    prepare: vi.fn(async (_target: ChromeLaunchTarget, _preparationId: string) => prepared),
     assertSession: vi.fn(async () => {}),
     legacyContext: vi.fn(async () => null),
     launches: new BrowserTaskLaunches<typeof prepared>(),
@@ -86,7 +86,7 @@ describe('sidepanel launcher', () => {
       extensionClientId: 'this-profile',
       tabId: 91,
       expectedUrl: 'https://work.example',
-      selectionId: 'task-nonce',
+      selectionId: '4488c303-9880-44d9-885e-51e13755933b',
     });
     expect(a.body.clientRequestId).toBe(b.body.clientRequestId);
     expect(deps.prepare).toHaveBeenCalledTimes(1);
@@ -110,4 +110,38 @@ describe('sidepanel launcher', () => {
     await expect(prepareSidePanelLaunch(input, deps)).rejects.toThrow('session changed');
     expect(deps.prepare).not.toHaveBeenCalled();
   });
+});
+
+it('keeps the sidepanel source and id while loading, then returns one ready task handle', async () => {
+  vi.useFakeTimers();
+  try {
+    const deps = fixture();
+    deps.discover.mockResolvedValue({
+      backgroundTaskTabs: true,
+      tabs: [{ ...source, preparationReadiness: true }],
+    } as never);
+    deps.prepare.mockImplementationOnce(
+      async (target, preparationId) =>
+        ({
+          preparationState: 'loading',
+          extensionClientId: target.extensionClientId,
+          taskTabCreated: true,
+          preparationId,
+          sourceTabId: 42,
+          sourceOrigin: source.expectedUrl,
+          tabId: 91,
+        }) as never,
+    );
+    const operation = prepareSidePanelLaunch(input, deps);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect((await operation).body.localChrome?.tabId).toBe(91);
+    expect(deps.prepare).toHaveBeenCalledTimes(2);
+    expect(deps.prepare.mock.calls[0]).toEqual(deps.prepare.mock.calls[1]);
+    expect((await prepareSidePanelLaunch(input, deps)).body.localChrome).not.toHaveProperty(
+      'preparationReadiness',
+    );
+    expect(deps.prepare).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

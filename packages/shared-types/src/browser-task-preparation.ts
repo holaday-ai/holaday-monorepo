@@ -98,6 +98,7 @@ export async function pollBrowserTaskPreparation(input: {
       if (!parsed.success) throw uncheckedReceipt();
       const loading = parsed.data;
       if (
+        source.preparationReadiness !== true ||
         loading.preparationId !== preparationId ||
         loading.sourceTabId !== source.tabId ||
         loading.sourceOrigin !== source.expectedUrl ||

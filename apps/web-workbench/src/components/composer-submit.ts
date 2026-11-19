@@ -28,10 +28,10 @@ export function composerSubmittingStatus(input: {
   readonly hasFollowUpTarget?: boolean;
 }): string {
   if (input.replyMode) {
-    return '已收到回复，正在继续当前任务…';
+    return '正在提交回复，等待确认…';
   }
   if (input.hasFollowUpTarget) {
-    return '已收到追问，正在打开跟进任务…';
+    return '正在提交追问，等待确认…';
   }
-  return '已收到任务，正在打开执行页…';
+  return '正在提交任务，等待确认…';
 }
