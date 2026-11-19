@@ -1,4 +1,5 @@
 import type { NativeBlobSources } from './native-blob-source.js';
+import type { NativeDownloadResponseSources } from './native-download-sources.js';
 
 export type NativeDownloadEvent = (method: string, params: Record<string, unknown>) => void;
 export interface NativeDownloadTransport {
@@ -43,11 +44,14 @@ export interface NativeDownloadCaptureOptions {
   captureMs?: number;
   totalMs?: number;
   maxBytes?: number;
+  /** Host-owned native-export policy; grants response bytes, never DOM access. */
+  responseSources?: NativeDownloadResponseSources;
 }
 const owners = new WeakMap<object, NativeDownloadCaptureController>();
 const MAX_BYTES = 50 * 1024 * 1024;
 const CHUNK_BYTES = 256 * 1024;
 type Receipt = {
+  frameId: string;
   guid: string;
   url: string;
   filename: string;
@@ -56,6 +60,7 @@ type Receipt = {
   received?: number;
 };
 type NetworkBody = {
+  frameId: string;
   requestId: string;
   networkId: string;
   url: string;
@@ -142,7 +147,32 @@ export class NativeDownloadCaptureController {
     let receipt: Receipt | undefined;
     let bodyFailure: string | undefined;
     let totalBytes = 0;
-    const requests = new Map<string, { url: string; method: string; pending: boolean }>();
+    const requests = new Map<
+      string,
+      { url: string; frameId: string; method: string; pending: boolean }
+    >();
+    // Only the clicked frame's own subtree can supply a native receipt. This
+    // includes same-origin export iframes created by its click handler, never
+    // other tabs, siblings or pre-existing ungranted cross-origin frames.
+    const frames = new Map<string, string | null>([[options.frameId, null]]);
+    const retireFrame = (id: string, keepSelected = false) => {
+      const pending = [id];
+      const seen = new Set<string>();
+      for (const frame of pending) {
+        if (seen.has(frame)) continue;
+        seen.add(frame);
+        for (const [child, parent] of frames) if (parent === frame) pending.push(child);
+        if (!keepSelected || frame !== options.frameId) frames.delete(frame);
+      }
+      return seen;
+    };
+    const allowedResponse = (url: string) => {
+      try {
+        return sameOrigin(url, options.origin) || options.responseSources?.accepts(url) === true;
+      } catch {
+        return false;
+      }
+    };
     const bodies: NetworkBody[] = [];
     const jobs = new Set<Promise<void>>();
     let notify: (() => void) | undefined;
@@ -283,6 +313,54 @@ export class NativeDownloadCaptureController {
     };
     const listener: NativeDownloadEvent = (method, params) => {
       if (released) return;
+      if (method === 'Page.frameNavigated') {
+        const frame = params.frame as
+          | { id?: unknown; url?: unknown; securityOrigin?: unknown }
+          | undefined;
+        if (typeof frame?.id === 'string' && frames.has(frame.id)) {
+          const inherited =
+            (frame.url === 'about:blank' || frame.url === 'about:srcdoc') &&
+            frame.securityOrigin === options.origin;
+          const same =
+            typeof frame.url === 'string' &&
+            sameOrigin(frame.url, options.origin) &&
+            (frame.securityOrigin === undefined || frame.securityOrigin === options.origin);
+          if (!same && !inherited) {
+            const revoked = retireFrame(frame.id);
+            // A detached download can still finish, but a committed foreign
+            // document must not reuse its predecessor's response/receipt IDs.
+            for (const [id, request] of requests)
+              if (revoked.has(request.frameId)) requests.delete(id);
+            if (
+              bodies.some((body) => revoked.has(body.frameId)) ||
+              (receipt && revoked.has(receipt.frameId))
+            ) {
+              bodyFailure = 'scope_unavailable';
+              wake();
+            }
+          }
+        }
+        return;
+      }
+      if (method === 'Page.frameAttached') {
+        if (
+          started &&
+          !expired &&
+          !retired &&
+          current() &&
+          frames.size < 64 &&
+          typeof params.frameId === 'string' &&
+          typeof params.parentFrameId === 'string' &&
+          !frames.has(params.frameId) &&
+          frames.has(params.parentFrameId)
+        )
+          frames.set(params.frameId, params.parentFrameId);
+        return;
+      }
+      if (method === 'Page.frameDetached') {
+        retireFrame(String(params.frameId), true);
+        return;
+      }
       if (method === 'Fetch.requestPaused') {
         const id = params.requestId;
         if (typeof id !== 'string') return;
@@ -311,7 +389,7 @@ export class NativeDownloadCaptureController {
           !current() ||
           !request ||
           request.url !== requestData?.url ||
-          params.frameId !== options.frameId ||
+          params.frameId !== request.frameId ||
           !['Document', 'Other'].includes(String(params.resourceType)) ||
           !attachment ||
           typeof status !== 'number' ||
@@ -339,6 +417,7 @@ export class NativeDownloadCaptureController {
           confirmCancellation = resolve;
         });
         const body: NetworkBody = {
+          frameId: request.frameId,
           requestId: id,
           networkId: networkId as string,
           url: request.url,
@@ -363,16 +442,18 @@ export class NativeDownloadCaptureController {
           !expired &&
           current() &&
           ['Document', 'Other'].includes(String(params.type)) &&
-          params.frameId === options.frameId &&
+          typeof params.frameId === 'string' &&
+          frames.has(params.frameId) &&
           typeof params.requestId === 'string' &&
           typeof request?.url === 'string' &&
           typeof request.method === 'string' &&
           ['GET', 'POST'].includes(request.method) &&
-          sameOrigin(request.url, options.origin) &&
+          allowedResponse(request.url) &&
           requests.size < 64
         )
           requests.set(params.requestId, {
             url: request.url,
+            frameId: params.frameId,
             method: request.method,
             pending: true,
           });
@@ -380,7 +461,11 @@ export class NativeDownloadCaptureController {
       }
       if (
         method === 'Page.downloadWillBegin' &&
-        params.frameId === options.frameId &&
+        typeof params.frameId === 'string' &&
+        (frames.has(params.frameId) ||
+          [...requests.values()].some(
+            (request) => request.frameId === params.frameId && request.url === params.url,
+          )) &&
         typeof params.guid === 'string' &&
         typeof params.url === 'string' &&
         typeof params.suggestedFilename === 'string'
@@ -389,6 +474,7 @@ export class NativeDownloadCaptureController {
         if (receipt && receipt.guid !== params.guid) ambiguous = true;
         else
           receipt = {
+            frameId: params.frameId,
             guid: params.guid,
             url: params.url,
             filename: params.suggestedFilename,
@@ -475,9 +561,30 @@ export class NativeDownloadCaptureController {
           reason: 'scope_unavailable',
         };
       else {
+        type FrameTree = {
+          frame: { id: string; url?: string; securityOrigin?: string };
+          childFrames?: FrameTree[];
+        };
+        const tree = (await send('Page.getFrameTree')) as { frameTree?: FrameTree };
+        const visit = (node: FrameTree, inside = false, parent: string | null = null) => {
+          const selected = node.frame.id === options.frameId;
+          const eligible =
+            selected ||
+            (inside &&
+              ((sameOrigin(node.frame.url ?? '', options.origin) &&
+                (node.frame.securityOrigin === undefined ||
+                  node.frame.securityOrigin === options.origin)) ||
+                (node.frame.url === 'about:blank' &&
+                  node.frame.securityOrigin === options.origin)));
+          if (eligible && frames.size < 64) frames.set(node.frame.id, parent);
+          for (const child of node.childFrames ?? []) visit(child, eligible, node.frame.id);
+        };
+        if (tree?.frameTree) visit(tree.frameTree);
         fetchTouched = true;
         await send('Fetch.enable', {
-          patterns: [{ urlPattern: `${options.origin}/*`, requestStage: 'Response' }],
+          patterns: [
+            ...new Set([`${options.origin}/*`, ...(options.responseSources?.patterns ?? [])]),
+          ].map((urlPattern) => ({ urlPattern, requestStage: 'Response' })),
         });
         await options.prepare();
         if (!current() || expired)
@@ -531,7 +638,7 @@ export class NativeDownloadCaptureController {
           else {
             let mimeType: string;
             let originBasis: 'download_url' | 'owning_page';
-            if (sameOrigin(receipt.url, options.origin)) {
+            if (allowedResponse(receipt.url)) {
               if (receipt.url.startsWith('blob:')) {
                 if (!options.blobs) throw new Error('blob_source_unavailable');
                 const info = await options.blobs.describe(receipt.url);
@@ -551,7 +658,11 @@ export class NativeDownloadCaptureController {
               } else {
                 await Promise.all([...jobs]);
                 const candidates = bodies.filter(
-                  (value) => value.url === receipt!.url && value.settled && value.buffer,
+                  (value) =>
+                    value.url === receipt!.url &&
+                    value.frameId === receipt!.frameId &&
+                    value.settled &&
+                    value.buffer,
                 );
                 if (candidates.length > 1) throw new Error('download_ambiguous');
                 const body = candidates[0];
@@ -559,7 +670,9 @@ export class NativeDownloadCaptureController {
                 buffer = body.buffer;
                 body.buffer = undefined;
                 mimeType = body.mimeType;
-                originBasis = 'download_url';
+                originBasis = sameOrigin(receipt.url, options.origin)
+                  ? 'download_url'
+                  : 'owning_page';
               }
             } else if (receipt.url.startsWith('data:')) {
               const parsed = decodeData(receipt.url, maxBytes);
