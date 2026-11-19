@@ -255,6 +255,19 @@ it.runIf(enabled)(
         VITE_ORCHESTRATOR_WS: `ws://127.0.0.1:${wsPort}`,
       },
     );
+    // Unsafe CDP loading may reuse a previous worker at the same unpacked
+    // path/version. Bind the QA entry URL to its bytes; actual loaded assets
+    // must still be verified against disk before any acceptance task is sent.
+    const qaManifestPath = join(extensionDir, 'manifest.json');
+    const qaManifest = JSON.parse(await readFile(qaManifestPath, 'utf8'));
+    expect(qaManifest.name).toBe('HOLA DAY · Local QA');
+    expect(qaManifest.version).toBe('0.0.3');
+    expect(qaManifest.background.service_worker).toBe('service-worker-loader.js');
+    const qaWorker = await readFile(join(extensionDir, 'service-worker-loader.js'));
+    const qaEntry = `qa-worker-${createHash('sha256').update(qaWorker).digest('hex').slice(0, 16)}.js`;
+    await writeFile(join(extensionDir, qaEntry), qaWorker, { flag: 'wx', mode: 0o600 });
+    qaManifest.background.service_worker = qaEntry;
+    await writeFile(qaManifestPath, `${JSON.stringify(qaManifest, null, 2)}\n`);
     const web = join(root, 'apps/web-workbench');
     const entry = join(artifacts, 'ui-entry');
     await mkdir(entry, { recursive: true });

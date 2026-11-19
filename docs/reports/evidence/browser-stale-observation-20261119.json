@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "scope": "one bounded retry of an invalidated read-only selected-page snapshot",
+  "runtimeChanged": true,
+  "providerRequestsSent": 0,
+  "canonicalLedgerChanged": false,
+  "ledgerAttempts": 14,
+  "clientUnknown": 1,
+  "maxAttempts": 25,
+  "realCase": {
+    "freshDifferentPr360File": true,
+    "taskStatus": "failed",
+    "iterations": 0,
+    "modelCalls": 0,
+    "nativeDownloads": 0,
+    "taskFileOutputs": 0,
+    "originalFailureDetail": "observation_failed",
+    "originalExactRawAdapterErrorAvailable": false,
+    "originalTaskResumed": false
+  },
+  "diagnosis": {
+    "stableSelectedPage": "ok",
+    "backgroundCloneFirstRead": "EXTRACT_FAILED/stale_observation",
+    "backgroundCloneSecondReadAfterMs": 150,
+    "backgroundCloneSecondRead": "ok",
+    "temporaryDiagnosticHook": true,
+    "restoredAfterDiagnosis": true,
+    "countsAsFullAcceptance": false
+  },
+  "fix": {
+    "maxAdditionalReads": 1,
+    "waitMs": 150,
+    "retryOnlyExactError": "stale_observation",
+    "repeatOriginLifecycleRedactionAndFreshnessChecks": true,
+    "inputRetries": 0,
+    "downloadRetries": 0,
+    "modelRetries": 0
+  },
+  "checks": {
+    "initialFocusedPassed": 3,
+    "initialFocusedFailed": 4,
+    "finalFocusedPassed": 7,
+    "driverRegressionPassed": 46,
+    "sessionRegressionPassed": 22,
+    "driverRegressionIncludesFocusedTests": true,
+    "staticErrors": 0,
+    "strictTypesExitCode": 0,
+    "initialTypeCheck": "two new generic-data assertions corrected; initial log retained"
+  },
+  "qaPackaging": {
+    "hashedWorkerEntry": true,
+    "actualLoadedScriptHashesMatched": 5,
+    "permissionsChanged": false,
+    "version": "0.0.3",
+    "formalExtensionChangedByPackaging": false
+  },
+  "fullAcceptancePassed": false,
+  "prior8251CandidateContainsThisFix": false,
+  "productionChanged": false,
+  "goalComplete": false
+}
