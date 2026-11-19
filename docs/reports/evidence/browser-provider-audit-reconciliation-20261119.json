@@ -1,0 +1,67 @@
+{
+  "checkedAtUTC": "2026-11-19T05:09:09.379104+00:00",
+  "runtimeSourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+  "sourceHeadAtObservation": "778b9cc598b25602c29a07a97bb9b725a18c7863",
+  "source": "existing signed-in China Beijing console default audit metadata, DOM-visible rows and detail panel",
+  "matching": {
+    "localAttempts": 14,
+    "providerRows": 14,
+    "oneToOne": true,
+    "allProviderStatus200": true,
+    "modelCounts": {
+      "qwen3.8-max": 13,
+      "qwen3.8-flash": 1
+    },
+    "existingKeyMaskedPrefixSuffixMatchedInsideOriginalServer": true,
+    "credentialValuesCopied": false
+  },
+  "lastAttempt": {
+    "localClientState": "unknown_response_missing",
+    "providerOutcome": "completed",
+    "providerStatus": 200,
+    "durationSeconds": 50.49,
+    "usage": {
+      "inputTokens": 100269,
+      "outputTokens": 1295,
+      "totalTokens": 101564,
+      "cachedInputTokens": 89216
+    },
+    "responseContentRecovered": false,
+    "originalTaskAccepted": false,
+    "billingVerified": false
+  },
+  "canonicalLedger": {
+    "changed": false,
+    "attempts": 14,
+    "received": 13,
+    "clientUnknown": 1,
+    "maxAttempts": 25,
+    "sha256": "9dc51c0612e23581f1658b4486d289e15408d0ab6d94962e02943a603bff2288"
+  },
+  "operations": {
+    "newQwenRequests": 0,
+    "originalRequestsOrExportsReplayed": 0,
+    "logDeliveryEnabled": false,
+    "inferenceLoggingEnabled": false,
+    "newAPIKeys": 0,
+    "productionChanged": false,
+    "budgetOrQueueGuardsChanged": false
+  },
+  "privateEvidence": {
+    "directory": "/Users/yaleiqi/.holaday-recovery/tasks/browser-assistant-next/release-readiness-20261118/provider-audit-20261119-v1",
+    "reconciliationSHA256": "367f2844d5c54f94193320c989140b1f33008fbef460d1e4887e7b4c7ecf4e3e",
+    "rawRequestIdsAndMaskedKeyScreenshotsNotPublished": true
+  },
+  "officialReference": {
+    "monitoring": "https://help.aliyun.com/zh/model-studio/model-telemetry",
+    "note": "audit metadata is separate from prompt/response inference logs and from invoices"
+  },
+  "next": [
+    "Implement evidence-bound provider reconciliation while preserving missing client response, original 25-attempt cap and no same-body replay",
+    "Verify bounded transport deadlines and future request-id/usage capture locally before fresh real tasks",
+    "Continue full real site/file/stat/account/physical/KMS acceptance; AWS owner relogin still pending"
+  ],
+  "pr361Merged": false,
+  "deployed": false,
+  "goalComplete": false
+}
