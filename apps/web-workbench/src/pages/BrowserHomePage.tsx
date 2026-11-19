@@ -26,7 +26,6 @@ import {
   isWebPageUrl,
 } from '@/lib/browser-home';
 import { createBrowserHomeTask } from '@/lib/browser-home-task';
-import { taskActionError } from '@/lib/error-copy';
 import { buildScreencastWsUrl } from '@/lib/screencast-url';
 import { trpc } from '@/lib/trpc';
 import { useKeyboardInset } from '@/lib/use-keyboard-inset';
@@ -256,11 +255,10 @@ export function BrowserHomePage({
       if (current?.status === 'awaiting_user') {
         const replied = await useTaskStore.getState().replyToTask(current.taskId, intent, fileIds);
         if ('error' in replied || !replied.ok) {
-          toast.show(
-            taskActionError('回复失败', 'error' in replied ? replied.error : null),
-            'error',
-          );
-          return keepComposerOnSubmitFailure;
+          return {
+            ...keepComposerOnSubmitFailure,
+            error: 'error' in replied ? replied.error : '回复结果尚未确认，请核对当前任务。',
+          };
         }
         return clearComposerOnSubmitSuccess;
       }
@@ -269,8 +267,10 @@ export function BrowserHomePage({
       if (!sessionId && aliveRef.current) sessionId = await openSession();
       if (!aliveRef.current) return keepComposerOnSubmitFailure;
       if (!sessionId) {
-        toast.show(openErrorRef.current ?? '云浏览器打开失败，请稍后重试', 'error');
-        return keepComposerOnSubmitFailure;
+        return {
+          ...keepComposerOnSubmitFailure,
+          error: openErrorRef.current ?? '云浏览器打开失败，请稍后重试',
+        };
       }
       const task = { intent, fileIds, mode, expertMode, skillSelection };
       let res = await createBrowserHomeTask(task);
@@ -279,8 +279,7 @@ export function BrowserHomePage({
         if (await reopenQuietly()) res = await createBrowserHomeTask(task);
       }
       if ('error' in res) {
-        toast.show(taskActionError('发送失败', res.error), 'error');
-        return keepComposerOnSubmitFailure;
+        return { ...keepComposerOnSubmitFailure, error: res.error };
       }
       if (!aliveRef.current) return clearComposerOnSubmitSuccess;
       // Stay on this page: the assistant works on the screen, the card shows its progress.
@@ -289,7 +288,7 @@ export function BrowserHomePage({
       setView('browser');
       return clearComposerOnSubmitSuccess;
     },
-    [activeTaskId, openSession, reopenQuietly, toast],
+    [activeTaskId, openSession, reopenQuietly],
   );
 
   const sessionId = session.status === 'ready' ? session.sessionId : null;

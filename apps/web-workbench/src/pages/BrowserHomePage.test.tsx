@@ -502,7 +502,7 @@ describe('BROWSER-HOME-1 step 4: a task from the floating input runs in this bro
     expect(screen.queryByText('别的页面')).toBeNull();
   });
 
-  it('a failure shows its reason in the card; a server refusal is a toast and keeps the draft', async () => {
+  it('a failure shows its reason in the card; a server refusal stays visible and keeps the draft', async () => {
     api.create.mockRejectedValueOnce(
       Object.assign(new Error('云浏览器里已有一个任务在执行，请等它结束后再发送。'), {
         data: { code: 'PRECONDITION_FAILED' },
@@ -512,7 +512,7 @@ describe('BROWSER-HOME-1 step 4: a task from the floating input runs in this bro
     await waitFor(() => expect(api.open).toHaveBeenCalled());
     await user.type(composer(), '再整理一次');
     await user.click(screen.getByRole('button', { name: '发送' }));
-    expect(await screen.findByText(/已有一个任务在执行/)).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain('已有一个任务在执行');
     expect((composer() as HTMLTextAreaElement).value).toBe('再整理一次');
     expect(screen.queryByRole('region', { name: '云浏览器任务' })).toBeNull();
 
@@ -544,4 +544,16 @@ describe('BROWSER-HOME-1 step 4: a task from the floating input runs in this bro
     );
     expect(api.create).toHaveBeenCalledTimes(1);
   });
+});
+
+it('keeps an actual floating composer submission failure visible with its draft', async () => {
+  api.create.mockRejectedValueOnce(new Error('合成验收：任务创建尚未确认'));
+  const user = mount();
+  await waitFor(() => expect(api.open).toHaveBeenCalled());
+  const input = screen.getByPlaceholderText('描述你想让 HOLA DAY 做什么...') as HTMLTextAreaElement;
+  await user.type(input, '合成验收保留浮动输入');
+  await user.click(screen.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
+  expect((await screen.findByRole('alert')).textContent).toContain('提交失败');
+  expect(input.value).toBe('合成验收保留浮动输入');
 });

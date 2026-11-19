@@ -449,6 +449,77 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       await page.screenshot({ path: join(artifacts, `history-files-${viewport.width}.png`) });
       views.push({ viewport, downloads, facts: JSON.parse(comparison.stdout) });
     }
+    const preparationFeedbackViews = [];
+    let syntheticCreateResponses = 0;
+    if (process.env.HOLADAY_PREPARATION_FEEDBACK_VISUAL === '1') {
+      // Only the browser receives a synthetic rejected write. The read-only
+      // fixture server and its SQL never receive this submission.
+      await page.route('**/api/trpc/tasks.create*', async (route) => {
+        syntheticCreateResponses++;
+        await writeFile(
+          join(artifacts, 'synthetic-submit-count.json'),
+          JSON.stringify({ syntheticCreateResponses }),
+        );
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              error: {
+                message: '合成验收：创建结果尚未确认，请保留输入。',
+                code: -32603,
+                data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500, path: 'tasks.create' },
+              },
+            },
+          ]),
+        });
+      });
+      for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
+        const input = page.getByRole('textbox').first();
+        await input.fill('合成验收：保留这段未确认的输入，不执行网页操作');
+        await input.press('Enter');
+        const alert = page.getByRole('alert').filter({ hasText: '提交失败' });
+        await alert.waitFor({ timeout: 10000 });
+        await page
+          .getByText('任务创建待核实', { exact: true })
+          .first()
+          .waitFor({ state: 'attached' });
+        const errorText = await alert.textContent();
+        expect(errorText).toContain('提交失败');
+        await page.waitForTimeout(4500);
+        expect(await page.getByRole('button', { name: `关闭提示：${errorText}` }).count()).toBe(0);
+        expect(await alert.isVisible()).toBe(true);
+        expect(await input.inputValue()).toBe('合成验收：保留这段未确认的输入，不执行网页操作');
+        const bounds = await alert.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(bounds!.y).toBeGreaterThanOrEqual(0);
+        expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height + 1);
+        await page.screenshot({
+          path: join(artifacts, `preparation-feedback-${viewport.width}.png`),
+        });
+        preparationFeedbackViews.push({
+          viewport,
+          bounds,
+          inputPreserved: true,
+          errorStillVisibleAfterToast: true,
+          unknownCreationTitle: '任务创建待核实',
+          syntheticBrowserResponseOnly: true,
+          actualTaskCreated: false,
+        });
+        await input.fill('修改后的合成指令');
+        expect(await alert.count()).toBe(0);
+      }
+      expect(syntheticCreateResponses).toBe(2);
+      expect(blockedMutations).toBe(0);
+      await page.unroute('**/api/trpc/tasks.create*');
+    }
     expect(consoleErrors).toEqual([]);
     expect(model).not.toHaveBeenCalled();
     expect(hash(await readFile(ledgerPath))).toBe(hash(ledgerBefore));
@@ -468,7 +539,9 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       JSON.stringify(
         {
           scope:
-            'historical actual saved-file recovery only; original task result remains unresolved',
+            process.env.HOLADAY_PREPARATION_FEEDBACK_VISUAL === '1'
+              ? 'frozen UI historical saved files plus browser-only synthetic rejected submissions; no new task acceptance'
+              : 'historical actual saved-file recovery only; original task result remains unresolved',
           browser: browser.version(),
           candidateBinding,
           browserPlugin: 'Browser plugin not available; existing project Playwright workflow',
@@ -488,6 +561,8 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
           foreignTaskStatus: foreignTask.status(),
           foreignFileStatus: foreignFile.status(),
           blockedMutations,
+          preparationFeedbackViews,
+          syntheticCreateResponses,
           consoleErrors,
           consoleWarnings,
           views,
