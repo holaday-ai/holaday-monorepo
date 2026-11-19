@@ -126,13 +126,26 @@ def _audit(prefix, audit):
                  and 0 <= duration <= 86400, 'AUDIT_PROVIDER_NOT_COMPLETED')
         observed = _utc(row.get('providerUTCStartToSecond'))
         possible = []
+        anchored_matches = []
         for number, candidate in enumerate(prefix, 1):
             start = _utc(candidate['startedAtUTC'])
             end = _utc(candidate['finishedAtUTC']) if candidate.get('finishedAtUTC') else None
-            if candidate['model'] == row['model'] and 0 <= (observed - start).total_seconds() <= 15:
-                if end is None or observed < end:
-                    possible.append(number)
-        _require(possible == [index], 'AMBIGUOUS_OR_UNMATCHED_AUDIT_TIME')
+            receipt = candidate.get('providerReceipt')
+            message_id = receipt.get('providerMessageId') if isinstance(receipt, dict) else None
+            # A received response supplies an exact provider body ID. It is a
+            # stronger correlation than SSH/queue timing, but still requires the
+            # provider start to fall inside that same local request. Missing
+            # client responses retain the original unique 15-second window.
+            anchored_id = (candidate['state'] == 'received' and isinstance(message_id, str)
+                           and re.fullmatch(r'msg_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', message_id))
+            if candidate['model'] != row['model']:
+                continue
+            if anchored_id:
+                if message_id == 'msg_'+request_id and start <= observed and end is not None and observed < end:
+                    anchored_matches.append(number)
+            elif 0 <= (observed - start).total_seconds() <= 15 and (end is None or observed < end):
+                possible.append(number)
+        _require((anchored_matches or possible) == [index], 'AMBIGUOUS_OR_UNMATCHED_AUDIT_TIME')
         matched[index] = row
     _require(set(matched) == set(range(1, len(prefix) + 1)), 'INCOMPLETE_AUDIT')
     resolution = audit.get('lastAttemptResolution')

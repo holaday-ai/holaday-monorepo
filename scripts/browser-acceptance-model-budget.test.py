@@ -109,6 +109,40 @@ class BudgetTest(unittest.TestCase):
         with self.assertRaisesRegex(budget.BudgetError, 'AMBIGUOUS'):
             budget.seal_audit(self.state, encoded(self.audit))
 
+    def test_received_message_id_correlates_a_delayed_provider_start_inside_its_local_request(self):
+        entry = self.state['attempts'][0]
+        row = self.audit['matches'][0]
+        entry['finishedAtUTC'] = '2026-11-19T00:00:30+00:00'
+        entry['providerReceipt'] = {'providerMessageId': 'msg_'+row['providerRequestId']}
+        row['localFinishedAtUTC'] = entry['finishedAtUTC']
+        row['providerUTCStartToSecond'] = '2026-11-19T00:00:17+00:00'
+        before = copy.deepcopy(self.state)
+        self.permit()
+        self.assertEqual(self.state, before)
+
+    def test_persisted_received_message_id_cannot_be_replaced_by_a_time_only_match(self):
+        self.state['attempts'][0]['providerReceipt'] = {
+            'providerMessageId': 'msg_00000000-0000-4000-8000-000000000099'}
+        with self.assertRaises(budget.BudgetError):
+            self.permit()
+
+    def test_received_message_id_does_not_accept_a_provider_start_outside_the_request(self):
+        for observed in ['2026-11-18T23:59:59+00:00', '2026-11-19T00:00:11+00:00']:
+            with self.subTest(observed=observed):
+                self.state, self.audit = fixture()
+                row = self.audit['matches'][0]
+                self.state['attempts'][0]['providerReceipt'] = {'providerMessageId': 'msg_'+row['providerRequestId']}
+                row['providerUTCStartToSecond'] = observed
+                with self.assertRaises(budget.BudgetError):
+                    self.permit()
+
+    def test_unknown_attempt_cannot_use_a_message_id_to_widen_its_time_window(self):
+        row = self.audit['matches'][-1]
+        self.state['attempts'][-1]['providerReceipt'] = {'providerMessageId': 'msg_'+row['providerRequestId']}
+        row['providerUTCStartToSecond'] = '2026-11-19T00:00:30+00:00'
+        with self.assertRaises(budget.BudgetError):
+            self.permit()
+
     def test_client_response_is_not_fabricated(self):
         audit = copy.deepcopy(self.audit)
         audit['lastAttemptResolution']['clientResponseReceived'] = True
