@@ -25,6 +25,10 @@ import {
   type ValidatedBrowserTaskFile,
 } from '../../agent/browser-tools/browser-task-files.js';
 import {
+  isExplicitFileOnlyRequest,
+  taskFileInputSupported,
+} from '../../agent/browser-tools/task-file-contract.js';
+import {
   createResponsesWebSearch,
   withoutVerbatimNotes,
 } from '../../agent/browser-tools/unified-browser-loop.js';
@@ -1660,9 +1664,16 @@ export const tasksRouter = router({
             // Routing only needs file presence. Defer parsing until the lane is fixed
             // so core text can preserve the full source while other lanes keep their
             // existing parser behavior. This still precedes every quota operation.
+            let loadedCreateFiles: Awaited<ReturnType<FileService['loadMany']>> | undefined;
+            const loadCreateFiles = async () => {
+              if (!loadedCreateFiles)
+                loadedCreateFiles = await fileService.loadMany(orderedFileIds, userRow.id);
+              return loadedCreateFiles;
+            };
             const parseCreateAttachments = async (completeText: boolean) => {
               if (orderedFileIds.length === 0) return;
-              const loaded = await fileService.loadMany(orderedFileIds, userRow.id);
+              const loaded = await loadCreateFiles();
+              loadedCreateFiles = undefined;
               if (appEnv.BROWSER_TASK_FILES_V1)
                 browserInputReferences.push(
                   ...BrowserTaskFiles.validatedReferences(loaded, userRow.id),
@@ -1987,6 +1998,26 @@ export const tasksRouter = router({
             // REBUILD-2 part 2: with TOOL_ROUTER_V2 on, the tool router decides generate /
             // interface / browser instead of the keyword rules (media and file lanes keep theirs).
             // A forced browser (scrape retry, local Chrome) needs no routing turn.
+            const fileOnlyCandidate =
+              !retryCore &&
+              appEnv.BROWSER_TASK_FILES_V1 &&
+              appEnv.BROWSER_EXECUTOR === 'unified' &&
+              orderedFileIds.length > 0 &&
+              !input.localChrome &&
+              !input.browserHomeSession &&
+              !input.replyToTaskId &&
+              !ctx.scrapeBrowserRetry &&
+              isExplicitFileOnlyRequest(input.intent);
+            const fileOnlyInputs = fileOnlyCandidate
+              ? (await loadCreateFiles()).map(({ row }) => ({
+                  name: row.filename,
+                  mimeType: row.mimetype,
+                }))
+              : [];
+            const fileOnlyRequest =
+              fileOnlyCandidate &&
+              fileOnlyInputs.length === new Set(orderedFileIds).size &&
+              fileOnlyInputs.every(taskFileInputSupported);
             const routedExecution = retryCore
               ? null
               : await decideExecutionRoute({
@@ -1994,16 +2025,23 @@ export const tasksRouter = router({
                   enabled:
                     taskToolRouter.enabledFor(userRow.modelDataRegion) &&
                     !ctx.scrapeBrowserRetry &&
-                    !input.localChrome,
+                    !input.localChrome &&
+                    !fileOnlyRequest,
                   legacy: () =>
-                    explainExecutionMode({
-                      intent: input.intent,
-                      skillId: taskSkillId,
-                      // §5 fileIds-aware soft template-fill: an attachment + a fill clue
-                      // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
-                      hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
-                      logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
-                    }),
+                    fileOnlyRequest
+                      ? Promise.resolve({
+                          mode: 'browser' as const,
+                          source: 'kw:explicit-browser' as const,
+                          match: '仅附件文件处理',
+                        })
+                      : explainExecutionMode({
+                          intent: input.intent,
+                          skillId: taskSkillId,
+                          // §5 fileIds-aware soft template-fill: an attachment + a fill clue
+                          // ("填入…模板…留空") relaxes the strict-pattern adjacency requirement.
+                          hasFileAttachment: Boolean(input.fileIds && input.fileIds.length > 0),
+                          logger: ctx.logger.child({ userId: ctx.userId, stage: 'router' }),
+                        }),
                   route: async () => {
                     const judge = gatewayFor(taskModelWiring).resolve(
                       'judge',
@@ -2203,6 +2241,7 @@ export const tasksRouter = router({
             await parseCreateAttachments(
               executionMode === 'generate' || executionMode === 'scrape',
             );
+            const fileOnlyTask = fileOnlyRequest && browserInputReferences.length > 0;
             // Preserve the existing specialized stock candidate path (including its
             // generic fallback) until the remaining first-create migration is done.
             const specializedStockLaneEligible =
@@ -2389,6 +2428,7 @@ export const tasksRouter = router({
                   await assertLocalChromeSelection(ctx.userId, input.localChrome);
                 if (
                   !input.localChrome &&
+                  !fileOnlyTask &&
                   !ctx.playwrightExecutor &&
                   !ctx.executionRouter?.getExecutor('headed') &&
                   !ctx.executionRouter?.getExecutor('headless') &&
@@ -2699,9 +2739,13 @@ export const tasksRouter = router({
              * task fell through to vision-loop the moment the singleton
              * crashed, defeating Phase 8 + Phase 10 entirely.
              */
-            const browserPoolEligible = Boolean(
-              ctx.browserPool && shouldUseBrowserPool(ctx.userId) && ctx.browserPool.canAllocate(),
-            );
+            const browserPoolEligible =
+              fileOnlyTask ||
+              Boolean(
+                ctx.browserPool &&
+                  shouldUseBrowserPool(ctx.userId) &&
+                  ctx.browserPool.canAllocate(),
+              );
 
             // ===== image-mode fork (sprint #5 — nano banana) =====
             // 文生图 / 图生图 tasks: classify NB2 vs Pro, call Gemini, persist
@@ -5929,7 +5973,10 @@ export const tasksRouter = router({
               // failures become no-plan, so task execution remains available. Run in
               // parallel with memory retrieval to avoid adding serial create latency.
               const skipPlan =
-                Boolean(input.localChrome) || isSimpleSearchIntent || shouldSkipPlan(input.intent);
+                fileOnlyTask ||
+                Boolean(input.localChrome) ||
+                isSimpleSearchIntent ||
+                shouldSkipPlan(input.intent);
               const memoryService = new MemoryService(ctx.db, ctx.logger);
               const pendingPlanCalls: LlmCallRecord[] = [];
               const [planResult, relevantMemories] = await Promise.all([
@@ -5981,7 +6028,8 @@ export const tasksRouter = router({
               // 'executing' seed.
               // BROWSER-HOME-1: a cloud-browser task needs no new pool slot — never queued for one.
               const willQueueDispatch = Boolean(
-                !input.localChrome &&
+                !fileOnlyTask &&
+                  !input.localChrome &&
                   !input.browserHomeSession &&
                   ctx.taskQueue &&
                   executionMode === 'browser' &&
@@ -6098,9 +6146,12 @@ export const tasksRouter = router({
               // Empty headed lane (dev boxes without Xvfb + Brave) falls back
               // to headless → plain injected executor → router-less deploy
               // ancestor. Each null just hops to the next layer.
-              const headedExec = ctx.executionRouter?.getExecutor('headed') ?? null;
-              const headlessExec =
-                ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null;
+              const headedExec = fileOnlyTask
+                ? null
+                : (ctx.executionRouter?.getExecutor('headed') ?? null);
+              const headlessExec = fileOnlyTask
+                ? null
+                : (ctx.executionRouter?.getExecutor('headless') ?? ctx.playwrightExecutor ?? null);
 
               // Phase 21b — executionMode was decided up at the admission
               // gate (so per-mode concurrency could apply). It's reused here
@@ -6133,6 +6184,7 @@ export const tasksRouter = router({
                 let perUserExec = null;
                 let adoptedBrowserSession = false;
                 if (
+                  !fileOnlyTask &&
                   !input.localChrome &&
                   ctx.browserPool &&
                   shouldUseBrowserPool(ctx.userId) &&
@@ -6513,6 +6565,7 @@ export const tasksRouter = router({
                 // G2a 复审: never in the person's own browser (their local Chrome or their cloud
                 // browser) — they are at the screen and can pass the check themselves.
                 const wallFallbackRun =
+                  !fileOnlyTask &&
                   !input.localChrome &&
                   !input.browserHomeSession &&
                   taskToolRouter.enabledFor(userRow.modelDataRegion) &&
@@ -7650,18 +7703,20 @@ export const tasksRouter = router({
                 const runFn = () =>
                   (input.localChrome
                     ? runLocalChrome()
-                    : useOtaUserBrowser
-                      ? runUserBrowserReadonly()
-                      : runSearchWithFallback(supercarArgs, {
-                          originalIntent: input.intent,
-                          // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
-                          searchProvider: searchProviderFromEnv(),
-                          searchApiFirst: process.env.BROWSER_SEARCH_API_FIRST !== 'false',
-                          run: (args) =>
-                            runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
-                          stop: supercarAbort,
-                          onFallback: recordSearchFallback,
-                        })
+                    : fileOnlyTask
+                      ? runSupercarWithRetry(supercarArgs, { userId, taskId, logger: ctx.logger })
+                      : useOtaUserBrowser
+                        ? runUserBrowserReadonly()
+                        : runSearchWithFallback(supercarArgs, {
+                            originalIntent: input.intent,
+                            // CAPTCHA-REDUCE-1: BROWSER_SEARCH_API_PROVIDER (default none).
+                            searchProvider: searchProviderFromEnv(),
+                            searchApiFirst: process.env.BROWSER_SEARCH_API_FIRST !== 'false',
+                            run: (args) =>
+                              runSupercarWithRetry(args, { userId, taskId, logger: ctx.logger }),
+                            stop: supercarAbort,
+                            onFallback: recordSearchFallback,
+                          })
                   )
                     .then(async (rawOutcome) => {
                       let outcome = rawOutcome;

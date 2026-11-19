@@ -16,6 +16,10 @@ export type {
 
 import { env } from '../../config/env.js';
 import {
+  isExplicitFileOnlyRequest,
+  taskFileInputSupported,
+} from '../browser-tools/task-file-contract.js';
+import {
   hasParkedUnifiedTask,
   runUnifiedSupercarTask,
   unifiedParkedIntent,
@@ -85,7 +89,14 @@ export async function runSupercarTask(opts: RunSupercarOptions): Promise<Superca
       iterations: 0,
       toolsUsed: [],
     };
-  if ((browserExecutorMode() === 'unified' || opts.messagesAdapter.browserBrain) && opts.executor)
+  if (
+    (browserExecutorMode() === 'unified' || opts.messagesAdapter.browserBrain) &&
+    (opts.executor ||
+      (env.BROWSER_TASK_FILES_V1 &&
+        opts.browserTaskFiles &&
+        isExplicitFileOnlyRequest(opts.userRequest ?? opts.intent) &&
+        opts.browserTaskFiles.references().every(taskFileInputSupported)))
+  )
     return runUnifiedSupercarTask(opts);
   if (opts.messagesAdapter.browserBrain)
     return {

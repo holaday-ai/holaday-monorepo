@@ -151,6 +151,13 @@ export class BrowserTaskFileReader {
       throw new Error('文件无法读取、已失效或不在本任务材料范围内，尚未完成分析。');
     }
   }
+  completeFiles(): ReadonlySet<string> {
+    return new Set(
+      [...this.reads.values()]
+        .filter((read) => read.coverage.complete && !this.failed.has(read.fileId))
+        .map((read) => read.fileId),
+    );
+  }
   incomplete(analyzedFiles: ReadonlySet<string> = new Set()): boolean {
     return (
       this.failed.size > 0 ||

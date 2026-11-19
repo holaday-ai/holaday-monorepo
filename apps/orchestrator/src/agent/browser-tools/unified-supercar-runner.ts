@@ -54,6 +54,8 @@ import {
 } from './playwright-unified-executor.js';
 import { readOnlyEffectMayPass } from './read-only-effect-policy.js';
 import { siteEntryHint } from './site-entry-hints.js';
+import { isExplicitFileOnlyRequest, taskFileInputSupported } from './task-file-contract.js';
+import { runTaskFileMaterials } from './task-file-runner.js';
 import { createUnifiedActionGate } from './unified-action-gate.js';
 import {
   NOT_STARTED,
@@ -235,6 +237,35 @@ function describe(action: UnifiedBrowserAction, label: string | null): string {
  * replies through `supercarReply`). Never throws.
  */
 export async function runUnifiedSupercarTask(opts: RunSupercarOptions): Promise<SupercarOutcome> {
+  if (
+    env.BROWSER_TASK_FILES_V1 &&
+    opts.browserTaskFiles?.taskId === opts.taskId &&
+    opts.browserTaskFiles.references().every(taskFileInputSupported) &&
+    isExplicitFileOnlyRequest(opts.userRequest ?? opts.intent)
+  ) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    running.set(opts.taskId, controller);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abort();
+    }, opts.timeoutMs ?? 600_000);
+    timeout.unref?.();
+    try {
+      const outcome = await runTaskFileMaterials(opts, controller.signal);
+      return timedOut
+        ? {
+            ...outcome,
+            status: 'timeout',
+            reason: '文件任务超时，已停止；已保存文件保留，未完成操作不会自动重放。',
+          }
+        : outcome;
+    } finally {
+      clearTimeout(timeout);
+      if (running.get(opts.taskId) === controller) running.delete(opts.taskId);
+    }
+  }
   if (!opts.executor || !opts.messagesAdapter) {
     return {
       status: 'failed',

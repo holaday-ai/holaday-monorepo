@@ -722,9 +722,13 @@ export class BrowserTaskTable {
         const source =
           result.source.kind === 'browser_download'
             ? result.source.origin
-            : english
-              ? 'user attachment'
-              : '用户附件';
+            : result.source.kind === 'task_generated'
+              ? english
+                ? 'task-generated file'
+                : '任务生成文件'
+              : english
+                ? 'user attachment'
+                : '用户附件';
         return english
           ? `${result.filename}: source ${source}; scanned ${result.scope.scannedRows} data rows, matched ${result.scope.matchedRows}, blank rows excluded ${result.scope.blankRows}; filters ${filters}; group columns ${groups}, groups shown ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}. ${metrics ? `${metrics}. ` : ''}${result.complete ? '' : 'Partial statistics: missing/invalid values or unseen result groups.'} File scope does not verify complete website exports.`
           : `${result.filename}：来源 ${source}；统计扫描 ${result.scope.scannedRows} 条数据，筛选后 ${result.scope.matchedRows} 条，排除空记录 ${result.scope.blankRows} 条；筛选 ${filters}；分组列 ${groups}，已返回分组 ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}。${metrics ? `核对值：${metrics}。` : ''}${result.complete ? '' : '统计尚有缺失/无效值或未返回的分组，属于部分结果。'}网站导出范围尚未核实。`;

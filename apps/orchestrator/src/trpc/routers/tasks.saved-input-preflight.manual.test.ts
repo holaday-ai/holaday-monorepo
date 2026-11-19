@@ -6,7 +6,6 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import express from 'express';
-import { type Browser, chromium } from 'playwright';
 import { afterAll, expect, it, vi } from 'vitest';
 import type { TableAggregate } from '../../agent/browser-tools/browser-task-table.js';
 import { signAccessToken } from '../../auth/jwt.js';
@@ -39,11 +38,9 @@ vi.mock('../../db/client.js', () => ({
 
 const root = fileURLToPath(new URL('../../../../..', import.meta.url));
 const originalEnv = { ...env };
-let browser: Browser | undefined;
 let closeProbe: (() => Promise<void>) | undefined;
 let server: ReturnType<typeof createServer> | undefined;
 afterAll(async () => {
-  await browser?.close();
   if (server)
     await new Promise<void>((yes, no) => server!.close((error) => (error ? no(error) : yes())));
   await closeProbe?.();
@@ -132,26 +129,7 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
         return nativeFetch(input, init);
       },
     );
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await page.setContent(
-      '<!doctype html><title>Saved file preflight</title><p>仅分析已提供文件</p>',
-    );
     const navigations: string[] = [];
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) navigations.push(frame.url());
-    });
-    await context.route('**/*', (route) => route.abort());
-    const executor = {
-      getPage: async () => page,
-      resetPageForTask: async () => {},
-      screenshot: async () => ({
-        base64: (await page.screenshot({ type: 'jpeg' })).toString('base64'),
-        viewportWidth: 1280,
-        viewportHeight: 720,
-      }),
-    };
     const metadata = {
       provider: 'alibaba-model-studio',
       model: 'saved-input-scripted-fixture',
@@ -253,7 +231,7 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
             name = 'finish';
             input = {
               status: 'completed',
-              summary: '已读取保存的原件、完成统计并生成 summary.csv，两份文件均已保留。',
+              summary: `已完整读取原件并核对 summary.csv：data_rows=${aggregate!.overall[0]!.value}，amount_sum=${aggregate!.overall[1]!.value}。原件和生成文件均已保留。`,
               fields: aggregate!.overall.map((metric) => ({
                 name: metric.name,
                 value: metric.value,
@@ -262,14 +240,7 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
               })),
             };
           } else {
-            expect(turns).toBe(8);
-            expect(JSON.stringify(request.messages.at(-1))).toContain('尚无真实浏览器页面证据');
-            name = 'finish';
-            input = {
-              status: 'failed',
-              summary:
-                '文件读取、统计和新文件读回已完成，但当前浏览器完成校验要求页面证据，文件接续未验收。',
-            };
+            throw new Error('File continuation did not finish within the seven scripted turns');
           }
           return {
             id: `saved-input-${turns}`,
@@ -319,7 +290,6 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
       '/api',
       createHttpApp({
         planner: {} as never,
-        playwrightExecutor: executor as never,
         executionDrain: admission,
       }),
     );
@@ -371,11 +341,12 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
     await vi.waitFor(
       async () => {
         detail = await rpc('tasks.detail', { taskId });
-        expect(detail.status, JSON.stringify(detail)).toBe('failed');
+        expect(['completed', 'failed'], JSON.stringify(detail)).toContain(detail.status);
       },
       { timeout: 30_000, interval: 250 },
     );
-    expect(turns).toBe(8);
+    expect(detail.status, JSON.stringify(detail)).toBe('completed');
+    expect(turns).toBe(7);
     expect(JSON.stringify(detail)).toContain(inputId);
     expect(JSON.stringify(detail)).toContain(generatedId);
     expect(attemptedExternalFetches).toEqual([]);
@@ -400,13 +371,21 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
       boundary.current = db;
     });
     const reloaded = await rpc('tasks.detail', { taskId });
-    expect(reloaded.status).toBe('failed');
+    expect(reloaded.status).toBe('completed');
     const [rows] = await probe.db.execute(
       sql`SELECT status, result FROM tasks WHERE external_id=${taskId}`,
     );
     const [quota] = await probe.db.execute(
       sql`SELECT tasks_used, opus_used FROM task_quotas WHERE user_id=7`,
     );
+    const [steps] = await probe.db.execute(
+      sql`SELECT kind, status, input, output FROM task_steps WHERE task_id=(SELECT id FROM tasks WHERE external_id=${taskId}) ORDER BY seq`,
+    );
+    expect(JSON.stringify(steps)).toContain('read_task_file');
+    expect(JSON.stringify(steps)).toContain('analyze_task_table');
+    expect(JSON.stringify(steps)).toContain('create_file');
+    expect(String((detail.result as { summary?: string }).summary)).toContain(inputId);
+    expect(String((detail.result as { summary?: string }).summary)).toContain(generatedId);
     await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
     drain.close();
     expect(drain.snapshot().idle).toBe(true);
@@ -417,8 +396,8 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
         {
           scope:
             'actual saved bytes; real HTTP/SQL/tools; scripted model only, not paid real-site acceptance',
-          fullFileOnlyTaskAccepted: false,
-          completionBoundary: 'browser page evidence required; refused instead of bypassed',
+          fullFileOnlyTaskAccepted: true,
+          completionBoundary: 'opaque task-file contract; source and output receipts verified',
           sourceSHA256: material.sha256,
           sourceBytes: bytes.length,
           inputFileId: inputId,
@@ -435,6 +414,8 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
           summaryBytes: summary.length,
           actualSqlRows: rows,
           actualQuota: quota,
+          actualSteps: steps,
+          browserConfigured: false,
           newConnectionDetailStatus: reloaded.status,
           drain: drain.snapshot(),
           ledgerUnchanged: true,
