@@ -691,7 +691,9 @@ export class BrowserTaskTable {
     return [...this.analyses.values()]
       .filter((state) => !state.supersededBy)
       .map(({ result }) => {
-        const metrics = result.overall
+        // Grouped batches may overlap. Automatic result notes describe their
+        // coverage; an overall total belongs only to an explicit ungrouped query.
+        const metrics = (result.scope.groupBy.length ? [] : result.overall)
           .map(
             (metric) =>
               `${metric.name}=${metric.value ?? (english ? 'no numeric value' : '无数值')}${metric.exact ? '' : ` (${english ? 'rounded decimal places' : '舍入至小数位数'} ${metric.fractionDigits})`}`,
@@ -724,8 +726,8 @@ export class BrowserTaskTable {
               ? 'user attachment'
               : '用户附件';
         return english
-          ? `${result.filename}: source ${source}; scanned ${result.scope.scannedRows} data rows, matched ${result.scope.matchedRows}, blank rows excluded ${result.scope.blankRows}; filters ${filters}; group columns ${groups}, groups shown ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}. ${metrics}. ${result.complete ? '' : 'Partial statistics: missing/invalid values or unseen result groups.'} File scope does not verify complete website exports.`
-          : `${result.filename}：来源 ${source}；统计扫描 ${result.scope.scannedRows} 条数据，筛选后 ${result.scope.matchedRows} 条，排除空记录 ${result.scope.blankRows} 条；筛选 ${filters}；分组列 ${groups}，已返回分组 ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}。核对值：${metrics}。${result.complete ? '' : '统计尚有缺失/无效值或未返回的分组，属于部分结果。'}网站导出范围尚未核实。`;
+          ? `${result.filename}: source ${source}; scanned ${result.scope.scannedRows} data rows, matched ${result.scope.matchedRows}, blank rows excluded ${result.scope.blankRows}; filters ${filters}; group columns ${groups}, groups shown ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}. ${metrics ? `${metrics}. ` : ''}${result.complete ? '' : 'Partial statistics: missing/invalid values or unseen result groups.'} File scope does not verify complete website exports.`
+          : `${result.filename}：来源 ${source}；统计扫描 ${result.scope.scannedRows} 条数据，筛选后 ${result.scope.matchedRows} 条，排除空记录 ${result.scope.blankRows} 条；筛选 ${filters}；分组列 ${groups}，已返回分组 ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}。${metrics ? `核对值：${metrics}。` : ''}${result.complete ? '' : '统计尚有缺失/无效值或未返回的分组，属于部分结果。'}网站导出范围尚未核实。`;
       })
       .concat(
         this.failed.size

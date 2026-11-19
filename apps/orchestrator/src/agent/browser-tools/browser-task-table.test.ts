@@ -39,6 +39,28 @@ async function fixture(text: string | Buffer, name = 'report.csv') {
   };
 }
 describe('owned CSV table analysis', () => {
+  it.each([false, true])(
+    'does not append a cross-group grand total to grouped analysis notes (english=%s)',
+    async (english) => {
+      const f = await fixture('batch,total\ninitial,5348\nrecheck,236\n');
+      await f.table.run({
+        fileId: f.row.externalId,
+        mode: 'aggregate',
+        groupBy: ['A'],
+        metrics: [{ op: 'sum', column: 'B' }],
+      });
+      const note = f.table.coverageNote(english);
+      expect(note).not.toContain('5584');
+      expect(note).toContain('2/2');
+      const overall = new BrowserTaskTable(f.scope);
+      await overall.run({
+        fileId: f.row.externalId,
+        mode: 'aggregate',
+        metrics: [{ op: 'sum', column: 'B' }],
+      });
+      expect(overall.coverageNote(english)).toContain('5584');
+    },
+  );
   it('allows an explicit complete correction in the same scope without declaring the old missing-value sum complete', async () => {
     const f = await fixture('phase,files,total\ninitial,2,5\nrecheck,,3\n');
     const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
