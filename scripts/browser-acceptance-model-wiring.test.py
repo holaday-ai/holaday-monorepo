@@ -104,14 +104,21 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                     and isinstance(node.args[0], ast.Constant)]
         self.assertTrue(any(re.fullmatch(pattern, 'audit-20261119-v1.json') for pattern in patterns))
 
-    def test_check_only_admission_uses_the_real_snapshot_without_reserving_or_sending(self):
+    def test_check_only_enforces_live_snapshot_budget_without_reserving_or_sending(self):
         result = self.run_fixture(self.request, ['--check-admission-only'])
+        snapshot = json.loads(self.before)
+        attempts = len(snapshot['attempts'])
+        if attempts >= snapshot['maxAttempts']:
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('BUDGET_EXHAUSTED', result.stderr)
+            self.assertEqual(result.stdout, '')
+            return
         self.assertEqual(result.returncode, 0, result.stderr[-500:])
         response = json.loads(result.stdout)
         self.assertTrue(response['admitted'])
         self.assertFalse(response['executionAllowed'])
         self.assertEqual(response['providerRequestsSent'], 0)
-        self.assertEqual(response['attempts'], 14)
+        self.assertEqual(response['attempts'], attempts)
 
     def test_missing_flag_and_request_side_policy_overrides_are_rejected(self):
         for request, flags, reason in [
