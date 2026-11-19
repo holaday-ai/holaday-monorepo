@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "kind": "full approved-scope preparation only",
+  "preparedAtUTC": "2026-11-19T10:29:46.394860+00:00",
+  "preparedAtSourceHead": "a90eb57f1b8acc6af5e1593f56dab5accc39202b",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "github": {
+    "commit": "91ba3cd6b7b208231f60265a7bb805ae7a5af2cf",
+    "path": "docs/reports/evidence/pr360-premerge-20261118.json",
+    "sourceBytes": 7560,
+    "sourceSHA256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+    "summaryRows": 8,
+    "expectedSummaryBytes": 304,
+    "historicalFailedCountsPreserved": true,
+    "oldMini779ByteCaseNotSubstitute": true,
+    "sourceFromGitBlobNotNewBrowserDownload": true
+  },
+  "sheets": {
+    "dataRows": 100,
+    "amountSum": "5075.00",
+    "recordAmountRuleVerified": true,
+    "caseIdRuleVerified": true,
+    "range": "RawData!A1:C101",
+    "cellsReadBack": 303,
+    "privatePermissionAndOwnerMatch": true,
+    "formulasPresent": false,
+    "canonicalFixtureBytes": 1609,
+    "canonicalBytesNotNativeExportReceipt": true,
+    "browserStableSubjectProved": false,
+    "agentExportsPerformed": 0
+  },
+  "verifier": {
+    "priorTwoColumnRedPreserved": true,
+    "checks": 14,
+    "passed": 14,
+    "scope": "file bytes/facts only; no project-browser/task/account/KMS/physical proof"
+  },
+  "modelPromptOracleStatisticsExcluded": true,
+  "proposedAuthorization": {
+    "additionalMaximumAttempts": 16,
+    "cumulativeMaximumAttempts": 41,
+    "model": "qwen3.8-max",
+    "maxOutputTokens": 4096,
+    "freshOriginalDownloads": {
+      "fullGithubOriginalJsonAdditionalDownload": 1,
+      "fresh100FirstCsvExport": 1
+    },
+    "newTasksOnly": true,
+    "legacyOriginalsTasksUnknownResultsPreserved": true,
+    "legacyOperationOrBodyReplay": false,
+    "approved": false,
+    "activationAllowed": false
+  },
+  "livePolicy": {
+    "maxAttempts": 25,
+    "attemptsUsed": 25,
+    "ledgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+    "relaySHA256": "da92389c0c2700ca5a4ce9140900ac81271d97d7cf29b84e65bd1e11c957f2a4",
+    "policySHA256": "8171565fe0f6fb9a53fc5d1b9ce747411432796f236e5de9158ce16b32f0a8c8",
+    "modified": false
+  },
+  "privateMaterialBindings": [
+    {
+      "path": "cases.json",
+      "bytes": 7647,
+      "sha256": "06fcd2ecb661dd3f9fd6a4e275a2f9772c9dc2aca411ba0b06ef3b1b1eadfcc7"
+    },
+    {
+      "path": "build-cases.py",
+      "bytes": 7877,
+      "sha256": "c6f53d081db6a444fa309634c84a5d80ce26fc5459c2e3f9751863065cf84808"
+    },
+    {
+      "path": "sheets-preflight.json",
+      "bytes": 609,
+      "sha256": "829e7bb49660cf4db981e2c250cf3735f3e61660da08c329e53687d6769595e8"
+    },
+    {
+      "path": "sheets-canonical-fixture.csv",
+      "bytes": 1609,
+      "sha256": "38b0c7fe5e06b6e3c493528ead2a36e7d02261d17c89edff692d9466e6910c90"
+    },
+    {
+      "path": "pr360-premerge-source.json",
+      "bytes": 7560,
+      "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0"
+    },
+    {
+      "path": "github-expected-summary.csv",
+      "bytes": 304,
+      "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9"
+    },
+    {
+      "path": "sheets-expected-summary.csv",
+      "bytes": 46,
+      "sha256": "939f2dfedbc9cdc629a63b67a3e134fbcbd93b75a532c938eb403985c6a93e02"
+    },
+    {
+      "path": "verify-deliveries.py",
+      "bytes": 6494,
+      "sha256": "bab1cb6b7d5ccf0af3b58ae6d16c6e2d32c4e4fd4f405ea52f7e4c8def751b45"
+    },
+    {
+      "path": "comparator-red.json",
+      "bytes": 150,
+      "sha256": "050159e2b4829d85455a8411891fb26dc4a8f853f8ecdd6933ec6190f9d77528"
+    },
+    {
+      "path": "comparator-green.json",
+      "bytes": 1762,
+      "sha256": "f6d4f867cd93a5d3e16d441a48edf8b56af520fcfc4aacfcaf1527615038884a"
+    },
+    {
+      "path": "verifier-checks.json",
+      "bytes": 2238,
+      "sha256": "68540c3f89c8f4443aea3becbf40c445468df79ea80cfc8b9a54db61dcd367de"
+    }
+  ],
+  "effects": {
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "siteExports": 0,
+    "productionBusinessWrites": 0,
+    "productionConfigurationChanges": 0
+  },
+  "projectPluginAcceptance": false,
+  "goalComplete": false,
+  "releaseReady": false,
+  "executionAllowed": false,
+  "productionChanged": false,
+  "nativeUiObservation": {
+    "observedAtUTC": "2026-11-19T10:32:15Z",
+    "profileLabel": "Holaday 验收",
+    "githubExactPr360Url": true,
+    "githubAuthenticatedNavigationVisible": true,
+    "githubMergedVisible": true,
+    "scope": "current native page state only; no project task or saved/restored session proof",
+    "awsOfficialSignInFormVisible": true,
+    "credentialsEntered": false,
+    "submitted": false
+  }
+}
