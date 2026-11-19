@@ -168,6 +168,19 @@ function terminalFileCase({ unavailable = false, sameFilename = false } = {}) {
     ],
   });
 }
+it('shows unconfirmed execution without a live spinner or replay action while preserving the row status', () => {
+  show({
+    taskId: 'tsk_unknown_execution',
+    intent: '只读验收',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+  });
+  expect(screen.getByText('执行结果待核实')).toBeTruthy();
+  expect(screen.queryByTestId('live-status-line')).toBeNull();
+  expect(screen.queryByRole('button', { name: /重试|重新执行|继续执行/ })).toBeNull();
+  expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
+});
 it('terminal file cards render one copy of a file returned in both summary and host attachments', () => {
   terminalFileCase();
   expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(1);

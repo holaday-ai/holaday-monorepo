@@ -13,6 +13,7 @@ import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profil
 import { humaniseTaskError } from '@/lib/error-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { normalizeExecutionObservation } from '@/lib/task-execution-observation';
 import { trpc } from '@/lib/trpc';
 import type { ImageCreationOptions } from '@/types/image';
 import type {
@@ -1176,6 +1177,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       : {}),
                     ...(detailIdentity && detailIdentity !== 'invalid' ? detailIdentity : {}),
                     status: detailStatus,
+                    executionObservation: normalizeExecutionObservation(
+                      detail.executionObservation,
+                    ),
                     tickCount: Math.max(t.tickCount, steps.length),
                     ...(resultText ? { resultText } : {}),
                     ...(planText ? { planText } : {}),
@@ -1209,6 +1213,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             intent: safeTaskListText(detail.intent) || '未命名任务',
             title: safeNullableTaskListText(detail.title),
             status: detailStatus,
+            executionObservation: normalizeExecutionObservation(detail.executionObservation),
             tickCount: steps.length,
             ...(resultText ? { resultText } : {}),
             createdAt: new Date(safeTaskListDate(detail.createdAt) ?? 0),
@@ -2381,6 +2386,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...t,
                     ...identity,
                     status: 'executing',
+                    executionObservation: null,
                     resultText: undefined,
                     awaitingKind: undefined,
                     planText: undefined,
@@ -3708,6 +3714,7 @@ export function toUiTask(row: ListRow): UiTask {
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
     title: safeNullableTaskListText((row as { title?: unknown }).title),
     status,
+    executionObservation: normalizeExecutionObservation(row.executionObservation),
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,

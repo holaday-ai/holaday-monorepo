@@ -94,7 +94,10 @@ import {
   supercarReply,
   validateExternalBrowserReply,
 } from '../../agent/supercar/index.js';
-import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
+import {
+  localChromeExecutionObservation,
+  localChromeTaskSessions,
+} from '../../agent/supercar/local-chrome-task-session.js';
 import {
   parseOtaAllowlist,
   resolveOtaCanaryLane,
@@ -10988,6 +10991,12 @@ export const tasksRouter = router({
           verificationPassed: r.verificationPassed,
           failureLevel: r.failureLevel,
           stockContext: publicStockTaskContext(r.sourceContext),
+          executionObservation: localChromeExecutionObservation(
+            ctx.userId,
+            r.externalId,
+            r.status,
+            r.sourceContext,
+          ),
           ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(r.sourceContext)
             .success
             ? { browserSource: 'local-chrome' as const }
@@ -11116,6 +11125,12 @@ export const tasksRouter = router({
         starredAt: taskRow.starredAt,
         projectId: projectExternalId,
         stockContext: publicStockTaskContext(taskRow.sourceContext),
+        executionObservation: localChromeExecutionObservation(
+          ctx.userId,
+          taskRow.externalId,
+          taskRow.status,
+          taskRow.sourceContext,
+        ),
         ...(z.object({ browserSource: z.literal('local-chrome') }).safeParse(taskRow.sourceContext)
           .success
           ? { browserSource: 'local-chrome' as const }

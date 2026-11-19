@@ -18,6 +18,17 @@ function task(overrides: Partial<UiTask> = {}): UiTask {
     ...overrides,
   };
 }
+it('shows uncertainty instead of a live phase in history and sidebar subtitles', () => {
+  expect(
+    taskListItemSubtitle(
+      task({
+        status: 'executing',
+        browserSource: 'local-chrome',
+        executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+      }),
+    ),
+  ).toBe('执行结果待核实');
+});
 
 describe('taskDisplayTitle', () => {
   const lockedSubjectIntent = [

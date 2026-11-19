@@ -1,6 +1,7 @@
 import { useToast } from '@/components/ui/toast';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
 import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
+import { isExecutionUnconfirmed } from '@/lib/task-execution-observation';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
@@ -92,7 +93,8 @@ export function TaskListItem({
   const toast = useToast();
   const batchUnavailable = Boolean(batchMode && batchDisabled);
   const batchDisabledReason = '进行中的任务不能批量操作';
-  const active = isActive(task.status);
+  const executionUnconfirmed = isExecutionUnconfirmed(task);
+  const active = isActive(task.status) && !executionUnconfirmed;
   const elapsedNow = useTaskListElapsedNow(active && Boolean(liveSubStatus));
   const elapsedLabel = active ? taskListElapsedLabel(liveSubStatus, elapsedNow) : null;
   const handleRowClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
@@ -155,7 +157,7 @@ export function TaskListItem({
           {batchChecked && <Check className="h-3 w-3" strokeWidth={2.5} />}
         </span>
       )}
-      <StatusDot status={task.status} />
+      <StatusDot status={executionUnconfirmed ? 'unknown' : task.status} />
       {renaming && onRenameCommit ? (
         <RenameInput
           initial={taskDisplaySource(task)}
@@ -295,11 +297,18 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 export function taskListItemSubtitle(
   task: Pick<
     UiTask,
-    'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource' | 'resultText'
+    | 'awaitingKind'
+    | 'queuePosition'
+    | 'status'
+    | 'tickCount'
+    | 'browserSource'
+    | 'resultText'
+    | 'executionObservation'
   >,
   liveSubStatus?: TaskLiveSubStatusEntry | null,
   now = Date.now(),
 ): string {
+  if (isExecutionUnconfirmed(task)) return '执行结果待核实';
   const recordCount = `${task.tickCount} ${task.browserSource === 'local-chrome' ? '条记录' : '步'}`;
   const productState = deriveTaskProductState({
     status: task.status,

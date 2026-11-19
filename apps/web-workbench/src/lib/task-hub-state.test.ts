@@ -18,10 +18,28 @@ import {
   taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
+  taskHubStatusLabel,
   taskHubStatusTone,
 } from './task-hub-state';
 
 describe('taskHubRowTone — P2-B resting tone', () => {
+  it('preserves scoped execution observations through history normalization and stops the live icon', () => {
+    const [row] = normalizeTaskHubRows([
+      {
+        taskId: 'tsk_uncertain',
+        status: 'executing',
+        browserSource: 'local-chrome',
+        executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+      },
+    ]);
+    expect(row?.status).toBe('executing');
+    expect(row).toMatchObject({
+      executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+    });
+    expect(taskHubStatusIconKind(row!)).toBe('inactive');
+    expect(taskHubStatusTone(row!)).toBe('unknown');
+    expect(taskHubStatusLabel(row!)).toBe('执行结果待核实');
+  });
   it('failed / partial / cancelled get a subtle tone; others neutral', () => {
     expect(taskHubRowTone('failed')).toContain('rgba(255,0,97');
     expect(taskHubRowTone('partial_success')).toContain('rgba(255,201,16');

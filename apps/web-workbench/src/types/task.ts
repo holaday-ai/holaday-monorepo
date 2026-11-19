@@ -33,6 +33,15 @@ export interface UiStockTaskContext {
 
 export interface UiTask {
   browserSource?: 'local-chrome';
+  /** Scoped server observation; does not change the persisted lifecycle or authorize a retry. */
+  executionObservation?: {
+    state: 'unconfirmed';
+    reason:
+      | 'session_not_observed'
+      | 'session_finishing'
+      | 'control_closed'
+      | 'input_outcome_unknown';
+  } | null;
   taskId: string;
   executionId?: string;
   executionRevision?: number;

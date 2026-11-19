@@ -27,6 +27,18 @@ function task(overrides: Partial<UiTask> = {}): UiTask {
 }
 
 describe('workbench state helpers', () => {
+  it('keeps uncertain execution evidence without calling its browser session live', () => {
+    const uncertain = task({
+      browserSource: 'local-chrome',
+      executionObservation: {
+        state: 'unconfirmed',
+        reason: 'session_not_observed',
+      },
+    });
+    expect(isLiveBrowserTaskForWorkbench(uncertain)).toBe(false);
+    expect(hasBrowserRecordForWorkbench(uncertain)).toBe(true);
+    expect(isLiveBrowserTaskForWorkbench(task())).toBe(true);
+  });
   it('does not treat partial-success browser tasks as live browser sessions', () => {
     expect(isLiveBrowserTaskForWorkbench(task({ status: 'executing' }))).toBe(true);
     expect(isLiveBrowserTaskForWorkbench(task({ status: 'awaiting_user' }))).toBe(true);

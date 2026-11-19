@@ -5,7 +5,7 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 describe('owned task detail execution identity', () => {
-  it.each(['executing', 'completed'])(
+  it.each(['executing', 'completed', 'awaiting_user'])(
     'restores only unresolved inventory and preserves selected final outputs (%s)',
     async (status) => {
       const expiry = new Date(Date.now() + 86400000);
@@ -21,6 +21,7 @@ describe('owned task detail execution identity', () => {
         externalId: 'tsk_inventory',
         intent: 'Read-only inventory',
         status,
+        sourceContext: { browserSource: 'local-chrome' },
         projectId: null,
         result: {
           metadata: {
@@ -73,6 +74,14 @@ describe('owned task detail execution identity', () => {
         .createCaller({ db, logger, userId: 'usr_owner', taskOrigin: 'user' } as unknown as Context)
         .detail({ taskId: 'tsk_inventory' });
       expect(output.status).toBe(status);
+      expect(output.executionObservation).toEqual(
+        status === 'executing'
+          ? {
+              state: 'unconfirmed',
+              reason: 'session_not_observed',
+            }
+          : null,
+      );
       const result = output.result as { metadata: { attachments: { fileId: string }[] } };
       expect(result.metadata.attachments.map((file) => file.fileId)).toEqual(
         status === 'completed' ? ['file_first'] : ['file_first', 'file_second'],
@@ -138,6 +147,7 @@ describe('owned task detail execution identity', () => {
       expect(result).toMatchObject(identity);
       expect(result).not.toHaveProperty('verificationJson');
       expect(result).not.toHaveProperty('coreRecordVersion');
+      expect(result.executionObservation).toBeNull();
       expect(queries[1]?.params).toEqual(['tsk_detail', 9, 'user']);
     },
   );

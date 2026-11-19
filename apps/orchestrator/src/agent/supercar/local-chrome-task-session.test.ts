@@ -9,6 +9,42 @@ const selection = {
   selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
 };
 describe('local Chrome task ownership', () => {
+  it('reports only a scoped local observation and never dispatches to resolve uncertainty', async () => {
+    const sessions = new LocalChromeTaskSessions();
+    let sends = 0;
+    const session = sessions.start('alice', 'task', selection, async () => {
+      sends++;
+      return { ok: false };
+    });
+    expect(sessions.executionObservation('alice', 'task')).toBeNull();
+    expect(sessions.executionObservation('bob', 'task')).toEqual({
+      state: 'unconfirmed',
+      reason: 'session_not_observed',
+    });
+    session.control.close('input_outcome_unknown');
+    expect(sessions.executionObservation('alice', 'task')).toEqual({
+      state: 'unconfirmed',
+      reason: 'input_outcome_unknown',
+    });
+    expect(sends).toBe(0);
+    await sessions.finish('alice', 'task');
+    expect(sessions.executionObservation('alice', 'task')).toEqual({
+      state: 'unconfirmed',
+      reason: 'session_not_observed',
+    });
+  });
+  it('does not mistake quarantined cleanup for an active run', async () => {
+    const sessions = new LocalChromeTaskSessions();
+    const session = sessions.start('alice', 'task', selection, async () => ({ ok: false }));
+    await session.client.open(selection);
+    await sessions.finish('alice', 'task');
+    expect(sessions.get('alice', 'task')).toBe(session);
+    expect(sessions.executionObservation('alice', 'task')).toEqual({
+      state: 'unconfirmed',
+      reason: 'session_finishing',
+    });
+    expect(() => sessions.reserve('alice', selection)).toThrow('chrome_connection_busy');
+  });
   it.each([false, true])(
     'only requests file bytes with the explicit task file switch (%s)',
     async (enabled) => {

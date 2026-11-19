@@ -82,6 +82,7 @@ import {
   stepDisplayStepsForTask,
 } from '@/lib/step-card-state';
 import { taskDisplayIntent } from '@/lib/task-display-copy';
+import { isExecutionUnconfirmed } from '@/lib/task-execution-observation';
 import { refundStatusCopy, retryAttachmentNote } from '@/lib/task-failure-recovery';
 import { pausedTaskNoticeCopy } from '@/lib/task-status-copy';
 import { terminalArtifactFallbackText } from '@/lib/terminal-artifact-copy';
@@ -354,6 +355,7 @@ function AgentBlock({
   // terminal so the canonical resultText takes over.
   const streamingText = useTaskStore((s) => s.streamingByTask[task.taskId]);
   const progressMessage = useTaskStore((s) => s.progressByTask[task.taskId]);
+  const executionUnconfirmed = isExecutionUnconfirmed(task);
   // Codex Pack B1 — live sub-status chip. Backend broadcasts
   // server.task.progress with a `subStatus` field at 5 phase
   // boundaries; store records it + a client-side `since` timestamp.
@@ -418,29 +420,41 @@ function AgentBlock({
         {/* FIX-57 #3: one live status line while the task runs — what I am doing now,
             in plain words, with the elapsed time on long runs. It opens into the step
             timeline; when the task is done it folds into 「查看过程」 under the answer. */}
-        {!terminal && !awaitingUser && task.status !== 'paused' && !streamingText && (
-          <LiveStatusLine
-            text={liveStatusText({
-              steps,
-              progressMessage,
-              subStatus:
-                subStatusEntry &&
-                shouldRenderLiveSubStatus({
-                  status: task.status,
-                  terminal,
-                  hasAwaitingUser: Boolean(awaitingUser),
-                })
-                  ? subStatusEntry.subStatus
-                  : null,
-            })}
-            since={runStartedAt}
-            timeline={timeline}
-          >
-            {task.planText && <PlanNote text={task.planText} />}
-            {thinking && <ThinkingBlock text={thinking} />}
-            {webSearch && <WebSearchLine event={webSearch} terminal={terminal} />}
-          </LiveStatusLine>
+        {executionUnconfirmed && (
+          <section aria-label="执行结果待核实" className="space-y-1 text-sm">
+            <p className="font-medium">执行结果待核实</p>
+            <p className="text-muted-foreground">
+              当前服务无法确认任务仍在执行。已有步骤和文件已保留，请先核对结果，避免重复操作。
+            </p>
+          </section>
         )}
+        {!executionUnconfirmed &&
+          !terminal &&
+          !awaitingUser &&
+          task.status !== 'paused' &&
+          !streamingText && (
+            <LiveStatusLine
+              text={liveStatusText({
+                steps,
+                progressMessage,
+                subStatus:
+                  subStatusEntry &&
+                  shouldRenderLiveSubStatus({
+                    status: task.status,
+                    terminal,
+                    hasAwaitingUser: Boolean(awaitingUser),
+                  })
+                    ? subStatusEntry.subStatus
+                    : null,
+              })}
+              since={runStartedAt}
+              timeline={timeline}
+            >
+              {task.planText && <PlanNote text={task.planText} />}
+              {thinking && <ThinkingBlock text={thinking} />}
+              {webSearch && <WebSearchLine event={webSearch} terminal={terminal} />}
+            </LiveStatusLine>
+          )}
 
         {captchaWait && <CaptchaWaitBanner wait={captchaWait} />}
         {degrade && !executorFallback && <DegradeBanner event={degrade} />}
@@ -480,24 +494,26 @@ function AgentBlock({
          *  so the transition to TerminalSummary is visually a
          *  no-op — only the supplementary controls (copy button,
          *  suggestion chips) light up when resultText lands. */}
-        {!task.resultText && ((terminal && progressMessage) || streamingText) && (
-          <div className="text-foreground">
-            {/* FIX-57 #3: while running, the status line above carries the progress note. */}
-            {terminal && progressMessage && !streamingText && (
-              <div className="text-xs text-muted-foreground">
-                <span className="inline-block animate-pulse">●</span> {progressMessage}
-              </div>
-            )}
-            {streamingText && (
-              <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(streamingText))}
-                </ReactMarkdown>
-                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
-              </div>
-            )}
-          </div>
-        )}
+        {!executionUnconfirmed &&
+          !task.resultText &&
+          ((terminal && progressMessage) || streamingText) && (
+            <div className="text-foreground">
+              {/* FIX-57 #3: while running, the status line above carries the progress note. */}
+              {terminal && progressMessage && !streamingText && (
+                <div className="text-xs text-muted-foreground">
+                  <span className="inline-block animate-pulse">●</span> {progressMessage}
+                </div>
+              )}
+              {streamingText && (
+                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert dark:prose-headings:text-foreground dark:prose-p:text-foreground/95 dark:prose-li:text-foreground/95 dark:prose-strong:text-foreground dark:prose-code:text-foreground">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {sanitizeMarkdownTrailingPunctuation(sanitizeForRender(streamingText))}
+                  </ReactMarkdown>
+                  <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-foreground/40 align-baseline" />
+                </div>
+              )}
+            </div>
+          )}
 
         {!terminal && Boolean(task.attachments?.length) && (
           <section aria-label="已保存的文件" className="space-y-2">

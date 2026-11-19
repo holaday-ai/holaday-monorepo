@@ -275,6 +275,11 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       .first()
       .waitFor({ timeout: 30000 });
     await page.goto(`${origin}/history`);
+    const historyRow = page
+      .getByRole('button')
+      .filter({ hasText: '在给定GitHub固定提交的JSON文件页面' })
+      .last();
+    await historyRow.getByText('执行结果待核实').waitFor();
     await page
       .getByRole('button')
       .filter({ hasText: '在给定GitHub固定提交的JSON文件页面' })
@@ -290,6 +295,8 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
       await page.setViewportSize(viewport);
       await page.goto(`${origin}/?task=${taskId}`);
       await page.getByText('文件已保存，任务结果尚未确认。').waitFor({ timeout: 10000 });
+      await page.getByRole('region', { name: '执行结果待核实' }).waitFor();
+      expect(await page.getByTestId('live-status-line').count()).toBe(0);
       expect(await page.title()).toBe('Holaday 文件恢复验收');
       expect(await page.locator('vite-error-overlay').count()).toBe(0);
       expect(await page.getByTestId('assistant-answer').count()).toBe(0);
@@ -366,6 +373,8 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
           modelAPICalls: 0,
           canonicalModelLedgerUnchanged: true,
           historyReload: true,
+          executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+          executionObservationScope: 'current_process_only_not_a_terminal_verdict',
           foreignTaskStatus: foreignTask.status(),
           foreignFileStatus: foreignFile.status(),
           blockedMutations,

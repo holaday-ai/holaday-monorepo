@@ -42,6 +42,43 @@ const deleteMutate = vi.mocked(trpc.tasks.delete.mutate);
 const moveToProjectMutate = vi.mocked(trpc.tasks.moveToProject.mutate);
 const starMutate = vi.mocked(trpc.tasks.star.mutate);
 
+it('hydrates scoped execution uncertainty from list and detail without changing lifecycle or replaying', async () => {
+  const observation = { state: 'unconfirmed', reason: 'session_not_observed' } as const;
+  const row = {
+    taskId: 'tsk_unconfirmed',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    executionObservation: observation,
+    intent: 'Readonly',
+    result: null,
+  };
+  expect(toUiTask(row as never)).toMatchObject({
+    status: 'executing',
+    executionObservation: observation,
+  });
+  expect(
+    toUiTask({
+      ...row,
+      executionObservation: { state: 'unconfirmed', reason: 'untrusted' },
+    } as never).executionObservation,
+  ).toBeNull();
+  detailQuery.mockResolvedValueOnce({ ...row, steps: [] } as never);
+  useTaskStore.getState().selectTask(row.taskId, 'ui');
+  await flushPromises();
+  expect(useTaskStore.getState().tasks.find((t) => t.taskId === row.taskId)).toMatchObject({
+    status: 'executing',
+    executionObservation: observation,
+  });
+  detailQuery.mockResolvedValueOnce({ ...row, executionObservation: null, steps: [] } as never);
+  useTaskStore.getState().selectTask(row.taskId, 'ui');
+  await flushPromises();
+  expect(
+    useTaskStore.getState().tasks.find((t) => t.taskId === row.taskId)?.executionObservation,
+  ).toBeNull();
+  expect(createMutate).not.toHaveBeenCalled();
+  expect(replyMutate).not.toHaveBeenCalled();
+});
+
 beforeEach(() => {
   vi.mocked(trpc.taskRecovery.failureContext.query)
     .mockReset()

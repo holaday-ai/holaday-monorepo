@@ -16,6 +16,10 @@ type Send = (
   options: ExtensionToolCallOptions,
 ) => Promise<ExtensionToolCallOutcome>;
 export type LocalChromeReservation = Readonly<{ key: string; nonce: symbol }>;
+export type LocalChromeExecutionObservation = {
+  state: 'unconfirmed';
+  reason: 'session_not_observed' | 'session_finishing' | 'control_closed' | 'input_outcome_unknown';
+};
 type Session = {
   reservation: LocalChromeReservation;
   userId: string;
@@ -25,6 +29,7 @@ type Session = {
   control: BrowserControl;
   client: SelectedChromeClient;
   cancellation: AbortController;
+  finishing: boolean;
 };
 
 /** Runtime handles are never looked up by a caller-controlled task ID alone. */
@@ -48,6 +53,19 @@ export class LocalChromeTaskSessions {
   }
   get(userId: string, taskId: string): Session | undefined {
     return this.entries.get(JSON.stringify([userId, taskId]));
+  }
+  /** Read-only evidence from this process, never a terminal verdict or permission to replay. */
+  executionObservation(userId: string, taskId: string): LocalChromeExecutionObservation | null {
+    const session = this.get(userId, taskId);
+    if (!session) return { state: 'unconfirmed', reason: 'session_not_observed' };
+    if (session.finishing) return { state: 'unconfirmed', reason: 'session_finishing' };
+    const control = session.control.snapshot();
+    if (control.phase === 'closed')
+      return {
+        state: 'unconfirmed',
+        reason: control.error === 'input_outcome_unknown' ? control.error : 'control_closed',
+      };
+    return null;
   }
   start(
     userId: string,
@@ -88,6 +106,7 @@ export class LocalChromeTaskSessions {
       control,
       client,
       cancellation: new AbortController(),
+      finishing: false,
     };
     this.entries.set(JSON.stringify([userId, taskId]), session);
     return session;
@@ -102,6 +121,7 @@ export class LocalChromeTaskSessions {
   async finish(userId: string, taskId: string) {
     const session = this.get(userId, taskId);
     if (!session) return;
+    session.finishing = true;
     const receipt = await session.client.close();
     // Unknown cleanup keeps this connection quarantined, not silently reusable.
     if (receipt.ok && receipt.closed) {
@@ -112,3 +132,21 @@ export class LocalChromeTaskSessions {
   }
 }
 export const localChromeTaskSessions = new LocalChromeTaskSessions();
+
+/** Call only after the persisted row has passed task/owner/origin authorization. */
+export function localChromeExecutionObservation(
+  userId: string,
+  taskId: string,
+  status: string,
+  sourceContext: unknown,
+): LocalChromeExecutionObservation | null {
+  if (
+    status !== 'executing' ||
+    !sourceContext ||
+    typeof sourceContext !== 'object' ||
+    !('browserSource' in sourceContext) ||
+    sourceContext.browserSource !== 'local-chrome'
+  )
+    return null;
+  return localChromeTaskSessions.executionObservation(userId, taskId);
+}

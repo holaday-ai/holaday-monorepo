@@ -1,4 +1,5 @@
 import { taskDisplayTitle } from '@/lib/task-display-copy';
+import { isExecutionUnconfirmed } from '@/lib/task-execution-observation';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
@@ -81,7 +82,12 @@ export function taskFrameForWorkbench(
 }
 
 export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
-  return Boolean(task && hasBrowserRecordForWorkbench(task) && !isWorkbenchTerminalTask(task));
+  return Boolean(
+    task &&
+      hasBrowserRecordForWorkbench(task) &&
+      !isExecutionUnconfirmed(task) &&
+      !isWorkbenchTerminalTask(task),
+  );
 }
 
 export function isWorkbenchTerminalTask(task: UiTask): boolean {
