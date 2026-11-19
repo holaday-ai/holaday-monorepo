@@ -412,7 +412,10 @@ import {
 } from './task-followup-copy.js';
 import { enqueueTaskExecution } from './task-queue-execution.js';
 import { markQueuedTaskExecutingOrThrow } from './task-queue-start.js';
-import { annotateTaskResultAttachmentAvailability } from './task-result-attachment-availability.js';
+import {
+  type ScopedSavedTaskFile,
+  annotateTaskResultAttachmentAvailability,
+} from './task-result-attachment-availability.js';
 import {
   type CapturedBrowserFinalState as CapturedFinalState,
   captureBrowserFinalState as captureFinalState,
@@ -10901,6 +10904,10 @@ export const tasksRouter = router({
               .select({
                 taskId: taskFiles.taskId,
                 externalId: taskFiles.externalId,
+                filename: taskFiles.filename,
+                mimetype: taskFiles.mimetype,
+                sizeBytes: taskFiles.sizeBytes,
+                expiresAt: taskFiles.expiresAt,
               })
               .from(taskFiles)
               .where(
@@ -10917,11 +10924,15 @@ export const tasksRouter = router({
               )
           : [];
       const availableAttachmentIdsByTaskId = new Map<number, Set<string>>();
+      const savedAttachmentsByTaskId = new Map<number, ScopedSavedTaskFile[]>();
       for (const file of availableAttachmentRows) {
         if (file.taskId == null) continue;
         const ids = availableAttachmentIdsByTaskId.get(file.taskId) ?? new Set<string>();
         ids.add(file.externalId);
         availableAttachmentIdsByTaskId.set(file.taskId, ids);
+        const saved = savedAttachmentsByTaskId.get(file.taskId) ?? [];
+        saved.push(file);
+        savedAttachmentsByTaskId.set(file.taskId, saved);
       }
 
       // Resolve project external ids in one round-trip — mapping
@@ -10962,6 +10973,10 @@ export const tasksRouter = router({
               normalizeOutput(resultByTaskId.get(r.id)),
               availableAttachmentIdsByTaskId.get(r.id) ?? new Set<string>(),
               attachmentNow,
+              // Successful tasks retain their deliberately selected final outputs.
+              r.status === 'completed' || r.status === 'partial_success'
+                ? undefined
+                : savedAttachmentsByTaskId.get(r.id),
             ),
           ),
           starred: Boolean(r.starred),
@@ -11054,7 +11069,13 @@ export const tasksRouter = router({
       })();
       const attachmentNow = new Date();
       const availableAttachmentRows = await ctx.db
-        .select({ externalId: taskFiles.externalId })
+        .select({
+          externalId: taskFiles.externalId,
+          filename: taskFiles.filename,
+          mimetype: taskFiles.mimetype,
+          sizeBytes: taskFiles.sizeBytes,
+          expiresAt: taskFiles.expiresAt,
+        })
         .from(taskFiles)
         .where(
           and(
@@ -11103,6 +11124,9 @@ export const tasksRouter = router({
           normalizeOutput(taskRow.result),
           availableAttachmentIds,
           attachmentNow,
+          taskRow.status === 'completed' || taskRow.status === 'partial_success'
+            ? undefined
+            : availableAttachmentRows,
         ),
         // Phase 13 Dim 1 — surface plan body so a re-opened tab
         // re-renders the PlanCard from persisted state instead of

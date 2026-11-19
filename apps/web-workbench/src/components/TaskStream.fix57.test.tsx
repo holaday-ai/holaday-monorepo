@@ -183,3 +183,38 @@ it('terminal file cards keep different file ids even when their filenames match'
   terminalFileCase({ sameFilename: true });
   expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(2);
 });
+it.each(['executing', 'awaiting_user'])(
+  'shows actual saved outputs while task status is %s without claiming completion',
+  (status) => {
+    show({
+      taskId: 'tsk_saved_unresolved',
+      intent: '导出原件和摘要',
+      status,
+      attachments: [
+        {
+          fileId: 'file_raw',
+          filename: 'original.json',
+          sizeBytes: 7560,
+          downloadUrl: '/api/files/file_raw/download',
+          mimetype: 'application/json',
+          kind: 'json',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+        {
+          fileId: 'file_summary',
+          filename: 'summary.csv',
+          sizeBytes: 304,
+          downloadUrl: '/api/files/file_summary/download',
+          mimetype: 'text/csv',
+          kind: 'csv',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+      ],
+    });
+    expect(screen.getByText('文件已保存，任务结果尚未确认。')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /original\.json/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /summary\.csv/ })).toHaveLength(1);
+    expect(screen.queryByTestId('assistant-answer')).toBeNull();
+    expect(useTaskStore.getState().tasks[0]?.status).toBe(status);
+  },
+);

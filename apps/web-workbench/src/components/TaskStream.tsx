@@ -499,6 +499,15 @@ function AgentBlock({
           </div>
         )}
 
+        {!terminal && Boolean(task.attachments?.length) && (
+          <section aria-label="已保存的文件" className="space-y-2">
+            <p className="text-xs text-muted-foreground">文件已保存，任务结果尚未确认。</p>
+            {task.attachments?.map((attachment) => (
+              <AttachmentRow key={attachment.fileId} attachment={attachment} />
+            ))}
+          </section>
+        )}
+
         {terminal && (task.resultText || hasTerminalArtifacts) && (
           <TerminalSummary
             status={task.status}
