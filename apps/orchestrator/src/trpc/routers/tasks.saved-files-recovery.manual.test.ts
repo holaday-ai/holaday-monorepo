@@ -485,10 +485,17 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RECOVERY_MANUAL === '1')(
         await input.press('Enter');
         const alert = page.getByRole('alert').filter({ hasText: '提交失败' });
         await alert.waitFor({ timeout: 10000 });
-        await page
-          .getByText('任务创建待核实', { exact: true })
-          .first()
-          .waitFor({ state: 'attached' });
+        await page.screenshot({
+          path: join(artifacts, `preparation-before-sidebar-${viewport.width}.png`),
+        });
+        if (viewport.width < 769) {
+          await page.getByRole('button', { name: '打开任务列表', exact: true }).first().click();
+          await page.getByText('任务创建待核实', { exact: true }).first().waitFor();
+          await page.keyboard.press('Escape');
+          await page.getByRole('dialog', { name: '任务列表' }).waitFor({ state: 'hidden' });
+        } else {
+          await page.getByText('任务创建待核实', { exact: true }).first().waitFor();
+        }
         const errorText = await alert.textContent();
         expect(errorText).toContain('提交失败');
         await page.waitForTimeout(4500);
