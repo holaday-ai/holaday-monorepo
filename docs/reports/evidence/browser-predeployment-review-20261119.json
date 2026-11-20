@@ -236,7 +236,7 @@
   },
   "currentCandidateStartup": {
     "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-    "verified": false,
+    "verified": true,
     "previousCandidateRecord": {
       "backendBuildPassed": true,
       "localSqlPreflightPassed": true,
@@ -258,6 +258,22 @@
         "vaultEnabledAccepted": false,
         "compiledBackendZipStartupAccepted": false
       }
+    },
+    "verificationReport": "browser-current4639-offline-20261119.json",
+    "actualSourceEntrypointOnEmulatedX64": {
+      "passed": true,
+      "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "runtimeInputHashesVerified": 1832,
+      "fullNetworkIsolation": true,
+      "samePidTwoPorts": true,
+      "healthStatus": 200,
+      "businessStatus": 503,
+      "gracefulExitCode": 0,
+      "ownedContainerRemoved": true,
+      "nativeProductionProcessIdentityAccepted": false,
+      "connectedDatabaseAccepted": false,
+      "vaultEnabledAccepted": false,
+      "compiledBackendZipStartupAccepted": false
     }
   },
   "githubSavedInputPreflight": {
@@ -308,5 +324,16 @@
     "githubAccepted": false,
     "report": "browser-saved57-real-results-20261119.json",
     "currentCandidatePaidRetest": false
-  }
+  },
+  "currentCandidateUiComponentVerification": {
+    "report": "browser-current4639-offline-20261119.json",
+    "passed": true,
+    "realFrozenWorkbench": true,
+    "backendSynthetic": true,
+    "noTaskWebSocketFrames": true,
+    "terminalPollingStopped": true,
+    "mobileChatTerminalVisibleAfterUserCollapse": true,
+    "currentSqlModelTaskAccepted": false
+  },
+  "latestOfflineVerificationAtUTC": "2026-11-20T00:34:46.392608+00:00"
 }

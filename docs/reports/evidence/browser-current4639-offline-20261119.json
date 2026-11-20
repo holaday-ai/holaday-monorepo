@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "kind": "current-candidate-offline-source-entry-and-ui-component-proof",
+  "observedAtUTC": "2026-11-20T00:34:46.392608+00:00",
+  "runtimeSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+  "candidateManifestSHA256": "1d0e117c417ba9434c06e1ce36ae5386b05633215c3cce0610f58b072210e7b3",
+  "runtimeInputs": 1832,
+  "linux": {
+    "targetArchitecture": "x86_64",
+    "cpuEmulatedOnArm64Host": true,
+    "head": "4639355e3b76fd9a224f93522738f495d8f67577",
+    "memoryBytes": 805306368,
+    "cpuLimit": 0.5,
+    "node": "22.23.3",
+    "pnpm": "10.33.0",
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "productionChanged": false,
+    "networkNoneThroughout": true,
+    "runtimeExitCode": 0,
+    "runtime": {
+      "kind": "actual reviewed Linux entrypoint cold start in closed maintenance",
+      "head": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "platform": "linux",
+      "arch": "x64",
+      "architectureExecution": "Docker linux/amd64 on arm64 host; CPU emulated",
+      "node": "v22.23.3",
+      "uid": 998,
+      "runtimeInputHashesVerified": 1832,
+      "nativeBindings": {
+        "argon2SyntheticHashVerify": true,
+        "sharpSyntheticOnePixelPng": true
+      },
+      "externalNetworkInterfaces": 0,
+      "defaultRoutes": 0,
+      "modelCalls": 0,
+      "kmsCalls": 0,
+      "productionChanged": false,
+      "fullReleaseAcceptance": false,
+      "connectedDatabaseAcceptance": false,
+      "vaultEnabledAcceptance": false,
+      "guestNodeExecutableSHA256": "fde6a4bf8d0562f7751d1a2d6cb9b417c4cfe107bbcb0aa3e9a24e125e348f48",
+      "kernelExecutable": "/run/rosetta/rosetta",
+      "kernelNodePathNative": false,
+      "nativeProductionProcessIdentityAcceptance": false,
+      "healthStatus": 200,
+      "businessRequestStatus": 503,
+      "actualEntrypointCmdlineVerified": true,
+      "sameManagedPidOwnsHttpAndWs": true,
+      "listenerPorts": [
+        31011,
+        31012
+      ],
+      "maintenanceStatus": {
+        "mode": "closed",
+        "idle": true,
+        "needsReconciliation": false,
+        "newBootIdentity": true
+      },
+      "passed": true,
+      "gracefulExit": {
+        "code": 0,
+        "signal": null
+      },
+      "writerLockRemoved": true,
+      "controlSocketRemoved": true,
+      "finalJournalClosed": true,
+      "httpListenerClosed": true,
+      "exitStatus": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    "peakMemoryBytes": 805310464,
+    "containerOomKilled": false,
+    "resourceLimits": {
+      "Memory": 805306368,
+      "MemorySwap": 805306368,
+      "NanoCpus": 500000000,
+      "PidsLimit": 128
+    },
+    "memoryEvents": {
+      "low": 0,
+      "high": 0,
+      "max": 5052,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "ownedContainerRemoved": true,
+    "passed": true
+  },
+  "ui": {
+    "atUTC": "2026-11-20T00:33:55.507Z",
+    "passed": true,
+    "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+    "workbenchSHA256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
+    "verifiedArchiveFiles": 332,
+    "backend": "in-memory synthetic transcript fixture; not real SQL or model",
+    "taskBrowserSource": "cloud/unspecified",
+    "observations": [
+      {
+        "phase": "first-read-from-detail",
+        "elapsedMs": 4868,
+        "detailReads": 1
+      },
+      {
+        "phase": "second-step-from-detail",
+        "elapsedMs": 4827,
+        "detailReads": 1
+      },
+      {
+        "phase": "terminal-from-detail",
+        "elapsedMs": 4807,
+        "detailReads": 1
+      }
+    ],
+    "terminalPollingStopped": true,
+    "serverTaskFrames": 0,
+    "mutations": 0,
+    "pageErrors": [],
+    "blockedAssetRequests": [
+      "https://assets.holaday.ai",
+      "https://assets.holaday.ai",
+      "https://assets.holaday.ai"
+    ],
+    "nonlocalRequestsSent": 0,
+    "modelCalls": 0,
+    "websiteExports": 0,
+    "viewports": [
+      1440,
+      390
+    ],
+    "mobileChatResultVisibleAfterUserCollapse": true,
+    "productionChanged": false
+  },
+  "uiClosed": {
+    "atUTC": "2026-11-20T00:34:19.008Z",
+    "ownedBrowserClosed": true,
+    "ownedServerClosed": true,
+    "passed": true,
+    "observations": [
+      {
+        "phase": "first-read-from-detail",
+        "elapsedMs": 4868,
+        "detailReads": 1
+      },
+      {
+        "phase": "second-step-from-detail",
+        "elapsedMs": 4827,
+        "detailReads": 1
+      },
+      {
+        "phase": "terminal-from-detail",
+        "elapsedMs": 4807,
+        "detailReads": 1
+      }
+    ],
+    "errors": [],
+    "external": [
+      "https://assets.holaday.ai",
+      "https://assets.holaday.ai",
+      "https://assets.holaday.ai"
+    ]
+  },
+  "scope": {
+    "realModelForCurrentCandidateAccepted": false,
+    "connectedSqlForCurrentCandidateAccepted": false,
+    "productionNativeProcessIdentityAccepted": false,
+    "fullMobileBrowserAcceptance": false,
+    "kmsAcceptance": false,
+    "productionWrites": 0,
+    "newWebsiteExports": 0,
+    "newModelCalls": 0
+  },
+  "modelBudget": {
+    "maxAttempts": 57,
+    "used": 57,
+    "remaining": 0,
+    "ledgerSHA256": "a691dcb5fa4d5a5951302fd8c1c3ea90095c9c05f016510484c83ed52a639cd9",
+    "automaticRetries": 0
+  },
+  "fixtureFailuresPreserved": [
+    "v1 dependency resolution before listen",
+    "v2 UI humanized create_file label expectation",
+    "v3-v5 synthetic summary below existing meaningful-content threshold",
+    "v7 sandbox localhost listen EPERM before browser",
+    "v8 ambiguous collapse-button locator"
+  ],
+  "rawBindings": [
+    {
+      "group": "linux",
+      "filename": "receipt.json",
+      "bytes": 2676,
+      "sha256": "f0deee4e8975fe30cf673ea7961ac10209138ccae4d2f04fb5e77044b529a7ca"
+    },
+    {
+      "group": "linux",
+      "filename": "cold-start-result.json",
+      "bytes": 1465,
+      "sha256": "831223654716c9439583b62951cec7159c99b7a2b7f8de302cd3cce29a25ba31"
+    },
+    {
+      "group": "linux",
+      "filename": "container-absence.json",
+      "bytes": 212,
+      "sha256": "eb557e39ef76bc62a5682d2a8e37bc394d97840b6a6550752852a7c678cd7b69"
+    },
+    {
+      "group": "linux",
+      "filename": "cold-start-application.log",
+      "bytes": 1121,
+      "sha256": "1a1880fdbd6cd4ec2dfe1716e1b0ad7454e42ace6eb530ee6b718cc491485abf"
+    },
+    {
+      "group": "ui",
+      "filename": "result.json",
+      "bytes": 1114,
+      "sha256": "11d6ebe285e7735a7c887dd78f05dfe26da50a0f72bd0f9a9579040701e53cab"
+    },
+    {
+      "group": "ui",
+      "filename": "closed.json",
+      "bytes": 583,
+      "sha256": "102807675addafe37ac93346143a63477f2f087f514cb728bc488677922145a2"
+    },
+    {
+      "group": "ui",
+      "filename": "requests.json",
+      "bytes": 1428,
+      "sha256": "2b212adc904f5ed1712367b1d75898bdf8a598d82165957f6d62ea0a2b042113"
+    },
+    {
+      "group": "ui",
+      "filename": "detail-receipts.json",
+      "bytes": 10185,
+      "sha256": "d72302ac964a27435e1e0577e440ccc7defbed72dfe46bda618ebd08057c354b"
+    },
+    {
+      "group": "ui",
+      "filename": "cloud-first-read.png",
+      "bytes": 95586,
+      "sha256": "44c46c70abfcebbf66ff77dfad1b6c45b8abe35eada507a83726569af668fc5b"
+    },
+    {
+      "group": "ui",
+      "filename": "cloud-second-step.png",
+      "bytes": 97765,
+      "sha256": "292265a5dda08ca70aa19a9edef4334838b8aca35a81c822b7b9259ec62aa8c0"
+    },
+    {
+      "group": "ui",
+      "filename": "cloud-completed-1440.png",
+      "bytes": 93425,
+      "sha256": "467987552f3a24c627e1c919d7f1d007cf025546d09748d01bc26368e2f5849c"
+    },
+    {
+      "group": "ui",
+      "filename": "cloud-completed-390.png",
+      "bytes": 39050,
+      "sha256": "1e70353a44e5e44d2788a33299ce5a3ce58309b394c62e115e26e58ce300ef0e"
+    }
+  ],
+  "releaseReady": false,
+  "goalComplete": false,
+  "executionAllowed": false,
+  "pr361Merged": false,
+  "deployed": false
+}

@@ -2,7 +2,7 @@
 
 本包供上线前审阅，执行许可为 false。PR361仍为草稿；当前工作不请求、不执行合并、生产迁移、服务切换或开关变更。[机器记录](../reports/evidence/browser-predeployment-review-20261119.json)
 
-最新[真实保存附件验收](../reports/2026-11-19-browser-saved57-real-results.md)：旧候选 bbcf 的 Sheets 在约75秒 completed，GitHub 在约67秒 failed；两项首次文件步骤约8秒可见，未再次网站导出。新候选为4639355e，1832输入中的三项变化；后端ZIP7514f6a4、工作台ZIP5e931b07重新构建，插件c8bfb324不变，逐文件核对通过。新候选的Linux／实际页面／真实模型复验尚未补齐；下方bbcf及更早结果按原来源保留，不转成4639的实测。现网观察仍是15:21UTC快照，未重验有效配置或执行生产写入。
+最新[真实保存附件验收](../reports/2026-11-19-browser-saved57-real-results.md)：旧候选 bbcf 的 Sheets 在约75秒 completed，GitHub 在约67秒 failed；两项首次文件步骤约8秒可见，未再次网站导出。新候选为4639355e，1832输入中的三项变化；后端ZIP7514f6a4、工作台ZIP5e931b07重新构建，插件c8bfb324不变，逐文件核对通过。新候选[准确Linux模拟关闭入口和冻结工作台合成进度检查](../reports/2026-11-19-browser-current4639-offline.md)已通过，约4.8秒详情补查、终态停查、双视口聊天终态可见；真实SQL／模型复验仍未完成；下方bbcf及更早结果按原来源保留，不转成4639的实测。现网观察仍是15:21UTC快照，未重验有效配置或执行生产写入。
 
 ## 已绑定的观察证据
 

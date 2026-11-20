@@ -72,7 +72,9 @@
     "runtimeInputs": 1832,
     "candidateArtifactCount": 3,
     "candidateZipCrcAndEachFileHash": true,
-    "currentLinuxStartup": false
+    "currentLinuxStartup": true,
+    "currentLinuxStartupScope": "Exact TS/tsx entry on network-isolated emulated Linux amd64, closed maintenance; not production or connected SQL/Vault",
+    "currentUiComponentProof": "browser-current4639-offline-20261119.json"
   },
   "effects": {
     "websiteExports": 0,
