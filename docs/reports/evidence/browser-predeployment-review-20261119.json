@@ -3,19 +3,19 @@
   "kind": "browser-predeployment-review-only",
   "preparedAtUTC": "2026-11-19T17:20:21.625946+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
-  "runtimeSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-  "runtimeInputCount": 1832,
+  "runtimeSourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+  "runtimeInputCount": 1833,
   "runtimeInputsEquivalent": true,
-  "candidateManifestSHA256": "1d0e117c417ba9434c06e1ce36ae5386b05633215c3cce0610f58b072210e7b3",
+  "candidateManifestSHA256": "cb7bad2e7d00ed8a1460c974e7046631ae6cc5f6f0d497975f44e8aa87ff349f",
   "artifacts": {
     "backend": {
-      "archive": "backend-4639355e.zip",
-      "bytes": 4209971,
-      "sha256": "7514f6a4e94182b3a20a830e89601848d4654e9e749f2befbf208635a76a44d8",
-      "files": 1614,
+      "archive": "backend-a5ed894a.zip",
+      "bytes": 4213444,
+      "sha256": "b29c3abad7dcac66f8707c418ebe50de626105f5d22898b59803b11619ff3a26",
+      "files": 1616,
       "fileManifest": "backend-files.json",
-      "fileManifestSHA256": "238b7193efd967f3fe55dcb9d6c409d5167762069af1b0fb8f2f9e6fa499415f",
-      "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "fileManifestSHA256": "d4d786b4c4ad7e363f6e0c9e0e6f6706a0502de9291a8231e3e052800a98c57a",
+      "builtFromSourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
       "reusedUnchanged": false
     },
     "workbench": {
@@ -26,7 +26,7 @@
       "fileManifest": "workbench-files.json",
       "fileManifestSHA256": "59637f6a6588d8bcb9533ac69e442a64d875d9f973ddd40b1873cf29259c25f9",
       "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-      "reusedUnchanged": false
+      "reusedUnchanged": true
     },
     "extension": {
       "archive": "extension-b4c4b3a1.zip",
@@ -206,7 +206,7 @@
     "node": "22.23.3",
     "databaseAndVaultVerified": false
   },
-  "componentReuseProofSHA256": "a9975ba52e7dad1c4fa253f65d57e9008478f7367bb27619ab9d973a43ed8dce",
+  "componentReuseProofSHA256": "7df6fd9c380e0e458fbbf11f6e0bf0aae881f9d0096ee6c374f6cfffa3cddb5a",
   "kmsRealServiceAcceptance": {
     "executed": false,
     "latestObservedState": "authenticated console reloaded; CloudShell still reports account verification; no deletion/upload/crypto",
@@ -235,22 +235,42 @@
     "isolatedSchemaCleaned": true
   },
   "currentCandidateStartup": {
-    "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-    "verified": true,
+    "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+    "verified": false,
     "previousCandidateRecord": {
-      "backendBuildPassed": true,
-      "localSqlPreflightPassed": true,
-      "linuxStartupForCurrentBackendAccepted": true,
-      "unchangedWorkbenchAndExtensionReused": true,
-      "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+      "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "verified": true,
+      "previousCandidateRecord": {
+        "backendBuildPassed": true,
+        "localSqlPreflightPassed": true,
+        "linuxStartupForCurrentBackendAccepted": true,
+        "unchangedWorkbenchAndExtensionReused": true,
+        "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+        "actualSourceEntrypointOnEmulatedX64": {
+          "passed": true,
+          "runtimeInputHashesVerified": 1832,
+          "node": "22.23.3",
+          "uid": 998,
+          "fullNetworkIsolation": true,
+          "samePidTwoPorts": true,
+          "closedBusinessStatus": 503,
+          "gracefulExitCode": 0,
+          "ownedContainerRemoved": true,
+          "nativeProductionProcessIdentityAccepted": false,
+          "connectedDatabaseAccepted": false,
+          "vaultEnabledAccepted": false,
+          "compiledBackendZipStartupAccepted": false
+        }
+      },
+      "verificationReport": "browser-current4639-offline-20261119.json",
       "actualSourceEntrypointOnEmulatedX64": {
         "passed": true,
+        "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
         "runtimeInputHashesVerified": 1832,
-        "node": "22.23.3",
-        "uid": 998,
         "fullNetworkIsolation": true,
         "samePidTwoPorts": true,
-        "closedBusinessStatus": 503,
+        "healthStatus": 200,
+        "businessStatus": 503,
         "gracefulExitCode": 0,
         "ownedContainerRemoved": true,
         "nativeProductionProcessIdentityAccepted": false,
@@ -259,22 +279,7 @@
         "compiledBackendZipStartupAccepted": false
       }
     },
-    "verificationReport": "browser-current4639-offline-20261119.json",
-    "actualSourceEntrypointOnEmulatedX64": {
-      "passed": true,
-      "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-      "runtimeInputHashesVerified": 1832,
-      "fullNetworkIsolation": true,
-      "samePidTwoPorts": true,
-      "healthStatus": 200,
-      "businessStatus": 503,
-      "gracefulExitCode": 0,
-      "ownedContainerRemoved": true,
-      "nativeProductionProcessIdentityAccepted": false,
-      "connectedDatabaseAccepted": false,
-      "vaultEnabledAccepted": false,
-      "compiledBackendZipStartupAccepted": false
-    }
+    "reason": "Current changed candidate not rerun; Linux entry evidence remains bound to4639; local HTTP/SQL tests do not attest production entry."
   },
   "githubSavedInputPreflight": {
     "sourceBytes": 7560,
@@ -317,7 +322,7 @@
     "realModelAcceptance": false,
     "productionChanged": false
   },
-  "reviewedHead": "4639355e3b76fd9a224f93522738f495d8f67577",
+  "reviewedHead": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
   "latestSavedMaterialRealModelResults": {
     "sourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
     "sheetsAccepted": true,
@@ -326,14 +331,14 @@
     "currentCandidatePaidRetest": false
   },
   "currentCandidateUiComponentVerification": {
-    "report": "browser-current4639-offline-20261119.json",
+    "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+    "report": "browser-binding-history-local-20261119.json",
     "passed": true,
-    "realFrozenWorkbench": true,
-    "backendSynthetic": true,
-    "noTaskWebSocketFrames": true,
-    "terminalPollingStopped": true,
-    "mobileChatTerminalVisibleAfterUserCollapse": true,
-    "currentSqlModelTaskAccepted": false
+    "backend": "actual HTTP/SQL test App with scripted adapter",
+    "frozenWorkbenchUnchanged": true,
+    "completedAndFailedCases": true,
+    "newSqlConnectionAndActualDualViewportDownloads": true,
+    "realModelAcceptance": false
   },
   "latestOfflineVerificationAtUTC": "2026-11-20T00:34:46.392608+00:00",
   "currentCandidateRealModelRetest": {
@@ -365,6 +370,8 @@
     "newSqlAndDualViewportDownloads": true,
     "newModelCalls": 0,
     "realModelAcceptance": false,
-    "oldCandidateNeedsRefresh": true
-  }
+    "oldCandidateNeedsRefresh": false,
+    "runtimeSourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d"
+  },
+  "candidateBoundAtUTC": "2026-11-20T04:10:54.563106+00:00"
 }

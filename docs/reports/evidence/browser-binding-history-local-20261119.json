@@ -245,5 +245,15 @@
     "Old paid-run full finish arguments were not persisted; these are local reproductions of confirmed failure categories, not reconstruction of its exact output.",
     "Current UI is the unchanged frozen workbench; backend is current source in an actual HTTP/SQL test App.",
     "Scripted local-model turns do not measure provider latency or establish real model acceptance."
-  ]
+  ],
+  "runtimeSourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+  "candidateBinding": {
+    "runtimeInputCount": 1833,
+    "manifestSHA256": "cb7bad2e7d00ed8a1460c974e7046631ae6cc5f6f0d497975f44e8aa87ff349f",
+    "backendSHA256": "b29c3abad7dcac66f8707c418ebe50de626105f5d22898b59803b11619ff3a26",
+    "workbenchSHA256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
+    "extensionSHA256": "c8bfb32416a3536c3a78f6337a441973f088179226e4b77e0e211761b9ef3294",
+    "zipCrcAndEveryMemberHashVerified": true,
+    "sourceLinuxEntrypointReverified": false
+  }
 }
