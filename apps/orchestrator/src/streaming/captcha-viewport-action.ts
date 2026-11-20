@@ -43,9 +43,23 @@ export async function authorizeHumanViewportInput(
     // Never persist input text, attributes, credentials or DOM content.
     let target: string;
     if ('x' in payload && 'y' in payload) {
+      // Input.dispatchMouseEvent uses viewport CSS coordinates, while this DOM hit test uses
+      // document CSS coordinates. Keep the original input unchanged; translate only the
+      // target lookup, including horizontal scrolling and visual-viewport panning.
+      const { cssVisualViewport } = await cdp.send('Page.getLayoutMetrics');
+      const pageX = cssVisualViewport?.pageX;
+      const pageY = cssVisualViewport?.pageY;
+      if (
+        typeof pageX !== 'number' ||
+        typeof pageY !== 'number' ||
+        !Number.isFinite(pageX) ||
+        !Number.isFinite(pageY)
+      )
+        throw new Error('browser_input_target_unavailable');
+      requireOwner();
       const node = await cdp.send('DOM.getNodeForLocation', {
-        x: Math.round(payload.x),
-        y: Math.round(payload.y),
+        x: Math.round(payload.x + pageX),
+        y: Math.round(payload.y + pageY),
         includeUserAgentShadowDOM: true,
       });
       target = `${node.frameId}:${node.backendNodeId}`;
