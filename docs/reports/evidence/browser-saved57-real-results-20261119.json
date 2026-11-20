@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "kind": "saved-original-real-model-latency-and-followup",
+  "observedAtUTC": "2026-11-19T23:56:14.318Z",
+  "executedRuntimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+  "newRuntimeSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+  "model": "qwen3.8-max",
+  "modelTransportAutomaticRetries": 0,
+  "measurements": [
+    {
+      "site": "github",
+      "status": "failed",
+      "iterations": 7,
+      "executorElapsedMs": 66814,
+      "firstVisibleReadMs": 7830,
+      "firstVisibleTerminalMs": 67494
+    },
+    {
+      "site": "sheets",
+      "status": "completed",
+      "iterations": 9,
+      "executorElapsedMs": 75438,
+      "firstVisibleReadMs": 7911,
+      "firstVisibleTerminalMs": 75922
+    }
+  ],
+  "scope": "Previously saved website originals through the local candidate App; no new website or full website-account acceptance.",
+  "sheets": {
+    "accepted": true,
+    "dataRows": 100,
+    "amountSum": 5075,
+    "generatedBytes": 43,
+    "downloadCount": 2,
+    "newConnectionCompleted": true,
+    "historyViewports": [
+      1440,
+      390
+    ],
+    "pageErrors": 0
+  },
+  "github": {
+    "accepted": false,
+    "sqlStatus": "failed",
+    "generatedBytes": 382,
+    "issues": [
+      "Six-cell records under seven-column header",
+      "Measurement and phase combined or mislabeled",
+      "Explicit zero failed counts omitted"
+    ]
+  },
+  "fixtureFailuresPreserved": {
+    "v1": "Definite pre-router412; no tasks or paid calls",
+    "v2": "Wrong descriptor argument failed before provider send; SQL unknown/drain unknown retained in receipts; no paid calls"
+  },
+  "followupFixes": {
+    "selectedCloudTaskRefresh": true,
+    "visibleOnlySerialFiveSeconds": true,
+    "rejectDeclaredCsvColumnMismatchBeforeStorage": true,
+    "originalRequestOnlyAsciiColumns": true,
+    "preserveEmptyCellsAndQuotedContent": true,
+    "notAFullJsonSemanticValidator": true,
+    "realModelRetestOfNewCandidate": false
+  },
+  "validation": {
+    "backendTests": 129,
+    "webTests": 198,
+    "backendStrictTypes": true,
+    "webStrictTypes": true,
+    "backendBuild": true,
+    "webBuild": true,
+    "static": true,
+    "runtimeInputs": 1832,
+    "candidateArtifactCount": 3,
+    "candidateZipCrcAndEachFileHash": true,
+    "currentLinuxStartup": false
+  },
+  "effects": {
+    "websiteExports": 0,
+    "runtimeCredentialCopies": 0,
+    "productionWrites": 0,
+    "deployment": false,
+    "pr361Merged": false
+  },
+  "sourceRecordBindings": [
+    {
+      "filename": "real-results-verification.json",
+      "sha256": "ee7ebd61282fcd66a15d370cf6cc503c1b829b4fb1d36d560b5864d62575fdf3"
+    },
+    {
+      "filename": "github-real-evaluation.json",
+      "sha256": "b2ed692d53de4b461f22ccf88587d327fd8b55ebacfc63b0ce0f2648ce4aa133"
+    },
+    {
+      "filename": "final-live.json",
+      "sha256": "f0c7c01b5e07f4fb76b90f25d96d3b257ccbd3877d7f29f45a2c42f949705313"
+    },
+    {
+      "filename": "closed-resources.json",
+      "sha256": "6cf3118232e1b879437f51ace608e290fe42457eee80c16b6a0104a022bc27e2"
+    },
+    {
+      "filename": "listener-absence.json",
+      "sha256": "fd6bc4a22928d191a8748db30956858eac3891ebfed9357120f4705a08f1d708"
+    }
+  ],
+  "candidateManifestSHA256": "1d0e117c417ba9434c06e1ce36ae5386b05633215c3cce0610f58b072210e7b3",
+  "releaseReady": false,
+  "goalComplete": false,
+  "executionAllowed": false
+}

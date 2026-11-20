@@ -3,20 +3,30 @@
   "kind": "browser-predeployment-review-only",
   "preparedAtUTC": "2026-11-19T17:20:21.625946+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
-  "runtimeSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+  "runtimeSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
   "runtimeInputCount": 1832,
   "runtimeInputsEquivalent": true,
-  "candidateManifestSHA256": "4c7a5586ce7d35ae1f9c0eb9d0c7ec9d339b9c952dbd6b5cf4818709284873cf",
+  "candidateManifestSHA256": "1d0e117c417ba9434c06e1ce36ae5386b05633215c3cce0610f58b072210e7b3",
   "artifacts": {
+    "backend": {
+      "archive": "backend-4639355e.zip",
+      "bytes": 4209971,
+      "sha256": "7514f6a4e94182b3a20a830e89601848d4654e9e749f2befbf208635a76a44d8",
+      "files": 1614,
+      "fileManifest": "backend-files.json",
+      "fileManifestSHA256": "238b7193efd967f3fe55dcb9d6c409d5167762069af1b0fb8f2f9e6fa499415f",
+      "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "reusedUnchanged": false
+    },
     "workbench": {
-      "archive": "workbench-b00bec89.zip",
-      "bytes": 33109537,
-      "sha256": "6622d70a5cc1ba25974e66d230035ec7cc939b1463c049fc9dea248fb33ef2e8",
+      "archive": "workbench-4639355e.zip",
+      "bytes": 33109508,
+      "sha256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
       "files": 332,
       "fileManifest": "workbench-files.json",
-      "fileManifestSHA256": "62f6d6002c4787801616652056fc91adef50d8750fac251f06b39a22ccb5eacd",
-      "builtFromSourceCommit": "b00bec89be7625039be118c84324dc6b206d0f62",
-      "reusedUnchanged": true
+      "fileManifestSHA256": "59637f6a6588d8bcb9533ac69e442a64d875d9f973ddd40b1873cf29259c25f9",
+      "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "reusedUnchanged": false
     },
     "extension": {
       "archive": "extension-b4c4b3a1.zip",
@@ -27,16 +37,6 @@
       "fileManifestSHA256": "a72dfa6f80bb02694fac4e8664679396a6ab3bf7ddf23c0febfc32f467c5577d",
       "builtFromSourceCommit": "b4c4b3a1a020e130cf7e4eb68ae9b04d01642620",
       "reusedUnchanged": true
-    },
-    "backend": {
-      "archive": "backend-bbcf4422.zip",
-      "bytes": 4267922,
-      "sha256": "47328e8d782b2e9288119527aeb9504e45ca2409af71d8907acaa87b88ec33ef",
-      "files": 1614,
-      "fileManifest": "backend-files.json",
-      "fileManifestSHA256": "a892a25afed7d64042696f21626cdd061eaef329724b83bc953bafb2c6669df3",
-      "builtFromSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
-      "reusedUnchanged": false
     }
   },
   "observedEvidenceBindings": {
@@ -206,7 +206,7 @@
     "node": "22.23.3",
     "databaseAndVaultVerified": false
   },
-  "componentReuseProofSHA256": "9021abdb0602e8506de88130ebafb41d0ad95b128567504a7b93332913126f32",
+  "componentReuseProofSHA256": "a9975ba52e7dad1c4fa253f65d57e9008478f7367bb27619ab9d973a43ed8dce",
   "kmsRealServiceAcceptance": {
     "executed": false,
     "latestObservedState": "authenticated console reloaded; CloudShell still reports account verification; no deletion/upload/crypto",
@@ -235,25 +235,29 @@
     "isolatedSchemaCleaned": true
   },
   "currentCandidateStartup": {
-    "backendBuildPassed": true,
-    "localSqlPreflightPassed": true,
-    "linuxStartupForCurrentBackendAccepted": true,
-    "unchangedWorkbenchAndExtensionReused": true,
-    "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
-    "actualSourceEntrypointOnEmulatedX64": {
-      "passed": true,
-      "runtimeInputHashesVerified": 1832,
-      "node": "22.23.3",
-      "uid": 998,
-      "fullNetworkIsolation": true,
-      "samePidTwoPorts": true,
-      "closedBusinessStatus": 503,
-      "gracefulExitCode": 0,
-      "ownedContainerRemoved": true,
-      "nativeProductionProcessIdentityAccepted": false,
-      "connectedDatabaseAccepted": false,
-      "vaultEnabledAccepted": false,
-      "compiledBackendZipStartupAccepted": false
+    "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+    "verified": false,
+    "previousCandidateRecord": {
+      "backendBuildPassed": true,
+      "localSqlPreflightPassed": true,
+      "linuxStartupForCurrentBackendAccepted": true,
+      "unchangedWorkbenchAndExtensionReused": true,
+      "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+      "actualSourceEntrypointOnEmulatedX64": {
+        "passed": true,
+        "runtimeInputHashesVerified": 1832,
+        "node": "22.23.3",
+        "uid": 998,
+        "fullNetworkIsolation": true,
+        "samePidTwoPorts": true,
+        "closedBusinessStatus": 503,
+        "gracefulExitCode": 0,
+        "ownedContainerRemoved": true,
+        "nativeProductionProcessIdentityAccepted": false,
+        "connectedDatabaseAccepted": false,
+        "vaultEnabledAccepted": false,
+        "compiledBackendZipStartupAccepted": false
+      }
     }
   },
   "githubSavedInputPreflight": {
@@ -296,5 +300,13 @@
     "reuploadSavedBytesOnNewBootRequired": true,
     "realModelAcceptance": false,
     "productionChanged": false
+  },
+  "reviewedHead": "4639355e3b76fd9a224f93522738f495d8f67577",
+  "latestSavedMaterialRealModelResults": {
+    "sourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+    "sheetsAccepted": true,
+    "githubAccepted": false,
+    "report": "browser-saved57-real-results-20261119.json",
+    "currentCandidatePaidRetest": false
   }
 }
