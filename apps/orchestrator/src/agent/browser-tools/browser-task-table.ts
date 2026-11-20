@@ -203,7 +203,12 @@ function columnName(index: number): string {
   return result;
 }
 /** Validate structure/limits before the library allocates cells. The library decodes values. */
-async function csvShape(text: string, delimiter: string, signal?: AbortSignal) {
+export async function csvShape(
+  text: string,
+  delimiter: string,
+  signal?: AbortSignal,
+  expectedColumns?: number,
+) {
   let state: 'start' | 'plain' | 'quoted' | 'closed' = 'start';
   let rows = 0;
   let columns = 1;
@@ -211,6 +216,10 @@ async function csvShape(text: string, delimiter: string, signal?: AbortSignal) {
   let pending = false;
   const finish = () => {
     rows++;
+    if (expectedColumns !== undefined && pending && columns !== expectedColumns)
+      throw new Error(
+        `CSV第${rows}条记录应为${expectedColumns}列，实际${columns}列。空值仍需保留分隔符，不要补成0。`,
+      );
     width = Math.max(width, columns);
     if (
       rows > TASK_TABLE_LIMITS.rows + 100 ||

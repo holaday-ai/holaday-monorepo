@@ -1,17 +1,14 @@
-import { isExecutionUnconfirmed } from '@/lib/task-execution-observation';
 import type { UiTask } from '@/types/task';
 import { useEffect } from 'react';
 
-/** Read-only fallback for missed live frames; one visible selected local task at a time. */
+/** Read-only fallback for missed live frames; one visible selected task at a time. */
 export function useActiveTaskRefresh(
   task: UiTask | undefined,
   refresh: (taskId: string) => Promise<void>,
 ): void {
   const taskId = task?.taskId;
   const enabled =
-    task?.status === 'executing' &&
-    task.browserSource === 'local-chrome' &&
-    !isExecutionUnconfirmed(task);
+    task?.status === 'executing' && task.executionObservation?.state !== 'unconfirmed';
 
   useEffect(() => {
     if (!taskId || !enabled) return;

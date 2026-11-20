@@ -55,7 +55,7 @@ it.each([
   expect(isExplicitFileOnlyRequest(text)).toBe(false);
 });
 
-async function fixture() {
+async function fixture(requestIntent = intent) {
   const f = await browserOutputFixture();
   const row = await f.service.storeUpload({
     userIdInternal: 7,
@@ -101,7 +101,7 @@ async function fixture() {
   });
   const controller = new AbortController();
   const contract = await createTaskFileContract({
-    intent,
+    intent: requestIntent,
     files,
     outputs,
     signal: controller.signal,
@@ -109,6 +109,81 @@ async function fixture() {
   expect(contract).toBeTruthy();
   return { ...f, row, files, outputs, controller, contract: contract! };
 }
+
+it('rejects the real missing-column CSV before saving, then permits a corrected file without filling blanks', async () => {
+  const f = await fixture(
+    '仅处理我提供的CSV附件，生成“summary.csv”，列为measurement,phase,files,total,passed,failed,pending；未提供的值留空。',
+  );
+  try {
+    await expect(
+      f.contract.create({
+        filename: 'summary.csv',
+        format: 'csv',
+        content:
+          'measurement,phase,files,total,passed,failed,pending\ncore_recheck/backend,,236,235,1,\n',
+      }),
+    ).rejects.toThrow(/7列.*6列/);
+    expect(f.files.generatedReferences()).toHaveLength(0);
+    const corrected =
+      'measurement,phase,files,total,passed,failed,pending\ncore_recheck,backend,,236,235,1,\nfocused_unit,mixed_unit,,51,51,0,\n';
+    const made = await f.contract.create({
+      filename: 'summary.csv',
+      format: 'csv',
+      content: corrected,
+    });
+    expect(made.ok).toBe(true);
+    if (!made.ok) throw Error('corrected CSV missing');
+    const read = await f.contract.read({ fileId: made.file.fileId });
+    expect(read.text).toBe(corrected);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+it('counts quoted commas and newlines as cell content while preserving empty records', async () => {
+  const f = await fixture('仅处理我提供的CSV附件，生成“summary.csv”，列为metric,value。');
+  try {
+    const made = await f.contract.create({
+      filename: 'summary.csv',
+      format: 'csv',
+      content: 'metric,value\n"a,b","line1\nline2"\n\n"quoted ""name""",\n',
+    });
+    expect(made.ok).toBe(true);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+it('does not invent a fixed output width when the original request has no explicit columns', async () => {
+  const f = await fixture();
+  try {
+    expect(
+      (
+        await f.contract.create({
+          filename: 'summary.csv',
+          format: 'csv',
+          content: 'metric,value\nnotes\n',
+        })
+      ).ok,
+    ).toBe(true);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+it('validates rendered CSV when create_file accepts JSON object rows', async () => {
+  const f = await fixture('仅处理我提供的CSV附件，生成“summary.csv”，列为metric,value。');
+  try {
+    const made = await f.contract.create({
+      filename: 'summary.csv',
+      format: 'csv',
+      content: JSON.stringify([{ metric: 'a,b', value: 1 }]),
+    });
+    expect(made.ok).toBe(true);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
 
 async function complete(f: Awaited<ReturnType<typeof fixture>>) {
   await f.contract.read({ fileId: f.row.externalId });

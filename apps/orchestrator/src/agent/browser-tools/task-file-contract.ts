@@ -1,8 +1,9 @@
 import { isEnglishRequestText } from '@holaday/shared-types';
+import { renderFile } from '../../files/writers.js';
 import { BrowserTaskFileReader } from './browser-task-file-reader.js';
 import type { BrowserTaskFiles } from './browser-task-files.js';
 import type { BrowserTaskOutputs } from './browser-task-output.js';
-import { BrowserTaskTable, type TableAggregate } from './browser-task-table.js';
+import { BrowserTaskTable, type TableAggregate, csvShape } from './browser-task-table.js';
 
 const contracts = new WeakSet<object>();
 const fileTools = Object.freeze(['read_task_file', 'analyze_task_table', 'create_file', 'finish']);
@@ -98,6 +99,11 @@ export async function createTaskFileContract(options: {
   if (/最大|\bmax(?:imum)?\b/i.test(intent)) requiredOps.add('max');
   if (/最小|\bmin(?:imum)?\b/i.test(intent)) requiredOps.add('min');
   const allowsFilters = /筛选|过滤|\b(?:filter|where)\b/i.test(positiveRequest(intent));
+  const csvColumnNames =
+    /(?:列为|columns?\s*(?:are|:|=))\s*([A-Za-z_][A-Za-z0-9_-]*(?:[ \t]*[,，][ \t]*[A-Za-z_][A-Za-z0-9_-]*)+)/i.exec(
+      positiveRequest(intent),
+    )?.[1];
+  const requestedCsvWidth = csvColumnNames?.split(/[,，]/).length;
   let unresolvedOutput = false;
   const statsRequested =
     requiredOps.size > 0 ||
@@ -130,6 +136,14 @@ export async function createTaskFileContract(options: {
     create: async (input) => {
       if (unresolvedOutput) return { ok: false, error: 'file_save_unconfirmed', fatal: true };
       await ensureCurrent();
+      if (requestedCsvWidth && input && typeof input === 'object') {
+        const args = input as Record<string, unknown>;
+        if (args.format === 'csv' && typeof args.content === 'string') {
+          const rendered = await renderFile('csv', args.content);
+          await csvShape(rendered.buffer.toString('utf8'), ',', signal, requestedCsvWidth);
+          await ensureCurrent();
+        }
+      }
       const result = await outputs.create(input);
       if (result.ok) {
         try {
