@@ -509,5 +509,94 @@ class SavedFileExtensionTest(unittest.TestCase):
                     runtime_source=self.runtime, materials=materials)
 
 
+class GithubRetestExtensionTest(unittest.TestCase):
+    def setUp(self):
+        self.saved = SavedFileExtensionTest()
+        self.saved.setUp()
+        self.first = self.saved.first
+        self.second = self.saved.approval()
+        self.state = budget.extend_saved_ledger(self.saved.state, self.first, self.second)
+        self.state['attempts'] += [self.saved.entry(n) for n in range(42, 58)]
+        self.material = self.saved.materials[0]
+        self.runtime = 'd'*40
+
+    def proposal(self):
+        return budget.prepare_retest_extension(self.state, self.first, self.second,
+            runtime_source=self.runtime, material=self.material)
+
+    def approval(self):
+        return {**self.proposal(), 'approved': True, 'authorizationRef': 'synthetic-github-eight'}
+
+    def migrate(self, policy):
+        return budget.extend_retest_ledger(self.state, self.first, self.second, policy)
+
+    def admit(self, state, policy, **change):
+        args = {'scope': 'github-pr360', 'body_sha': 'f'*64,
+            'permits': self.saved.base.permits, 'extension': self.first,
+            'saved_extension': self.second, 'retest_extension': policy,
+            'model': 'qwen3.8-max', 'max_tokens': 4096, 'material_sha': 'a'*64,
+            'runtime_source': self.runtime, 'tool_names': ['finish']}
+        args.update(change)
+        return budget.authorize(state, **args)
+
+    def entry(self, n):
+        return {**self.saved.base.entry(n), 'scope': 'github-pr360',
+            'savedInputSHA256': 'a'*64, 'runtimeSourceCommit': self.runtime,
+            'toolNames': ['finish'],
+            'startedAtUTC': f'2026-11-19T01:{n-58:02d}:00+00:00',
+            'finishedAtUTC': f'2026-11-19T01:{n-58:02d}:10+00:00'}
+
+    def test_proposal_cannot_activate_and_preserves_all_57(self):
+        before = copy.deepcopy(self.state)
+        p = self.proposal()
+        self.assertFalse(p['approved'])
+        self.assertEqual(p['maxAttempts'], 65)
+        self.assertEqual(p['allowedScopes'], ['github-pr360'])
+        with self.assertRaises(budget.BudgetError): self.migrate(p)
+        self.assertEqual(self.state, before)
+        migrated = self.migrate(self.approval())
+        self.assertEqual(migrated['attempts'], before['attempts'])
+        with self.assertRaises(budget.BudgetError):
+            budget.extend_retest_ledger(migrated, self.first, self.second, self.approval())
+
+    def test_only_eight_calls_current_github_source_no_old_candidate_or_sheets(self):
+        p = self.approval(); state = self.migrate(p)
+        for change in [{'scope':'sheets-synthetic'}, {'material_sha':'b'*64},
+            {'runtime_source':self.saved.runtime}, {'model':'other'},
+            {'max_tokens':4097}, {'max_tokens':True}, {'tool_names':['navigate']}]:
+            with self.subTest(change=change), self.assertRaises(budget.BudgetError):
+                self.admit(state,p,**change)
+        for n in range(58,66):
+            self.admit(state,p,body_sha=f'{n:064x}')
+            state['attempts'].append(self.entry(n))
+        with self.assertRaisesRegex(budget.BudgetError,'EXHAUSTED'):self.admit(state,p)
+
+    def test_policy_cannot_widen_or_rewrite_historical_prefix(self):
+        p=self.approval()
+        for key,value in [('maxAttempts',66),('additionalAttempts',9),
+            ('automaticRetries',1),('freshOriginalDownloads',{'github-pr360':1}),
+            ('allowedScopes',['github-pr360','sheets-synthetic']),
+            ('baselineSHA256','0'*64),('approved',1),('authorizationRef','')]:
+            with self.subTest(key=key), self.assertRaises(budget.BudgetError):
+                self.migrate({**p,key:value})
+        for index in [0,40,56]:
+            state=self.migrate(p);state['attempts'][index]['maxTokens']=4095
+            with self.subTest(index=index),self.assertRaises(budget.BudgetError):
+                self.admit(state,p)
+
+    def test_old_bodies_unknowns_and_new_history_still_require_proof(self):
+        p=self.approval();state=self.migrate(p)
+        for entry in state['attempts']:
+            with self.assertRaisesRegex(budget.BudgetError,'REPLAY'):
+                self.admit(state,p,body_sha=entry['bodySHA256'])
+        with self.assertRaisesRegex(budget.BudgetError,'UNKNOWN'):
+            self.admit(state,p,permits=[])
+        for change in [{'state':'unknown'},{'scope':'sheets-synthetic'},
+            {'runtimeSourceCommit':self.saved.runtime},{'savedInputSHA256':'b'*64}]:
+            changed=copy.deepcopy(state);changed['attempts'].append({**self.entry(58),**change})
+            with self.subTest(change=change),self.assertRaises(budget.BudgetError):
+                self.admit(changed,p)
+
+
 if __name__ == '__main__':
     unittest.main()

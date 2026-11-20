@@ -321,9 +321,73 @@ def extend_saved_ledger(state, extension, saved_extension):
     return {**copy.deepcopy(state), 'maxAttempts': 57}
 
 
-def seal_audit(state, audit_bytes, *, extension=None, saved_extension=None):
+def _retest_template(entries, runtime_source, material):
+    _require(isinstance(runtime_source, str)
+             and re.fullmatch(r'[a-f0-9]{40}', runtime_source), 'INVALID_RETEST_RUNTIME')
+    _require(isinstance(material, dict) and material.get('scope') == 'github-pr360',
+             'INVALID_RETEST_MATERIAL')
+    return {'schemaVersion': 1, 'baselineMaxAttempts': 57, 'baselineAttempts': 57,
+            'baselineSHA256': _digest(entries[:57]), 'additionalAttempts': 8,
+            'maxAttempts': 65, 'model': 'qwen3.8-max', 'maxOutputTokens': 4096,
+            'allowedScopes': ['github-pr360'], 'automaticRetries': 0,
+            'freshOriginalDownloads': {'github-pr360': 0},
+            'allowedTools': ['read_task_file', 'analyze_task_table', 'create_file', 'finish'],
+            'runtimeSourceCommit': runtime_source, 'materials': [copy.deepcopy(material)],
+            'approved': False, 'authorizationRef': None}
+
+
+def prepare_retest_extension(state, extension, saved_extension, *, runtime_source, material):
+    entries = _saved_extension_ledger(state, extension, saved_extension)
+    _require(state['maxAttempts'] == 57 and len(entries) == 57,
+             'EXHAUSTED_RETEST_BASELINE_REQUIRED')
+    _require(material == next(item for item in saved_extension['materials']
+                             if item['scope'] == 'github-pr360'), 'INVALID_RETEST_MATERIAL')
+    return _retest_template(entries, runtime_source, material)
+
+
+def _retest_extension_ledger(state, extension, saved_extension, retest_extension):
+    _require(isinstance(state, dict) and type(state.get('maxAttempts')) is int
+             and state['maxAttempts'] in (57, 65), 'INVALID_LEDGER_POLICY')
+    entries = _ledger(state, state['maxAttempts'])
+    _require(len(entries) >= 57, 'RETEST_BASELINE_REQUIRED')
+    _saved_extension_ledger({**state, 'maxAttempts': 57, 'attempts': entries[:57]},
+                            extension, saved_extension)
+    _require(isinstance(retest_extension, dict), 'INVALID_RETEST_EXTENSION_POLICY')
+    material = next(item for item in saved_extension['materials']
+                    if item['scope'] == 'github-pr360')
+    expected = _retest_template(entries, retest_extension.get('runtimeSourceCommit'), material)
+    _require(set(retest_extension) == set(expected), 'INVALID_RETEST_EXTENSION_POLICY')
+    _require(retest_extension['approved'] is True
+             and isinstance(retest_extension['authorizationRef'], str)
+             and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9:._/-]{0,159}',
+                              retest_extension['authorizationRef']),
+             'EXPLICIT_RETEST_EXTENSION_APPROVAL_REQUIRED')
+    fields = set(expected) - {'approved', 'authorizationRef'}
+    _require(_digest({key:retest_extension[key] for key in fields})
+             == _digest({key:expected[key] for key in fields}), 'INVALID_RETEST_EXTENSION_POLICY')
+    seen = {entry['bodySHA256'] for entry in entries[:57]}
+    for entry in entries[57:]:
+        _saved_request(retest_extension, entry['scope'], entry['model'], entry['maxTokens'],
+                       entry.get('savedInputSHA256'), entry.get('runtimeSourceCommit'),
+                       entry.get('toolNames'))
+        _require(entry['bodySHA256'] not in seen, 'BODY_REPLAY_FORBIDDEN')
+        seen.add(entry['bodySHA256'])
+    return entries
+
+
+def extend_retest_ledger(state, extension, saved_extension, retest_extension):
+    _require(isinstance(state, dict) and state.get('maxAttempts') == 57,
+             'EXHAUSTED_RETEST_BASELINE_REQUIRED')
+    entries = _retest_extension_ledger(state, extension, saved_extension, retest_extension)
+    _require(len(entries) == 57, 'EXHAUSTED_RETEST_BASELINE_REQUIRED')
+    return {**copy.deepcopy(state), 'maxAttempts': 65}
+
+
+def seal_audit(state, audit_bytes, *, extension=None, saved_extension=None, retest_extension=None):
     """Seal only already verified, complete local metadata; does not alter any ledger."""
-    entries = (_saved_extension_ledger(state, extension, saved_extension)
+    entries = (_retest_extension_ledger(state, extension, saved_extension, retest_extension)
+               if retest_extension is not None else
+               _saved_extension_ledger(state, extension, saved_extension)
                if saved_extension is not None else
                _ledger(state) if extension is None else _extension_ledger(state, extension))
     _require(bool(entries), 'EMPTY_AUDIT_PREFIX')
@@ -334,13 +398,21 @@ def seal_audit(state, audit_bytes, *, extension=None, saved_extension=None):
 
 
 def authorize(state, scope, body_sha, permits=(), *, extension=None, model=None, max_tokens=None,
-              saved_extension=None, material_sha=None, runtime_source=None, tool_names=None):
+              saved_extension=None, material_sha=None, runtime_source=None, tool_names=None,
+              retest_extension=None):
     """Read-only admission for a new request, never permission to resume an old task."""
-    entries = (_saved_extension_ledger(state, extension, saved_extension)
+    entries = (_retest_extension_ledger(state, extension, saved_extension, retest_extension)
+               if retest_extension is not None else
+               _saved_extension_ledger(state, extension, saved_extension)
                if saved_extension is not None else
                _ledger(state) if extension is None else _extension_ledger(state, extension))
     limit = 25
-    if saved_extension is not None:
+    if retest_extension is not None:
+        _require(state['maxAttempts'] == 65, 'RETEST_EXTENSION_LEDGER_NOT_MIGRATED')
+        _saved_request(retest_extension, scope, model, max_tokens,
+                       material_sha, runtime_source, tool_names)
+        limit = 65
+    elif saved_extension is not None:
         _require(state['maxAttempts'] == 57, 'SAVED_EXTENSION_LEDGER_NOT_MIGRATED')
         _saved_request(saved_extension, scope, model, max_tokens,
                        material_sha, runtime_source, tool_names)

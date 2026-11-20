@@ -335,5 +335,16 @@
     "mobileChatTerminalVisibleAfterUserCollapse": true,
     "currentSqlModelTaskAccepted": false
   },
-  "latestOfflineVerificationAtUTC": "2026-11-20T00:34:46.392608+00:00"
+  "latestOfflineVerificationAtUTC": "2026-11-20T00:34:46.392608+00:00",
+  "currentCandidateRealModelRetest": {
+    "report": "browser-saved65-results-20261119.json",
+    "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+    "status": "failed",
+    "csvSemanticAccepted": true,
+    "independentSqlAndHistoryAccepted": false,
+    "actualNewCalls": 7,
+    "used": 64,
+    "maximum": 65,
+    "remaining": 1
+  }
 }
