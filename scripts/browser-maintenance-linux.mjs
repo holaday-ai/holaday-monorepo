@@ -1,8 +1,8 @@
-import { readFile, readlink, readdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { readFile, readdir, readlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { captureMaintenanceProcesses } from './browser-maintenance-runtime-system.mjs';
 
 export function createMaintenanceStopEffects(io = system) {

@@ -19,7 +19,9 @@ describe('energy content targets', () => {
 
     expect(isEnergyContentTarget({ type: 'practice', practiceId: 'unknown' })).toBe(false);
     expect(isEnergyContentTarget({ type: 'test', testId: 'private free text' })).toBe(false);
-    expect(isEnergyContentTarget({ type: 'tarot', mode: 'three', question: 'private' })).toBe(false);
+    expect(isEnergyContentTarget({ type: 'tarot', mode: 'three', question: 'private' })).toBe(
+      false,
+    );
     expect(isEnergyContentTarget({ type: 'astrology', period: 'tomorrow' })).toBe(false);
   });
 

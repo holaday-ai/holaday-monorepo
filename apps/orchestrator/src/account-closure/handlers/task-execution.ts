@@ -1,3 +1,4 @@
+import { browserReplayStore } from '../../agent/browser-tools/browser-replay-service.js';
 import { deleteUserFilesPage } from '../../files/file-service.js';
 import {
   type AccountClosureHandler,
@@ -103,6 +104,29 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'tasks',
       childParentColumn: 'task_id',
     }),
+    // Per-task quota charge/refund ledger.
+    directUserRows('quota_refunds'),
+    // Which brain each task ran with; keyed by the task's external id.
+    rowsOwnedThroughParent({
+      tableName: 'task_model_selections',
+      parentTableName: 'tasks',
+      childParentColumn: 'task_external_id',
+      parentJoinColumn: 'external_id',
+    }),
+    // Batch 06 reuse metrics: rows for the user's own task runs, then rows of
+    // paths crystallized from the user's tasks (before those paths go).
+    rowsOwnedThroughParent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'tasks',
+      childParentColumn: 'task_id',
+    }),
+    rowsOwnedThroughGrandparent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'operation_paths',
+      ownerTableName: 'tasks',
+      childParentColumn: 'path_id',
+      parentOwnerColumn: 'source_task_id',
+    }),
     // A crystallized path stores full sourceTaskIntent/externalId in JSON.
     // Delete its children while the source-task ownership edge still exists.
     rowsOwnedThroughGrandparent({
@@ -162,6 +186,14 @@ const taskExecutionRelationalClosureHandler = createRelationalDeleteHandler({
       parentTableName: 'exploration_runs',
       ownerTableName: 'sites',
       childParentColumn: 'exploration_run_id',
+      parentOwnerColumn: 'site_id',
+      ownerUserColumn: 'owner_user_id',
+    }),
+    rowsOwnedThroughGrandparent({
+      tableName: 'operation_path_replays',
+      parentTableName: 'operation_paths',
+      ownerTableName: 'sites',
+      childParentColumn: 'path_id',
       parentOwnerColumn: 'site_id',
       ownerUserColumn: 'owner_user_id',
     }),
@@ -255,6 +287,22 @@ export const taskExecutionClosureHandler: AccountClosureHandler = {
   retentionOutcomes: ['deleted', 'anonymized', 'not_present'],
   async run(context) {
     context.signal.throwIfAborted();
+    try {
+      await browserReplayStore.removeOwner(context.request.userExternalId);
+    } catch (error) {
+      // Local replay cleanup is best-effort; account closure must remain available.
+      context.signal.throwIfAborted();
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      const storageCode =
+        typeof code === 'string' &&
+        ['EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EDQUOT', 'EIO', 'ENOENT'].includes(code)
+          ? code
+          : 'UNKNOWN';
+      context.logger.warn(
+        { reasonCode: 'browser_replay_cleanup_failed', storageCode },
+        'Browser replay cleanup unavailable during account closure',
+      );
+    }
     const pageSize = Math.min(context.pageSize, 100);
     if (!Number.isSafeInteger(pageSize) || pageSize <= 0) {
       throw new ClosureHandlerError('INVARIANT_VIOLATION');

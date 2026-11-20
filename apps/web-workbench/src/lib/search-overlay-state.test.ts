@@ -3,17 +3,17 @@ import {
   nextSearchActiveIndex,
   normalizeSearchOverlayRows,
   searchOverlayCanRetry,
+  searchOverlayErrorMessage,
   searchOverlayNeedsAttention,
   searchOverlayRowCopy,
   searchOverlayRowTone,
-  searchOverlayStatusTone,
-  searchOverlayErrorMessage,
   searchOverlayStatusCopy,
+  searchOverlayStatusTone,
 } from './search-overlay-state';
 
 describe('searchOverlayRowTone — P2-B resting tone', () => {
   it('failed → subtle red left border', () => {
-    expect(searchOverlayRowTone('failed')).toContain('rgba(234,31,89');
+    expect(searchOverlayRowTone('failed')).toContain('rgba(255,0,97');
   });
   it('partial_success → subtle amber left border', () => {
     expect(searchOverlayRowTone('partial_success')).toContain('rgba(255,201,16');
@@ -130,9 +130,7 @@ describe('search overlay state helpers', () => {
   it('keeps action-needed status visible in mobile search rows', () => {
     expect(searchOverlayNeedsAttention('awaiting_user')).toBe(true);
     expect(searchOverlayNeedsAttention('executing')).toBe(false);
-    expect(searchOverlayNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(
-      true,
-    );
+    expect(searchOverlayNeedsAttention({ status: 'executing', awaitingKind: 'login' })).toBe(true);
 
     expect(
       searchOverlayRowCopy({

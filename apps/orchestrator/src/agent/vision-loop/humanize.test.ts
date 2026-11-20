@@ -161,10 +161,10 @@ describe('randomDelay', () => {
 });
 
 describe('isHumanizeEnabled', () => {
-  it('defaults to true', () => {
+  it('defaults to false (FIX-31: no detection-evading input)', () => {
     const prev = process.env.HUMANIZE_ENABLED;
     delete process.env.HUMANIZE_ENABLED;
-    expect(isHumanizeEnabled()).toBe(true);
+    expect(isHumanizeEnabled()).toBe(false);
     if (prev !== undefined) process.env.HUMANIZE_ENABLED = prev;
   });
 

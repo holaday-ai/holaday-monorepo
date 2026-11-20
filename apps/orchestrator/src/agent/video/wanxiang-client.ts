@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, observeMediaCall } from '../media-call-recorder.js';
 /**
  * Tongyi Wanxiang (通义万相 / Wan) B-roll client — DashScope async
  * image / video generation.
@@ -30,12 +31,13 @@
  * one-env-var fix, never a redeploy.
  */
 
-import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
+import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash';
 const DEFAULT_VIDEO_MODEL = 'wan2.7-t2v-2026-06-12';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CREATE_TIMEOUT_MS = 60_000;
 // Image gen is ~10-30s, video 1-5min — these are POLL ceilings, not the
 // per-HTTP timeout above.
 const DEFAULT_IMAGE_MAX_WAIT_MS = 120_000;
@@ -111,7 +113,7 @@ export interface CreateVideoTaskParams extends WanxiangBaseParams {
   readonly negativePrompt?: string;
   /** e.g. '1280*720'. Default omitted (model default). */
   readonly size?: string;
-  /** Wan 2.7 protocol resolution tier. */
+  /** Wan 2.7 protocol resolution tier (t2v and i2v). */
   readonly resolution?: '720P' | '1080P';
   /** Wan 2.7 protocol output ratio. */
   readonly ratio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
@@ -128,6 +130,7 @@ export interface WanxiangTaskResult {
   readonly videoUrl?: string;
   /** usage.image_count — the billable unit ($0.025/img on flash). */
   readonly imageCount?: number;
+  readonly videoDurationSeconds?: number;
   /** Provider error code/message on FAILED. */
   readonly code?: string;
   readonly message?: string;
@@ -149,7 +152,7 @@ interface DashScopeTaskResponse {
     code?: string;
     message?: string;
   };
-  usage?: { image_count?: number };
+  usage?: { image_count?: number; video_duration?: number };
   code?: string;
   message?: string;
 }
@@ -169,11 +172,7 @@ function isRetryableHttpStatus(status: number): boolean {
 }
 
 /** POST a create-task body with X-DashScope-Async, retrying transient 429/503. */
-async function postCreate(
-  url: string,
-  body: unknown,
-  p: WanxiangBaseParams,
-): Promise<string> {
+async function postCreate(url: string, body: unknown, p: WanxiangBaseParams): Promise<string> {
   const fetchImpl = p.fetchImpl ?? fetch;
   const maxRetries = p.maxRetries ?? 2;
   const retryBaseMs = p.retryBaseMs ?? 1000;
@@ -192,7 +191,13 @@ async function postCreate(
           },
           body: JSON.stringify(body),
         },
-        { timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
+        // Create is not retried on a lost response (it may already be billed),
+        // so give the single attempt more room than a poll.
+        {
+          timeoutMs: p.timeoutMs ?? CREATE_TIMEOUT_MS,
+          ...(p.signal ? { signal: p.signal } : {}),
+          fetchImpl,
+        },
       );
     } catch (err) {
       if (err instanceof VideoHttpError) throw new WanxiangError(err.message, err.kind);
@@ -217,7 +222,10 @@ async function postCreate(
   try {
     json = (await res.json()) as DashScopeCreateResponse;
   } catch (err) {
-    throw new WanxiangError(`DashScope create response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new WanxiangError(
+      `DashScope create response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   const taskId = json.output?.task_id;
   if (!taskId) {
@@ -256,15 +264,24 @@ export async function createVideoTask(
   const model = p.model ?? DEFAULT_VIDEO_MODEL;
   const parameters: Record<string, unknown> = {};
   const usesWan27TextProtocol = model.startsWith('wan2.7-t2v');
+  // Wan 2.7 i2v: input.media[{type:'first_frame', url}], parameters.resolution/duration;
+  // the output ratio follows the first frame (no size/ratio parameter).
+  // https://help.aliyun.com/zh/model-studio/image-to-video-general-api-reference
+  const usesWan27ImageProtocol = model.startsWith('wan2.7-i2v') && Boolean(p.imageUrl);
   if (usesWan27TextProtocol) {
     if (p.resolution) parameters.resolution = p.resolution;
     if (p.ratio) parameters.ratio = p.ratio;
+  } else if (usesWan27ImageProtocol) {
+    if (p.resolution) parameters.resolution = p.resolution;
   } else if (p.size) {
     parameters.size = p.size;
   }
   if (p.durationSeconds !== undefined) parameters.duration = p.durationSeconds;
   const input: Record<string, unknown> = { prompt: p.prompt };
-  if (p.imageUrl) input.img_url = p.imageUrl;
+  if (p.imageUrl) {
+    if (usesWan27ImageProtocol) input.media = [{ type: 'first_frame', url: p.imageUrl }];
+    else input.img_url = p.imageUrl;
+  }
   if (p.negativePrompt) input.negative_prompt = p.negativePrompt;
   const taskId = await postCreate(
     `${base(p)}/api/v1/services/aigc/video-generation/video-synthesis`,
@@ -290,7 +307,11 @@ export async function getTaskStatus(
           ...(p.workspaceId ? { 'x-dashscope-workspace': p.workspaceId } : {}),
         },
       },
-      { timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
+      {
+        timeoutMs: p.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(p.signal ? { signal: p.signal } : {}),
+        fetchImpl,
+      },
     );
   } catch (err) {
     if (err instanceof VideoHttpError) throw new WanxiangError(err.message, err.kind);
@@ -298,13 +319,21 @@ export async function getTaskStatus(
   }
   if (!res.ok) {
     const errBody = await safeText(res);
-    throw new WanxiangError(`DashScope task poll returned ${res.status}`, 'http', res.status, errBody.slice(0, 800));
+    throw new WanxiangError(
+      `DashScope task poll returned ${res.status}`,
+      'http',
+      res.status,
+      errBody.slice(0, 800),
+    );
   }
   let json: DashScopeTaskResponse;
   try {
     json = (await res.json()) as DashScopeTaskResponse;
   } catch (err) {
-    throw new WanxiangError(`DashScope task response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new WanxiangError(
+      `DashScope task response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
   const out = json.output ?? {};
   const taskStatus = (out.task_status ?? 'UNKNOWN') as WanxiangTaskStatus;
@@ -317,6 +346,9 @@ export async function getTaskStatus(
     imageUrls,
     ...(out.video_url ? { videoUrl: out.video_url } : {}),
     ...(json.usage?.image_count !== undefined ? { imageCount: json.usage.image_count } : {}),
+    ...(Number.isFinite(json.usage?.video_duration)
+      ? { videoDurationSeconds: json.usage?.video_duration }
+      : {}),
     ...(out.code ? { code: out.code } : {}),
     ...(out.message ? { message: out.message } : {}),
   };
@@ -339,8 +371,26 @@ export async function waitForTask(p: WaitForTaskParams): Promise<WanxiangTaskRes
   const pollIntervalMs = p.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxWaitMs = p.maxWaitMs ?? DEFAULT_IMAGE_MAX_WAIT_MS;
   const startedAt = Date.now();
+  let consecutivePollFailures = 0;
   for (;;) {
-    const status = await getTaskStatus(p);
+    // Polling is an idempotent GET on an already-created (paid) task: transient
+    // timeouts / network errors / 429 / 5xx keep polling until maxWaitMs.
+    let status: WanxiangTaskResult;
+    try {
+      status = await getTaskStatus(p);
+      consecutivePollFailures = 0;
+    } catch (error) {
+      consecutivePollFailures += 1;
+      const transient =
+        error instanceof WanxiangError &&
+        (error.kind === 'timeout' ||
+          error.kind === 'network' ||
+          (error.kind === 'http' && ((error.status ?? 0) >= 500 || error.status === 429)));
+      if (!transient || consecutivePollFailures >= 5 || Date.now() - startedAt > maxWaitMs)
+        throw error;
+      await sleep(pollIntervalMs);
+      continue;
+    }
     p.onStatus?.(status);
     if (status.taskStatus === 'SUCCEEDED') return status;
     if (
@@ -388,7 +438,7 @@ export async function generateBrollImage(
 }
 
 /** Convenience: create a video task and poll to completion. */
-export async function generateBrollVideo(
+async function generateBrollVideoImpl(
   p: CreateVideoTaskParams & {
     pollIntervalMs?: number;
     maxWaitMs?: number;
@@ -410,4 +460,35 @@ export async function generateBrollVideo(
     throw new WanxiangError('Wanxiang video task succeeded with no result url', 'no_result');
   }
   return result;
+}
+
+export async function generateBrollVideo(
+  p: Parameters<typeof generateBrollVideoImpl>[0],
+): Promise<WanxiangTaskResult> {
+  const model = p.model ?? DEFAULT_VIDEO_MODEL;
+  return observeMediaCall(
+    {
+      provider: 'alibaba-model-studio',
+      model,
+      region: dashscopeCostRegion(p.baseUrl),
+      purpose: 'media.video',
+    },
+    () => generateBrollVideoImpl(p),
+    (result) => {
+      const duration = result.videoDurationSeconds ?? p.durationSeconds;
+      return {
+        providerRequestId: result.taskId,
+        ...(duration !== undefined
+          ? {
+              mediaUsage: {
+                unit: 'second',
+                quantity: duration,
+                resolution: p.resolution?.toLowerCase() ?? '1080p',
+                basis: result.videoDurationSeconds !== undefined ? 'provider' : 'request',
+              },
+            }
+          : {}),
+      };
+    },
+  );
 }

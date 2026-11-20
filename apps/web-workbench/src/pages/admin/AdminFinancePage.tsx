@@ -16,6 +16,10 @@
  * accents matching the calendar palette.
  */
 
+import { ChoiceButton } from '@/components/ui/choice-button';
+import { pageErrorMessage } from '@/lib/page-error-copy';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import * as React from 'react';
 import {
@@ -31,9 +35,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { pageErrorMessage } from '@/lib/page-error-copy';
-import { trpc } from '@/lib/trpc';
-import { cn } from '@/lib/utils';
 import {
   ADMIN_BORDER,
   ADMIN_MAGENTA,
@@ -59,7 +60,7 @@ type CostBreakdownData = Awaited<ReturnType<typeof trpc.admin.finance.costBreakd
 type CostByDayData = Awaited<ReturnType<typeof trpc.admin.finance.costByDay.query>>;
 type TopCostlyData = Awaited<ReturnType<typeof trpc.admin.finance.topCostlyTasks.query>>;
 
-const PALETTE = ['#EA1F59', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757'];
+const PALETTE = ['#FF0061', '#FFC910', '#42C0EF', '#57479C', '#ADADAD', '#595757'];
 
 /** Format CNY cents → ¥123.45 with thousands separator. */
 function formatYuan(cents: unknown): string {
@@ -117,7 +118,7 @@ export function AdminFinancePage(): JSX.Element {
     return (
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-xl font-semibold">营收与成本</h1>
-        <div className="mt-4 rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+        <div className="mt-4 rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
           <div className="font-medium">{copy.title}</div>
           <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
         </div>
@@ -148,9 +149,7 @@ export function AdminFinancePage(): JSX.Element {
         </div>
       </div>
 
-      <div className="mt-6">
-        {tab === 'revenue' ? <RevenueTab /> : <CostTab />}
-      </div>
+      <div className="mt-6">{tab === 'revenue' ? <RevenueTab /> : <CostTab />}</div>
     </div>
   );
 }
@@ -160,7 +159,10 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
     return (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-[8px] border border-[#DCDDDD] bg-white" />
+          <div
+            key={i}
+            className="h-24 animate-pulse rounded-[8px] border border-[#DCDDDD] bg-white"
+          />
         ))}
       </div>
     );
@@ -173,19 +175,23 @@ function ProfitBar({ summary }: { summary: SummaryData | null }): JSX.Element {
       <SummaryCard
         label="本月营收"
         value={formatYuan(summary.monthRevenueCnyCents)}
-        tint="rgba(234,31,89,0.10)"
+        tint="rgba(255,0,97,0.10)"
       />
       <SummaryCard
         label="本月成本"
         value={formatYuan(summary.monthCostCnyCents)}
         tint="rgba(255,201,16,0.18)"
-        sub={incomplete ? `已知模型估算 ${formatYuan(summary.monthKnownLlmCostCnyCents)} · ${summary.unknownCostCalls} 次待核算` : `模型估算 ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`}
+        sub={
+          incomplete
+            ? `已知模型估算 ${formatYuan(summary.monthKnownLlmCostCnyCents)} · ${summary.unknownCostCalls} 次待核算`
+            : `模型估算 ${formatYuanCompact(summary.monthLlmCostCnyCents)} · 服务器 ${formatYuanCompact(summary.monthServerCostCnyCents)}`
+        }
       />
       <SummaryCard
         label={incomplete ? '利润待核算' : profitPositive ? '本月利润（估算）' : '本月亏损（估算）'}
         value={incomplete ? '—' : formatYuan(Math.abs(profit))}
-        tint={profitPositive ? 'rgba(66,192,239,0.12)' : 'rgba(234,31,89,0.10)'}
-        valueClass={profitPositive ? 'text-[#1688AA]' : 'text-[#EA1F59]'}
+        tint={profitPositive ? 'rgba(66,192,239,0.12)' : 'rgba(255,0,97,0.10)'}
+        valueClass={profitPositive ? 'text-[#1688AA]' : 'text-[#FF0061]'}
         trend={incomplete ? undefined : profitPositive ? 'up' : 'down'}
       />
     </div>
@@ -216,7 +222,7 @@ function SummaryCard({
       <div className={cn('mt-2 flex items-baseline gap-2', valueClass)}>
         <span className="text-2xl font-semibold">{value}</span>
         {trend === 'up' && <TrendingUp className="h-4 w-4 text-[#1688AA]" aria-hidden />}
-        {trend === 'down' && <TrendingDown className="h-4 w-4 text-[#EA1F59]" aria-hidden />}
+        {trend === 'down' && <TrendingDown className="h-4 w-4 text-[#FF0061]" aria-hidden />}
       </div>
       {sub ? <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div> : null}
     </div>
@@ -233,18 +239,19 @@ function TabButton({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <button
+    <ChoiceButton
+      selected={active}
       type="button"
       onClick={onClick}
       className={cn(
         'border-b-2 px-1 pb-3 text-[14px] font-medium transition-colors',
         active
-          ? 'border-[#EA1F59] text-[#EA1F59]'
-          : 'border-transparent text-muted-foreground hover:text-[#EA1F59]',
+          ? 'border-[#FF0061] text-[#FF0061]'
+          : 'border-transparent text-muted-foreground hover:text-[#FF0061]',
       )}
     >
       {children}
-    </button>
+    </ChoiceButton>
   );
 }
 
@@ -346,7 +353,11 @@ function RevenueTab(): JSX.Element {
                         ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
+                      contentStyle={{
+                        borderRadius: 8,
+                        border: `1px solid ${ADMIN_BORDER}`,
+                        fontSize: 12,
+                      }}
                       formatter={(value, _name, ctx) => {
                         const v = typeof value === 'number' ? value : Number(value ?? 0);
                         const p = (ctx as { payload?: { label?: string } } | undefined)?.payload;
@@ -401,7 +412,11 @@ function RevenueTab(): JSX.Element {
                   tickFormatter={(v: number) => formatYuanCompact(v)}
                 />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
+                  contentStyle={{
+                    borderRadius: 8,
+                    border: `1px solid ${ADMIN_BORDER}`,
+                    fontSize: 12,
+                  }}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value ?? 0);
                     return [formatYuan(v), '营收'];
@@ -421,7 +436,7 @@ function RevenueTab(): JSX.Element {
             {funnelStages.map((stage, i) => {
               const top = funnelStages[0]?.count ?? 1;
               const widthPct = top > 0 ? (stage.count / top) * 100 : 0;
-              const prevCount = i > 0 ? funnelStages[i - 1]?.count ?? 0 : null;
+              const prevCount = i > 0 ? (funnelStages[i - 1]?.count ?? 0) : null;
               const conv = prevCount && prevCount > 0 ? (stage.count / prevCount) * 100 : null;
               return (
                 <div key={stage.label} className="flex items-center gap-3">
@@ -452,9 +467,7 @@ function RevenueTab(): JSX.Element {
           </div>
         </Section>
         <Section title="付费用户 LTV" hint="累计订阅收入 / 付费人数">
-          <div className="text-3xl font-semibold text-foreground">
-            {formatYuan(ltvCnyCents)}
-          </div>
+          <div className="text-3xl font-semibold text-foreground">{formatYuan(ltvCnyCents)}</div>
           <div className="mt-1 text-[12px] text-muted-foreground">
             含全部 subscription 类型订单（USD 已折算为 CNY）
           </div>
@@ -546,18 +559,28 @@ function CostTab(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      {unknownCostCalls > 0 && <p role="status" className="text-sm text-muted-foreground">
-        {unknownCostCalls} 次调用费用待核算；已知估算小计 {formatYuan(totalLlmCost)}。不代表完整成本。
-      </p>}
+      {unknownCostCalls > 0 && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {unknownCostCalls} 次调用费用待核算；已知估算小计 {formatYuan(totalLlmCost)}
+          。不代表完整成本。
+        </p>
+      )}
       {/* Cost summary chips */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <ChipCard label="本月模型成本（估算）" value={unknownCostCalls > 0 ? '待核算' : formatYuan(totalLlmCost)} />
+        <ChipCard
+          label="本月模型成本（估算）"
+          value={unknownCostCalls > 0 ? '待核算' : formatYuan(totalLlmCost)}
+        />
         <ChipCard label="本月模型调用" value={`${formatInteger(totalCalls)} 次`} />
         <ChipCard label="本月模型用量" value={formatTokens(incompleteUsage ? null : totalTokens)} />
         <ChipCard
           label="单次调用均价"
           value={
-            unknownCostCalls > 0 ? '待核算' : totalCalls > 0 ? formatYuan(Math.round(totalLlmCost / totalCalls)) : '—'
+            unknownCostCalls > 0
+              ? '待核算'
+              : totalCalls > 0
+                ? formatYuan(Math.round(totalLlmCost / totalCalls))
+                : '—'
           }
         />
       </div>
@@ -567,7 +590,7 @@ function CostTab(): JSX.Element {
         <Section title="按模型成本分布" hint="仅已知估算">
           {models.length === 0 ? (
             <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
-            本月暂无模型调用
+              本月暂无模型调用
             </div>
           ) : (
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
@@ -589,7 +612,11 @@ function CostTab(): JSX.Element {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
+                      contentStyle={{
+                        borderRadius: 8,
+                        border: `1px solid ${ADMIN_BORDER}`,
+                        fontSize: 12,
+                      }}
                       formatter={(value, _name, ctx) => {
                         const v = typeof value === 'number' ? value : Number(value ?? 0);
                         const p = (ctx as { payload?: { model?: string } } | undefined)?.payload;
@@ -646,7 +673,11 @@ function CostTab(): JSX.Element {
                   tickFormatter={(v: number) => formatYuanCompact(v)}
                 />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, border: `1px solid ${ADMIN_BORDER}`, fontSize: 12 }}
+                  contentStyle={{
+                    borderRadius: 8,
+                    border: `1px solid ${ADMIN_BORDER}`,
+                    fontSize: 12,
+                  }}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value ?? 0);
                     return [formatYuan(v), '成本'];
@@ -666,6 +697,7 @@ function CostTab(): JSX.Element {
       </div>
 
       {/* Top costly tasks */}
+      <TaskCostLookup />
       <Section title="高成本任务 TOP 10" hint="按已知估算排序 · 非完整排行">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
@@ -696,10 +728,7 @@ function CostTab(): JSX.Element {
                       {truncate(t.title ?? t.intent ?? '—', 60)}
                     </td>
                     <td className="py-2 pr-3 text-muted-foreground">
-                      {truncate(
-                        t.user?.displayName ?? t.user?.email ?? t.user?.userId ?? '—',
-                        20,
-                      )}
+                      {truncate(t.user?.displayName ?? t.user?.email ?? t.user?.userId ?? '—', 20)}
                     </td>
                     <td className="py-2 pr-3 text-muted-foreground">{t.model ?? '—'}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
@@ -710,9 +739,11 @@ function CostTab(): JSX.Element {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-foreground">
                       {formatYuan(t.costCnyCents)}
-                      {t.unknownCostCalls > 0 && <div className="text-[11px] text-muted-foreground">
-                        已知 {formatYuan(t.knownCostCnyCents)} · {t.unknownCostCalls} 次待核算
-                      </div>}
+                      {t.unknownCostCalls > 0 && (
+                        <div className="text-[11px] text-muted-foreground">
+                          已知 {formatYuan(t.knownCostCnyCents)} · {t.unknownCostCalls} 次待核算
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -722,9 +753,7 @@ function CostTab(): JSX.Element {
         </div>
       </Section>
 
-      <p className="text-[11px] text-muted-foreground">
-        最后更新：{formatDateTime(new Date())}
-      </p>
+      <p className="text-[11px] text-muted-foreground">最后更新：{formatDateTime(new Date())}</p>
     </div>
   );
 }
@@ -791,14 +820,15 @@ function Section({
   className?: string;
 }): JSX.Element {
   return (
-    <section className={cn('rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]', className)}>
+    <section
+      className={cn(
+        'rounded-[8px] border border-[#DCDDDD] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]',
+        className,
+      )}
+    >
       <header className="mb-4 flex items-baseline justify-between">
         <h2 className="text-base font-semibold">{title}</h2>
-        {hint ? (
-          <span className="text-[11px] uppercase text-muted-foreground">
-            {hint}
-          </span>
-        ) : null}
+        {hint ? <span className="text-[11px] uppercase text-muted-foreground">{hint}</span> : null}
       </header>
       {children}
     </section>
@@ -817,9 +847,73 @@ function LoadingPane(): JSX.Element {
 function ErrorPane({ msg }: { msg: string }): JSX.Element {
   const copy = adminLoadErrorCopy(msg);
   return (
-    <div className="rounded-[8px] border border-[#EA1F59]/25 border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-[#EA1F59] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+    <div className="rounded-[8px] border border-[#FF0061]/25 border-l-[#FF0061] bg-white px-4 py-3 text-sm text-[#FF0061] shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
       <div className="font-medium">{copy.title}</div>
       <div className="mt-1 text-xs text-[#595757]">{copy.body}</div>
     </div>
+  );
+}
+
+function TaskCostLookup(): JSX.Element {
+  const mounted = useMountedRef();
+  const [taskId, setTaskId] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [result, setResult] = React.useState<Awaited<
+    ReturnType<typeof trpc.admin.finance.taskCost.query>
+  > | null>(null);
+  async function lookup(event: React.FormEvent) {
+    event.preventDefault();
+    if (loading || !taskId.trim()) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const value = await trpc.admin.finance.taskCost.query({ taskId: taskId.trim() });
+      if (mounted.current) setResult(value);
+    } catch {
+      if (mounted.current) setError('未能读取任务成本，请确认任务 ID 后重试。');
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  }
+  return (
+    <Section
+      title="查询任务成本"
+      hint="按供应商用量与官方价目估算，包含未交付的生成尝试；不等于供应商实付账单。"
+    >
+      <form onSubmit={lookup} className="flex flex-wrap gap-2">
+        <input
+          aria-label="成本查询任务 ID"
+          value={taskId}
+          onChange={(event) => setTaskId(event.target.value)}
+          placeholder="tsk_…"
+          disabled={loading}
+          className="rounded border bg-transparent px-3 py-2 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={loading || !taskId.trim()}
+          className="rounded border px-3 py-2 text-sm disabled:opacity-50"
+        >
+          {loading ? '查询中…' : '查询成本'}
+        </button>
+      </form>
+      {error && <p role="alert">{error}</p>}
+      {result && (
+        <output className="mt-3 block text-sm">
+          <p>
+            {result.taskId} · {result.callCount} 次调用
+          </p>
+          <p>
+            {result.callCount === 0
+              ? '暂无费用回执'
+              : result.unknownCostCalls > 0
+                ? `待核算 · 已知估算 ${formatYuan(result.knownCostCnyCents)} · ${result.unknownCostCalls} 次未知费用`
+                : `官方价目估算 USD ${(result.totalCostUsd ?? 0).toFixed(6)} · ${formatYuan(result.costCnyCents ?? 0)}`}
+          </p>
+        </output>
+      )}
+    </Section>
   );
 }

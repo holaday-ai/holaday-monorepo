@@ -1,9 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
-import {
-  deletableTaskIdsForBatchSelection,
-  pruneBatchSelection,
-} from './sidebar-batch-selection';
+import { describe, expect, it } from 'vitest';
+import { deletableTaskIdsForBatchSelection, pruneBatchSelection } from './sidebar-batch-selection';
 
 describe('sidebar batch selection', () => {
   it('returns only visible terminal task ids and dedupes repeated rows', () => {
@@ -21,12 +18,12 @@ describe('sidebar batch selection', () => {
   });
 
   it('drops stale selected ids when rows disappear or become active', () => {
-    expect(
-      [...pruneBatchSelection(
+    expect([
+      ...pruneBatchSelection(
         new Set(['tsk_done', 'tsk_hidden', 'tsk_running', 'tsk_failed']),
         new Set(['tsk_done', 'tsk_failed']),
-      )],
-    ).toEqual(['tsk_done', 'tsk_failed']);
+      ),
+    ]).toEqual(['tsk_done', 'tsk_failed']);
   });
 });
 

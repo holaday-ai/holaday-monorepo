@@ -1,7 +1,8 @@
 import type { DraftAttachment } from '@/components/AttachmentChip';
-import { CapabilityCenterContent } from '@/components/skills/CapabilityCenterContent';
+import { ApprovedSkillsCatalog } from '@/components/skills/ApprovedSkillsCatalog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { withoutHiddenEntrySkills } from '@/lib/feature-entries';
 import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import {
   normalizeSkillRows,
@@ -57,7 +58,8 @@ export function SkillsPage(): JSX.Element {
       setLoading(true);
       setLoadError(null);
       try {
-        const list = normalizeSkillRows(await trpc.skills.list.query());
+        // HIDE-1: the A-share skill card is an entry, hidden with it.
+        const list = withoutHiddenEntrySkills(normalizeSkillRows(await trpc.skills.list.query()));
         if (!mountedRef.current || requestId !== requestIdRef.current) return;
         setSkills(list);
         setActiveSkillId((current) => {
@@ -232,7 +234,7 @@ export function SkillsPage(): JSX.Element {
   }
 
   return (
-    <PageContainer width="wide" className="max-w-[1180px]">
+    <PageContainer width="wide" className="hd-skills-page max-w-[1180px]">
       {loading ? (
         <>
           <PageHeader
@@ -295,7 +297,7 @@ export function SkillsPage(): JSX.Element {
           </div>
         </>
       ) : (
-        <CapabilityCenterContent
+        <ApprovedSkillsCatalog
           skills={skills}
           activeSkillId={activeSkillId}
           query={query}

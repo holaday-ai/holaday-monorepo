@@ -26,7 +26,5 @@ export function isWorkbenchWideWidth(width: number): boolean {
 export function workbenchInlineColumnMinimums(inputs: {
   isWideDesktop: boolean;
 }): { main: number; browser: number } {
-  return inputs.isWideDesktop
-    ? { main: 560, browser: 360 }
-    : { main: 320, browser: 320 };
+  return inputs.isWideDesktop ? { main: 560, browser: 360 } : { main: 320, browser: 320 };
 }

@@ -1,19 +1,29 @@
 import {
-  formatCny,
   PARTNER_RECHARGE_MAX_SINGLE_CNY_CENTS,
   PARTNER_RECHARGE_MIN_CNY_CENTS,
+  formatCny,
 } from '@holaday/shared-types';
 import { pageErrorMessage } from './page-error-copy';
 
 type PartnerMembershipStatus = 'active' | 'expired' | 'cancelled';
 type NormalizedMembershipStatus = PartnerMembershipStatus | 'none';
 type PartnerKycStatus = 'not_started' | 'pending' | 'passed' | 'review_required' | 'rejected';
-type PartnerLotStatus = 'accumulating' | 'release_pending' | 'releasing' | 'completed' | 'frozen' | 'closed';
+type PartnerLotStatus =
+  | 'accumulating'
+  | 'release_pending'
+  | 'releasing'
+  | 'completed'
+  | 'frozen'
+  | 'closed';
 type PartnerRiskStatus = 'normal' | 'review' | 'review_required' | 'frozen';
 export type PartnerPaymentProvider = 'wechat' | 'alipay' | 'manual';
 export type PartnerWorkbenchSection = 'ledger' | 'recharge' | 'withdraw';
 
-export const PARTNER_PAYMENT_PROVIDERS: readonly PartnerPaymentProvider[] = ['wechat', 'alipay', 'manual'];
+export const PARTNER_PAYMENT_PROVIDERS: readonly PartnerPaymentProvider[] = [
+  'wechat',
+  'alipay',
+  'manual',
+];
 
 const PARTNER_WORKBENCH_SECTION_HASHES: Record<PartnerWorkbenchSection, string> = {
   ledger: '#partner-ledger',
@@ -22,7 +32,8 @@ const PARTNER_WORKBENCH_SECTION_HASHES: Record<PartnerWorkbenchSection, string> 
 };
 
 export function normalizePartnerPaymentProvider(value: unknown): PartnerPaymentProvider {
-  return typeof value === 'string' && PARTNER_PAYMENT_PROVIDERS.includes(value as PartnerPaymentProvider)
+  return typeof value === 'string' &&
+    PARTNER_PAYMENT_PROVIDERS.includes(value as PartnerPaymentProvider)
     ? (value as PartnerPaymentProvider)
     : 'manual';
 }
@@ -39,7 +50,10 @@ export function partnerPaymentProviderHint(value: unknown): string {
   return provider === 'manual' ? '人工兜底通道，后台确认后生效。' : '支付成功后等待渠道回调确认。';
 }
 
-export function partnerWorkbenchRedirectTarget(value: unknown): { pathname: '/partner'; hash: string } {
+export function partnerWorkbenchRedirectTarget(value: unknown): {
+  pathname: '/partner';
+  hash: string;
+} {
   return {
     pathname: '/partner',
     hash:
@@ -601,7 +615,8 @@ function sumScheduledCreditCents(lots: readonly PartnerLotState[]): number {
 function normalizeLimits(value: unknown): PartnerLimitsState {
   const limits = isRecord(value) ? value : {};
   return {
-    withdrawalMinCreditCents: safeCents(limits.withdrawalMinCreditCents) || PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS,
+    withdrawalMinCreditCents:
+      safeCents(limits.withdrawalMinCreditCents) || PARTNER_WITHDRAWAL_MIN_CREDIT_CENTS,
   };
 }
 
@@ -678,7 +693,8 @@ function normalizeOrders(value: unknown): readonly PartnerOrderState[] {
     if (!isRecord(entry)) return [];
     const orderExternalId = safeTrimmedString(entry.orderExternalId) || `order-${index + 1}`;
     const status = safeTrimmedString(entry.status) || 'pending';
-    const reviewDetail = safeTrimmedString(entry.reviewErrorMessage) || safeTrimmedString(entry.reviewReason);
+    const reviewDetail =
+      safeTrimmedString(entry.reviewErrorMessage) || safeTrimmedString(entry.reviewReason);
     const createdAt = dateOnly(entry.createdAt);
     return [
       {
@@ -701,7 +717,8 @@ function normalizeWithdrawals(value: unknown): readonly PartnerWithdrawalActivit
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry, index) => {
     if (!isRecord(entry)) return [];
-    const withdrawalExternalId = safeTrimmedString(entry.withdrawalExternalId) || `withdrawal-${index + 1}`;
+    const withdrawalExternalId =
+      safeTrimmedString(entry.withdrawalExternalId) || `withdrawal-${index + 1}`;
     const status = safeTrimmedString(entry.status) || 'requested';
     const reviewDueAt = dateOnly(entry.reviewDueAt);
     const paidAt = dateOnly(entry.paidAt);
@@ -741,7 +758,8 @@ function normalizeReferrals(value: unknown): readonly PartnerReferralActivitySta
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry, index) => {
     if (!isRecord(entry)) return [];
-    const referralExternalId = safeTrimmedString(entry.referralExternalId) || `referral-${index + 1}`;
+    const referralExternalId =
+      safeTrimmedString(entry.referralExternalId) || `referral-${index + 1}`;
     const status = safeTrimmedString(entry.status) || 'pending';
     const assisted = entry.assisted === true;
     const rewardRateBps = safeCount(entry.rewardRateBps);
@@ -788,7 +806,9 @@ function orderStatusHelp(status: string, reviewDetail: string): string {
   if (status === 'pending') return '等待支付渠道或后台确认。';
   if (status === 'completed') return '订单已完成，权益或 HOLA Credit 已入账。';
   if (status === 'review_required') {
-    return reviewDetail ? `订单进入人工复核：${reviewDetail}` : '订单进入人工复核，请等待后台确认。';
+    return reviewDetail
+      ? `订单进入人工复核：${reviewDetail}`
+      : '订单进入人工复核，请等待后台确认。';
   }
   if (status === 'cancelled') return '订单已取消，不会继续处理。';
   return '订单状态已更新，请刷新查看最新进度。';
@@ -815,10 +835,14 @@ function withdrawalStatusHelp(
       : '已完成出款，请留意到账。';
   }
   if (status === 'rejected') {
-    return detail.rejectionReason ? `提现未通过：${detail.rejectionReason}` : '提现未通过，资金已回到可用余额。';
+    return detail.rejectionReason
+      ? `提现未通过：${detail.rejectionReason}`
+      : '提现未通过，资金已回到可用余额。';
   }
   if (status === 'returned') {
-    return detail.returnedReason ? `提现已退回：${detail.returnedReason}` : '提现已退回，资金会回到可用余额。';
+    return detail.returnedReason
+      ? `提现已退回：${detail.returnedReason}`
+      : '提现已退回，资金会回到可用余额。';
   }
   return '提现状态已更新，请刷新查看最新进度。';
 }

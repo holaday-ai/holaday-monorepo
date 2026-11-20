@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ConnectionProviderLike,
   connectionAccessMailBody,
   connectionLoadErrorCopy,
   connectionPageSummary,
@@ -8,7 +9,6 @@ import {
   groupConnectionProviders,
   normalizeConnectionProviders,
   safeConnectionCount,
-  type ConnectionProviderLike,
 } from './connection-page-state';
 
 const providers: readonly ConnectionProviderLike[] = [
@@ -39,11 +39,7 @@ describe('connection page state helpers', () => {
   it('groups providers in product order with localized labels', () => {
     const groups = groupConnectionProviders(providers);
 
-    expect(groups.map((group) => group.label)).toEqual([
-      '效率工具',
-      '沟通协作',
-      '研发协作',
-    ]);
+    expect(groups.map((group) => group.label)).toEqual(['效率工具', '沟通协作', '研发协作']);
     expect(groups[0]?.items.map((item) => item.id)).toEqual(['google-calendar']);
   });
 
@@ -79,15 +75,15 @@ describe('connection page state helpers', () => {
     expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: true, error: null })).toBe(
       '连接器加载中…',
     );
-    expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: false, error: 'down' })).toBe(
-      '连接器暂时无法加载',
-    );
+    expect(
+      connectionPageSummary({ count: 0, categoryCount: 0, loading: false, error: 'down' }),
+    ).toBe('连接器暂时无法加载');
     expect(connectionPageSummary({ count: 0, categoryCount: 0, loading: false, error: null })).toBe(
       '暂无规划连接器',
     );
-    expect(connectionPageSummary({ count: 10, categoryCount: 5, loading: false, error: null })).toBe(
-      '已规划 10 个连接器 · 5 类工具',
-    );
+    expect(
+      connectionPageSummary({ count: 10, categoryCount: 5, loading: false, error: null }),
+    ).toBe('已规划 10 个连接器 · 5 类工具');
     expect(
       connectionPageSummary({
         count: Number.NaN,

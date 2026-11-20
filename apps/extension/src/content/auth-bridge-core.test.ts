@@ -66,7 +66,7 @@ describe('looksLikeToken', () => {
   });
 
   it('accepts long opaque token (not strictly JWT format)', () => {
-    expect(looksLikeToken('hd_live_' + 'a'.repeat(24))).toBe(true);
+    expect(looksLikeToken(`hd_live_${'a'.repeat(24)}`)).toBe(true);
   });
 
   it('rejects oversized observed tokens', () => {
@@ -81,15 +81,15 @@ describe('decideObservedTokenAction', () => {
   });
 
   it('ignores malformed observed tokens after a valid token', () => {
-    expect(decideObservedTokenAction('hd_live_' + 'a'.repeat(24), 'token with spaces')).toEqual({
+    expect(decideObservedTokenAction(`hd_live_${'a'.repeat(24)}`, 'token with spaces')).toEqual({
       kind: 'unchanged',
     });
   });
 
   it('keeps valid observed tokens on the set path', () => {
-    expect(decideObservedTokenAction(null, 'hd_live_' + 'a'.repeat(24))).toEqual({
+    expect(decideObservedTokenAction(null, `hd_live_${'a'.repeat(24)}`)).toEqual({
       kind: 'set',
-      token: 'hd_live_' + 'a'.repeat(24),
+      token: `hd_live_${'a'.repeat(24)}`,
     });
   });
 });

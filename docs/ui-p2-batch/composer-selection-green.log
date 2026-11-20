@@ -1,0 +1,14 @@
+
+> @holaday/web-workbench@0.0.0 test /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> vitest run src/components/InputArea.permissions.test.tsx --maxWorkers=1 --minWorkers=1
+
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+
+ ✓ src/components/InputArea.permissions.test.tsx (9 tests) 341ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  01:09:27
+   Duration  1.67s (transform 389ms, setup 0ms, collect 751ms, tests 341ms, environment 216ms, prepare 60ms)
+

@@ -25,14 +25,6 @@
  * `BottomSheet` wrapper (CSS-only fallback if no Sheet component).
  */
 
-import FullCalendar from '@fullcalendar/react';
-import zhCnLocale from '@fullcalendar/core/locales/zh-cn';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
-import listPlugin from '@fullcalendar/list';
-import interactionPlugin from '@fullcalendar/interaction';
-import rrulePlugin from '@fullcalendar/rrule';
-import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
 import type {
   DatesSetArg,
   EventClickArg,
@@ -41,43 +33,47 @@ import type {
   EventInput,
   EventMountArg,
 } from '@fullcalendar/core';
+import zhCnLocale from '@fullcalendar/core/locales/zh-cn';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import type { DateClickArg, EventResizeDoneArg } from '@fullcalendar/interaction';
+import listPlugin from '@fullcalendar/list';
+import FullCalendar from '@fullcalendar/react';
+import rrulePlugin from '@fullcalendar/rrule';
+import timeGridPlugin from '@fullcalendar/timegrid';
 
-import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
-import * as React from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { taskActionError } from '@/lib/error-copy';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
-import { ScheduledTaskDialog } from '@/components/ScheduledTaskDialog';
+import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
+import * as React from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { EventDetailPopover } from './EventDetailPopover';
+import { QuickCreatePopover } from './QuickCreatePopover';
+import { scheduledEventToggleSuccessMessage } from './event-detail-state';
 import {
+  type ScheduledTaskRow,
   normalizeScheduledTaskRows,
   rowToEventInput,
-  type ScheduledTaskRow,
 } from './event-mapping';
-import { QuickCreatePopover } from './QuickCreatePopover';
-import { EventDetailPopover } from './EventDetailPopover';
-import { formatRollForward, nextQuickCreateDate } from './time-helpers';
 import {
   scheduledCalendarErrorMessage,
   scheduledCalendarStatusCopy,
   scheduledCalendarSummary,
   shouldOpenScheduledCalendarPopover,
 } from './scheduled-calendar-state';
-import { scheduledEventToggleSuccessMessage } from './event-detail-state';
+import { formatRollForward, nextQuickCreateDate } from './time-helpers';
 import './calendar-styles.css';
 
 const MOBILE_QUERY = '(max-width: 640px)';
 
-type ScheduledCalendarView =
-  | 'dayGridMonth'
-  | 'timeGridWeek'
-  | 'timeGridDay'
-  | 'listMonth';
+type ScheduledCalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listMonth';
 
 interface QuickCreateState {
   /** Anchor position for the popover (viewport coords). */
@@ -102,9 +98,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   }, [searchParams]);
   const calendarRef = React.useRef<FullCalendar | null>(null);
   const [rows, setRows] = React.useState<ScheduledTaskRow[]>([]);
-  const [lastRefreshFocusId, setLastRefreshFocusId] = React.useState<number | null>(
-    null,
-  );
+  const [lastRefreshFocusId, setLastRefreshFocusId] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [currentRange, setCurrentRange] = React.useState<{
@@ -112,9 +106,7 @@ export function ScheduledCalendarPage(): JSX.Element {
     end: Date;
   } | null>(null);
   const [quickCreate, setQuickCreate] = React.useState<QuickCreateState | null>(null);
-  const [eventDetail, setEventDetail] = React.useState<EventDetailState | null>(
-    null,
-  );
+  const [eventDetail, setEventDetail] = React.useState<EventDetailState | null>(null);
   /**
    * Cooldown timestamp set whenever a popover closes. The popover's
    * outside-click runs on `mousedown` (closes the popover); the
@@ -154,9 +146,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   const [toolbarTitle, setToolbarTitle] = React.useState<string>('');
   // Track row externalIds whose CREATED_AT just landed in the last
   // refresh so we can apply the magenta-glow pulse animation once.
-  const [recentlyCreatedIds, setRecentlyCreatedIds] = React.useState<Set<string>>(
-    new Set(),
-  );
+  const [recentlyCreatedIds, setRecentlyCreatedIds] = React.useState<Set<string>>(new Set());
   const focusedScheduledTaskRef = React.useRef<number | null>(null);
   const refreshRequestRef = React.useRef(0);
   const mountedRef = React.useRef(false);
@@ -185,9 +175,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       const res = await trpc.scheduledTasks.list.query({
         rangeStart: currentRange.start.toISOString(),
         rangeEnd: currentRange.end.toISOString(),
-        ...(focusScheduledTaskInternalId !== null
-          ? { focusScheduledTaskInternalId }
-          : {}),
+        ...(focusScheduledTaskInternalId !== null ? { focusScheduledTaskInternalId } : {}),
       });
       if (!mountedRef.current || refreshRequestRef.current !== requestId) return;
       setRows(normalizeScheduledTaskRows(res));
@@ -232,9 +220,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   React.useEffect(() => {
     if (focusScheduledTaskInternalId === null) return;
     if (focusedScheduledTaskRef.current === focusScheduledTaskInternalId) return;
-    const row = rows.find(
-      (r) => r.scheduledTaskInternalId === focusScheduledTaskInternalId,
-    );
+    const row = rows.find((r) => r.scheduledTaskInternalId === focusScheduledTaskInternalId);
     if (!row) {
       if (lastRefreshFocusId === focusScheduledTaskInternalId) {
         focusedScheduledTaskRef.current = focusScheduledTaskInternalId;
@@ -246,11 +232,9 @@ export function ScheduledCalendarPage(): JSX.Element {
       return;
     }
 
-    const targetDate =
-      row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
+    const targetDate = row.nextRunAt instanceof Date ? row.nextRunAt : new Date(row.nextRunAt);
     if (currentRange && !Number.isNaN(targetDate.getTime())) {
-      const isInCurrentRange =
-        targetDate >= currentRange.start && targetDate < currentRange.end;
+      const isInCurrentRange = targetDate >= currentRange.start && targetDate < currentRange.end;
       if (!isInCurrentRange) {
         calendarRef.current?.getApi().gotoDate(targetDate);
         return;
@@ -292,7 +276,9 @@ export function ScheduledCalendarPage(): JSX.Element {
 
   // Toolbar action helpers — talk to the FullCalendar API ref.
   const callApi = React.useCallback(
-    (fn: (api: NonNullable<ReturnType<NonNullable<typeof calendarRef.current>['getApi']>>) => void) => {
+    (
+      fn: (api: NonNullable<ReturnType<NonNullable<typeof calendarRef.current>['getApi']>>) => void,
+    ) => {
       const api = calendarRef.current?.getApi();
       if (api) fn(api);
     },
@@ -333,9 +319,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         root.querySelector<HTMLElement>('.fc-timegrid .fc-scroller') ??
         root.querySelector<HTMLElement>('.fc-scroller-liquid-absolute') ??
         root.querySelector<HTMLElement>('.fc-scroller');
-      const slot8 = root.querySelector<HTMLElement>(
-        '.fc-timegrid-slot[data-time="08:00:00"]',
-      );
+      const slot8 = root.querySelector<HTMLElement>('.fc-timegrid-slot[data-time="08:00:00"]');
       if (!slot8) return;
 
       // Path A: internal scroller (if FC created one and it's
@@ -352,7 +336,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       const bandRaw =
         shell?.style.getPropertyValue('--hd-band-h') ||
         getComputedStyle(shell ?? document.documentElement).getPropertyValue('--hd-band-h');
-      const bandH = parseInt(bandRaw, 10) || 120;
+      const bandH = Number.parseInt(bandRaw, 10) || 120;
       const targetY = rect.top + window.scrollY - bandH - 8;
       window.scrollTo({ top: targetY, behavior: 'auto' });
     }, 800);
@@ -456,27 +440,30 @@ export function ScheduledCalendarPage(): JSX.Element {
     };
   }, [currentView, handleNext, handlePrev]);
 
-  const handleDateClick = React.useCallback((arg: DateClickArg) => {
-    // The popover's outside-click closed it on mousedown and stamped
-    // popoverClosedAtRef. This `click` is the SAME gesture — if it
-    // landed inside the cooldown window, drop it instead of opening
-    // a new popover. The user must click again to open.
-    if (
-      !shouldOpenScheduledCalendarPopover({
-        quickCreateOpen: quickCreate !== null,
-        popoverClosedAt: popoverClosedAtRef.current,
-        now: Date.now(),
-      })
-    ) {
-      return;
-    }
-    // The clicked cell's center as the anchor for the popover. arg.jsEvent
-    // gives us the source MouseEvent so we can read clientX/Y directly.
-    const x = arg.jsEvent.clientX;
-    const y = arg.jsEvent.clientY;
-    const clicked = nextQuickCreateDate(new Date(arg.date));
-    setQuickCreate({ anchor: { x, y }, date: clicked });
-  }, [quickCreate]);
+  const handleDateClick = React.useCallback(
+    (arg: DateClickArg) => {
+      // The popover's outside-click closed it on mousedown and stamped
+      // popoverClosedAtRef. This `click` is the SAME gesture — if it
+      // landed inside the cooldown window, drop it instead of opening
+      // a new popover. The user must click again to open.
+      if (
+        !shouldOpenScheduledCalendarPopover({
+          quickCreateOpen: quickCreate !== null,
+          popoverClosedAt: popoverClosedAtRef.current,
+          now: Date.now(),
+        })
+      ) {
+        return;
+      }
+      // The clicked cell's center as the anchor for the popover. arg.jsEvent
+      // gives us the source MouseEvent so we can read clientX/Y directly.
+      const x = arg.jsEvent.clientX;
+      const y = arg.jsEvent.clientY;
+      const clicked = nextQuickCreateDate(new Date(arg.date));
+      setQuickCreate({ anchor: { x, y }, date: clicked });
+    },
+    [quickCreate],
+  );
 
   const handleEventClick = React.useCallback(
     (arg: EventClickArg) => {
@@ -536,6 +523,29 @@ export function ScheduledCalendarPage(): JSX.Element {
     [refresh, toast],
   );
 
+  const handleNotifyPrefsChange = React.useCallback(
+    async (
+      scheduledTaskId: string,
+      prefs: { notifyOnSuccess?: boolean; failureNotifyThreshold?: number },
+    ) => {
+      try {
+        await trpc.scheduledTasks.update.mutate({ scheduledTaskId, ...prefs });
+        if (!mountedRef.current) return;
+        setEventDetail((current) =>
+          current && current.row.scheduledTaskId === scheduledTaskId
+            ? { ...current, row: { ...current.row, ...prefs } }
+            : current,
+        );
+        toast.show('已更新通知设置', 'info');
+        await refresh();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        toast.show(taskActionError('更新失败', errorMessage(err)), 'error');
+      }
+    },
+    [refresh, toast],
+  );
+
   const handleEventResize = React.useCallback(
     async (arg: EventResizeDoneArg) => {
       const id = arg.event.id;
@@ -545,10 +555,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         arg.revert();
         return;
       }
-      const durationMinutes = Math.max(
-        5,
-        Math.round((end.getTime() - start.getTime()) / 60_000),
-      );
+      const durationMinutes = Math.max(5, Math.round((end.getTime() - start.getTime()) / 60_000));
       try {
         await trpc.scheduledTasks.update.mutate({
           scheduledTaskId: id,
@@ -680,9 +687,7 @@ export function ScheduledCalendarPage(): JSX.Element {
   const handleToggle = React.useCallback(
     async (scheduledTaskId: string) => {
       try {
-        const previousStatus = rows.find(
-          (row) => row.scheduledTaskId === scheduledTaskId,
-        )?.status;
+        const previousStatus = rows.find((row) => row.scheduledTaskId === scheduledTaskId)?.status;
         const result = await trpc.scheduledTasks.toggle.mutate({ scheduledTaskId });
         if (!mountedRef.current) return;
         toast.show(
@@ -756,7 +761,7 @@ export function ScheduledCalendarPage(): JSX.Element {
               </div>
               <Button
                 onClick={() => setFullModalOpen(true)}
-                className="bg-[#EA1F59] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#EA1F59]/90"
+                className="bg-[#FF0061] text-white shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:bg-[#FF0061]/90"
               >
                 <Plus className="mr-1 h-4 w-4" />
                 新建定时任务
@@ -788,11 +793,7 @@ export function ScheduledCalendarPage(): JSX.Element {
             >
               <ChevronRight className="h-4 w-4" />
             </button>
-            <button
-              type="button"
-              className="hd-calendar-toolbar__today"
-              onClick={handleToday}
-            >
+            <button type="button" className="hd-calendar-toolbar__today" onClick={handleToday}>
               今天
             </button>
           </div>
@@ -824,19 +825,24 @@ export function ScheduledCalendarPage(): JSX.Element {
       </div>
       <div ref={shellRef} className="hd-calendar relative">
         {statusCopy && (
-          <div className="mb-3 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+          <div className="mb-3 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-2">
                 {loadError ? (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                 ) : loading ? (
-                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" aria-hidden />
+                  <Loader2
+                    className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]"
+                    aria-hidden
+                  />
                 ) : (
-                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+                  <Plus className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
                 )}
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground/85">{statusCopy.title}</div>
-                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{statusCopy.body}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                    {statusCopy.body}
+                  </div>
                 </div>
               </div>
               {loadError && (
@@ -845,7 +851,7 @@ export function ScheduledCalendarPage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                     onClick={() => void refresh()}
                     disabled={loading}
                   >
@@ -856,7 +862,7 @@ export function ScheduledCalendarPage(): JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                    className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                   >
                     <a
                       href={supportMailtoHref({
@@ -874,13 +880,7 @@ export function ScheduledCalendarPage(): JSX.Element {
         )}
         <FullCalendar
           ref={calendarRef}
-          plugins={[
-            dayGridPlugin,
-            timeGridPlugin,
-            listPlugin,
-            interactionPlugin,
-            rrulePlugin,
-          ]}
+          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin, rrulePlugin]}
           initialView={isMobile ? 'listMonth' : 'timeGridWeek'}
           headerToolbar={false}
           /* Day view title needs the full date — FullCalendar's
@@ -947,6 +947,7 @@ export function ScheduledCalendarPage(): JSX.Element {
       )}
       {eventDetail && (
         <EventDetailPopover
+          suspended={confirmDelete !== null}
           anchor={eventDetail.anchor}
           row={eventDetail.row}
           mobile={isMobile}
@@ -954,6 +955,7 @@ export function ScheduledCalendarPage(): JSX.Element {
           onToggle={handleToggle}
           onRunNow={handleRunNow}
           onDeleteRequest={(id) => setConfirmDelete(id)}
+          onNotifyPrefsChange={handleNotifyPrefsChange}
         />
       )}
       <ScheduledTaskDialog

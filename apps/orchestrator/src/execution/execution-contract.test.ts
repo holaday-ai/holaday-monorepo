@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildContract, buildPromptSchemaSuffix, classifyIntentForOutputRequirement } from './execution-contract.js';
+import {
+  buildContract,
+  buildPromptSchemaSuffix,
+  classifyIntentForOutputRequirement,
+} from './execution-contract.js';
 
 describe('buildPromptSchemaSuffix — readable research answers', () => {
   it.each([
@@ -23,9 +27,15 @@ describe('buildPromptSchemaSuffix — readable research answers', () => {
   });
 
   it('still requires a source URL for ordinary research without requiring JSON rows', () => {
-    const contract = buildContract({ taskId: 'synthetic_readable_sources', intent: '总结这份公开资料并附来源链接', executionMode: 'scrape' });
-    expect(contract.successCriteria.some(c => c.type === 'url_count' && c.data?.min === 1)).toBe(true);
-    expect(contract.successCriteria.some(c => c.type === 'result_count')).toBe(false);
+    const contract = buildContract({
+      taskId: 'synthetic_readable_sources',
+      intent: '总结这份公开资料并附来源链接',
+      executionMode: 'scrape',
+    });
+    expect(contract.successCriteria.some((c) => c.type === 'url_count' && c.data?.min === 1)).toBe(
+      true,
+    );
+    expect(contract.successCriteria.some((c) => c.type === 'result_count')).toBe(false);
   });
 });
 
@@ -53,9 +63,9 @@ describe('buildContract — tier selection', () => {
 
     expect(c.tier).toBe('full');
     expect(c.expertMode).toBe('expert');
-    expect(c.successCriteria.some((criterion) => criterion.rule === 'expert_claim_provenance')).toBe(
-      true,
-    );
+    expect(
+      c.successCriteria.some((criterion) => criterion.rule === 'expert_claim_provenance'),
+    ).toBe(true);
   });
 
   it('browser without expert workflow → light tier', () => {
@@ -202,13 +212,40 @@ describe('buildContract — dynamic word_count threshold (Phase 1 follow-up)', (
   it('long generate prompt (>= 100 chars) → min=50', () => {
     const c = buildContract({
       taskId: 'tsk_long',
-      intent: '请帮我写一份详细的产品经理岗位的 OKR 周报，包括本周进展、下周计划、风险与依赖、需要协调的事项与资源。'.repeat(2),
+      intent:
+        '请帮我写一份详细的产品经理岗位的 OKR 周报，包括本周进展、下周计划、风险与依赖、需要协调的事项与资源。'.repeat(
+          2,
+        ),
       executionMode: 'generate',
     });
     expect(wordCountMin(c)).toBe(50);
   });
 
-  it('scrape mode → min=100 regardless of prompt length', () => {
+  it('scrape of one named page with a short prompt → min=30 (FIRECRAWL-1)', () => {
+    const c = buildContract({
+      taskId: 'tsk_scrape_page',
+      intent: '访问 https://www.zhihu.com/question/287581453 读这个问题的标题',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(c)).toBe(30);
+  });
+
+  it('scrape asking for one value with a short prompt → min=30 (FIX-30 c09)', () => {
+    const c = buildContract({
+      taskId: 'tsk_scrape_one_value',
+      intent: '微博热搜榜第一是啥',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(c)).toBe(30);
+    const hours = buildContract({
+      taskId: 'tsk_scrape_hours',
+      intent: '携程上 杭州西湖风景名胜区 的开放时间',
+      executionMode: 'scrape',
+    });
+    expect(wordCountMin(hours)).toBe(30);
+  });
+
+  it('scrape mode → min=100 for a search, whatever the prompt length', () => {
     const c = buildContract({
       taskId: 'tsk_scrape_short',
       intent: '搜小红书',
@@ -285,18 +322,19 @@ describe('buildContract — light tier (browser)', () => {
     expect(c.successCriteria.find((s) => s.type === 'data_present')).toBeDefined();
   });
 
-  it('always includes the safety constraints (no_form_submit, no_payment)', () => {
+  // BROWSER-AUTOPILOT-1: irreversible actions are confirmed by the runtime action
+  // gate; no default post-hoc keyword constraints (a search is not a violation).
+  it('adds no default keyword constraints to a browser search', () => {
     const c = buildContract({
       taskId: 'tsk_b3',
       intent: '搜索',
       executionMode: 'browser',
       targetDomain: 'duckduckgo.com',
     });
-    expect(c.constraints).toContain('no_form_submit');
-    expect(c.constraints).toContain('no_payment');
+    expect(c.constraints).toEqual([]);
   });
 
-  it('appends user constraints AFTER the default safety set', () => {
+  it('keeps the constraints the user stated', () => {
     const c = buildContract({
       taskId: 'tsk_b4',
       intent: '比价',
@@ -304,9 +342,7 @@ describe('buildContract — light tier (browser)', () => {
       targetDomain: 'taobao.com',
       constraints: ['不点击购买按钮'],
     });
-    // Caller-supplied constraint comes first, then defaults.
-    expect(c.constraints[0]).toBe('不点击购买按钮');
-    expect(c.constraints).toContain('no_form_submit');
+    expect(c.constraints).toEqual(['不点击购买按钮']);
   });
 });
 
@@ -323,9 +359,7 @@ describe('buildContract — full tier (expert workflow)', () => {
     expect(types).toContain('word_count');
     expect(types).toContain('data_present');
     // Two custom rules: covers_required_inputs + no_ungrounded_urls.
-    const customRules = c.successCriteria
-      .filter((s) => s.type === 'custom')
-      .map((s) => s.rule);
+    const customRules = c.successCriteria.filter((s) => s.type === 'custom').map((s) => s.rule);
     expect(customRules).toContain('covers_required_inputs');
     expect(customRules).toContain('no_ungrounded_urls');
   });
@@ -342,23 +376,25 @@ describe('buildContract — full tier (expert workflow)', () => {
       intent: 'x',
       executionMode: 'generate',
     });
-    const fullMin = (fullContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
-    const checklistMin = (checklistContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }).min;
+    const fullMin = (
+      fullContract.successCriteria.find((s) => s.type === 'word_count')!.data as { min: number }
+    ).min;
+    const checklistMin = (
+      checklistContract.successCriteria.find((s) => s.type === 'word_count')!.data as {
+        min: number;
+      }
+    ).min;
     expect(fullMin).toBeGreaterThan(checklistMin);
   });
 });
 
 describe('classifyIntentForOutputRequirement — real QA prompts', () => {
   it('requires a clickable source for explicit research and retrieval intents', () => {
-    expect(
-      classifyIntentForOutputRequirement('研究 2026 年 AI 行业趋势'),
-    ).toEqual({
+    expect(classifyIntentForOutputRequirement('研究 2026 年 AI 行业趋势')).toEqual({
       kind: 'general_with_links',
       requirement: { kind: 'general_with_links', minUrls: 1 },
     });
-    expect(
-      classifyIntentForOutputRequirement('检索最新的数据隐私法规'),
-    ).toEqual({
+    expect(classifyIntentForOutputRequirement('检索最新的数据隐私法规')).toEqual({
       kind: 'general_with_links',
       requirement: { kind: 'general_with_links', minUrls: 1 },
     });
@@ -413,9 +449,7 @@ describe('classifyIntentForOutputRequirement — real QA prompts', () => {
   });
 
   it('tightens comparison URL requirements when the user asks for links', () => {
-    const out = classifyIntentForOutputRequirement(
-      '对比 Notion 和 Coda 的优缺点，并给出来源链接',
-    );
+    const out = classifyIntentForOutputRequirement('对比 Notion 和 Coda 的优缺点，并给出来源链接');
     expect(out.kind).toBe('comparison');
     expect(out.requirement).toEqual({
       kind: 'comparison',
@@ -438,5 +472,105 @@ describe('SuccessCriterion id uniqueness', () => {
     for (const id of ids) {
       expect(id).toMatch(/^[0-9a-f-]{36}$/);
     }
+  });
+});
+
+describe('list answers need per-item sources (FIX-BATCH-A)', () => {
+  it.each([
+    ['打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。', 3, ['date']],
+    ['打开 Hacker News 首页，列出排名前三的帖子：标题、发布时间和讨论页链接。', 3, ['date']],
+    ['打开 GitHub Trending，列出今天排名前三的仓库：仓库名、今日新增 star 数和仓库链接。', 3, []],
+    ['给我5条关于AI的最新新闻和来源', 5, []],
+    ['top 3 posts on hacker news with links', 3, []],
+  ])('%s → %i items with fields %j', (intent, minItems, keyFields) => {
+    expect(classifyIntentForOutputRequirement(intent)).toEqual({
+      kind: 'list_with_sources',
+      requirement: { kind: 'list_sources', minItems, keyFields },
+    });
+  });
+
+  it.each([
+    '写三条小红书标题',
+    '帮我看看最近3天的新闻热点',
+    '总结一下这篇文章的前三段',
+    '前3天的天气',
+  ])('does not treat %s as a sourced list', (intent) => {
+    expect(classifyIntentForOutputRequirement(intent).kind).not.toBe('list_with_sources');
+  });
+
+  it('keeps ecommerce listings on the product-row contract (acceptance A1)', () => {
+    expect(
+      classifyIntentForOutputRequirement(
+        '去京东搜索降噪耳机，告诉我前三个商品的名称和价格，并附商品链接。',
+      ),
+    ).toMatchObject({ kind: 'ecommerce_listing', requirement: { minItems: 3 } });
+  });
+
+  it('turns the requirement into a per-item criterion and a model-facing instruction', () => {
+    const contract = buildContract({
+      taskId: 't',
+      intent: '打开36kr首页，总结今天前三条新闻，提供原标题、发布日期和可核实链接。',
+      executionMode: 'browser',
+    });
+    expect(contract.successCriteria).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'list_item_sources',
+          data: { minItems: 3, keyFields: ['date'] },
+        }),
+      ]),
+    );
+    // The one-URL guard no longer stands in for per-item sources.
+    expect(contract.successCriteria.some((criterion) => criterion.type === 'url_count')).toBe(
+      false,
+    );
+    const suffix = buildPromptSchemaSuffix(contract.goal);
+    expect(suffix).toContain('该条自己的详情页链接');
+    expect(suffix).toContain('不能用搜索结果页本身或列表页代替');
+    // A search result pointing at a home page is that result's own link (AP4 core-01).
+    expect(suffix).toContain('即使它是某个网站的首页');
+  });
+});
+
+describe('FIX-31 — one product page is not a product list (Deploy-31 fc-jd)', () => {
+  const types = (intent: string) =>
+    buildContract({ taskId: 'tsk_fix31', intent, executionMode: 'scrape' }).successCriteria.map(
+      (c) => c.type,
+    );
+  it.each([
+    '打开 https://item.jd.com/100142621606.html 读商品标题和页面显示的价格',
+    'https://item.jd.com/100142621606.html 这个多少钱',
+    'amazon https://www.amazon.com/dp/B0DZJXN9FJ 这个商品现在什么价格',
+  ])('no list checks for %s', (intent) => {
+    expect(types(intent)).not.toContain('ecommerce_rows');
+    expect(types(intent)).not.toContain('result_count');
+  });
+  it.each([
+    '淘宝上 小米充电宝 20000毫安 最便宜的前5个，要价格和链接',
+    '京东 https://item.jd.com/100142621606.html 同款里最便宜的前3个商品价格',
+    // PR #293 review: Chinese counts.
+    '京东 https://item.jd.com/100142621606.html 同款里最便宜的前三个',
+    '京东 https://item.jd.com/100142621606.html 再找两款同价位的',
+  ])('a request for several products keeps them: %s', (intent) => {
+    expect(types(intent)).toContain('ecommerce_rows');
+  });
+});
+
+describe('FIX-31 — product links only when the user asks for them (Deploy-31 b-p02)', () => {
+  const rows = (intent: string) =>
+    buildContract({
+      taskId: 'tsk_fix31_links',
+      intent,
+      executionMode: 'browser',
+    }).successCriteria.find((c) => c.type === 'ecommerce_rows');
+  it('names and prices only: rows need no link', () => {
+    const c = rows('请使用云端浏览器，amazon.com 搜 usb c cable 前3个商品名和价格');
+    expect(c?.data).toMatchObject({ minItems: 3, minUniqueUrls: 0, requireLinks: false });
+    expect(c?.description).not.toContain('链接');
+  });
+  it('links asked for: rows keep their own links', () => {
+    const c = rows('淘宝上 小米充电宝 20000毫安 最便宜的前5个，要价格和链接');
+    expect(c?.data).toMatchObject({ minItems: 5, minUniqueUrls: 5 });
+    expect(c?.data?.requireLinks).toBeUndefined();
   });
 });

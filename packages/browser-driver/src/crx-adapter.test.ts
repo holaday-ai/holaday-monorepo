@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DRIVER_ERRORS } from './driver.js';
 import { PlaywrightCrxAdapter } from './crx-adapter.js';
+import { DRIVER_ERRORS } from './driver.js';
 
 vi.mock('playwright-crx', () => ({
   crx: {

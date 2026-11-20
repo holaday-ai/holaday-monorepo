@@ -1,0 +1,34 @@
+[
+  {
+    "width": 1440,
+    "height": 960,
+    "rowDisabled": null,
+    "titleDisabled": null,
+    "hint": "进行中的任务无法批量删除",
+    "feedback": 0
+  },
+  {
+    "width": 1280,
+    "height": 960,
+    "rowDisabled": null,
+    "titleDisabled": null,
+    "hint": "进行中的任务无法批量删除",
+    "feedback": 0
+  },
+  {
+    "width": 1024,
+    "height": 960,
+    "rowDisabled": null,
+    "titleDisabled": null,
+    "hint": "进行中的任务无法批量删除",
+    "feedback": 0
+  },
+  {
+    "width": 1200,
+    "height": 1000,
+    "rowDisabled": null,
+    "titleDisabled": null,
+    "hint": "进行中的任务无法批量删除",
+    "feedback": 0
+  }
+]

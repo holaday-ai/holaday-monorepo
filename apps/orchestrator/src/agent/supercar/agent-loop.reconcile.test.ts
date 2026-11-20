@@ -50,19 +50,14 @@ describe('reconcileFinalAnswerText', () => {
     it('match modulo trailing slash + punctuation', () => {
       const text = '查看 https://www.iana.org/help/example-domains/。';
       expect(
-        reconcileFinalAnswerText(
-          text,
-          'https://www.iana.org/help/example-domains',
-          null,
-        ),
+        reconcileFinalAnswerText(text, 'https://www.iana.org/help/example-domains', null),
       ).toBe(text);
     });
   });
 
   describe('same-domain mismatch — replace inline', () => {
     it('replaces a bare URL with observed URL', () => {
-      const text =
-        '点击后跳转到 https://www.iana.org/domains/reserved，标题是 IANA — Reserved。';
+      const text = '点击后跳转到 https://www.iana.org/domains/reserved，标题是 IANA — Reserved。';
       const out = reconcileFinalAnswerText(
         text,
         'https://www.iana.org/help/example-domains',
@@ -75,16 +70,13 @@ describe('reconcileFinalAnswerText', () => {
     });
 
     it('replaces markdown link AND swaps label to observed title', () => {
-      const text =
-        '跳转到 [IANA — Reserved](https://www.iana.org/domains/reserved)。';
+      const text = '跳转到 [IANA — Reserved](https://www.iana.org/domains/reserved)。';
       const out = reconcileFinalAnswerText(
         text,
         'https://www.iana.org/help/example-domains',
         'Example Domains - IANA',
       );
-      expect(out).toContain(
-        '[Example Domains - IANA](https://www.iana.org/help/example-domains)',
-      );
+      expect(out).toContain('[Example Domains - IANA](https://www.iana.org/help/example-domains)');
       expect(out).not.toContain('IANA — Reserved');
       expect(out).not.toContain('/domains/reserved');
     });
@@ -101,9 +93,7 @@ describe('reconcileFinalAnswerText', () => {
         'Example Domains - IANA',
       );
       // All three should now point at the observed URL.
-      const matches = out.match(
-        /https:\/\/www\.iana\.org\/help\/example-domains/g,
-      );
+      const matches = out.match(/https:\/\/www\.iana\.org\/help\/example-domains/g);
       expect(matches?.length).toBe(3);
       expect(out).not.toContain('iana.org/foo');
     });
@@ -114,11 +104,7 @@ describe('reconcileFinalAnswerText', () => {
         '- 商品 B: [B](https://item.jd.com/100002.html)',
         '- 商品 C: https://item.jd.com/100003.html',
       ].join('\n');
-      const out = reconcileFinalAnswerText(
-        text,
-        'https://item.jd.com/100004.html',
-        '商品 D',
-      );
+      const out = reconcileFinalAnswerText(text, 'https://item.jd.com/100004.html', '商品 D');
       expect(out).toContain('https://item.jd.com/100001.html');
       expect(out).toContain('https://item.jd.com/100002.html');
       expect(out).toContain('https://item.jd.com/100003.html');
@@ -128,11 +114,7 @@ describe('reconcileFinalAnswerText', () => {
 
     it('falls back to URL itself when observedTitle is empty', () => {
       const text = '跳转到 [Old Label](https://www.iana.org/wrong)。';
-      const out = reconcileFinalAnswerText(
-        text,
-        'https://www.iana.org/help/example-domains',
-        null,
-      );
+      const out = reconcileFinalAnswerText(text, 'https://www.iana.org/help/example-domains', null);
       expect(out).toContain(
         '[https://www.iana.org/help/example-domains](https://www.iana.org/help/example-domains)',
       );
@@ -141,8 +123,7 @@ describe('reconcileFinalAnswerText', () => {
 
   describe('different-domain mismatch — append correction', () => {
     it('keeps the foreign-domain URL intact and appends 📍 line', () => {
-      const text =
-        '页面是 https://example.com/some-other-thing，请查看。';
+      const text = '页面是 https://example.com/some-other-thing，请查看。';
       const out = reconcileFinalAnswerText(
         text,
         'https://www.iana.org/help/example-domains',
@@ -152,9 +133,7 @@ describe('reconcileFinalAnswerText', () => {
       expect(out).toContain('https://example.com/some-other-thing');
       // Append marker present with observed page details.
       expect(out).toContain('📍 实际浏览器页面');
-      expect(out).toContain(
-        '[Example Domains - IANA](https://www.iana.org/help/example-domains)',
-      );
+      expect(out).toContain('[Example Domains - IANA](https://www.iana.org/help/example-domains)');
     });
   });
 

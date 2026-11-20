@@ -2,11 +2,11 @@ import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
-  partnerLots,
-  partnerRiskEvents,
   type NewPartnerRiskEvent,
   type PartnerLot,
   type PartnerRiskEvent,
+  partnerLots,
+  partnerRiskEvents,
 } from '../db/schema/partner.js';
 import { PartnerRiskLotService, PartnerRiskLotTransitionError } from './risk-lot-service.js';
 

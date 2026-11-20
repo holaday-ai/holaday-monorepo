@@ -1,0 +1,65 @@
+[
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "select",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [
+      {
+        "rule": "control-occluded",
+        "severity": "P1",
+        "control": "BUTTON||UI generate failed||0",
+        "box": {
+          "x": 57,
+          "y": 634,
+          "width": 177,
+          "height": 32
+        }
+      }
+    ],
+    "screenshot": "before-1366x768-select.png"
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "copy",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [
+      {
+        "rule": "control-occluded",
+        "severity": "P1",
+        "control": "BUTTON||UI browser completed||0",
+        "box": {
+          "x": 57,
+          "y": 634,
+          "width": 177,
+          "height": 32
+        }
+      }
+    ],
+    "screenshot": "before-1366x768-copy.png"
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "action": "pin",
+    "countBefore": 8,
+    "countAfter": 8,
+    "issues": [
+      {
+        "rule": "control-occluded",
+        "severity": "P1",
+        "control": "BUTTON||UI generate awaiting_us…||0",
+        "box": {
+          "x": 57,
+          "y": 634,
+          "width": 177,
+          "height": 32
+        }
+      }
+    ],
+    "screenshot": "before-1366x768-pin.png"
+  }
+]

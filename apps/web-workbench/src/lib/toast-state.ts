@@ -15,9 +15,7 @@ export function enqueueToastItem(
 ): ToastItem[] {
   const safeLimit = Math.max(1, Math.floor(limit));
   return [
-    ...items.filter(
-      (existing) => existing.kind !== item.kind || existing.text !== item.text,
-    ),
+    ...items.filter((existing) => existing.kind !== item.kind || existing.text !== item.text),
     item,
   ].slice(-safeLimit);
 }

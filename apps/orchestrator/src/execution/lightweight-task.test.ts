@@ -65,7 +65,9 @@ describe('classifyLightweightTask — must-execute intents stay null', () => {
   });
 
   it('does NOT intercept long-form generation or empty input', () => {
-    expect(classifyLightweightTask('帮我写一份完整的产品需求文档 PRD，包含背景、目标、功能列表')).toBeNull();
+    expect(
+      classifyLightweightTask('帮我写一份完整的产品需求文档 PRD，包含背景、目标、功能列表'),
+    ).toBeNull();
     expect(classifyLightweightTask('')).toBeNull();
     expect(classifyLightweightTask(null)).toBeNull();
   });

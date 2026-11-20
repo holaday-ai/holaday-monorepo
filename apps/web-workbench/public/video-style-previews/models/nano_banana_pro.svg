@@ -3,7 +3,7 @@
     <linearGradient id="bg" x1="10" y1="8" x2="86" y2="88" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#111827"/>
       <stop offset="0.44" stop-color="#3b2fc4"/>
-      <stop offset="0.7" stop-color="#ea1f59"/>
+      <stop offset="0.7" stop-color="#FF0061"/>
       <stop offset="1" stop-color="#ffb23f"/>
     </linearGradient>
     <radialGradient id="shine" cx="28" cy="18" r="50" gradientUnits="userSpaceOnUse">

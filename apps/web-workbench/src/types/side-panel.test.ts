@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  computeSidePanelMode,
-  needsBrowserViewport,
-  sidePanelModeForToolbar,
-} from './side-panel';
+import { computeSidePanelMode, needsBrowserViewport, sidePanelModeForToolbar } from './side-panel';
 
 describe('side-panel helpers', () => {
   it('keeps terminal browser tasks closed until the user opens evidence', () => {
@@ -87,9 +83,9 @@ describe('needsBrowserViewport — video_quote/clarification are chat-only', () 
   });
 
   it('no task / not awaiting / null kind → false', () => {
-    expect(
-      needsBrowserViewport({ ...base, hasSelectedTask: false, awaitingKind: 'login' }),
-    ).toBe(false);
+    expect(needsBrowserViewport({ ...base, hasSelectedTask: false, awaitingKind: 'login' })).toBe(
+      false,
+    );
     expect(needsBrowserViewport({ ...base, needsUser: false, awaitingKind: 'login' })).toBe(false);
     expect(needsBrowserViewport({ ...base, awaitingKind: null })).toBe(false);
   });

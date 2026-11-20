@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  generateImages,
   GeminiImageError,
   type GenerateImagesParams,
+  generateImages,
 } from './gemini-image-client.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -46,9 +46,9 @@ describe('generateImages', () => {
 
   it('throws no_api_key when the key is empty', async () => {
     const fetchImpl = vi.fn();
-    await expect(
-      generateImages({ ...BASE, apiKey: '  ', fetchImpl }),
-    ).rejects.toMatchObject({ kind: 'no_api_key' });
+    await expect(generateImages({ ...BASE, apiKey: '  ', fetchImpl })).rejects.toMatchObject({
+      kind: 'no_api_key',
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -82,9 +82,7 @@ describe('generateImages', () => {
     });
 
     const [url] = fetchImpl.mock.calls[0] as [string];
-    expect(url).toBe(
-      'https://gw.internal/v1beta/models/custom-pro-model:generateContent',
-    );
+    expect(url).toBe('https://gw.internal/v1beta/models/custom-pro-model:generateContent');
   });
 
   it('honours a custom baseUrl (proxy/gateway override)', async () => {
@@ -94,9 +92,7 @@ describe('generateImages', () => {
     await generateImages({ ...BASE, baseUrl: 'https://gw.internal/', fetchImpl });
 
     const [url] = fetchImpl.mock.calls[0] as [string];
-    expect(url).toBe(
-      'https://gw.internal/v1/models/gemini-3.1-flash-image:generateContent',
-    );
+    expect(url).toBe('https://gw.internal/v1/models/gemini-3.1-flash-image:generateContent');
   });
 
   it('sends inputImages as inlineData parts (图生图 / edit mode)', async () => {
@@ -189,9 +185,7 @@ describe('generateImages', () => {
   });
 
   it('throws http immediately on a non-retryable 4xx', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response('bad request', { status: 400 }));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('bad request', { status: 400 }));
 
     const err = await generateImages({ ...BASE, fetchImpl }).catch((e) => e);
     expect(err).toBeInstanceOf(GeminiImageError);
@@ -214,9 +208,7 @@ describe('generateImages', () => {
   });
 
   it('exhausts retries on persistent 503 and throws http 503', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockImplementation(() => new Response('overloaded', { status: 503 }));
+    const fetchImpl = vi.fn().mockImplementation(() => new Response('overloaded', { status: 503 }));
 
     const err = await generateImages({
       ...BASE,
@@ -278,8 +270,8 @@ describe('generateImages', () => {
       );
     });
 
-    await expect(
-      generateImages({ ...BASE, timeoutMs: 20, fetchImpl }),
-    ).rejects.toMatchObject({ kind: 'timeout' });
+    await expect(generateImages({ ...BASE, timeoutMs: 20, fetchImpl })).rejects.toMatchObject({
+      kind: 'timeout',
+    });
   });
 });

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  assertRequestTransition,
-  canCancelClosure,
-  closureGraceEndsAt,
-} from './state-machine.js';
+import { assertRequestTransition, canCancelClosure, closureGraceEndsAt } from './state-machine.js';
 
 describe('account closure request state machine', () => {
   it.each([

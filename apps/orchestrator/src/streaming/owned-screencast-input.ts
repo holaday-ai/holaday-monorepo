@@ -1,16 +1,14 @@
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
 import type { BrowserInstance } from '../browser-pool/types.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
-import {
-  type AppliedBrowserViewport,
-  DeferredScreencastInputBridge,
-} from './screencast-input-bridge.js';
+import { DeferredScreencastInputBridge, type InputEnvelope } from './screencast-input-bridge.js';
 
 export function createOwnedScreencastInputBridge(options: {
   instance: BrowserInstance;
+  runWithStableViewport?: (action: () => Promise<void>) => Promise<void>;
   peek: (taskId: string) => BrowserInstance | null;
-  onViewportApplied?: (viewport: AppliedBrowserViewport) => void;
-  releasePressed?: (signal: AbortSignal) => Promise<void>;
+  onInputReceived?: (envelope: InputEnvelope) => (() => void) | undefined;
+  beforeDispatch?: (envelope: InputEnvelope, signal?: AbortSignal) => Promise<void>;
   executionDrain?: ExecutionAdmission;
 }): DeferredScreencastInputBridge {
   const { instance } = options;
@@ -25,28 +23,25 @@ export function createOwnedScreencastInputBridge(options: {
   const current = () => {
     if (options.peek(instance.taskId) !== instance || instance.status !== 'ready')
       throw new Error('browser_session_changed');
-    return browserControlSessions.get(instance, instance.userId, instance.taskId);
+    return browserControlSessions.openForViewer(instance);
   };
   return new DeferredScreencastInputBridge({
-    onViewportApplied: options.onViewportApplied,
-    runOwnedInput: async (lease, action) => {
+    runWithStableViewport: options.runWithStableViewport,
+    beforeDispatch: options.beforeDispatch,
+    onInputReceived: options.onInputReceived,
+    // REBUILD-4: the person's input goes to the page at any time — no lease. It runs through the
+    // task's control so the assistant sees the person busy and yields (2 s idle, then re-reads).
+    runOwnedInput: async (action, kind) => {
       if (!allowed()) throw new Error('MAINTENANCE_INPUT_CLOSED');
       const session = current();
       if (!session) throw new Error('browser_control_unavailable');
-      await session.control.runHuman(lease ?? '', async (signal) => {
-        if (current() !== session) throw new Error('browser_session_changed');
-        if (options.releasePressed) session.control.beforeHandback(options.releasePressed);
-        await input(() => action(signal));
-      });
-    },
-    queueViewport: (action) => {
-      if (!allowed()) return;
-      const session = current();
-      if (!session) return; // no runner: keep viewing without mutating its layout
-      session.control.queueViewport(async (signal) => {
-        if (!allowed() || current() !== session) return;
-        await input(() => action(signal));
-      });
+      await session.control.runHuman(
+        async (signal) => {
+          if (current() !== session) throw new Error('browser_session_changed');
+          await input(() => action(signal));
+        },
+        kind === 'viewport' ? undefined : kind,
+      );
     },
   });
 }

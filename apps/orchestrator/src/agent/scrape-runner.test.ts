@@ -169,13 +169,15 @@ describe('runScrapeTask — Qwen synthesis', () => {
     expect(firecrawl.search).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({
       status: 'completed',
-      summary: '整理后的结果',
+      // FIRECRAWL-1: an answer that names no fetched page gets its source line.
+      summary: '整理后的结果\n\n来源：https://example.com/article',
       sources: ['https://example.com/article'],
       inputTokens: 100,
       outputTokens: 200,
+      firecrawl: { calls: 1, credits: 1 },
     });
     expect(deltas).toEqual(['整理后的结果']);
-    expect(progress).toEqual(['正在抓取网页数据…', '正在分析整理…']);
+    expect(progress).toEqual(['正在抓取网页数据…', '在整理答案…']);
   });
 
   it('routes a non-URL intent through Firecrawl search', async () => {
@@ -274,7 +276,12 @@ describe('runScrapeTask — Firecrawl failures', () => {
       scrape: vi.fn(async () => ({ ok: false as const, error: 'secret key missing' })),
     });
     const outcome = await run({ adapter, firecrawl });
-    expect(outcome).toMatchObject({ status: 'failed', reason: '网页抓取失败，请稍后重试。' });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: '网页抓取（Firecrawl）没有拿到正文：抓取服务返回错误',
+      failureKind: 'firecrawl',
+    });
+    expect(outcome.reason).not.toContain('secret');
     expect(adapter.stream).not.toHaveBeenCalled();
   });
 
@@ -299,5 +306,142 @@ describe('runScrapeTask — Firecrawl failures', () => {
     expect(outcome).toMatchObject({ status: 'failed', reason: '请输入要搜索的内容。' });
     expect(firecrawl.search).not.toHaveBeenCalled();
     expect(adapter.stream).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * FIX-32 (BENCH-1 r03/n06): Firecrawl search serves cached pages (zh-cn/download two days
+ * old said v24.22.0 after v24.22.1). A question about now reads stale results again.
+ */
+describe('fresh results for questions about now', () => {
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const lane = () =>
+    scrapeLane({
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [
+          {
+            url: 'https://nodejs.org/zh-cn/download',
+            markdown: '# 下载 Node.js\n\nLTS v24.22.0',
+            title: '下载 Node.js',
+            cachedAt: twoDaysAgo,
+          },
+        ],
+        credits: 1,
+      })),
+      scrape: vi.fn(async (url: string) => ({
+        ok: true as const,
+        markdown: '# 下载 Node.js\n\nLTS v24.22.1',
+        url,
+        credits: 1,
+      })),
+    });
+  it('re-reads a stale copy and labels when each source was read', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    const outcome = await run({ intent: 'nodejs官网最新的LTS版本是多少', adapter, firecrawl });
+    expect(firecrawl.scrape).toHaveBeenCalledWith('https://nodejs.org/zh-cn/download', {
+      fresh: true,
+    });
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain('v24.22.1');
+    expect(request).not.toContain('v24.22.0');
+    expect(request).toMatch(/读取时间：北京时间 \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    expect(outcome.firecrawl).toEqual({ calls: 2, credits: 2 });
+  });
+  it('a question that is not about now keeps the cached copy, labelled with its age', async () => {
+    const adapter = makeAdapter();
+    const firecrawl = lane();
+    await run({ intent: '搜索 Node.js 的下载页面介绍', adapter, firecrawl });
+    expect(firecrawl.scrape).not.toHaveBeenCalled();
+    const request = JSON.stringify(vi.mocked(adapter.stream).mock.calls.at(0)?.[0]);
+    expect(request).toContain(
+      `读取时间：北京时间 ${new Date(Date.parse(twoDaysAgo) + 8 * 3600_000).toISOString().slice(0, 16).replace('T', ' ')}`,
+    );
+  });
+});
+
+/**
+ * G2b (production 「帮我搜一下 2025 年诺贝尔文学奖得主是谁」): the write-up of five search
+ * results failed (qwen3.7-plus error) although the first result — a cernet.edu.cn page —
+ * reported the 2025 laureate. The answer is written from that result alone.
+ */
+describe('a failed write-up of several search results', () => {
+  const INTENT = '帮我搜一下 2025 年诺贝尔文学奖得主是谁';
+  const CERNET =
+    'https://www.cernet.edu.cn/rd/special_topic/nobel/wx/202510/t20251010_2693501.shtml';
+  const nobelSearch = () =>
+    scrapeLane({
+      search: vi.fn(async () => ({
+        ok: true as const,
+        results: [
+          {
+            url: CERNET,
+            markdown:
+              '# 2025年诺贝尔文学奖揭晓\n\n2025年诺贝尔文学奖授予匈牙利作家克拉斯诺霍尔卡伊·拉斯洛。',
+            title: '2025年诺贝尔文学奖揭晓',
+          },
+          { url: 'https://news.example.com/b', markdown: '# 其他新闻\n\n别的内容。', title: 'B' },
+          { url: 'https://news.example.com/c', markdown: '# 其他新闻\n\n更多内容。', title: 'C' },
+        ],
+      })),
+    });
+  const ANSWER = '2025 年诺贝尔文学奖得主是匈牙利作家克拉斯诺霍尔卡伊·拉斯洛。';
+
+  it('is written again from the top-ranked result alone', async () => {
+    const requests: NeutralResponsesRequest[] = [];
+    const adapter: ResponsesAdapter = {
+      metadata: METADATA,
+      stream: vi.fn(async (request: NeutralResponsesRequest) => {
+        requests.push(request);
+        if (requests.length === 1) throw new ResponsesAdapterError('PROVIDER_ERROR', 400);
+        return {
+          id: 'resp_retry',
+          metadata: METADATA,
+          text: ANSWER,
+          sources: [],
+          usage: { inputTokens: 10, outputTokens: 10 },
+          status: 'completed' as const,
+        };
+      }),
+    };
+    const outcome = await run({ intent: INTENT, adapter, firecrawl: nobelSearch() });
+    expect(outcome).toMatchObject({ status: 'completed', source: 'search', sources: [CERNET] });
+    expect(outcome.summary).toContain('克拉斯诺霍尔卡伊');
+    expect(requests).toHaveLength(2);
+    const retry = JSON.stringify(requests[1]);
+    expect(retry).toContain('cernet.edu.cn');
+    expect(retry).not.toContain('news.example.com');
+  });
+
+  it('a second failure is reported as a failed write-up (the task then goes to the browser)', async () => {
+    const adapter = makeAdapter({ error: new ResponsesAdapterError('PROVIDER_ERROR', 400) });
+    const outcome = await run({ intent: INTENT, adapter, firecrawl: nobelSearch() });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      failureKind: 'synthesis',
+      source: 'search',
+      sources: [CERNET],
+    });
+    expect(adapter.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it('a timeout is not written again', async () => {
+    const adapter = makeAdapter({ hang: true });
+    const outcome = await run({
+      intent: INTENT,
+      adapter,
+      firecrawl: nobelSearch(),
+      timeoutMs: 20,
+    });
+    expect(outcome).toMatchObject({ status: 'failed', failureKind: 'synthesis' });
+    expect(adapter.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('a named page is not written again', async () => {
+    const adapter = makeAdapter({ error: new ResponsesAdapterError('PROVIDER_ERROR', 400) });
+    const outcome = await run({ adapter });
+    expect(outcome).toMatchObject({ status: 'failed', failureKind: 'synthesis', source: 'scrape' });
+    expect(adapter.stream).toHaveBeenCalledTimes(1);
   });
 });

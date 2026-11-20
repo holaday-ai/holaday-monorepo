@@ -14,7 +14,7 @@ export type BriefingMode = 'dev' | 'prod';
 
 /** 固定免责声明（合规红线：只聚合不荐股、不预测）。 */
 export const BRIEFING_DISCLAIMER =
-  '本简报仅聚合公开市场信息，不构成任何投资建议，不预测涨跌；数据来源 AkShare（可能延迟或有误），请以交易所及上市公司公告为准。';
+  '本简报仅聚合公开市场信息，不构成任何投资建议，不预测涨跌；数据来自新浪财经、巨潮资讯等公开行情渠道（可能延迟或有误），请以交易所及上市公司公告为准。';
 
 export const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -155,18 +155,33 @@ export function dateHeader(date: string): string {
   return `${date}${wd}`;
 }
 
-/** 「来源 X · 抓取 HH:MM」（dev/④ 事实卡用，保留完整 fn 名便于溯源）。 */
-export function sourceTag(env: AkEnvelope): string {
-  return `来源 ${env.source} · 抓取 ${fmtClock(env.fetched_at)}`;
+/**
+ * FIX-58 P1-9: the user reads where the data came from in words — 新浪财经 / 巨潮资讯 / 东方财富 —
+ * never the interface (「akshare:stock_zh_a_daily(sina,…)」). The function name stays in the
+ * envelope and the fetch logs for tracing.
+ */
+const SOURCE_NAMES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/cninfo/i, '巨潮资讯'],
+  [/sina/i, '新浪财经'],
+  [/eastmoney|(?:^|[_:(,+])em(?:$|[_),+])/i, '东方财富'],
+  [/(?:^|[_:(,+])ths(?:$|[_),+])/i, '同花顺'],
+  [/baidu/i, '百度股市通'],
+];
+
+/** The data's own source in words, or 「公开行情数据」. */
+export function sourceName(source: string): string {
+  const names = SOURCE_NAMES.filter(([re]) => re.test(source)).map(([, name]) => name);
+  return names.length ? [...new Set(names)].join('、') : '公开行情数据';
 }
 
-/**
- * 段尾来源短标（prod 简报用）：只「来源 akshare · 抓取 HH:MM」，去冗长 fn 名
- * （如 zt_pool+dtgc+zbgc+board_summary_ths+index_spot_sina 71 字 → 16 字），
- * 减视觉噪音（BOSS 易读性原则3）。完整 fn 名仍在 dev（sourceTag）+ 取数层日志。
- */
+/** 「数据来自新浪财经 · HH:MM」 — 复审 #1: no 「抓取」, like the market card. */
+export function sourceTag(env: AkEnvelope): string {
+  return `数据来自${sourceName(env.source)} · ${fmtClock(env.fetched_at)}`;
+}
+
+/** 段尾来源短标（prod 简报用），和 sourceTag 同一套人话写法。 */
 export function sourceTagShort(env: AkEnvelope): string {
-  return `来源 akshare · 抓取 ${fmtClock(env.fetched_at)}`;
+  return sourceTag(env);
 }
 
 /**

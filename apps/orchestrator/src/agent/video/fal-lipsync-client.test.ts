@@ -79,7 +79,10 @@ describe('submitLipSync', () => {
     const { fetchImpl } = jsonQueue([
       {
         status: 403,
-        body: { detail: 'User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing.' },
+        body: {
+          detail:
+            'User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing.',
+        },
       },
     ]);
     await expect(
@@ -95,9 +98,11 @@ describe('submitLipSync', () => {
   });
 
   it('throws no_api_key when key empty', async () => {
-    await expect(submitLipSync({ apiKey: '', videoUrl: VID, audioUrl: AUD })).rejects.toMatchObject({
-      kind: 'no_api_key',
-    });
+    await expect(submitLipSync({ apiKey: '', videoUrl: VID, audioUrl: AUD })).rejects.toMatchObject(
+      {
+        kind: 'no_api_key',
+      },
+    );
   });
 });
 
@@ -129,7 +134,9 @@ describe('getLipSyncStatus / getLipSyncResult', () => {
 
   it('throws no_result when video url absent', async () => {
     const { fetchImpl } = jsonQueue([{ body: {} }]);
-    await expect(getLipSyncResult({ apiKey: KEY, requestId: 'r', fetchImpl })).rejects.toMatchObject({
+    await expect(
+      getLipSyncResult({ apiKey: KEY, requestId: 'r', fetchImpl }),
+    ).rejects.toMatchObject({
       kind: 'no_result',
     });
   });
@@ -218,7 +225,14 @@ describe('runLipSync (submit + poll to completion)', () => {
       { body: { status: 'IN_PROGRESS' } },
     ]);
     await expect(
-      runLipSync({ apiKey: KEY, videoUrl: VID, audioUrl: AUD, fetchImpl, pollIntervalMs: 1, maxWaitMs: 5 }),
+      runLipSync({
+        apiKey: KEY,
+        videoUrl: VID,
+        audioUrl: AUD,
+        fetchImpl,
+        pollIntervalMs: 1,
+        maxWaitMs: 5,
+      }),
     ).rejects.toMatchObject({ kind: 'timeout' });
   });
 });

@@ -31,12 +31,21 @@ export interface ParsedFile {
   truncated: boolean;
 }
 
-class CoreFileInputError extends Error {
-  constructor(code: 'CORE_FILE_INPUT_LIMIT' | 'CORE_FILE_UNREADABLE') {
+export class CoreFileInputError extends Error {
+  constructor(
+    public readonly code:
+      | 'CORE_FILE_INPUT_LIMIT'
+      | 'CORE_FILE_UNREADABLE'
+      | 'CORE_FILE_CONVERT_REQUIRED',
+  ) {
     super(code);
     this.name = 'CoreFileInputError';
   }
 }
+
+/** User copy for legacy Office formats we do not parse (no quota is consumed). */
+export const CONVERT_REQUIRED_COPY =
+  '暂不支持 .doc / .ppt / .pptx 文件，请另存为 .docx 或 .pdf 后重新上传（本次未扣额度）。';
 
 /**
  * Dispatch on mimetype + extension. Falls back to "text" for anything
@@ -51,8 +60,19 @@ export async function parseFileForPrompt(
 ): Promise<ParsedFile> {
   const ext = extOf(filename).toLowerCase();
   const mt = mimetype.toLowerCase();
-  if (options.completeText && ['.docx', '.doc', '.zip'].includes(ext))
-    throw new CoreFileInputError('CORE_FILE_UNREADABLE');
+  if (
+    ['.doc', '.ppt', '.pptx'].includes(ext) ||
+    mt === 'application/msword' ||
+    mt.includes('presentationml')
+  )
+    throw new CoreFileInputError('CORE_FILE_CONVERT_REQUIRED');
+  if (options.completeText && ext === '.zip') throw new CoreFileInputError('CORE_FILE_UNREADABLE');
+  if (
+    ext === '.docx' ||
+    mt === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ) {
+    return parseDocx(buffer, filename, options.completeText);
+  }
 
   if (mt.startsWith('image/')) {
     return parseImage(buffer, mt);
@@ -225,6 +245,68 @@ function wrapText(text: string, filename: string, fence: string, completeText = 
     blocks: [{ type: 'text', text: wrapped }],
     truncated,
   };
+}
+
+/**
+ * Word (.docx) via the open-source `mammoth` converter: document HTML →
+ * plain text with tables rendered as markdown tables. No hand-written OOXML parsing.
+ */
+async function parseDocx(
+  buffer: Buffer,
+  filename: string,
+  completeText = false,
+): Promise<ParsedFile> {
+  let html: string;
+  try {
+    const mammoth = await import('mammoth');
+    html = (await mammoth.convertToHtml({ buffer })).value;
+  } catch {
+    throw new CoreFileInputError('CORE_FILE_UNREADABLE');
+  }
+  return wrapText(docxHtmlToText(html), filename, '', completeText);
+}
+
+/** Exported for tests. Tables become markdown; other blocks become paragraphs. */
+export function docxHtmlToText(html: string): string {
+  const withTables = html.replace(/<table[\s\S]*?<\/table>/gi, (table) => {
+    const rows = [...table.matchAll(/<tr[\s\S]*?<\/tr>/gi)].map((row) =>
+      [...row[0].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((cell) =>
+        inlineText(cell[1] ?? '').replace(/\|/g, '\\|'),
+      ),
+    );
+    if (rows.length === 0) return '';
+    const width = Math.max(...rows.map((row) => row.length));
+    const pad = (row: string[]) => [...row, ...Array(width - row.length).fill('')];
+    const [head = [], ...body] = rows;
+    const lines = [
+      `| ${pad(head).join(' | ')} |`,
+      `| ${Array(width).fill('---').join(' | ')} |`,
+      ...body.map((row) => `| ${pad(row).join(' | ')} |`),
+    ];
+    return `\n\n${lines.join('\n')}\n\n`;
+  });
+  return withTables
+    .replace(/<(?:\/p|\/h[1-6]|br\s*\/?|\/li)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function inlineText(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extOf(filename: string): string {

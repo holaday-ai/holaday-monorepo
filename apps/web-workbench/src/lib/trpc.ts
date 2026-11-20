@@ -1,6 +1,6 @@
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import type { AppRouter } from '@holaday/orchestrator/trpc/router';
 import { getAccessToken } from '@/lib/auth';
+import type { AppRouter } from '@holaday/orchestrator/trpc/router';
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
 
 /**
  * tRPC client for the web workbench. Talks to the orchestrator at
@@ -26,3 +26,14 @@ export const trpc = createTRPCClient<AppRouter>({
 });
 
 export type { AppRouter };
+/** Pin the authenticated actor for a durable submission, even if global auth changes mid-batch. */
+export function createPinnedTrpc(token: string) {
+  return createTRPCClient<AppRouter>({
+    links: [
+      httpBatchLink({
+        url: '/api/trpc',
+        headers: () => ({ authorization: `Bearer ${token}` }),
+      }),
+    ],
+  });
+}

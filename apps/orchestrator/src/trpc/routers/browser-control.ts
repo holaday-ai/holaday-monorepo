@@ -2,18 +2,21 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { defaultBrowserNetworkPolicy } from '../../agent/browser-network-policy.js';
-import { hasParkedSupercarHandle, supercarReply } from '../../agent/supercar/agent-loop.js';
 import { browserControlSessions } from '../../agent/supercar/browser-control-sessions.js';
 import { BrowserInputOutcomeUnknownError } from '../../agent/supercar/browser-control.js';
-import { localChromeTaskSessions } from '../../agent/supercar/local-chrome-task-session.js';
-import { TaskRepository } from '../../agent/task-repository.js';
+import { captchaHandoffs } from '../../agent/supercar/captcha-handoff.js';
+import { browserProfileStore } from '../../browser-profiles/profile-store.js';
 import { tasks } from '../../db/schema/tasks.js';
 import { users } from '../../db/schema/users.js';
+import { isTaskTerminalStatus } from '../../task-status.js';
 import type { Context } from '../context.js';
 import { protectedProcedure } from '../trpc.js';
 
 const taskInput = z.object({ taskId: z.string().min(1) });
-const terminal = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+// FIX-61 复审 #2 #2: the same 「已结束」 as everywhere else (the page, checkpointBrowserSession).
+// The old local list missed partial_success, so a 部分完成 task's screen was treated as a run with
+// no runner: every takeover came back 412 browser_runner_unavailable and the page stayed 仅观察.
+const ended = (status: string) => isTaskTerminalStatus(status) || status === 'timeout';
 
 async function ownedBrowser(ctx: Context & { userId: string }, taskId: string) {
   const [row] = await ctx.db
@@ -32,109 +35,21 @@ async function ownedBrowser(ctx: Context & { userId: string }, taskId: string) {
     instance.taskId !== taskId ||
     instance.status !== 'ready'
   ) {
-    return { instance: null, terminal: terminal.has(row.status), userId: row.userId };
+    return { instance: null, terminal: ended(row.status), userId: row.userId };
   }
-  return { instance, terminal: terminal.has(row.status), userId: row.userId };
+  return { instance, terminal: ended(row.status), userId: row.userId };
 }
 
-export const browserControlStateProcedure = protectedProcedure
-  .input(taskInput)
-  .query(async ({ ctx, input }) => {
-    const owned = await ownedBrowser(ctx, input.taskId);
-    const local = localChromeTaskSessions.get(ctx.userId, input.taskId);
-    if (local)
-      return {
-        taskId: input.taskId,
-        supported: true,
-        mode: 'running' as const,
-        ...local.control.snapshot(),
-      };
-    const session =
-      owned.instance && browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
-    return {
-      taskId: input.taskId,
-      supported: Boolean(owned.instance && (session || owned.terminal)),
-      mode: owned.terminal && !session?.active ? ('review' as const) : ('running' as const),
-      phase: session?.control.snapshot().phase ?? ('closed' as const),
-      lease: session?.control.snapshot().lease ?? null,
-      error: session
-        ? session.control.snapshot().error
-        : owned.instance && owned.terminal
-          ? null
-          : owned.instance
-            ? 'runner_unavailable'
-            : 'session_unavailable',
-    };
-  });
-
-export const browserControlProcedure = protectedProcedure
-  .input(
-    taskInput.extend({
-      action: z.enum(['takeover', 'return']),
-      controlLease: z.string().optional(),
-    }),
-  )
-  .mutation(async ({ ctx, input }) => {
-    const owned = await ownedBrowser(ctx, input.taskId);
-    const local = localChromeTaskSessions.get(ctx.userId, input.taskId);
-    if (local) {
-      try {
-        if (input.action === 'takeover') local.control.requestHuman();
-        else local.control.returnToAgent(input.controlLease ?? '');
-      } catch {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
-      }
-      return {
-        taskId: input.taskId,
-        supported: true,
-        mode: 'running' as const,
-        ...local.control.snapshot(),
-      };
-    }
-    if (!owned.instance)
-      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_session_unavailable' });
-    let session = browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
-    if (input.action === 'takeover' && owned.terminal && !session?.active) {
-      session = browserControlSessions.review(owned.instance);
-    }
-    if (!session)
-      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_runner_unavailable' });
-    if (input.action === 'takeover') session.control.requestHuman();
-    else {
-      const state = session.control.snapshot();
-      if (!input.controlLease || state.lease !== input.controlLease)
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'browser_control_not_owned' });
-      if (hasParkedSupercarHandle(input.taskId)) {
-        const resumed = await new TaskRepository(ctx.db, ctx.taskOrigin).markAwaitingReplyResumed(
-          input.taskId,
-          owned.userId,
-        );
-        if (!resumed.persisted)
-          throw new TRPCError({
-            code: 'PRECONDITION_FAILED',
-            message: 'browser_resume_not_persisted',
-          });
-        // It is a handback instruction, never affirmative permission to replay
-        // the pre-handoff sensitive action. The waiting loop discards that action.
-        supercarReply(input.taskId, '浏览器已交还，请根据当前页面重新规划并继续。');
-      }
-      session.control.returnToAgent(input.controlLease);
-    }
-    return {
-      taskId: input.taskId,
-      supported: true,
-      mode: session.active ? ('running' as const) : ('review' as const),
-      ...session.control.snapshot(),
-    };
-  });
+// REBUILD-4 共同操作: no control state, takeover or handback — the person uses the browser at any
+// time (the screencast input and browserNav below); the assistant yields while they are busy.
 
 export const browserNavProcedure = protectedProcedure
   .input(
     z.object({
       taskId: z.string().optional(),
       direction: z.enum(['back', 'forward', 'reload', 'goto']),
+      // REBUILD-4: no lease. An old client's extra controlLease key is stripped by zod (accepted).
       url: z.string().max(2048).optional(),
-      controlLease: z.string().optional(),
     }),
   )
   .mutation(async ({ ctx, input }) => {
@@ -142,10 +57,13 @@ export const browserNavProcedure = protectedProcedure
     const owned = await ownedBrowser(ctx, input.taskId);
     const instance = owned.instance;
     if (!instance) return { ok: false as const, reason: 'no_executor' };
-    const session = browserControlSessions.get(instance, ctx.userId, input.taskId);
+    // A finished task's browser: the person just uses it (an open review control, no lease).
+    const session =
+      browserControlSessions.openForViewer(instance) ??
+      (owned.terminal ? browserControlSessions.review(instance) : null);
     if (!session) return { ok: false as const, reason: 'browser_control_not_owned' };
     try {
-      return await session.control.runHuman(input.controlLease ?? '', async (signal) => {
+      return await session.control.runHuman(async (signal) => {
         const page = await instance.executor.getPage();
         const options = { timeout: 15_000, waitUntil: 'domcontentloaded' as const };
         let target = input.url?.trim() ?? '';
@@ -182,8 +100,45 @@ export const browserNavProcedure = protectedProcedure
             );
           throw new BrowserInputOutcomeUnknownError();
         }
-      });
+      }, 'navigate');
     } catch (error) {
       return { ok: false as const, reason: error instanceof Error ? error.message : 'nav_failed' };
     }
+  });
+
+/**
+ * CAPTCHA-REDUCE-1: the user's persistent cloud browser profile (verification
+ * clearance). `configured` is false when the store is off; clearing is always
+ * safe and only touches the caller's own profile.
+ */
+export const browserProfileStatusProcedure = protectedProcedure.query(() => ({
+  configured: browserProfileStore() !== null,
+}));
+export const browserProfileClearProcedure = protectedProcedure.mutation(async ({ ctx }) => {
+  const store = browserProfileStore();
+  if (store) await store.clear(ctx.userId);
+  return { ok: true as const, configured: store !== null };
+});
+
+export const browserCaptchaProcedure = protectedProcedure
+  .input(taskInput.extend({ action: z.enum(['continue', 'cancel', 'status', 'alternate']) }))
+  .mutation(async ({ ctx, input }) => {
+    const owned = await ownedBrowser(ctx, input.taskId);
+    const session =
+      owned.instance && browserControlSessions.get(owned.instance, ctx.userId, input.taskId);
+    if (!session || !captchaHandoffs.active(input.taskId, ctx.userId, session.control))
+      return { ok: false, state: 'inactive' as const };
+    const status = () => captchaHandoffs.status(input.taskId, ctx.userId, session.control);
+    if (input.action === 'cancel') {
+      captchaHandoffs.cancel(input.taskId, ctx.userId, session.control);
+      return { ok: true, state: 'cancelled' as const };
+    }
+    if (input.action === 'status') return { ok: true, state: 'waiting' as const, ...status() };
+    if (input.action === 'alternate') {
+      // CAPTCHA-REDUCE-1: only offered after repeated failed rounds.
+      const ok = captchaHandoffs.alternate(input.taskId, ctx.userId, session.control);
+      return { ok, state: ok ? ('alternate' as const) : ('waiting' as const), ...status() };
+    }
+    const ok = await captchaHandoffs.proceed(input.taskId, ctx.userId, session.control);
+    return { ok, state: ok ? ('resuming' as const) : ('waiting' as const), ...status() };
   });

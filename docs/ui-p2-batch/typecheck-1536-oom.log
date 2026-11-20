@@ -1,0 +1,111 @@
+
+> @holaday/web-workbench@0.0.0 build /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> pnpm lint && pnpm typecheck && vite build --config vite.config.ts
+
+
+> @holaday/web-workbench@0.0.0 lint /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> eslint 'src/**/*.{ts,tsx}'
+
+
+> @holaday/web-workbench@0.0.0 typecheck /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> tsc --noEmit && tsc --noEmit -p tsconfig.node.json
+
+
+<--- Last few GCs --->
+
+[52862:0x8cf40c000]    34471 ms: Mark-Compact 1531.7 (1566.9) -> 1527.4 (1567.1) MB, pooled: 0 MB, 619.62 / 0.00 ms  (average mu = 0.154, current mu = 0.011) allocation failure; scavenge might not succeed
+
+
+<--- JS stacktrace --->
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x1048d7f14 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 2: 0x104ab40a0 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 3: 0x104cc36b4 v8::internal::Heap::stack() [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 4: 0x104cd9ad0 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 5: 0x104cd9364 void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 6: 0x105494fc0 PushAllRegistersAndIterateStack [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 7: 0x104cc1874 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 8: 0x104cb6048 v8::internal::HeapAllocator::AllocateRawWithLightRetrySlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+ 9: 0x104cb6880 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+10: 0x104c99b6c v8::internal::Factory::NewFillerObject(int, v8::internal::AllocationAlignment, v8::internal::AllocationType, v8::internal::AllocationOrigin) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+11: 0x1050b5fcc v8::internal::Runtime_AllocateInYoungGeneration(int, unsigned long*, v8::internal::Isolate*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+12: 0x105579df4 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+13: 0x1054e7ca8 Builtins_GrowFastSmiOrObjectElements [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+14: 0x111174620 
+15: 0x1106cf204 
+16: 0x1106f0cac 
+17: 0x11060df4c 
+18: 0x110209de0 
+19: 0x110732420 
+20: 0x11021e810 
+21: 0x110727e70 
+22: 0x1106ced6c 
+23: 0x110728ee4 
+24: 0x110f6a2a4 
+25: 0x111188888 
+26: 0x110f6a244 
+27: 0x11072c76c 
+28: 0x110d16ccc 
+29: 0x10555e4c8 Builtins_SetPrototypeForEach [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+30: 0x110695ad0 
+31: 0x110696220 
+32: 0x110697b8c 
+33: 0x110697e18 
+34: 0x1106a08b8 
+35: 0x110697f5c 
+36: 0x1104efcfc 
+37: 0x1106ebd7c 
+38: 0x1106d8190 
+39: 0x11039ce58 
+40: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+41: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+42: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+43: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+44: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+45: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+46: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+47: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+48: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+49: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+50: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+51: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+52: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+53: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+54: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+55: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+56: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+57: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+58: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+59: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+60: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+61: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+62: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+63: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+64: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+65: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+66: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+67: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+68: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+69: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+70: 0x1054e4ef0 Builtins_InterpreterEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+71: 0x1054e2c0c Builtins_JSEntryTrampoline [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+72: 0x1054e28f4 Builtins_JSEntry [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+73: 0x104c1b4a0 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+74: 0x104c1adfc v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::Handle<v8::internal::Object>, v8::internal::Handle<v8::internal::Object>, int, v8::internal::Handle<v8::internal::Object>*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+75: 0x104aca058 v8::Function::Call(v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+76: 0x1048b1ef0 node::builtins::BuiltinLoader::CompileAndCall(v8::Local<v8::Context>, char const*, node::Realm*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+77: 0x10496a5c4 node::Realm::ExecuteBootstrapper(char const*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+78: 0x10488f934 node::StartExecution(node::Environment*, char const*) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+79: 0x10488f888 node::StartExecution(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+80: 0x1047daefc node::LoadEnvironment(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>, std::__1::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+81: 0x1049226c8 node::NodeMainInstance::Run() [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+82: 0x10489307c node::Start(int, char**) [/private/tmp/holaday-tasks/fix-batch-b/node-v22.23.3-darwin-arm64/bin/node]
+83: 0x186d89d54 start [/usr/lib/dyld]
+sh: line 1: 52862 Abort trap: 6           tsc --noEmit
+ ELIFECYCLE  Command failed with exit code 134.
+/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @holaday/web-workbench@0.0.0 build: `pnpm lint && pnpm typecheck && vite build --config vite.config.ts`
+Exit status 134

@@ -1,0 +1,155 @@
+TAP version 13
+# Subtest: new JSX routes and native/custom controls cannot silently disappear from inventory
+ok 1 - new JSX routes and native/custom controls cannot silently disappear from inventory
+  ---
+  duration_ms: 1.38775
+  type: 'test'
+  ...
+# Subtest: unhandled seed RPC remains an explicit coverage error
+ok 2 - unhandled seed RPC remains an explicit coverage error
+  ---
+  duration_ms: 1.214584
+  type: 'test'
+  ...
+# Subtest: pagination appends seeded rows; mutation persists only in isolated seed state
+ok 3 - pagination appends seeded rows; mutation persists only in isolated seed state
+  ---
+  duration_ms: 0.221542
+  type: 'test'
+  ...
+# Subtest: overlap exemption is explicit; clipping, truncation and dead coverage stay blocking
+ok 4 - overlap exemption is explicit; clipping, truncation and dead coverage stay blocking
+  ---
+  duration_ms: 0.189125
+  type: 'test'
+  ...
+# Subtest: audits reject non-loopback targets including misleading hosts
+ok 5 - audits reject non-loopback targets including misleading hosts
+  ---
+  duration_ms: 0.252917
+  type: 'test'
+  ...
+# Subtest: overlapping independent controls fail while nested controls and intentional overlay layers do not
+ok 6 - overlapping independent controls fail while nested controls and intentional overlay layers do not
+  ---
+  duration_ms: 0.185333
+  type: 'test'
+  ...
+# Subtest: an interrupted or partial report cannot pass even with zero findings
+ok 7 - an interrupted or partial report cannot pass even with zero findings
+  ---
+  duration_ms: 0.089
+  type: 'test'
+  ...
+# Subtest: settings and Chrome fixtures expose real response shapes and isolated mutations
+ok 8 - settings and Chrome fixtures expose real response shapes and isolated mutations
+  ---
+  duration_ms: 0.159209
+  type: 'test'
+  ...
+# Subtest: home and catch-all screenshots never share a filename
+ok 9 - home and catch-all screenshots never share a filename
+  ---
+  duration_ms: 0.27425
+  type: 'test'
+  ...
+# Subtest: canonical routes retain settings hash sections
+ok 10 - canonical routes retain settings hash sections
+  ---
+  duration_ms: 0.318625
+  type: 'test'
+  ...
+# Subtest: astrology empty trend uses the actual nullable shape and batch creation persists its response
+ok 11 - astrology empty trend uses the actual nullable shape and batch creation persists its response
+  ---
+  duration_ms: 0.63925
+  type: 'test'
+  ...
+# Subtest: popup classification accepts only navigation and handles the pre-frame request race
+ok 12 - popup classification accepts only navigation and handles the pre-frame request race
+  ---
+  duration_ms: 0.093792
+  type: 'test'
+  ...
+# Subtest: browser seed exposes real ownership contract and persists takeover and navigation
+ok 13 - browser seed exposes real ownership contract and persists takeover and navigation
+  ---
+  duration_ms: 0.138208
+  type: 'test'
+  ...
+# Subtest: terminal browser checkpoint persists its safe URL and rejects invalid or active tasks
+ok 14 - terminal browser checkpoint persists its safe URL and rejects invalid or active tasks
+  ---
+  duration_ms: 0.12475
+  type: 'test'
+  ...
+# Subtest: disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+ok 15 - disabled-editor whitelist matches the exact pathname with query and rejects unrelated failures
+  ---
+  duration_ms: 0.085125
+  type: 'test'
+  ...
+# Subtest: editor console whitelist accepts the real Chromium line but not arbitrary error text
+ok 16 - editor console whitelist accepts the real Chromium line but not arbitrary error text
+  ---
+  duration_ms: 0.100834
+  type: 'test'
+  ...
+# Subtest: energy choices fit their available content width even when the window uses desktop media queries
+ok 17 - energy choices fit their available content width even when the window uses desktop media queries
+  ---
+  duration_ms: 252.349875
+  type: 'test'
+  ...
+# Subtest: layout checks find clipped columns even when the document itself has no scrollbar
+ok 18 - layout checks find clipped columns even when the document itself has no scrollbar
+  ---
+  duration_ms: 197.64425
+  type: 'test'
+  ...
+# Subtest: layout checks detect both root overflow and a short shell, accepting full-height scroll content
+ok 19 - layout checks detect both root overflow and a short shell, accepting full-height scroll content
+  ---
+  duration_ms: 183.567833
+  type: 'test'
+  ...
+# Subtest: default audit includes laptop aspect ratios, retaining legacy 960px baselines
+ok 20 - default audit includes laptop aspect ratios, retaining legacy 960px baselines
+  ---
+  duration_ms: 0.584708
+  type: 'test'
+  ...
+# Subtest: an opaque shell strip cannot paint over the browser toolbar even with pointer-events disabled
+ok 21 - an opaque shell strip cannot paint over the browser toolbar even with pointer-events disabled
+  ---
+  duration_ms: 197.865
+  type: 'test'
+  ...
+# Subtest: clipped-off scroll content is not an overlap, but visible obstruction remains a P1
+ok 22 - clipped-off scroll content is not an overlap, but visible obstruction remains a P1
+  ---
+  duration_ms: 426.908458
+  type: 'test'
+  ...
+# Subtest: scrollable content behind a pinned navigation is clipped, while fixed controls still fail
+ok 23 - scrollable content behind a pinned navigation is clipped, while fixed controls still fail
+  ---
+  duration_ms: 316.864333
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: a dismissible live notice is an intentional overlay; an undismissible obstruction still fails
+ok 24 - a dismissible live notice is an intentional overlay; an undismissible obstruction still fails
+  ---
+  duration_ms: 1013.392458
+  type: 'test'
+  ...
+1..24
+# tests 24
+# suites 0
+# pass 24
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3253.344542

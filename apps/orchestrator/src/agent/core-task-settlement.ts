@@ -6,6 +6,7 @@ import {
   deriveFinalStatus,
 } from '../execution/execution-pipeline.js';
 import type { GenerationCompletion } from '../execution/generation-completion.js';
+import { canDeliverUnverifiedIntermediate } from '../execution/intermediate-delivery.js';
 import type { SafeVerifierIssueCode } from '../execution/llm-verifier.js';
 import {
   VERIFICATION_INPUT_LIMITS,
@@ -154,8 +155,48 @@ const inputSchema = z
         failedChecks: z.array(z.object({ type: z.string() })),
       })
       .optional(),
+    localFailure: z.enum(['EXECUTION_BUSY', 'REVIEW_FAILED']).optional(),
+    qualityFailure: z.enum(['NON_ANSWER', 'UNREAD_SOURCE', 'UNREAD_LISTING']).optional(),
   })
   .strict();
+
+/** Locally known failures (no uncertain database commit) with their user-facing copy. */
+export type CoreLocalFailure = 'EXECUTION_BUSY' | 'REVIEW_FAILED';
+export const CORE_LOCAL_FAILURE_COPY: Readonly<Record<CoreLocalFailure, string>> = Object.freeze({
+  EXECUTION_BUSY: '系统繁忙，任务未能开始执行，请稍后重试。',
+  REVIEW_FAILED: '结果核验过程出错，未能保存结果，请重试。',
+});
+/**
+ * FIX-30 (BENCH-1 r05/r06/n06/v06/t04: tool-call text or an opener delivered as
+ * the answer; r01: 「根据维基百科」 with nothing read). The answer's own fault, so —
+ * unlike CORE_LOCAL_FAILURE_COPY — not a platform failure for refunds.
+ */
+export type CoreQualityFailure = 'NON_ANSWER' | 'UNREAD_SOURCE' | 'UNREAD_LISTING';
+export const CORE_QUALITY_FAILURE_COPY: Readonly<Record<CoreQualityFailure, string>> =
+  Object.freeze({
+    // A platform fault: refunded once per task (quota/platform-failure-refunds.ts).
+    NON_ANSWER:
+      '没有生成实际答案：模型只输出了工具调用指令或「我来查一下」之类的开场白，这是平台的问题。这个问题需要联网读取网页，可以注明「请使用云端浏览器」后重试。',
+    UNREAD_SOURCE:
+      '答案说内容来自某个网站或资料，但本任务并没有读取它，这些内容无法核实，所以没有作为结果交付。',
+    // FIX-33: a site search answered from memory — ours (it was routed to generate).
+    UNREAD_LISTING:
+      '这个问题要看网站上实时的商品和价格，但本任务没有读取任何网页，凭记忆写出的商品和价格无法核实，所以没有作为结果交付（本次不扣次数）。可以注明「请使用云端浏览器」后重试。',
+  });
+/** What a failed quality check was about, in the user's words. */
+const ISSUE_COPY: Readonly<Record<string, string>> = Object.freeze({
+  UNSUPPORTED_CONCLUSION: '结论缺少依据',
+  MISSING_REQUIRED_SECTION: '缺少要求的部分',
+  IRRELEVANT_OUTPUT: '答非所问',
+  AMBIGUOUS_EVIDENCE: '依据不明确',
+  VERIFICATION_MATERIALS_INCOMPLETE: '核验所需材料不完整',
+  VERIFICATION_INPUT_LIMIT: '内容过长无法核验',
+  VERIFICATION_CONTEXT_INVALID: '核验上下文无效',
+  GENERATION_INCOMPLETE: '内容没有生成完整',
+  DETERMINISTIC_CHECK_FAILED: '没有通过格式或数据规则检查',
+  SEMANTIC_CHECK_FAILED: '内容核验没有通过',
+  SOURCE_TRUST_FAILED: '引用来源无法核实',
+});
 const semanticCodes: Readonly<Record<string, SafeVerifierIssueCode>> = Object.freeze({
   'semantic.unsupported_conclusion': 'UNSUPPORTED_CONCLUSION',
   'semantic.missing_required_section': 'MISSING_REQUIRED_SECTION',
@@ -173,6 +214,10 @@ export function prepareCoreSettlement(
     generation: GenerationCompletion;
     verification: VerificationResult;
     sourceTrust?: ResearchSourceTrustReview;
+    /** Only with status 'failed': replaces the derived reason with fixed local copy. */
+    localFailure?: CoreLocalFailure;
+    /** Only with status 'failed': the answer was not an answer (FIX-30). */
+    qualityFailure?: CoreQualityFailure;
   },
 ): CoreSettlement {
   const parsed = inputSchema.safeParse(input);
@@ -203,6 +248,8 @@ export function prepareCoreSettlement(
     sourceTrust,
   );
   const { status } = payload.data;
+  if ((parsed.data.localFailure || parsed.data.qualityFailure) && status !== 'failed')
+    throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
   if (
     (status !== 'failed' && qualityStatus === 'failed') ||
     (status === 'completed' && qualityStatus !== 'completed') ||
@@ -241,44 +288,15 @@ export function prepareCoreSettlement(
         !verification.inputCoverage.complete ||
         waiting)) ||
     (status === 'awaiting_user' &&
-      (!waiting || !verification.passed || !verification.inputCoverage.complete)) ||
+      (!waiting ||
+        ((!verification.passed || !verification.inputCoverage.complete) &&
+          !canDeliverUnverifiedIntermediate({
+            ...verification,
+            checks: verification.checks.map((check) => ({ ...check, detail: '' })),
+          })))) ||
     (status === 'partial_success' && waiting)
   )
     throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
-
-  const result: { tickCount: 1; summary?: string; reason?: string; planText?: string } = {
-    tickCount: 1,
-  };
-  let awaitingQuestion: string | null = null;
-  if (payload.data.status === 'failed') {
-    // Never retain a raw provider/model reason or a rejected candidate in a failure.
-    const generationOnlyFailure =
-      generation.completeness === 'partial' &&
-      generation.stopReason !== 'quality_rejected' &&
-      verification.semanticStatus === 'unavailable' &&
-      verification.inputCoverage.complete &&
-      !sourceTrust?.requiresReview &&
-      !hardFailure &&
-      !clarificationFailure &&
-      failedChecks.length > 0 &&
-      failedChecks.every(isGenerationFailureCheck);
-    result.reason = generationOnlyFailure
-      ? '生成未完成，请稍后重试'
-      : !verification.passed || hardFailure || qualityStatus === 'failed'
-        ? '质量校验未通过'
-        : '生成未完成，请稍后重试';
-  } else if (payload.data.status === 'awaiting_user') {
-    awaitingQuestion = payload.data.result.question;
-    if (payload.data.result.planText !== undefined) result.planText = payload.data.result.planText;
-    if (
-      Buffer.byteLength(awaitingQuestion, 'utf8') +
-        Buffer.byteLength(result.planText ?? '', 'utf8') >
-      VERIFICATION_INPUT_LIMITS.answerBytes
-    )
-      throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
-  } else {
-    result.summary = payload.data.result.summary;
-  }
 
   const issueCodes = new Set<IssueCode>(verification.inputCoverage.codes);
   if (sourceTrust?.requiresReview) issueCodes.add('SOURCE_TRUST_FAILED');
@@ -299,6 +317,48 @@ export function prepareCoreSettlement(
                 : 'SEMANTIC_CHECK_FAILED')),
     );
   }
+  const result: { tickCount: 1; summary?: string; reason?: string; planText?: string } = {
+    tickCount: 1,
+  };
+  let awaitingQuestion: string | null = null;
+  if (payload.data.status === 'failed') {
+    // Never retain a raw provider/model reason or a rejected candidate in a failure.
+    const generationOnlyFailure =
+      generation.completeness === 'partial' &&
+      generation.stopReason !== 'quality_rejected' &&
+      verification.semanticStatus === 'unavailable' &&
+      verification.inputCoverage.complete &&
+      !sourceTrust?.requiresReview &&
+      !hardFailure &&
+      !clarificationFailure &&
+      failedChecks.length > 0 &&
+      failedChecks.every(isGenerationFailureCheck);
+    // FIX-30: say what the check found missing, not only that it failed.
+    const found = [...new Set([...issueCodes].map((code) => ISSUE_COPY[code]).filter(Boolean))];
+    result.reason = parsed.data.localFailure
+      ? CORE_LOCAL_FAILURE_COPY[parsed.data.localFailure]
+      : parsed.data.qualityFailure
+        ? CORE_QUALITY_FAILURE_COPY[parsed.data.qualityFailure]
+        : generationOnlyFailure
+          ? '生成未完成，请稍后重试'
+          : !verification.passed || hardFailure || qualityStatus === 'failed'
+            ? found.length
+              ? `质量校验未通过：${found.join('、')}`
+              : '质量校验未通过'
+            : '生成未完成，请稍后重试';
+  } else if (payload.data.status === 'awaiting_user') {
+    awaitingQuestion = payload.data.result.question;
+    if (payload.data.result.planText !== undefined) result.planText = payload.data.result.planText;
+    if (
+      Buffer.byteLength(awaitingQuestion, 'utf8') +
+        Buffer.byteLength(result.planText ?? '', 'utf8') >
+      VERIFICATION_INPUT_LIMITS.answerBytes
+    )
+      throw new CoreSettlementError('CORE_SETTLEMENT_INVALID');
+  } else {
+    result.summary = payload.data.result.summary;
+  }
+
   const failureLevel = hardFailure
     ? 'hard_fail'
     : clarificationFailure

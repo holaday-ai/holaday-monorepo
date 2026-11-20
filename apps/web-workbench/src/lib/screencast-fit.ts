@@ -1,3 +1,4 @@
+import type { BrowserFrameGeometry } from '@holaday/shared-types';
 export interface ScreencastFitInput {
   hostWidth: number;
   hostHeight: number;
@@ -38,10 +39,7 @@ export function readableScreencastStartScrollLeft(input: {
   contentWidth: number;
   hostWidth: number;
 }): number {
-  if (
-    !isPositiveFinite(input.contentWidth) ||
-    !isPositiveFinite(input.hostWidth)
-  ) {
+  if (!isPositiveFinite(input.contentWidth) || !isPositiveFinite(input.hostWidth)) {
     return 0;
   }
   return Math.max(0, Math.floor((input.contentWidth - input.hostWidth) / 2));
@@ -149,9 +147,7 @@ export function fitScreencastReadable({
 export function fitTerminalEvidence(
   input: ScreencastFitInput & { viewMode?: TerminalEvidenceViewMode },
 ): ScreencastFitSize | null {
-  return input.viewMode === 'readable'
-    ? fitScreencastReadable(input)
-    : fitScreencastContain(input);
+  return input.viewMode === 'readable' ? fitScreencastReadable(input) : fitScreencastContain(input);
 }
 
 export function placeScreencastContainTop({
@@ -196,6 +192,39 @@ export function placeScreencastReadableTop({
   };
 }
 
+/**
+ * FIX-33 「100% 原尺寸」: one page CSS pixel per screen pixel (a device-scale frame is
+ * drawn at 1/pixelRatio); the host scrolls instead of shrinking the page.
+ */
+export function placeScreencastActual({
+  sourceWidth,
+  sourceHeight,
+  pixelRatio = 1,
+}: {
+  sourceWidth: number;
+  sourceHeight: number;
+  pixelRatio?: number;
+}): ScreencastContainPlacement | null {
+  if (!isPositiveFinite(sourceWidth) || !isPositiveFinite(sourceHeight)) return null;
+  const scale = 1 / (isPositiveFinite(pixelRatio) ? pixelRatio : 1);
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+    scale,
+    offsetX: 0,
+    offsetY: 0,
+  };
+}
+
+/**
+ * FIX-34: a frame's device scale without v2 geometry — its width over the CSS viewport the
+ * panel asked for (default desktop 1280), in half steps (1, 1.5, 2).
+ */
+export function framePixelRatio(sourceWidth: number, cssWidth = 1280): number {
+  if (!isPositiveFinite(sourceWidth) || !isPositiveFinite(cssWidth)) return 1;
+  return Math.max(1, Math.round((sourceWidth / cssWidth) * 2) / 2);
+}
+
 export function mapClientPointToScreencast({
   clientX,
   clientY,
@@ -223,4 +252,120 @@ export function mapClientPointToScreencast({
 
 function isPositiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+interface DisplayRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+export function mapClientPointToBrowserFrame(input: {
+  clientX: number;
+  clientY: number;
+  rect: DisplayRect;
+  frame: BrowserFrameGeometry;
+}): ScreencastPoint | null {
+  const { rect, frame } = input;
+  if (
+    ![
+      rect.width,
+      rect.height,
+      frame.cssWidth,
+      frame.cssHeight,
+      frame.imageWidth,
+      frame.imageHeight,
+      frame.pageScaleFactor,
+    ].every(isPositiveFinite)
+  )
+    return null;
+  const u = (input.clientX - rect.left) / rect.width;
+  const v = (input.clientY - rect.top) / rect.height;
+  if (!Number.isFinite(u) || !Number.isFinite(v) || u < 0 || v < 0 || u >= 1 || v >= 1) return null;
+  // Screencast pixels include compositor page scale. Input coordinates are
+  // unscaled viewport CSS coordinates. Scroll belongs only to document refs.
+  const x = (u * frame.cssWidth) / frame.pageScaleFactor;
+  // DEPLOY-61 重跑 #2: an image may show only the top of the layout at the same scale (seen: a
+  // 1280x657 frame of a 1280x800 page before a watcher's size is applied). Map by the rows the
+  // image really covers, or a press on Google's box at y=352 lands on its button at y=428.
+  const coveredHeight = (frame.imageHeight * frame.cssWidth) / frame.imageWidth;
+  const height =
+    Math.abs(coveredHeight - frame.cssHeight) > frame.cssHeight * 0.01
+      ? Math.min(frame.cssHeight, coveredHeight)
+      : frame.cssHeight;
+  const y = (v * height - frame.offsetTop) / frame.pageScaleFactor;
+  return y < 0 ? null : { x, y };
+}
+export function mapClientPointToFramebuffer(input: {
+  clientX: number;
+  clientY: number;
+  rect: DisplayRect;
+  width: number;
+  height: number;
+}): ScreencastPoint | null {
+  const { rect } = input;
+  if (![rect.width, rect.height, input.width, input.height].every(isPositiveFinite)) return null;
+  const x = ((input.clientX - rect.left) * input.width) / rect.width;
+  const y = ((input.clientY - rect.top) * input.height) / rect.height;
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    x < 0 ||
+    y < 0 ||
+    x >= input.width ||
+    y >= input.height
+  )
+    return null;
+  return { x, y };
+}
+
+/** CAPTCHA-UX-1 第 2 条: the captcha box, in CSS pixels of the page's viewport. */
+export interface ScreencastCaptchaBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+/** Margin around the captcha box when zoomed, in CSS pixels of the page. */
+export const CAPTCHA_ZOOM_MARGIN = 24;
+/** Below this panel width (a phone) the box fills the width, top-aligned. */
+export const CAPTCHA_ZOOM_PHONE_WIDTH = 640;
+/** At most this many screen pixels per CSS pixel of the page (a tiny checkbox stays legible). */
+const CAPTCHA_ZOOM_MAX_CSS_SCALE = 6;
+
+/**
+ * CAPTCHA-UX-1 第 2 条: place the frame so the captcha box (plus a margin) fills the panel — on a
+ * phone it is top-aligned, and it always fits whole. Only this screen's picture is scaled; the page keeps its size. Points still map
+ * through the canvas's displayed rect, so a click lands where it is shown.
+ */
+export function placeScreencastCaptchaZoom(input: {
+  hostWidth: number;
+  hostHeight: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  cssWidth: number;
+  box: ScreencastCaptchaBox;
+}): ScreencastContainPlacement | null {
+  const { hostWidth, hostHeight, sourceWidth, sourceHeight, cssWidth, box } = input;
+  if (hostWidth <= 0 || hostHeight <= 0 || sourceWidth <= 0 || sourceHeight <= 0 || cssWidth <= 0)
+    return null;
+  if (!(box.width > 0 && box.height > 0)) return null;
+  const k = sourceWidth / cssWidth;
+  const m = CAPTCHA_ZOOM_MARGIN;
+  const bx = Math.max(0, box.x - m) * k;
+  const by = Math.max(0, box.y - m) * k;
+  const bw = Math.min(sourceWidth - bx, (box.width + 2 * m) * k);
+  const bh = Math.min(sourceHeight - by, (box.height + 2 * m) * k);
+  if (bw <= 0 || bh <= 0) return null;
+  const phone = hostWidth < CAPTCHA_ZOOM_PHONE_WIDTH;
+  // 复审 P1-3: the whole box fits — width and height — on a phone too (the image grid with its
+  // Verify button is taller than wide; a width-only fit cut its last row off).
+  const scale = Math.min(CAPTCHA_ZOOM_MAX_CSS_SCALE / k, hostWidth / bw, hostHeight / bh);
+  return {
+    scale,
+    width: hostWidth,
+    height: hostHeight,
+    offsetX: (hostWidth - bw * scale) / 2 - bx * scale,
+    offsetY: phone ? -by * scale : Math.max(0, (hostHeight - bh * scale) / 2) - by * scale,
+  };
 }

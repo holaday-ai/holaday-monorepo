@@ -42,6 +42,7 @@ describe('AuthService password reset invalidation', () => {
     };
     const updates: Array<Record<string, unknown>> = [];
     const db = {
+      insert: () => ({ values: async () => [] }),
       select() {
         return {
           from() {
@@ -128,6 +129,7 @@ describe('AuthService password reset invalidation', () => {
       updatedAt: new Date(),
     };
     const db = {
+      insert: () => ({ values: async () => [] }),
       select() {
         return {
           from() {

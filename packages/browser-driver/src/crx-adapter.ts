@@ -11,6 +11,11 @@
  * task; tab multiplexing comes with the Skill's own plan.
  */
 
+import {
+  type UserBrowserActivity,
+  type UserBrowserBinding,
+  browserUploadManifestSchema,
+} from '@holaday/shared-types';
 import { type CrxApplication, type Locator, type Page, crx } from 'playwright-crx';
 import {
   DRIVER_ERRORS,
@@ -19,8 +24,15 @@ import {
   type HolaDayBrowserDriver,
   driverError,
 } from './driver.js';
+import { NativeDownloadCaptureError } from './native-download.js';
+import { NativeChooserCaptureError } from './native-file-chooser.js';
+import { collectSensitiveFieldValues, redactSensitiveValues } from './observation-redaction.js';
 import { isOriginAllowed } from './origin-guard.js';
+import { SelectedTargetResolver } from './selected-target.js';
+import type { NativeUploadPayload } from './selected-target.js';
 import { type LocatorSpec, buildSelectorPlan, renderLocatorSpec } from './selector-plan.js';
+import type { VerifiedTaskFile } from './task-file-transfer.js';
+import { captureMaskedTaskScreenshot } from './task-screenshot.js';
 
 /**
  * Per-strategy failure record. Included in the DriverResult.data for
@@ -99,17 +111,25 @@ function readNativeSelectState(
 }
 
 export interface CurrentPageObservation {
+  activity?: UserBrowserActivity;
   tabId: number;
   origin: string;
   title: string;
   bodyText: string;
   ariaSnapshot: string;
   truncated: boolean;
+  observationRevision?: number;
+  sourceURL?: string;
+  capturedAt?: number;
+  frameId?: string;
+  frames?: Array<{ frameId: string; origin: string; bodyText: string; ariaSnapshot: string }>;
 }
 
 export interface PlaywrightCrxAdapterOptions {
   /** Origin allowlist from the active Skill's `allowedOrigins`. */
   allowedOrigins?: readonly string[];
+  userBrowserRoutingV2?: boolean;
+  collaborationV2?: boolean;
   /** Per-strategy waitFor budget in ms (total plan timeout is honored separately). */
   perStrategyTimeoutMs?: number;
   /** If set, attach to this chrome.tabs tabId instead of opening a new tab on first goto. */
@@ -118,6 +138,7 @@ export interface PlaywrightCrxAdapterOptions {
 
 export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   private app: CrxApplication | null = null;
+  private targets: SelectedTargetResolver | null = null;
   private page: Page | null = null;
   private selectedAttachedListener: ((data: { page: Page; tabId: number }) => void) | null = null;
   private selectedDisposeRequested = false;
@@ -135,6 +156,8 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   constructor(opts: PlaywrightCrxAdapterOptions = {}) {
     this.opts = {
       allowedOrigins: opts.allowedOrigins ?? [],
+      userBrowserRoutingV2: opts.userBrowserRoutingV2 ?? false,
+      collaborationV2: opts.collaborationV2 ?? false,
       perStrategyTimeoutMs: opts.perStrategyTimeoutMs ?? 2_000,
       attachToTabId: opts.attachToTabId ?? null,
     };
@@ -155,12 +178,14 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     if (this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
+    if (this.targets?.stopped || this.targets?.busy)
+      return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab control is unavailable');
 
     const existingPage = this.getLivePage();
     try {
       const page = existingPage ?? (await this.ensurePage());
       const currentUrl = page.url();
-      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+      if (!this.isAllowed(currentUrl, this.opts.allowedOrigins)) {
         if (!existingPage) {
           try {
             await this.detachExplicitPage(page);
@@ -173,6 +198,36 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
           `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
         );
       }
+      if (this.opts.userBrowserRoutingV2 && !this.targets)
+        this.targets = new SelectedTargetResolver(
+          page,
+          requestedTabId,
+          this.opts.allowedOrigins,
+          // Hit testing rides the debugger session playwright-crx attached.
+          (method, params) =>
+            chrome.debugger.sendCommand(
+              { tabId: requestedTabId },
+              method,
+              params,
+            ) as Promise<unknown>,
+          this.opts.collaborationV2,
+          {
+            subscribe: (listener) => {
+              const onEvent = (
+                source: chrome.debugger.Debuggee & { sessionId?: string },
+                method: string,
+                params?: object,
+              ) => {
+                // Child protocol sessions and other tabs have no authority over
+                // this task's native response/receipt correlation.
+                if (source.tabId === requestedTabId && !source.sessionId)
+                  listener(method, (params ?? {}) as Record<string, unknown>);
+              };
+              chrome.debugger.onEvent.addListener(onEvent);
+              return () => chrome.debugger.onEvent.removeListener(onEvent);
+            },
+          },
+        );
       return { status: 'ok', data: { tabId: requestedTabId } };
     } catch (err) {
       if (!existingPage && this.page) {
@@ -200,7 +255,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
 
     try {
       const currentUrl = page.url();
-      if (!isOriginAllowed(currentUrl, this.opts.allowedOrigins)) {
+      if (!this.isAllowed(currentUrl, this.opts.allowedOrigins)) {
         return driverError(
           DRIVER_ERRORS.ORIGIN_BLOCKED,
           `current origin ${httpUrlOrigin(currentUrl) ?? '<invalid>'} not in Skill allowedOrigins: [${this.opts.allowedOrigins.join(', ')}]`,
@@ -214,12 +269,27 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         );
       }
 
+      if (this.targets) await this.targets.observe();
       const body = page.locator('body');
-      const [title, bodyText, ariaSnapshot] = await Promise.all([
+      // ariaSnapshot renders textbox values verbatim (password / OTP too).
+      // Collect sensitive field values alongside and mask them before the
+      // observation leaves the extension. Fail closed: if the values cannot
+      // be read, the catch below returns EXTRACT_FAILED, never raw text.
+      const [title, rawBodyText, rawAriaSnapshot, rawSensitiveValues] = await Promise.all([
         page.title(),
         body.innerText({ timeout: OBSERVATION_TIMEOUT_MS }),
         body.ariaSnapshot({ timeout: OBSERVATION_TIMEOUT_MS }),
+        page.evaluate(collectSensitiveFieldValues),
       ]);
+      if (
+        !Array.isArray(rawSensitiveValues) ||
+        !rawSensitiveValues.every((value) => typeof value === 'string')
+      ) {
+        throw new Error('sensitive field scan returned an unexpected shape');
+      }
+      const sensitiveValues = rawSensitiveValues as string[];
+      const bodyText = redactSensitiveValues(rawBodyText, sensitiveValues);
+      const ariaSnapshot = redactSensitiveValues(rawAriaSnapshot, sensitiveValues);
       if (page.isClosed()) {
         this.page = null;
         this.tabId = null;
@@ -232,9 +302,44 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         );
       }
 
+      const frames: NonNullable<CurrentPageObservation['frames']> = [];
+      if (this.targets)
+        for (const context of this.targets.frameContexts().slice(1, 6)) {
+          const body = context.frame.locator('body');
+          const values = await context.frame.evaluate(collectSensitiveFieldValues);
+          if (!Array.isArray(values) || !values.every((value) => typeof value === 'string'))
+            throw new Error('frame redaction unavailable');
+          frames.push({
+            frameId: context.frameId,
+            origin: context.origin,
+            bodyText: redactSensitiveValues(
+              await body.innerText({ timeout: OBSERVATION_TIMEOUT_MS }),
+              values,
+            ).slice(0, 2000),
+            ariaSnapshot: redactSensitiveValues(
+              await body.ariaSnapshot({ timeout: OBSERVATION_TIMEOUT_MS }),
+              values,
+            ).slice(0, 4000),
+          });
+        }
+      await this.targets?.assertObservationFresh();
+      if (page.isClosed() || page.url() !== currentUrl)
+        throw new Error('page changed during observation');
       const data: CurrentPageObservation = {
         tabId: this.tabId,
         origin,
+        ...(this.targets
+          ? {
+              observationRevision: this.targets.observationRevision,
+              sourceURL: currentUrl,
+              capturedAt: Date.now(),
+              frameId: this.targets.frameContexts()[0]?.frameId,
+              frames,
+              ...(this.opts.collaborationV2
+                ? { activity: await this.targets.observedActivity() }
+                : {}),
+            }
+          : {}),
         title: title.slice(0, OBSERVATION_TITLE_CAP),
         bodyText: bodyText.slice(0, OBSERVATION_BODY_TEXT_CAP),
         ariaSnapshot: ariaSnapshot.slice(0, OBSERVATION_ARIA_SNAPSHOT_CAP),
@@ -253,8 +358,37 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   async execute(action: DriverAction): Promise<DriverResult> {
-    if (this.opts.attachToTabId !== null && this.selectedDisposeRequested) {
+    if (this.opts.attachToTabId !== null && this.selectedDisposeRequested)
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
+    if (this.targets?.stopped || this.targets?.busy)
+      return {
+        status: 'error',
+        error: {
+          code: this.targets.stopped ? 'session_unavailable' : 'browser_busy',
+          message: 'Bound browser control is unavailable',
+        },
+      };
+    if (this.opts.collaborationV2) {
+      try {
+        await this.targets?.assertNativeIdle();
+      } catch (error) {
+        return {
+          status: 'error',
+          error: { code: safeTargetError(error), message: 'Native input is still active' },
+        };
+      }
+    }
+    if (this.targets && ['click', 'type', 'key', 'select', 'upload'].includes(action.kind))
+      return {
+        status: 'error',
+        error: { code: 'target_binding_required', message: 'Bound target required' },
+      };
+    if (this.targets && action.kind === 'scroll') {
+      await this.targets.scroll(
+        Number(action.payload?.deltaX || 0),
+        Number(action.payload?.deltaY || 0),
+      );
+      return { status: 'ok' };
     }
     try {
       // Pre-step origin guard for NON-goto actions. `goto` handles its
@@ -270,7 +404,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
         if (allowlist.length > 0) {
           const currentUrl = currentPage.url();
-          if (!isOriginAllowed(currentUrl, allowlist)) {
+          if (!this.isAllowed(currentUrl, allowlist)) {
             return driverError(
               DRIVER_ERRORS.ORIGIN_BLOCKED,
               `current page ${currentUrl} not in Skill allowedOrigins: [${allowlist.join(', ')}]`,
@@ -312,7 +446,319 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     }
   }
 
+  async describeTarget(action: DriverAction, revision: number): Promise<DriverResult> {
+    if (!this.targets)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Real targets unavailable' },
+      };
+    try {
+      return { status: 'ok', data: await this.targets.describe(action, revision) };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: { code: safeTargetError(error), message: 'Target cannot be verified' },
+      };
+    }
+  }
+  async executeBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed?: () => boolean,
+  ): Promise<DriverResult> {
+    if (!this.targets)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Real targets unavailable' },
+      };
+    try {
+      await this.targets.execute(action, binding, undefined, dispatchAllowed);
+      return { status: 'ok' };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: { code: safeTargetError(error), message: 'Bound input was rejected or unconfirmed' },
+      };
+    }
+  }
+
+  async uploadBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    files: readonly VerifiedTaskFile[],
+    dispatchAllowed: () => boolean,
+  ): Promise<DriverResult> {
+    const expected = browserUploadManifestSchema.safeParse(action.payload?.files);
+    if (!this.targets || action.kind !== 'upload' || typeof dispatchAllowed !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound file channel unavailable' },
+      };
+    if (!dispatchAllowed())
+      return {
+        status: 'error',
+        error: { code: 'session_unavailable', message: 'File delivery stopped' },
+      };
+    if (
+      !expected.success ||
+      files.length !== expected.data.length ||
+      files.some((file, index) => {
+        const metadata = expected.data[index]!;
+        return (
+          !(file.bytes instanceof Uint8Array) ||
+          file.bytes.length !== metadata.sizeBytes ||
+          file.fileId !== metadata.fileId ||
+          file.name !== metadata.name ||
+          file.mimeType !== metadata.mimeType ||
+          file.sizeBytes !== metadata.sizeBytes ||
+          file.sha256 !== metadata.sha256
+        );
+      })
+    )
+      return {
+        status: 'error',
+        error: {
+          code: 'file_payload_invalid',
+          message: 'File manifest does not match staged bytes',
+        },
+      };
+    const payloads: NativeUploadPayload[] = [];
+    try {
+      for (const file of files) {
+        // CRX's public filesystem is in memory. Its read returns the same Buffer
+        // implementation as setInputFiles expects; no user disk path is used.
+        const path = `/holaday-upload-${crypto.randomUUID()}`;
+        try {
+          crx.fs.writeFileSync(path, file.bytes, { flag: 'wx' });
+          const buffer = crx.fs.readFileSync(path);
+          if (typeof buffer === 'string') throw new Error('invalid buffer');
+          payloads.push({ name: file.name, mimeType: file.mimeType, buffer });
+        } finally {
+          try {
+            crx.fs.unlinkSync(path);
+          } catch {
+            /* only this private virtual path */
+          }
+        }
+      }
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'file_payload_invalid', message: 'In-memory file payload unavailable' },
+      };
+    }
+    try {
+      await this.targets.execute(action, binding, payloads, dispatchAllowed);
+      return { status: 'ok' };
+    } catch (error) {
+      return {
+        status: 'error',
+        error: {
+          code: safeTargetError(error),
+          message: 'Bound file input rejected or unconfirmed',
+        },
+      };
+    }
+  }
+
+  async captureFileChooserBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult> {
+    if (!this.targets || action.kind !== 'click' || typeof dispatchAllowed !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound file chooser unavailable' },
+        data: { clickOutcome: 'not_applied', interceptionRestored: true },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: await this.targets.captureFileChooser(action, binding, dispatchAllowed, signal),
+      };
+    } catch (error) {
+      const chooserError = error instanceof NativeChooserCaptureError;
+      const reason =
+        chooserError &&
+        [
+          'invalid_chooser_timeout',
+          'chooser_listener_state_unavailable',
+          'chooser_capture_busy',
+          'chooser_interception_unavailable',
+          'chooser_target_unavailable',
+          'chooser_restore_unconfirmed',
+          'input_outcome_unknown',
+        ].includes(error.message)
+          ? error.message
+          : safeTargetError(error);
+      const clickOutcome = chooserError
+        ? error.clickOutcome
+        : reason === 'input_outcome_unknown'
+          ? 'unknown'
+          : 'not_applied';
+      return {
+        status: 'error',
+        error: { code: reason, message: 'File-button input was rejected or unconfirmed' },
+        data: {
+          clickOutcome,
+          interceptionRestored:
+            reason !== 'chooser_restore_unconfirmed' &&
+            (chooserError || clickOutcome === 'not_applied'),
+        },
+      };
+    }
+  }
+
+  async captureTaskScreenshot(
+    captureId: string,
+    revision: number,
+    current: () => boolean,
+  ): Promise<DriverResult> {
+    const page = this.getLivePage();
+    const tabId = this.tabId;
+    const targets = this.targets;
+    const valid = () =>
+      Boolean(
+        current() &&
+          page &&
+          this.getLivePage() === page &&
+          tabId === this.tabId &&
+          targets &&
+          targets.observationRevision === revision &&
+          this.isAllowed(page.url(), this.opts.allowedOrigins),
+      );
+    if (!page || !targets || !this.opts.collaborationV2 || !valid())
+      return driverError(DRIVER_ERRORS.SCREENSHOT_FAILED, 'Task capture unavailable');
+    try {
+      await targets.assertObservationFresh();
+      await targets.assertNativeIdle();
+      // Reuse the tab's existing debugger attachment. CRX newCDPSession tries
+      // Target.attachToBrowserTarget and is unsupported in the extension.
+      const data = await captureMaskedTaskScreenshot(
+        page,
+        valid,
+        () => chrome.debugger.sendCommand({ tabId: tabId! }, 'Page.getFrameTree'),
+        this.opts.allowedOrigins ?? [],
+      );
+      // Screenshot masking/caret styles can change DOM epochs. The capture checks
+      // document loader IDs; the session checks the native input stamp separately.
+      await targets.assertNativeIdle();
+      if (!valid()) throw new Error();
+      const bytes = Buffer.from(data, 'base64');
+      const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+      if (!valid()) throw new Error();
+      return {
+        status: 'ok',
+        data: {
+          captureId,
+          tabId,
+          origin: new URL(page.url()).origin,
+          observationRevision: revision,
+          mediaType: 'image/jpeg',
+          sizeBytes: bytes.length,
+          sha256: Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, '0')).join(
+            '',
+          ),
+          data,
+          capturedAt: Date.now(),
+        },
+      };
+    } catch {
+      return driverError(DRIVER_ERRORS.SCREENSHOT_FAILED, 'Task capture unavailable');
+    }
+  }
+
+  async readActivity(): Promise<DriverResult> {
+    if (!this.targets || !this.opts.collaborationV2)
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Native activity unavailable' },
+      };
+    try {
+      return { status: 'ok', data: await this.targets.activity() };
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'activity_unavailable', message: 'Native activity cannot be verified' },
+      };
+    }
+  }
+
+  /** Dormant until an explicit file operation is negotiated by the session. */
+  async captureDownloadBound(
+    action: DriverAction,
+    binding: UserBrowserBinding,
+    dispatchAllowed: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<DriverResult> {
+    if (
+      !this.targets ||
+      this.selectedDisposeRequested ||
+      action.kind !== 'click' ||
+      typeof dispatchAllowed !== 'function'
+    )
+      return {
+        status: 'error',
+        error: { code: 'capability_missing', message: 'Bound download unavailable' },
+        data: { clickOutcome: 'not_applied', interceptionRestored: true },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: await this.targets.captureDownload(action, binding, dispatchAllowed, signal),
+      };
+    } catch (error) {
+      const native = error instanceof NativeDownloadCaptureError;
+      const code = native ? error.message : safeTargetError(error);
+      const clickOutcome = native
+        ? error.clickOutcome
+        : code === 'input_outcome_unknown'
+          ? 'unknown'
+          : 'not_applied';
+      return {
+        status: 'error',
+        error: { code, message: 'Original download rejected or unconfirmed' },
+        data: {
+          clickOutcome,
+          interceptionRestored:
+            code !== 'download_restore_unconfirmed' && (native || clickOutcome === 'not_applied'),
+        },
+      };
+    }
+  }
+  async readDownloadChunk(
+    id: string,
+    offset: number,
+    length: number,
+    current: () => boolean,
+  ): Promise<DriverResult> {
+    if (!this.targets || this.selectedDisposeRequested || typeof current !== 'function')
+      return {
+        status: 'error',
+        error: { code: 'download_unavailable', message: 'Original file unavailable' },
+      };
+    try {
+      return {
+        status: 'ok',
+        data: { bytes: await this.targets.readDownloadChunk(id, offset, length, current) },
+      };
+    } catch {
+      return {
+        status: 'error',
+        error: { code: 'download_unavailable', message: 'Original file unavailable' },
+      };
+    }
+  }
+  releaseDownload(id: string): void {
+    this.targets?.releaseDownload(id);
+  }
+
   async dispose(): Promise<void> {
+    if (this.opts.attachToTabId !== null) this.selectedDisposeRequested = true;
+    await this.targets?.dispose();
+    this.targets = null;
     if (this.opts.attachToTabId !== null) {
       this.selectedDisposeRequested = true;
       const app = this.app;
@@ -348,7 +794,7 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
     // constructor default; both respect the "empty = unrestricted"
     // contract from isOriginAllowed.
     const allowlist = action.allowedOrigins ?? this.opts.allowedOrigins;
-    if (!isOriginAllowed(url, allowlist)) {
+    if (!this.isAllowed(url, allowlist)) {
       return driverError(
         DRIVER_ERRORS.ORIGIN_BLOCKED,
         `origin not in Skill allowedOrigins: ${url} (allowlist: [${allowlist.join(', ')}])`,
@@ -712,6 +1158,18 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
         },
       };
     }
+    // A bound task/current-page session must never steal the user's focus,
+    // even when every background capture mechanism is unavailable.
+    if (this.opts.attachToTabId !== null) {
+      return {
+        status: 'skipped',
+        data: {
+          skipped: true,
+          backgroundOnly: true,
+          reason: `Background capture unavailable: clean=${first.error}; plain=${second.error}; rawCdp=${third.error}`,
+        },
+      };
+    }
     console.warn(
       '[holaday][screenshot] raw CDP failed, falling back to captureVisibleTab (will foreground window)',
       { error: third.error },
@@ -751,6 +1209,21 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   // ---------- private helpers ----------
+
+  private isAllowed(raw: string, legacyOrigins: readonly string[]): boolean {
+    if (!this.opts.userBrowserRoutingV2) return isOriginAllowed(raw, legacyOrigins);
+    try {
+      const url = new URL(raw);
+      return (
+        /^https?:$/.test(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        this.opts.allowedOrigins.includes(url.origin)
+      );
+    } catch {
+      return false;
+    }
+  }
 
   private async ensureApp(): Promise<CrxApplication> {
     if (this.app) return this.app;
@@ -1216,4 +1689,27 @@ async function captureViaVisibleTabFallback(tabId: number | null): Promise<Scree
 function base64ByteLength(b64: string): number {
   const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
   return Math.floor((b64.length * 3) / 4) - padding;
+}
+
+function safeTargetError(error: unknown): string {
+  const known = [
+    'target_binding_required',
+    'target_changed',
+    'stale_observation',
+    'target_ambiguous',
+    'target_missing',
+    'target_unreadable',
+    'target_obscured',
+    'origin_grant_required',
+    'unsupported_action',
+    'human_input_active',
+    'file_manifest_invalid',
+    'file_payload_invalid',
+    'file_target_forbidden',
+    'session_unavailable',
+    'browser_busy',
+  ];
+  return error instanceof Error && known.includes(error.message)
+    ? error.message
+    : 'input_outcome_unknown';
 }

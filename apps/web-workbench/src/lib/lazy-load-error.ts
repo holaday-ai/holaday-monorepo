@@ -20,10 +20,7 @@ export function isLazyLoadError(error: unknown): boolean {
   return CHUNK_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-export function lazyLoadErrorCopy(
-  error: unknown,
-  surfaceLabel = '页面',
-): LazyLoadErrorCopy {
+export function lazyLoadErrorCopy(error: unknown, surfaceLabel = '页面'): LazyLoadErrorCopy {
   if (isLazyLoadError(error)) {
     return {
       kind: 'stale_version',

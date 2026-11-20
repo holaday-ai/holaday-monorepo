@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  classifySmokePollStatus,
-  selectSmokeTasks,
-} from './supercar-smoke-state.mjs';
+import { classifySmokePollStatus, selectSmokeTasks } from './supercar-smoke-state.mjs';
 
 test('stops polling for every terminal task status', () => {
   for (const status of ['completed', 'partial_success', 'failed', 'cancelled']) {

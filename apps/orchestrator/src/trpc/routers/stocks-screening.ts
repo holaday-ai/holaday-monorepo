@@ -1,18 +1,18 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import type { StockScreeningClient } from '../../stocks/stock-screening-service.js';
 import {
-  runStockScreening,
-  StockScreeningDataError,
-  StockScreeningFreshnessError,
-  type StockScreeningResult,
-} from '../../stocks/stock-screening-service.js';
-import {
+  type StockScreenCriterion,
   canonicalStockScreenCriterion,
   parseStockScreenPrompt,
   validateStockScreenCriteria,
-  type StockScreenCriterion,
 } from '../../stocks/screening-criteria.js';
+import type { StockScreeningClient } from '../../stocks/stock-screening-service.js';
+import {
+  StockScreeningDataError,
+  StockScreeningFreshnessError,
+  type StockScreeningResult,
+  runStockScreening,
+} from '../../stocks/stock-screening-service.js';
 import { validateStockTaskContext } from '../../stocks/stock-task-context.js';
 
 type Db = typeof import('../../db/client.js').db;
@@ -54,20 +54,22 @@ export const previewStockScreeningInputSchema = z.object({
   prompt: z.string().trim().min(1).max(1_000),
 });
 
-export const runStockScreeningInputSchema = z.object({
-  snapshotId: z.string().regex(/^stkshot_[a-f0-9]{24}$/),
-  dataAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  criteria: z.array(criterionSchema).min(1).max(20),
-}).superRefine((input, context) => {
-  const validation = validateStockScreenCriteria(input.criteria as StockScreenCriterion[]);
-  for (const error of validation.errors) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['criteria', input.criteria.findIndex((item) => item.id === error.criterionId)],
-      message: error.message,
-    });
-  }
-});
+export const runStockScreeningInputSchema = z
+  .object({
+    snapshotId: z.string().regex(/^stkshot_[a-f0-9]{24}$/),
+    dataAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    criteria: z.array(criterionSchema).min(1).max(20),
+  })
+  .superRefine((input, context) => {
+    const validation = validateStockScreenCriteria(input.criteria as StockScreenCriterion[]);
+    for (const error of validation.errors) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['criteria', input.criteria.findIndex((item) => item.id === error.criterionId)],
+        message: error.message,
+      });
+    }
+  });
 
 export type RunStockScreeningInput = z.infer<typeof runStockScreeningInputSchema>;
 

@@ -38,10 +38,7 @@ export function browserNavFailureMessage(
   return '浏览器操作失败，请稍后重试';
 }
 
-export function browserNavExceptionMessage(
-  error: unknown,
-  direction: BrowserNavDirection,
-): string {
+export function browserNavExceptionMessage(error: unknown, direction: BrowserNavDirection): string {
   const raw = error instanceof Error ? error.message : String(error ?? '');
   const text = raw.toLowerCase();
   switch (classifyBrowserErrorKind(text)) {

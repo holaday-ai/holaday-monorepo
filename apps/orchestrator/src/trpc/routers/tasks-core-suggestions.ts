@@ -1,7 +1,7 @@
 import type { CoreAcceptedRequirements } from '../../agent/core-task-admission.js';
 import type { CoreTaskRepository } from '../../agent/core-task-repository.js';
 import type { CoreSettlement } from '../../agent/core-task-settlement.js';
-import { publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
+import { nextStepsFrame, publishCoreTaskSuggestions } from '../../agent/core-task-suggestions.js';
 import { runAuxiliaryDatabase } from '../../execution/auxiliary-database.js';
 import type { ProductionModelRuntimeWiring } from '../../llm/model-runtime-wiring.js';
 import { broadcastToUser } from '../../ws/server.js';
@@ -39,7 +39,7 @@ export async function publishCoreSettledSuggestions(args: {
         taskId: op.scope.taskId,
         executionId: op.executionId,
         executionRevision: op.executionRevision,
-        suggestions,
+        ...nextStepsFrame(suggestions),
       });
     },
   });

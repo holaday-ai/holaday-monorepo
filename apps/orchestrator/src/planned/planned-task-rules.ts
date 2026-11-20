@@ -1,11 +1,4 @@
-import rruleModule from 'rrule';
-
-const { rrulestr } = rruleModule as {
-  rrulestr: (value: string) => {
-    after(date: Date, inclusive?: boolean): Date | null;
-    between(after: Date, before: Date, inclusive?: boolean): Date[];
-  };
-};
+import { zonedRruleOccurrencesBetween } from '../schedule/rrule-zoned.js';
 
 export type PlannedRepeatType = 'once' | 'daily' | 'weekly' | 'monthly' | 'custom';
 export type PlannedTaskStatus = 'active' | 'paused' | 'failed' | 'completed' | 'archived';
@@ -92,6 +85,8 @@ export function expandPlannedOccurrences(input: {
   rangeStart: Date;
   rangeEnd: Date;
   exceptions: readonly PlannedOccurrenceException[];
+  /** Batch 10.3 — plan timezone; rrules are evaluated on its wall clock. */
+  timezone?: string | null;
 }): PlannedOccurrence[] {
   const exceptionByOriginal = new Map(
     input.exceptions.map((item) => [item.originalScheduledFor.getTime(), item]),
@@ -194,9 +189,18 @@ function expandBaseDates(input: {
   rrule: string | null;
   rangeStart: Date;
   rangeEnd: Date;
+  timezone?: string | null;
 }): Date[] {
   if (input.rrule?.trim()) {
-    return rrulestr(input.rrule.trim()).between(input.rangeStart, input.rangeEnd, true);
+    // Anchored at firstRunAt (not parse time) so occurrence ids are stable
+    // across calls and overrides keyed by originalScheduledFor keep matching.
+    return zonedRruleOccurrencesBetween({
+      rrule: input.rrule,
+      anchor: input.firstRunAt,
+      start: input.rangeStart,
+      end: input.rangeEnd,
+      timezone: input.timezone || 'UTC',
+    }).filter((date) => date.getTime() < input.rangeEnd.getTime());
   }
   if (input.repeatType === 'once') {
     return isInsideRange(input.firstRunAt, input.rangeStart, input.rangeEnd)

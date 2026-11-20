@@ -114,7 +114,9 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       const confirm = await confirmPromise;
       expect(confirm.taskId).toBe(s0.taskId);
@@ -203,7 +205,9 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       const awaiting = await awaitingPromise;
       expect(awaiting).toEqual({
@@ -294,7 +298,9 @@ describe('restart recovery: awaiting_user re-emits server.user.confirm', () => {
         client.once('open', () => resolve());
         client.once('error', reject);
       });
-      client.send(JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }));
+      client.send(
+        JSON.stringify({ type: 'client.hello', token, extensionVersion: 'web-workbench' }),
+      );
 
       const pause = await pausePromise;
       expect(pause).toMatchObject({

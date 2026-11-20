@@ -9,8 +9,8 @@ import {
   executeFirstCutoverRecoveryTargetTool,
   inspectFirstCutoverRecoveryTarget,
 } from '../browser-first-cutover-backup.mjs';
-import { verifyFirstCutoverQaRuntimeMaterials } from './browser-first-cutover-runtime-materials.qa.mjs';
 import { readFirstCutoverRecoveryRuntime } from '../browser-first-cutover-recovery-runtime.mjs';
+import { verifyFirstCutoverQaRuntimeMaterials } from './browser-first-cutover-runtime-materials.qa.mjs';
 const [containerId, imageId, attempt, root, kind] = process.argv.slice(2);
 assert.equal(process.argv.length, 7);
 assert.ok(['minimal', 'current-61', 'empty-target'].includes(kind));
@@ -131,7 +131,7 @@ console.log(
     migrations: kind === 'current-61' ? 61 : 0,
     objects: after.objects.length,
     snapshotFrameBytes: Buffer.byteLength(
-      JSON.stringify({ protocol: 1, type: 'result', seq: 99, value: after }) + '\n',
+      `${JSON.stringify({ protocol: 1, type: 'result', seq: 99, value: after })}\n`,
     ),
     verifyToolRequestBytes: Buffer.byteLength(
       JSON.stringify({

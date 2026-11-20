@@ -10,18 +10,12 @@ import {
 
 describe('batch dialog state helpers', () => {
   it('keeps submit disabled while invalid, over limit, or busy', () => {
-    expect(
-      batchCreateDisabled({ submitting: false, promptCount: 0, overLimit: false }),
-    ).toBe(true);
-    expect(
-      batchCreateDisabled({ submitting: false, promptCount: 3, overLimit: true }),
-    ).toBe(true);
-    expect(
-      batchCreateDisabled({ submitting: true, promptCount: 3, overLimit: false }),
-    ).toBe(true);
-    expect(
-      batchCreateDisabled({ submitting: false, promptCount: 3, overLimit: false }),
-    ).toBe(false);
+    expect(batchCreateDisabled({ submitting: false, promptCount: 0, overLimit: false })).toBe(true);
+    expect(batchCreateDisabled({ submitting: false, promptCount: 3, overLimit: true })).toBe(true);
+    expect(batchCreateDisabled({ submitting: true, promptCount: 3, overLimit: false })).toBe(true);
+    expect(batchCreateDisabled({ submitting: false, promptCount: 3, overLimit: false })).toBe(
+      false,
+    );
   });
 
   it('builds count copy with dedupe and limit warnings', () => {
@@ -41,24 +35,14 @@ describe('batch dialog state helpers', () => {
   });
 
   it('describes independent items with unsuccessful wording, not pure failure wording', () => {
-    expect(batchIndependenceCopy()).toBe(
-      '每一项都是一个独立的任务，部分未成功不会影响其他任务。',
-    );
+    expect(batchIndependenceCopy()).toBe('每一项都是一个独立的任务，部分未成功不会影响其他任务。');
   });
 
   it('keeps the guided task card focused after removing cards', () => {
-    expect(
-      batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 0, itemCount: 1 }),
-    ).toBe(0);
-    expect(
-      batchActiveIndexAfterRemove({ activeIndex: 2, removedIndex: 2, itemCount: 4 }),
-    ).toBe(1);
-    expect(
-      batchActiveIndexAfterRemove({ activeIndex: 3, removedIndex: 1, itemCount: 4 }),
-    ).toBe(2);
-    expect(
-      batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 3, itemCount: 4 }),
-    ).toBe(0);
+    expect(batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 0, itemCount: 1 })).toBe(0);
+    expect(batchActiveIndexAfterRemove({ activeIndex: 2, removedIndex: 2, itemCount: 4 })).toBe(1);
+    expect(batchActiveIndexAfterRemove({ activeIndex: 3, removedIndex: 1, itemCount: 4 })).toBe(2);
+    expect(batchActiveIndexAfterRemove({ activeIndex: 0, removedIndex: 3, itemCount: 4 })).toBe(0);
   });
 
   it('normalizes successful batch creation results', () => {

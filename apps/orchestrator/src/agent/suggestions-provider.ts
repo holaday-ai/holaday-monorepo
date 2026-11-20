@@ -1,16 +1,18 @@
-import {
-  type CoreModelRuntimeEnvironment,
-  type CoreModelRuntimeInput,
-  type CoreModelRuntimeUnavailableReason,
-  resolveCoreModelRuntime,
+import type {
+  CoreModelRuntimeEnvironment,
+  CoreModelRuntimeInput,
+  CoreModelRuntimeUnavailableReason,
+  QwenEndpointOverride,
 } from '../llm/core-model-runtime.js';
+import { modelGateway } from '../llm/gateway/model-gateway.js';
+import type { ModelGatewayEnvironment } from '../llm/gateway/settings.js';
 import type { MessagesAdapter } from '../llm/messages-adapter.js';
 
 type QwenMessagesAdapter = Omit<MessagesAdapter, 'metadata'> & {
   readonly metadata: Extract<MessagesAdapter['metadata'], { provider: 'alibaba-model-studio' }>;
 };
 
-export type SuggestionsProviderEnvironment = CoreModelRuntimeEnvironment;
+export type SuggestionsProviderEnvironment = CoreModelRuntimeEnvironment & ModelGatewayEnvironment;
 
 export type SuggestionsProviderRoute =
   | {
@@ -27,24 +29,26 @@ export function resolveSuggestionsProviderRoute(input: {
   environment: SuggestionsProviderEnvironment;
   userExternalId: string;
   userModelDataRegion: unknown;
+  /** BROWSER-HOME-1: set by tasks.create for an admitted cloud-browser task only. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: CoreModelRuntimeInput['createMessages'];
 }): SuggestionsProviderRoute {
-  const runtime = resolveCoreModelRuntime({
-    environment: input.environment,
+  const runtime = modelGateway({
+    core: { environment: input.environment, createMessages: input.createMessages },
+  }).resolve('suggestions', {
     actorExternalId: input.userExternalId,
-    lane: 'suggestions',
     ownership: {
       scope: 'personal',
       userRegion: input.userModelDataRegion,
     },
-    createMessages: input.createMessages,
+    ...(input.qwenEndpoint ? { qwenEndpoint: input.qwenEndpoint } : {}),
   });
 
   if (runtime.kind === 'unavailable') {
     return { provider: 'unavailable', reason: runtime.reason };
   }
 
-  const messagesAdapter = runtime.messages('fast');
+  const messagesAdapter = runtime.messages();
   if (messagesAdapter.metadata.provider !== 'alibaba-model-studio') {
     throw new Error('Qwen suggestions runtime returned a non-Qwen adapter');
   }

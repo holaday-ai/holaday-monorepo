@@ -4,11 +4,7 @@ import { planProgressSummary } from './plan-card-state';
 describe('planProgressSummary', () => {
   it('summarizes active plans', () => {
     expect(
-      planProgressSummary([
-        { status: 'done' },
-        { status: 'running' },
-        { status: 'pending' },
-      ]),
+      planProgressSummary([{ status: 'done' }, { status: 'running' }, { status: 'pending' }]),
     ).toEqual({
       total: 3,
       done: 1,
@@ -22,11 +18,7 @@ describe('planProgressSummary', () => {
 
   it('prioritizes failed plan state', () => {
     expect(
-      planProgressSummary([
-        { status: 'done' },
-        { status: 'failed' },
-        { status: 'running' },
-      ]),
+      planProgressSummary([{ status: 'done' }, { status: 'failed' }, { status: 'running' }]),
     ).toMatchObject({
       failed: 1,
       running: 1,

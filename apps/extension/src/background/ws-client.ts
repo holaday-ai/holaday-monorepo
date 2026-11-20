@@ -1,4 +1,11 @@
 import {
+  USER_BROWSER_ACTIVITY_CAPABILITY,
+  USER_BROWSER_CHOOSER_CAPABILITY,
+  USER_BROWSER_DOWNLOAD_CAPABILITY,
+  USER_BROWSER_PROTOCOL,
+  USER_BROWSER_UPLOAD_CAPABILITY,
+} from '@holaday/shared-types';
+import {
   type ClientMessage,
   HEARTBEAT_INTERVAL_MS,
   type ServerMessage,
@@ -25,6 +32,8 @@ const WS_ENDPOINT_FAILURE_COOLDOWN_MS = 15_000;
 interface State {
   socket: WebSocket | null;
   token: string | null;
+  authenticatedClientId: string | null;
+  authenticatedUserId: string | null;
   openingToken: string | null;
   socketGeneration: number;
   reconnectAttempt: number;
@@ -53,6 +62,8 @@ interface State {
 const state: State = {
   socket: null,
   token: null,
+  authenticatedClientId: null,
+  authenticatedUserId: null,
   openingToken: null,
   socketGeneration: 0,
   reconnectAttempt: 0,
@@ -132,6 +143,8 @@ function recoverFromCurrentSocketSendFailure(socket: WebSocket): void {
 }
 
 export function disconnect(): void {
+  state.authenticatedClientId = null;
+  state.authenticatedUserId = null;
   state.closedByUser = true;
   state.socketGeneration += 1;
   state.openingToken = null;
@@ -256,6 +269,20 @@ export function getCurrentWsToken(): string | null {
   return state.token;
 }
 
+export function getAuthenticatedExtensionClientId(): string | null {
+  return isConnected() ? state.authenticatedClientId : null;
+}
+export function getAuthenticatedExtensionUserId(): string | null {
+  return isConnected() ? state.authenticatedUserId : null;
+}
+
+/** A bearer can reconnect; an admitted browser action belongs to one authenticated socket. */
+export function getAuthenticatedExtensionConnectionOwner(): string | null {
+  const clientId = getAuthenticatedExtensionClientId();
+  const userId = getAuthenticatedExtensionUserId();
+  return clientId && userId ? JSON.stringify([userId, clientId, state.socketGeneration]) : null;
+}
+
 export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
   return {
     connected: isConnected(),
@@ -274,6 +301,8 @@ export async function getWsConnectionStatus(): Promise<WsConnectionStatus> {
 }
 
 function openSocket(token: string): void {
+  state.authenticatedClientId = null;
+  state.authenticatedUserId = null;
   clearReconnectTimer();
   state.socketGeneration += 1;
   const protocols = [WS_SUBPROTOCOL, `jwt.${token}`];
@@ -367,12 +396,11 @@ async function fetchPreconnectProbe(
 ): Promise<Response | null> {
   for (let attempt = 1; attempt <= WS_PRECONNECT_PROBE_ATTEMPTS; attempt += 1) {
     try {
-      const response = await withDeadline(
-        fetch(url, init),
-        timeoutMs,
-        timeoutMessage,
-      );
-      if (!isRetryablePreconnectProbeStatus(response.status) || attempt === WS_PRECONNECT_PROBE_ATTEMPTS) {
+      const response = await withDeadline(fetch(url, init), timeoutMs, timeoutMessage);
+      if (
+        !isRetryablePreconnectProbeStatus(response.status) ||
+        attempt === WS_PRECONNECT_PROBE_ATTEMPTS
+      ) {
         return response;
       }
     } catch {
@@ -458,6 +486,8 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // reconnect/token-swap) would otherwise clobber state.socket
     // (which now points at the NEW socket) and stop heartbeats.
     if (state.socket !== ws) return;
+    state.authenticatedClientId = null;
+    state.authenticatedUserId = null;
     if (state.pingTimer) clearInterval(state.pingTimer);
     state.pingTimer = null;
     state.socket = null;
@@ -512,8 +542,23 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // Fire-and-forget: best-effort, and we don't want to delay 'hello'
     // on a chrome.storage write.
     void persistReconnectAttempts(0);
+    void persistCappedAt(null);
     // Header path may have been stripped by some proxies; fallback hello.
-    send({ type: 'client.hello', token, extensionVersion: chrome.runtime.getManifest().version });
+    send({
+      type: 'client.hello',
+      token,
+      extensionVersion: chrome.runtime.getManifest().version,
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [
+          ...USER_BROWSER_PROTOCOL.capabilities,
+          USER_BROWSER_ACTIVITY_CAPABILITY,
+          USER_BROWSER_UPLOAD_CAPABILITY,
+          USER_BROWSER_CHOOSER_CAPABILITY,
+          USER_BROWSER_DOWNLOAD_CAPABILITY,
+        ],
+      },
+    });
 
     state.pingTimer = setInterval(() => {
       send({ type: 'client.pong', at: Date.now() });
@@ -530,11 +575,14 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
     // 4401-equivalent: orchestrator may emit server.error code=UNAUTHORIZED
     // before closing the socket. Surface it as an "unauthorized" event so
     // the SW clears the stale token instead of looping with bad creds.
-    if (
-      result.data.type === 'server.error' &&
-      result.data.code === 'UNAUTHORIZED'
-    ) {
+    if (result.data.type === 'server.error' && result.data.code === 'UNAUTHORIZED') {
+      state.authenticatedClientId = null;
+      state.authenticatedUserId = null;
       fireUnauthorized();
+    }
+    if (result.data.type === 'server.welcome') {
+      state.authenticatedClientId = result.data.clientId;
+      state.authenticatedUserId = result.data.userId ?? null;
     }
     for (const fn of state.listeners) {
       try {
@@ -551,6 +599,8 @@ function openWebSocket(token: string, protocols: string[], endpoint: string): vo
 
   ws.addEventListener('error', () => {
     if (state.socket !== ws) return;
+    state.authenticatedClientId = null;
+    state.authenticatedUserId = null;
     state.lastErrorAt = Date.now();
     state.lastCloseReason = 'network error';
     // 'close' will fire right after; reconnect handled there.
@@ -593,7 +643,16 @@ const MAX_NETWORK_RECONNECTS = 3;
 const BACKOFF_SCHEDULE_MS = [1_000, 2_000, 4_000] as const;
 const WS_RECONNECT_KEY = 'holaday.ws.reconnectAttempts';
 const WS_PREFERRED_ENDPOINT_KEY = 'holaday.ws.preferredEndpoint';
+const WS_CAPPED_AT_KEY = 'holaday.ws.cappedAt';
 const WS_STORAGE_TIMEOUT_MS = 1_500;
+/**
+ * Once capped, the keepalive alarm still allows ONE probe attempt per this
+ * interval. Without it an orchestrator restart longer than the 1/2/4 s
+ * (+15 s single-endpoint cooldown) window left every extension offline until
+ * the user opened the popup — mid-task tool calls then had no client. One
+ * attempt per 5 min keeps the "no reconnect storm" intent of the cap.
+ */
+export const WS_CAPPED_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * Hydrate `state.reconnectAttempt` from chrome.storage on module load
@@ -732,7 +791,54 @@ export async function resetWsReconnectAttempts(): Promise<void> {
   clearReconnectTimer();
   state.reconnectAttempt = 0;
   endpointCooldownUntil.clear();
-  await persistReconnectAttempts(0);
+  await Promise.all([persistReconnectAttempts(0), persistCappedAt(null)]);
+}
+
+/**
+ * Slow self-heal for the capped state, called by the keepalive alarm only
+ * when `isReconnectCapped()` is true. Returns true when this tick may make
+ * exactly one connection attempt: the counter is set to the cap so a single
+ * failure re-caps (and restarts the interval), while success resets it.
+ */
+export async function armCappedSlowRetry(now: number = Date.now()): Promise<boolean> {
+  try {
+    const out = await withDeadline(
+      chrome.storage.local.get([WS_RECONNECT_KEY, WS_CAPPED_AT_KEY]),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_capped_retry_read_timeout',
+    );
+    const attempts = out[WS_RECONNECT_KEY];
+    if (typeof attempts !== 'number' || attempts <= MAX_NETWORK_RECONNECTS) return false;
+    const cappedAt = out[WS_CAPPED_AT_KEY];
+    if (
+      typeof cappedAt === 'number' &&
+      Number.isFinite(cappedAt) &&
+      cappedAt <= now &&
+      now - cappedAt < WS_CAPPED_RETRY_INTERVAL_MS
+    ) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  clearReconnectTimer();
+  state.reconnectAttempt = MAX_NETWORK_RECONNECTS;
+  await persistReconnectAttempts(MAX_NETWORK_RECONNECTS);
+  return true;
+}
+
+async function persistCappedAt(at: number | null): Promise<void> {
+  try {
+    await withDeadline(
+      at === null
+        ? chrome.storage.local.remove(WS_CAPPED_AT_KEY)
+        : chrome.storage.local.set({ [WS_CAPPED_AT_KEY]: at }),
+      WS_STORAGE_TIMEOUT_MS,
+      'ws_capped_at_write_timeout',
+    );
+  } catch {
+    /* non-fatal: a missing timestamp only makes the next slow retry earlier */
+  }
 }
 
 function clearReconnectTimer(): void {
@@ -748,8 +854,9 @@ function scheduleReconnect(token: string): void {
   void persistReconnectAttempts(state.reconnectAttempt);
   if (state.reconnectAttempt > MAX_NETWORK_RECONNECTS) {
     state.nextRetryAt = null;
+    void persistCappedAt(Date.now());
     console.warn(
-      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重试连接)`,
+      `[holaday] ws: ${MAX_NETWORK_RECONNECTS} reconnects failed, pausing until user action (popup open or 重试连接) or the 5-min slow retry`,
     );
     return;
   }

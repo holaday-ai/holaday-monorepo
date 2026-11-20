@@ -1,0 +1,24 @@
+diff --git a/lib/index-DedCW3aV.mjs b/lib/index-DedCW3aV.mjs
+--- a/lib/index-DedCW3aV.mjs
++++ b/lib/index-DedCW3aV.mjs
+@@ -132818,7 +132818,7 @@
+   return { options: values };
+ }
+ function filePayloadExceedsSizeLimit(payloads) {
+-  return payloads.reduce((size, item) => size + (item.buffer ? item.buffer.byteLength : 0), 0) >= fileUploadSizeLimit;
++  return payloads.reduce((size, item) => size + (item.buffer ? item.buffer.byteLength : 0), 0) > fileUploadSizeLimit;
+ }
+ async function resolvePathsAndDirectoryForInputFiles(platform, items) {
+   let localPaths;
+diff --git a/lib/index-CiHmCFNI.js b/lib/index-CiHmCFNI.js
+--- a/lib/index-CiHmCFNI.js
++++ b/lib/index-CiHmCFNI.js
+@@ -132819,7 +132819,7 @@
+   return { options: values };
+ }
+ function filePayloadExceedsSizeLimit(payloads) {
+-  return payloads.reduce((size, item) => size + (item.buffer ? item.buffer.byteLength : 0), 0) >= fileUploadSizeLimit;
++  return payloads.reduce((size, item) => size + (item.buffer ? item.buffer.byteLength : 0), 0) > fileUploadSizeLimit;
+ }
+ async function resolvePathsAndDirectoryForInputFiles(platform, items) {
+   let localPaths;

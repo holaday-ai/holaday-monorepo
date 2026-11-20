@@ -1,6 +1,7 @@
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { type UserConfig, defineConfig } from 'vite';
+import { type UserConfig as VitestUserConfig, configDefaults } from 'vitest/config';
 import { resolveBrowserStreamProxyTarget } from './vite-browser-proxy';
 
 const devServerPort = Number(process.env.HOLADAY_WEB_PORT ?? 5173);
@@ -16,8 +17,10 @@ const browserStreamProxyTarget = resolveBrowserStreamProxyTarget(
 // consistent. /api and /ws are proxied to the orchestrator so the frontend
 // can talk to it with same-origin URLs — no CORS wrangling, no env var
 // plumbing for localhost.
-export default defineConfig({
+// Vite 6 owns plugin types; Vitest 2 supplies only its test options.
+const config: UserConfig & Pick<VitestUserConfig, 'test'> = {
   plugins: [react()],
+  test: { exclude: [...configDefaults.exclude, 'e2e/**'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -58,7 +61,14 @@ export default defineConfig({
       output: {
         manualChunks(id: string): string | undefined {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('react-markdown') || id.includes('remark-') || id.includes('rehype-') || id.includes('mdast-') || id.includes('hast-') || id.includes('unist-')) {
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-') ||
+            id.includes('rehype-') ||
+            id.includes('mdast-') ||
+            id.includes('hast-') ||
+            id.includes('unist-')
+          ) {
             return 'markdown';
           }
           if (id.includes('@fullcalendar')) return 'calendar';
@@ -120,4 +130,6 @@ export default defineConfig({
       },
     },
   },
-});
+};
+
+export default defineConfig(config);

@@ -49,10 +49,9 @@ export const pendingCookies = mysqlTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     /**
-     * Legacy plaintext storage. Kept as nullable during the Spec B
-     * envelope-encryption rollout so a rollback of the new code can
-     * still read existing rows from this column. Will be dropped in
-     * a follow-up migration after the soak window closes.
+     * Retired plaintext column retained only for explicit legacy cleanup.
+     * New writes set null; runtime never falls back to this column.
+     * Physical removal requires the reviewed migration/backup retention gate.
      */
     cookiesJson: text('cookies_json'),
     /**

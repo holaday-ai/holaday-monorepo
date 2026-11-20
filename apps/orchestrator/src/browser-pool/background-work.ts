@@ -53,7 +53,10 @@ export function startPoolBackgroundWork(
           if (!canDispatch()) return;
           if (kind === 'hook') {
             const hook = config.onInstanceReady;
-            if (canDispatch() && hook) await hook.call(config, instance.userId, instance.executor);
+            // Owner-scoped initialisation (e.g. legacy cookie injection) never
+            // runs for an anonymous ("公开云端") browser.
+            if (canDispatch() && hook && instance.sessionPolicy === 'vault_allowed')
+              await hook.call(config, instance.userId, instance.executor);
           } else {
             const dismiss = instance.executor.dismissChromeBanners;
             if (canDispatch()) await dismiss.call(instance.executor);

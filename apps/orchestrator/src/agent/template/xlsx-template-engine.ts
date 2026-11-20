@@ -18,10 +18,10 @@
 
 import ExcelJS from 'exceljs';
 import type {
-  PlaceholderField,
-  PlaceholderSchema,
   FillData,
   FillRow,
+  PlaceholderField,
+  PlaceholderSchema,
 } from './placeholder-schema.js';
 
 export class XlsxTemplateError extends Error {
@@ -414,10 +414,7 @@ function setCellText(cell: ExcelJS.Cell, text: string): void {
   cell.value = text.length > 0 ? text : null;
 }
 
-function substitute(
-  text: string,
-  lookup: (name: string, kind: TagKind) => string,
-): string {
+function substitute(text: string, lookup: (name: string, kind: TagKind) => string): string {
   return text.replace(TAG_RE, (_m, prefix: string, raw: string) => {
     const name = raw.trim();
     const kind: TagKind = prefix === '#' ? 'open' : prefix === '/' ? 'close' : 'field';

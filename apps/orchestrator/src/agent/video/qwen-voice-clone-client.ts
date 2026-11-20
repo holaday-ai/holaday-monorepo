@@ -1,3 +1,4 @@
+import { dashscopeCostRegion, observeMediaCall } from '../media-call-recorder.js';
 /**
  * Qwen3-TTS-VC voice-clone client — DashScope International (Singapore).
  *
@@ -30,7 +31,7 @@
  * The enrollment `target_model` MUST match the synthesis `model`.
  */
 
-import { fetchWithTimeout, safeText, sleep, VideoHttpError } from './video-http.js';
+import { VideoHttpError, fetchWithTimeout, safeText, sleep } from './video-http.js';
 
 const DEFAULT_BASE_URL = 'https://dashscope-intl.aliyuncs.com';
 const ENROLL_MODEL = 'qwen-voice-enrollment';
@@ -107,7 +108,11 @@ async function postJson(
           },
           body: JSON.stringify(body),
         },
-        { timeoutMs: p.timeoutMs ?? defaultTimeoutMs, ...(p.signal ? { signal: p.signal } : {}), fetchImpl },
+        {
+          timeoutMs: p.timeoutMs ?? defaultTimeoutMs,
+          ...(p.signal ? { signal: p.signal } : {}),
+          fetchImpl,
+        },
       );
     } catch (err) {
       if (err instanceof VideoHttpError) throw new QwenVoiceCloneError(err.message, err.kind);
@@ -120,12 +125,20 @@ async function postJson(
       continue;
     }
     const errBody = await safeText(res);
-    throw new QwenVoiceCloneError(`DashScope returned ${res.status}`, 'http', res.status, errBody.slice(0, 800));
+    throw new QwenVoiceCloneError(
+      `DashScope returned ${res.status}`,
+      'http',
+      res.status,
+      errBody.slice(0, 800),
+    );
   }
   try {
     return (await res.json()) as Record<string, unknown>;
   } catch (err) {
-    throw new QwenVoiceCloneError(`DashScope response not JSON: ${(err as Error).message}`, 'bad_response');
+    throw new QwenVoiceCloneError(
+      `DashScope response not JSON: ${(err as Error).message}`,
+      'bad_response',
+    );
   }
 }
 
@@ -222,7 +235,7 @@ export interface SynthesizeResult {
 }
 
 /** Synthesize speech in the cloned voice. Result audio is a temporary URL. */
-export async function synthesizeSpeech(p: SynthesizeParams): Promise<SynthesizeResult> {
+async function synthesizeSpeechImpl(p: SynthesizeParams): Promise<SynthesizeResult> {
   assertKey(p.apiKey);
   const json = await postJson(
     `${base(p)}/api/v1/services/aigc/multimodal-generation/generation`,
@@ -251,4 +264,21 @@ export async function synthesizeSpeech(p: SynthesizeParams): Promise<SynthesizeR
     ...(usage.characters !== undefined ? { characters: usage.characters } : {}),
     ...(output.finish_reason ? { finishReason: output.finish_reason } : {}),
   };
+}
+
+export async function synthesizeSpeech(p: SynthesizeParams): Promise<SynthesizeResult> {
+  return observeMediaCall(
+    {
+      provider: 'alibaba-model-studio',
+      model: p.model ?? DEFAULT_TARGET_MODEL,
+      region: dashscopeCostRegion(p.baseUrl),
+      purpose: 'media.tts',
+    },
+    () => synthesizeSpeechImpl(p),
+    (result) => ({
+      ...(result.characters !== undefined
+        ? { mediaUsage: { unit: 'character', quantity: result.characters, basis: 'provider' } }
+        : {}),
+    }),
+  );
 }

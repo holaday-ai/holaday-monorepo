@@ -3,6 +3,7 @@ export interface NormalizedAuthMeProfile {
   readonly email: string | null;
   readonly phone: string | null;
   readonly displayName: string | null;
+  readonly avatarUrl?: string;
   readonly plan: string;
   readonly multiUser: boolean;
   readonly selectedRoles: string[];
@@ -10,9 +11,18 @@ export interface NormalizedAuthMeProfile {
   /** Phase 1 #4 — video-creation reachable for this user (flag on + in
    *  allowlist). Gates the「视频任务」sidebar entry + /video route. */
   readonly videoEnabled: boolean;
+  /** BROWSER-HOME-1 — BROWSER_HOME_ENABLED + allowlist; gates the「云浏览器」entry + /browser. */
+  readonly browserHomeEnabled: boolean;
+  readonly browserHomeProfilesEnabled?: boolean;
   readonly teamProjectsEnabled: boolean;
   readonly teamTaskLifecycleEnabled: boolean;
   readonly modelDataRegion: 'cn' | 'intl' | null;
+  /**
+   * FIX-60 BOSS 决定: whether a region must be chosen before the first task. Off (the default,
+   * also when the server does not say) the dialog never opens and the server uses its default
+   * region for an account that never chose.
+   */
+  readonly modelDataRegionSelection: boolean;
 }
 
 export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile {
@@ -22,17 +32,20 @@ export function normalizeAuthMeProfile(value: unknown): NormalizedAuthMeProfile 
     email: authNullableText(raw.email),
     phone: authNullableText(raw.phone),
     displayName: authNullableText(raw.displayName),
+    ...(authNullableText(raw.avatarUrl) ? { avatarUrl: authSafeText(raw.avatarUrl) } : {}),
     plan: authSafeText(raw.plan) || 'free',
     multiUser: Boolean(raw.multiUser),
     selectedRoles: normalizeSelectedRoles(raw.selectedRoles),
     role: raw.role === 'admin' ? 'admin' : 'user',
     videoEnabled: Boolean(raw.videoEnabled),
+    browserHomeEnabled: raw.browserHomeEnabled === true,
+    browserHomeProfilesEnabled:
+      raw.browserHomeEnabled === true && raw.browserHomeProfilesEnabled === true,
     teamProjectsEnabled: raw.teamProjectsEnabled === true,
     teamTaskLifecycleEnabled: raw.teamTaskLifecycleEnabled === true,
     modelDataRegion:
-      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl'
-        ? raw.modelDataRegion
-        : null,
+      raw.modelDataRegion === 'cn' || raw.modelDataRegion === 'intl' ? raw.modelDataRegion : null,
+    modelDataRegionSelection: raw.modelDataRegionSelection === true,
   };
 }
 

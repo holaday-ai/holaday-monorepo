@@ -1,14 +1,8 @@
-import { AlertCircle, Check, Crown, Lock, Sparkles } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  BASIC_ROLE_PICK_LIMIT,
-  ROLE_CHANGES_PER_MONTH,
-  type RoleDefinition,
-} from '@holaday/shared-types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
+import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import {
+  type RoleListSnapshot,
   groupRoleCatalogue,
   normalizeRoleListResponse,
   normalizeRoleSelectResponse,
@@ -17,13 +11,19 @@ import {
   rolePageSummary,
   rolePlanLabel,
   roleRemainingChanges,
-  type RoleListSnapshot,
 } from '@/lib/roles-page-state';
-import { pageActionError, pageErrorMessage } from '@/lib/page-error-copy';
 import { supportMailtoHref } from '@/lib/support-links';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader } from '@/pages/PageShell';
+import {
+  BASIC_ROLE_PICK_LIMIT,
+  ROLE_CHANGES_PER_MONTH,
+  type RoleDefinition,
+} from '@holaday/shared-types';
+import { AlertCircle, Check, Crown, Lock, Sparkles } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * Role selection page. Three states based on plan:
@@ -121,14 +121,11 @@ export function RolesPage(): JSX.Element {
     if (!data || saving || !dirty || draft.length > currentPickLimit) return;
     setSaving(true);
     try {
-      const res = normalizeRoleSelectResponse(
-        await trpc.roles.select.mutate({ roleIds: draft }),
-        {
-          selected: draft,
-          changesThisMonth: data.changesThisMonth,
-          changesLimit: data.changesLimit,
-        },
-      );
+      const res = normalizeRoleSelectResponse(await trpc.roles.select.mutate({ roleIds: draft }), {
+        selected: draft,
+        changesThisMonth: data.changesThisMonth,
+        changesLimit: data.changesLimit,
+      });
       setData((prev) =>
         prev
           ? {
@@ -150,10 +147,7 @@ export function RolesPage(): JSX.Element {
     }
   }, [currentPickLimit, data, dirty, draft, saving, toast]);
 
-  const grouped = React.useMemo(
-    () => (data ? groupRoleCatalogue(data.catalogue) : []),
-    [data],
-  );
+  const grouped = React.useMemo(() => (data ? groupRoleCatalogue(data.catalogue) : []), [data]);
   const summary = rolePageSummary({
     loading,
     error: loadError,
@@ -238,7 +232,7 @@ export function RolesPage(): JSX.Element {
             <button
               type="button"
               onClick={() => navigate('/plan')}
-              className="ml-1 inline-flex font-medium underline underline-offset-2 hover:text-[#EA1F59]"
+              className="ml-1 inline-flex font-medium underline underline-offset-2 hover:text-[#FF0061]"
             >
               升级到基础版
             </button>
@@ -258,7 +252,7 @@ export function RolesPage(): JSX.Element {
             many draft picks)
       */}
       {isBasic && data.needsRoleRepair && (
-        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
+        <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
           {draft.length > BASIC_ROLE_PICK_LIMIT ? (
             <>
               检测到不适用于当前套餐的角色已被自动移除。请先取消勾选至
@@ -277,8 +271,8 @@ export function RolesPage(): JSX.Element {
 
       {isBasic && !data.needsRoleRepair && draft.length > currentPickLimit && (
         <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FFC910] bg-white px-4 py-3 text-sm text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.03)] animate-fade-in motion-reduce:animate-none [border-left-width:3px]">
-          你当前选择 <span className="font-semibold">{draft.length}</span> 个角色，
-          超出基础版 {currentPickLimit} 个上限。请取消勾选至 {currentPickLimit} 个以内
+          你当前选择 <span className="font-semibold">{draft.length}</span> 个角色， 超出基础版{' '}
+          {currentPickLimit} 个上限。请取消勾选至 {currentPickLimit} 个以内
           再保存，否则新任务将无法创建。
         </div>
       )}
@@ -289,9 +283,7 @@ export function RolesPage(): JSX.Element {
             <span
               className={cn(
                 'text-sm font-medium',
-                draft.length > currentPickLimit
-                  ? 'text-[#EA1F59]'
-                  : 'text-foreground',
+                draft.length > currentPickLimit ? 'text-[#FF0061]' : 'text-foreground',
               )}
             >
               已选 {draft.length} / {currentPickLimit}
@@ -304,7 +296,7 @@ export function RolesPage(): JSX.Element {
               <div
                 className={cn(
                   'h-full rounded-full transition-[width] duration-300',
-                  draft.length > currentPickLimit ? 'bg-[#FFC910]' : 'bg-[#EA1F59]',
+                  draft.length > currentPickLimit ? 'bg-[#FFC910]' : 'bg-[#FF0061]',
                 )}
                 style={{
                   width: `${Math.min(100, Math.round((draft.length / currentPickLimit) * 100))}%`,
@@ -313,12 +305,7 @@ export function RolesPage(): JSX.Element {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/plan')}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => navigate('/plan')}>
               升级解锁全部 33 个
             </Button>
             <Button
@@ -339,7 +326,8 @@ export function RolesPage(): JSX.Element {
             <Sparkles className="h-4 w-4" aria-hidden />
           </div>
           <div className="min-w-0 text-muted-foreground">
-            {rolePlanLabel(data.plan)}默认开启全部 {data.catalogue.length} 个角色，AI 会根据任务自动匹配最合适的视角。
+            {rolePlanLabel(data.plan)}默认开启全部 {data.catalogue.length} 个角色，AI
+            会根据任务自动匹配最合适的视角。
           </div>
         </div>
       )}
@@ -398,9 +386,7 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
         'group relative flex min-h-[128px] flex-col gap-2 rounded-[8px] border bg-white p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-[transform,border-color,box-shadow] duration-150 animate-fade-in motion-reduce:animate-none motion-reduce:transition-none motion-reduce:hover:translate-y-0',
         onClick &&
           'hover:-translate-y-px hover:border-[#ADADAD] hover:shadow-[0_5px_16px_rgba(15,23,42,0.055)]',
-        checked && !locked
-          ? 'border-[#DCDDDD]'
-          : 'border-[#DCDDDD]',
+        checked && !locked ? 'border-[#DCDDDD]' : 'border-[#DCDDDD]',
         locked && 'border-[#DCDDDD]',
         disabled && !onClick && 'cursor-default',
       )}
@@ -416,7 +402,7 @@ function RoleCard({ role, checked, locked, disabled, onClick }: CardProps): JSX.
             专业版
           </span>
         ) : checked ? (
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#EA1F59] bg-white text-[#EA1F59]">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#FF0061] bg-white text-[#FF0061]">
             <Check className="h-2.5 w-2.5" />
           </span>
         ) : (

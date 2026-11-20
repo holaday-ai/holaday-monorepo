@@ -8,9 +8,17 @@ describe('model data region state', () => {
     [null, 'choose_region'],
     [undefined, 'choose_region'],
     ['unknown', 'choose_region'],
-  ] as const)('maps %s to %s', (region, expected) => {
-    expect(modelTaskSubmitDecision(region)).toBe(expected);
+  ] as const)('with the selection on, maps %s to %s', (region, expected) => {
+    expect(modelTaskSubmitDecision(region, true)).toBe(expected);
   });
+
+  it.each([['cn'], ['intl'], [null], [undefined], ['unknown']] as const)(
+    'FIX-60 BOSS 决定: with the selection off (the default), %s submits',
+    (region) => {
+      expect(modelTaskSubmitDecision(region)).toBe('submit');
+      expect(modelTaskSubmitDecision(region, false)).toBe('submit');
+    },
+  );
 
   it('keeps the approved region labels and processing explanations exact', () => {
     expect(MODEL_DATA_REGION_COPY).toEqual({

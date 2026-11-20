@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Disposable private-PID/network QA only. Extracted from browser-site-fence-linux.
 // The caller owns the real application, journal, window and writer observations.
 import assert from 'node:assert/strict';
@@ -8,6 +7,7 @@ import * as fs from 'node:fs/promises';
 import https from 'node:https';
 import { promisify } from 'node:util';
 import { describeCutoverSite } from '/source/browser-first-cutover-fence.mjs';
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 import { createFirstCutoverIngressPair } from '/source/browser-first-cutover-ingress-session.mjs';
 
 export async function createQaNginxSites({ fencedCallbackPort } = {}) {

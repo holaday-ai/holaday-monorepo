@@ -1,0 +1,59 @@
+[
+  {
+    "repeat": 0,
+    "label": "自动执行",
+    "status": "failed",
+    "reason": "no observable effect",
+    "requestCount": 0
+  },
+  {
+    "repeat": 0,
+    "label": "技能 自动",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  },
+  {
+    "repeat": 0,
+    "label": "模型 千问",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  },
+  {
+    "repeat": 1,
+    "label": "自动执行",
+    "status": "failed",
+    "reason": "no observable effect",
+    "requestCount": 0
+  },
+  {
+    "repeat": 1,
+    "label": "技能 自动",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  },
+  {
+    "repeat": 1,
+    "label": "模型 千问",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  },
+  {
+    "repeat": 2,
+    "label": "自动执行",
+    "status": "failed",
+    "reason": "no observable effect",
+    "requestCount": 0
+  },
+  {
+    "repeat": 2,
+    "label": "技能 自动",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  },
+  {
+    "repeat": 2,
+    "label": "模型 千问",
+    "status": "failed",
+    "reason": "locator.click: Timeout 1800ms exceeded."
+  }
+]

@@ -269,3 +269,29 @@ describe('realtime token authentication', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('D10 session revocation', () => {
+  it('does not authenticate a token with an unregistered session id', async () => {
+    const { signAccessToken } = await import('./jwt.js');
+    const { authenticateAccessTokenSession } = await import('./middleware.js');
+    const db = {
+      select: (projection: object) => ({
+        from: () => ({
+          where: () => ({
+            limit: async () =>
+              'sid' in projection
+                ? []
+                : [{ externalId: 'usr_active', status: 'active', authVersion: 2 }],
+          }),
+        }),
+      }),
+    };
+    const token = await signAccessToken({
+      sub: 'usr_active',
+      plan: 'free',
+      authVersion: 2,
+      sid: 'synthetic-missing-session',
+    });
+    expect(await authenticateAccessTokenSession(db as never, token)).toBeNull();
+  });
+});

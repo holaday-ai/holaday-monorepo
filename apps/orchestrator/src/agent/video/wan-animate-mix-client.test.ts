@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateWanAnimateMix, WanAnimateMixError } from './wan-animate-mix-client.js';
+import { WanAnimateMixError, generateWanAnimateMix } from './wan-animate-mix-client.js';
 
 function jsonQueue(responses: Array<{ status?: number; body: unknown }>) {
   const calls: Array<{ url: string; init: RequestInit }> = [];

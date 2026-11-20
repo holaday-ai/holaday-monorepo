@@ -14,35 +14,78 @@ import {
 } from './tasks.js';
 
 describe('classifyReplyIntent', () => {
-  describe('manual_data', () => {
+  describe('materials stay in the browser task unless the user replaces it', () => {
     it('matches "数据如下" phrase', () => {
-      expect(classifyReplyIntent('数据如下: 一些数字')).toBe('manual_data');
+      expect(classifyReplyIntent('数据如下: 一些数字')).toBe('default');
     });
 
     it('matches "我直接给你数据"', () => {
-      expect(classifyReplyIntent('我直接给你数据')).toBe('manual_data');
+      expect(classifyReplyIntent('我直接给你数据')).toBe('default');
     });
 
     it('matches "用我上传的表格"', () => {
-      expect(classifyReplyIntent('用我上传的表格做复盘')).toBe('manual_data');
+      expect(classifyReplyIntent('用我上传的表格做复盘')).toBe('default');
     });
 
     it('matches "不用登录" — user opts out of browser', () => {
-      expect(classifyReplyIntent('不用登录，我自己给数据')).toBe('manual_data');
+      expect(classifyReplyIntent('不用登录，我自己给数据')).toBe('default');
     });
 
     it('matches English "here is the data"', () => {
-      expect(classifyReplyIntent("Here's the data: GMV 156k")).toBe('manual_data');
+      expect(classifyReplyIntent("Here's the data: GMV 156k")).toBe('default');
     });
 
     it('matches ≥3 numeric figures with unit hints', () => {
       const msg = 'GMV ¥156,832, UV 28,592, ROI 1:3.2, 转化率 2.8%';
-      expect(classifyReplyIntent(msg)).toBe('manual_data');
+      expect(classifyReplyIntent(msg)).toBe('default');
     });
 
     it('matches multiple key:value lines', () => {
       const msg = ['GMV: 156832', 'UV: 28592', 'ROI: 3.2'].join('\n');
-      expect(classifyReplyIntent(msg)).toBe('manual_data');
+      expect(classifyReplyIntent(msg)).toBe('default');
+    });
+
+    it.each([
+      '姓名：张三\n出发日期：2026-11-20\n人数：3',
+      '预算100元，手续费20元，保险30元，继续填写表单',
+      'Confirmed. Amount: 100\nQuantity: 3\nDate: 2026-11-20',
+    ])('does not abandon a web task for form values: %s', (reply) => {
+      expect(classifyReplyIntent(reply, { awaitingKind: 'clarification' })).toBe('default');
+    });
+
+    it.each([
+      '不要继续操作网页，只用我提供的数据和附件写分析',
+      '不用登录，使用我上传的表格做复盘',
+      'Stop browsing. Use my uploaded data to analyze the results.',
+      'Skip login and summarize the attached data.',
+    ])('hands off an explicit replacement analysis: %s', (reply) => {
+      expect(classifyReplyIntent(reply, { awaitingKind: 'clarification' })).toBe('manual_data');
+    });
+
+    it.each(['browser_action', 'permission', 'video_quote'])(
+      '%s is not an analysis handoff',
+      (awaitingKind) => {
+        expect(
+          classifyReplyIntent('不要继续操作网页，只用我提供的数据和附件写分析', { awaitingKind }),
+        ).toBe('default');
+      },
+    );
+
+    it.each([
+      '不要用我提供的数据分析，请继续操作网页',
+      'Do not use my uploaded data to analyze the results. Continue browsing.',
+      'Stop browsing. Use my uploaded data but do not analyze it yet.',
+      '资料原文：“不用登录，使用我上传的表格做复盘”',
+    ])('keeps a negative analysis instruction in the current task: %s', (reply) => {
+      expect(classifyReplyIntent(reply, { awaitingKind: 'clarification' })).toBe('default');
+    });
+
+    it('keeps an explicit hold parked when analysis is also declined', () => {
+      expect(
+        classifyReplyIntent('不要继续操作网页，使用我提供的数据，不要分析，等我', {
+          awaitingKind: 'clarification',
+        }),
+      ).toBe('still_awaiting');
     });
   });
 
@@ -65,8 +108,7 @@ describe('classifyReplyIntent', () => {
 
     it('does NOT match a long message that mentions login as part of context', () => {
       // The 30-char cap dodges this false positive.
-      const long =
-        '我已经登录进去了，但页面显示访问被拒绝，可能是账号权限不够，需要换一个号';
+      const long = '我已经登录进去了，但页面显示访问被拒绝，可能是账号权限不够，需要换一个号';
       expect(classifyReplyIntent(long)).not.toBe('login_completed');
     });
   });

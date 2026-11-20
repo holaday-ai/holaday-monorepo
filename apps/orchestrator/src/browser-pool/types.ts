@@ -12,6 +12,7 @@
 
 import type { BrowserViewportProfile } from '@holaday/shared-types';
 import type { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
+import type { BrowserCapabilities } from '../config/browser-capabilities.js';
 
 /**
  * Lifecycle status of one instance. Callers never see `allocating`
@@ -44,6 +45,14 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    */
   taskId: string;
   userId: string;
+  capabilities?: BrowserCapabilities;
+  /** Fixed at allocation; adoption never mixes anonymous and identity contexts. */
+  sessionPolicy?: BrowserSessionPolicy;
+  cloudProfileId?: string;
+  /** Server-installed transfer lifetime; not client capability or persisted identity. */
+  homeFileTransfers?: { pending(): boolean };
+  /** The original Home page is waiting for a person to select/cancel files. */
+  homeFileUploads?: { pending(): boolean };
   userDataDir?: string;
   executor: PlaywrightExecutor;
   xvfbPid?: number;
@@ -68,6 +77,11 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    */
   retentionTtlMs?: number;
   /**
+   * BROWSER-HOME-1: this instance's own idle timeout (pool.setIdleTimeout). Unset = the pool's
+   * configured idleTimeoutMs. Only the idle GC reads it; retention leases are unaffected.
+   */
+  idleTimeoutMs?: number;
+  /**
    * Optimization #3 R1 — viewport profile this instance was spawned
    * with. Used by the CDP streamer to cap frame dimensions to the
    * Brave's logical viewport, and by /screencast-ws/ handlers to
@@ -76,6 +90,42 @@ export interface BrowserInstance extends Partial<BrowserSlot> {
    * 'desktop' by downstream consumers).
    */
   viewportProfile?: BrowserViewportProfile;
+}
+
+/**
+ * BROWSER-HOME-1: pool key prefix of a user's task-less cloud browser (`bhs_<userId>`). These
+ * instances have no tasks row; peekActiveForUser never returns them, so legacy user-keyed routes
+ * keep reaching the user's task browsers only.
+ */
+export const BROWSER_HOME_SESSION_PREFIX = 'bhs_';
+
+/** What the task will browse; only a matching site grant applies to it. */
+/**
+ * Which sessions a task's browser may carry, derived by the server from the
+ * routing decision at task creation (never from model or client input):
+ * - `anonymous`: no vault grant, cookie, storage or profile is loaded and no
+ *   identity-bearing context is reused — the "公开云端（看不到你的个人信息）" promise;
+ * - `vault_allowed`: a connected readonly site grant for the target may be loaded;
+ * - `personal_home`: the user's personal workspace, including manual login. Only
+ *   an explicitly selected owned cloudProfileId may load saved state into it.
+ * A missing policy is treated as `anonymous` (fail closed).
+ */
+export type BrowserSessionPolicy = 'anonymous' | 'vault_allowed' | 'personal_home';
+
+export interface BrowserSessionTarget {
+  /** Trusted server snapshot resolved from the task owner at admission. */
+  capabilities?: BrowserCapabilities;
+  targetUrl?: string | null;
+  sessionPolicy?: BrowserSessionPolicy;
+  cloudProfileId?: string;
+  /** Server-only Home setup: a file observer is installed before navigation. */
+  homeDownloadsEnabled?: boolean;
+}
+
+/** Missing/unknown policy never inherits personal or readonly saved state. */
+export function sessionPolicyOf(session?: BrowserSessionTarget): BrowserSessionPolicy {
+  if (session?.sessionPolicy === 'personal_home') return 'personal_home';
+  return session?.sessionPolicy === 'vault_allowed' ? 'vault_allowed' : 'anonymous';
 }
 
 export interface PoolConfig {
@@ -102,6 +152,16 @@ export interface PoolConfig {
    * `executor.getPage().then(p => p.context())`. Optional — pool
    * boots without it for tests / smoke environments.
    */
+  /** Security-critical, awaited before publishing a ready instance. */
+  prepareSession?: (
+    userId: string,
+    executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+    session?: BrowserSessionTarget,
+  ) => Promise<void>;
+  /** Capture/close the isolated context before the browser process is destroyed. */
+  finishSession?: (
+    executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,
+  ) => Promise<void>;
   onInstanceReady?: (
     userExternalId: string,
     executor: import('../agent/vision-loop/playwright-executor.js').PlaywrightExecutor,

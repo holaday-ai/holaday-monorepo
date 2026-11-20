@@ -27,9 +27,14 @@ export function buildPosterCommand(input: {
 }
 
 export interface PosterDeps {
-  runFfmpeg: (cmd: { bin: string; args: readonly string[] }, opts?: FfmpegExecOpts) => Promise<void>;
+  runFfmpeg: (
+    cmd: { bin: string; args: readonly string[] },
+    opts?: FfmpegExecOpts,
+  ) => Promise<void>;
   readFile: (path: string) => Promise<Buffer>;
-  storeOutput: (i: { filename: string; mimetype: string; buffer: Buffer }) => Promise<{ fileId: string }>;
+  storeOutput: (i: { filename: string; mimetype: string; buffer: Buffer }) => Promise<{
+    fileId: string;
+  }>;
   logger: { warn: (obj: unknown, msg?: string) => void };
 }
 
@@ -54,7 +59,11 @@ export async function generatePosterFile(input: {
     });
     await input.deps.runFfmpeg(cmd, input.ffOpts);
     const buffer = await input.deps.readFile(input.posterPath);
-    const stored = await input.deps.storeOutput({ filename: 'poster.jpg', mimetype: 'image/jpeg', buffer });
+    const stored = await input.deps.storeOutput({
+      filename: 'poster.jpg',
+      mimetype: 'image/jpeg',
+      buffer,
+    });
     return stored.fileId;
   } catch (err) {
     input.deps.logger.warn(

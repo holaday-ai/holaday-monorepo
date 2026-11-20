@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enqueueToastItem, type ToastItem } from './toast-state.js';
+import { type ToastItem, enqueueToastItem } from './toast-state.js';
 
 function toast(id: number, text: string, kind: ToastItem['kind'] = 'info'): ToastItem {
   return { id, text, kind };
@@ -23,18 +23,14 @@ describe('toast-state', () => {
   });
 
   it('keeps different tones for the same text distinct', () => {
-    expect(enqueueToastItem([toast(1, '连接状态', 'info')], toast(2, '连接状态', 'error'))).toEqual([
-      toast(1, '连接状态', 'info'),
-      toast(2, '连接状态', 'error'),
-    ]);
+    expect(enqueueToastItem([toast(1, '连接状态', 'info')], toast(2, '连接状态', 'error'))).toEqual(
+      [toast(1, '连接状态', 'info'), toast(2, '连接状态', 'error')],
+    );
   });
 
   it('caps the stack to the most recent items', () => {
     expect(
-      enqueueToastItem(
-        [toast(1, 'one'), toast(2, 'two'), toast(3, 'three')],
-        toast(4, 'four'),
-      ),
+      enqueueToastItem([toast(1, 'one'), toast(2, 'two'), toast(3, 'three')], toast(4, 'four')),
     ).toEqual([toast(2, 'two'), toast(3, 'three'), toast(4, 'four')]);
   });
 });

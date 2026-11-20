@@ -51,9 +51,6 @@ export function getModelConfig(choice: ModelChoice): ModelConfig {
 /**
  * Convenience: classify + return the full config in one call.
  */
-export function selectModelForTask(
-  intent: string,
-  taskType: TaskType,
-): ModelConfig {
+export function selectModelForTask(intent: string, taskType: TaskType): ModelConfig {
   return getModelConfig(pickModelChoice(intent, taskType));
 }

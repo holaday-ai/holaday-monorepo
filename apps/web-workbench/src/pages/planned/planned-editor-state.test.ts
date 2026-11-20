@@ -110,9 +110,7 @@ describe('planned editor dirty fingerprint', () => {
   it('changes when any meaningful editable field changes', () => {
     const baseline = plannedEditorFingerprint(draft());
     expect(plannedEditorFingerprint(draft({ time: '10:00' }))).not.toBe(baseline);
-    expect(plannedEditorFingerprint(draft({ reminderMinutes: '30' }))).not.toBe(
-      baseline,
-    );
+    expect(plannedEditorFingerprint(draft({ reminderMinutes: '30' }))).not.toBe(baseline);
     expect(plannedEditorFingerprint(draft({ items: ['新任务'] }))).not.toBe(baseline);
   });
 });

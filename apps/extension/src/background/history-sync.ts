@@ -21,15 +21,12 @@
  * for the user's frequent destinations.
  */
 
-import { getAccessToken } from '../shared/storage.js';
 import { LOCAL_CHROME_QA, ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
-import {
-  fetchWithDeadline,
-  responseJsonWithDeadline,
-} from '../shared/http.js';
+import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import { isPublicDomain, normalizePublicDomain } from '../shared/public-domain.js';
+import { getAccessToken } from '../shared/storage.js';
 
 /**
  * Hard upload cap matches the server's MAX_HOSTS_PER_SYNC (see
@@ -84,15 +81,11 @@ export function extractHost(url: string): string | null {
 }
 
 function normalizeVisitCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function normalizeLastVisitTime(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 export function aggregateBrowsingHistoryItems(
@@ -191,11 +184,7 @@ function normalizeHistorySyncSummary(value: unknown): HistorySyncSummary | null 
     topDomains?: unknown;
     at?: unknown;
   };
-  if (
-    typeof raw.ingested !== 'number' ||
-    !Number.isFinite(raw.ingested) ||
-    raw.ingested < 0
-  ) {
+  if (typeof raw.ingested !== 'number' || !Number.isFinite(raw.ingested) || raw.ingested < 0) {
     return null;
   }
   const topDomains = Array.isArray(raw.topDomains)
@@ -206,9 +195,7 @@ function normalizeHistorySyncSummary(value: unknown): HistorySyncSummary | null 
         .slice(0, MAX_SUMMARY_TOP_DOMAINS)
     : [];
   const at =
-    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0
-      ? raw.at
-      : Date.now();
+    typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0 ? raw.at : Date.now();
   return {
     ingested: Math.floor(raw.ingested),
     topDomains,
@@ -326,9 +313,7 @@ function normalizeBrowsingSyncResponse(raw: unknown): BrowsingSyncResponse | nul
   const topDomains = Array.isArray(value.topDomains)
     ? value.topDomains
         .filter((domain): domain is string => typeof domain === 'string')
-        .map((domain) =>
-          normalizePublicDomain(domain.slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS)),
-        )
+        .map((domain) => normalizePublicDomain(domain.slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS)))
         .filter(isPublicDomain)
         .slice(0, MAX_SYNC_RESPONSE_TOP_DOMAINS)
     : [];

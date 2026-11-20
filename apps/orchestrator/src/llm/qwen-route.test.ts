@@ -15,8 +15,7 @@ const ENVIRONMENT: QwenRuntimeEnvironment = {
   DASHSCOPE_WORKSPACE_ID: 'legacy-workspace',
   DASHSCOPE_INTL_API_KEY: 'intl-explicit',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
-  DASHSCOPE_INTL_RESPONSES_BASE_URL:
-    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: 'intl-workspace',
   DASHSCOPE_CN_API_KEY: 'cn-explicit',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',

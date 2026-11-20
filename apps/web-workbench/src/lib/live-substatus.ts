@@ -1,7 +1,4 @@
-import {
-  deriveTaskProductState,
-  type TaskProductStateInput,
-} from './task-product-state';
+import { type TaskProductStateInput, deriveTaskProductState } from './task-product-state';
 
 /**
  * Whether the live sub-status chip ("正在操作浏览器 / 仍在执行网页操作 /

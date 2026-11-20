@@ -10,7 +10,10 @@ const native = vi.hoisted(() => ({
   owner: 'owner-a',
 }));
 vi.mock('playwright-crx', () => ({ crx: { start: native.start, get: native.get } }));
-vi.mock('./ws-client.js', () => ({ getCurrentWsToken: () => native.owner }));
+vi.mock('./ws-client.js', () => ({
+  getCurrentWsToken: () => native.owner,
+  getAuthenticatedExtensionConnectionOwner: () => native.owner,
+}));
 
 function browserBoundary() {
   let url = 'https://work.example/private/path?token=not-for-metadata';
@@ -27,6 +30,8 @@ function browserBoundary() {
     isClosed: () => false,
     url: () => url,
     title: async () => 'Projects',
+    // Sensitive-field scan used by observation redaction (no secrets here).
+    evaluate: async () => [],
     locator: () => ({
       innerText: async () => (saved ? 'Saved' : 'Draft'),
       ariaSnapshot: async () => (saved ? '- status "Saved"' : '- button "Save"'),

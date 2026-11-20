@@ -58,9 +58,7 @@ describe('normalizeStoredUser', () => {
   it('rejects malformed records from chrome storage', () => {
     expect(normalizeStoredUser(null)).toBeNull();
     expect(normalizeStoredUser({ email: 'person@example.com', plan: 'basic' })).toBeNull();
-    expect(
-      normalizeStoredUser({ externalId: 'user_1', email: '', plan: 'basic' }),
-    ).toBeNull();
+    expect(normalizeStoredUser({ externalId: 'user_1', email: '', plan: 'basic' })).toBeNull();
     expect(
       normalizeStoredUser({ externalId: 'user_1', email: 'person@example.com', plan: 123 }),
     ).toBeNull();

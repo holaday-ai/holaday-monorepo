@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { modelGateway } from '../llm/gateway/model-gateway.js';
 import type { ProductionModelRuntimeWiring } from '../llm/model-runtime-wiring.js';
 import { generatePlan, shouldSkipPlan } from './supercar/plan-service.js';
 
@@ -27,14 +28,13 @@ export async function prepareCoreTaskPlan(input: {
   )
     return null;
   try {
-    const runtime = input.wiring.resolveCore({
+    const runtime = modelGateway({ wiring: input.wiring }).resolve('plan', {
       actorExternalId: input.actorExternalId,
-      lane: 'plan',
       ownership: { scope: 'personal', userRegion: input.modelDataRegion },
     });
     if (runtime.kind !== 'ready') return null;
     const result = await generatePlan({
-      messagesAdapter: runtime.messages('standard'),
+      messagesAdapter: runtime.messages(),
       intent: input.intent,
       logger: input.logger,
       allowedTools: ['搜索 API', '文件处理', '生成内容'],

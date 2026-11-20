@@ -296,7 +296,7 @@ describe('verifyWithLlm', () => {
     });
     expect(JSON.stringify(request)).not.toMatch(/claude|anthropic|openai/i);
     expect(options.timeoutMs).toBe(DEFAULT_LLM_VERIFIER_TIMEOUT_MS);
-    expect(options.maxRetries).toBe(0);
+    expect(options.maxRetries).toBe(1);
   });
 
   it('uses a safe fixed summary instead of model-authored text', async () => {

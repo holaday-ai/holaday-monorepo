@@ -11,8 +11,7 @@ export const WEIBO_SITE_CONFIG: SiteConfig = {
   siteId: 'weibo',
   domains: ['weibo.com', 'weibo.cn'],
   requiresAuth: false,
-  authNote:
-    '微博的关注 / 私信 / 完整时间线需要登录；公开热搜和单条微博通常不需要。',
+  authNote: '微博的关注 / 私信 / 完整时间线需要登录；公开热搜和单条微博通常不需要。',
   auth: {
     loginUrlPaths: ['/visitor', '/login'],
     loginBodyPhrases: [

@@ -1,6 +1,15 @@
 import { classifyLightweightTask } from '../execution/lightweight-task.js';
+import { modelGateway } from '../llm/gateway/model-gateway.js';
 import type { ProductionModelRuntimeWiring } from '../llm/model-runtime-wiring.js';
-import { generateSuggestions } from './suggestions-generator.js';
+import { type NextStep, generateNextSteps } from './next-steps-generator.js';
+
+/** FIX-57 #4: the frame fields — instructions for older clients, steps for the new one. */
+export function nextStepsFrame(steps: readonly NextStep[]): {
+  suggestions: string[];
+  nextSteps: NextStep[];
+} {
+  return { suggestions: steps.map((step) => step.prompt), nextSteps: [...steps] };
+}
 
 /** Optional follow-ups never change, delay or claim completion of the main task. */
 export async function publishCoreTaskSuggestions(input: {
@@ -12,8 +21,10 @@ export async function publishCoreTaskSuggestions(input: {
   intent: string;
   summary: string;
   isCurrent: () => Promise<boolean>;
-  persist: (suggestions: string[]) => Promise<boolean>;
-  publish: (suggestions: string[]) => void;
+  persist: (steps: NextStep[]) => Promise<boolean>;
+  publish: (steps: NextStep[]) => void;
+  /** FIX-57 #4: the person's latest other requests, for continuity. */
+  recentIntents?: () => Promise<string[]>;
 }): Promise<void> {
   if (
     !input.rawIntent.trim() ||
@@ -23,16 +34,18 @@ export async function publishCoreTaskSuggestions(input: {
   )
     return;
   try {
-    const runtime = input.wiring.resolveCore({
+    const runtime = modelGateway({ wiring: input.wiring }).resolve('suggestions', {
       actorExternalId: input.actorExternalId,
-      lane: 'suggestions',
       ownership: { scope: 'personal', userRegion: input.modelDataRegion },
     });
     if (runtime.kind !== 'ready' || !(await input.isCurrent())) return;
-    const suggestions = await generateSuggestions({
-      messagesAdapter: runtime.messages('fast'),
+    const recentIntents = await input.recentIntents?.().catch(() => []);
+    const suggestions = await generateNextSteps({
+      messagesAdapter: runtime.messages(),
       intent: input.intent,
+      outcome: 'completed',
       summary: input.summary,
+      ...(recentIntents?.length ? { recentIntents } : {}),
     });
     if (suggestions.length > 0 && (await input.persist(suggestions)) && (await input.isCurrent())) {
       input.publish(suggestions);

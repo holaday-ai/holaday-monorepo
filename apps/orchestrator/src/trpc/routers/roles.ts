@@ -33,11 +33,9 @@ const selectInput = z.object({
    * Empty list = "no roles" (a valid choice — user disables the
    * role layer entirely on Basic).
    */
-  roleIds: z
-    .array(z.string())
-    .max(BASIC_ROLE_PICK_LIMIT, {
-      message: `基础版最多可选 ${BASIC_ROLE_PICK_LIMIT} 个角色，请先减少再保存`,
-    }),
+  roleIds: z.array(z.string()).max(BASIC_ROLE_PICK_LIMIT, {
+    message: `基础版最多可选 ${BASIC_ROLE_PICK_LIMIT} 个角色，请先减少再保存`,
+  }),
 });
 
 /** Same UTC month boundary the QuotaService uses for paid plans. */
@@ -80,16 +78,13 @@ export const rolesRouter = router({
     // SPA to surface a "请保存以修复" hint; saving the sanitized
     // list rewrites the DB row to a clean state.
     const sanitizedSelected =
-      user.plan === 'basic'
-        ? rawSelected.filter((id) => OPEN_POOL_SET.has(id))
-        : rawSelected;
+      user.plan === 'basic' ? rawSelected.filter((id) => OPEN_POOL_SET.has(id)) : rawSelected;
     const needsRoleRepair = sanitizedSelected.length !== rawSelected.length;
     // overLimit kept for the over-limit-but-all-open-pool case
     // (e.g. a Basic user with 8 valid open-pool roles). The banner
     // copy is different from needsRoleRepair (one says "auto-removed
     // ineligible roles", the other says "trim manually").
-    const overLimit =
-      user.plan === 'basic' && sanitizedSelected.length > BASIC_ROLE_PICK_LIMIT;
+    const overLimit = user.plan === 'basic' && sanitizedSelected.length > BASIC_ROLE_PICK_LIMIT;
     return {
       plan: user.plan,
       selected: sanitizedSelected,
@@ -154,12 +149,10 @@ export const rolesRouter = router({
     // monthly changes are spent can never repair their corrupted
     // selected_roles row, and stays locked out of task creation.
     const monthStart = currentMonthStart();
-    const periodInSync =
-      user.roleChangesPeriodStart && user.roleChangesPeriodStart >= monthStart;
+    const periodInSync = user.roleChangesPeriodStart && user.roleChangesPeriodStart >= monthStart;
     const currentSelected = (user.selectedRoles ?? []) as string[];
     const sanitizedCurrent = currentSelected.filter((id) => OPEN_POOL_SET.has(id));
-    const sortedKey = (a: readonly string[]): string =>
-      [...a].sort().join('|');
+    const sortedKey = (a: readonly string[]): string => [...a].sort().join('|');
     const dedupKey = sortedKey(dedup);
     const isRepair = sortedKey(sanitizedCurrent) === dedupKey;
     const isExactNoOp = sortedKey(currentSelected) === dedupKey;

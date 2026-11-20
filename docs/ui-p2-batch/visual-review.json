@@ -1,0 +1,170 @@
+[
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.057164351851851855",
+    "screenshot": "artifacts/1440-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.056950231481481484",
+    "screenshot": "artifacts/1440-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.18205295138888888",
+    "screenshot": "artifacts/1440-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.056469907407407406",
+    "screenshot": "artifacts/1440-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.1694386574074074",
+    "screenshot": "artifacts/1440-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.05676938657407407",
+    "screenshot": "artifacts/1440-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1440
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0661865234375",
+    "screenshot": "artifacts/1280-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06541666666666666",
+    "screenshot": "artifacts/1280-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.20366048177083335",
+    "screenshot": "artifacts/1280-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.053619791666666666",
+    "screenshot": "artifacts/1280-_settings_api-keys-diff.png",
+    "route": "/settings/api-keys",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06348714192708334",
+    "screenshot": "artifacts/1280-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.17536214192708333",
+    "screenshot": "artifacts/1280-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.060077311197916664",
+    "screenshot": "artifacts/1280-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1280
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.052851359049479164",
+    "screenshot": "artifacts/1024-task_browser_executing-diff.png",
+    "route": "task:browser:executing",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.05185546875",
+    "screenshot": "artifacts/1024-task_browser_awaiting_user-diff.png",
+    "route": "task:browser:awaiting_user",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.23868306477864584",
+    "screenshot": "artifacts/1024-_cosmic-preview-diff.png",
+    "route": "/cosmic-preview",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.0535247802734375",
+    "screenshot": "artifacts/1024-_settings_appearance-diff.png",
+    "route": "/settings/appearance",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06251220703125",
+    "screenshot": "artifacts/1024-_settings_api-keys-diff.png",
+    "route": "/settings/api-keys",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.07379862467447916",
+    "screenshot": "artifacts/1024-_settings_memory-diff.png",
+    "route": "/settings/memory",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.1941497802734375",
+    "screenshot": "artifacts/1024-_cosmic-diff.png",
+    "route": "/cosmic",
+    "width": 1024
+  },
+  {
+    "rule": "visual-difference",
+    "severity": "P2",
+    "detail": "ratio=0.06441650390625",
+    "screenshot": "artifacts/1024-_stocks-diff.png",
+    "route": "/stocks",
+    "width": 1024
+  }
+]

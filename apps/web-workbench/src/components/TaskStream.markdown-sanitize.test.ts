@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
 
 import {
   AwaitingMarkdown,
@@ -15,9 +15,9 @@ import {
 
 describe('TaskStream markdown sanitizer', () => {
   it('removes a broken bold marker before bare urls', () => {
-    expect(
-      sanitizeMarkdownBrokenBoldUrls('页面链接：**https://en.wikipedia.org/wiki/OpenAI'),
-    ).toBe('页面链接：https://en.wikipedia.org/wiki/OpenAI');
+    expect(sanitizeMarkdownBrokenBoldUrls('页面链接：**https://en.wikipedia.org/wiki/OpenAI')).toBe(
+      '页面链接：https://en.wikipedia.org/wiki/OpenAI',
+    );
   });
 
   it('keeps normal bold text and markdown links intact', () => {
@@ -68,7 +68,7 @@ describe('TaskStream live phase copy', () => {
   });
 
   it('reassures users when browser work runs past two minutes', () => {
-    expect(liveSubStatusLongRunningHint('browsing', 120)).toContain('不是卡死');
+    expect(liveSubStatusLongRunningHint('browsing', 120)).toContain('尚未收到下一阶段更新');
   });
 
   it('offers a calmer long-running browser explanation after five minutes', () => {
@@ -77,7 +77,7 @@ describe('TaskStream live phase copy', () => {
 
   it('uses a concise processing hint for extraction and verification phases', () => {
     expect(liveSubStatusLongRunningHint('verifying', 180)).toBe(
-      '仍在整理和核对结果，不是卡死。',
+      '尚未收到下一阶段更新，正在等待数据或核验结果。',
     );
   });
 
@@ -93,14 +93,14 @@ describe('TaskStream live phase copy', () => {
   });
 
   it('changes live activity key when streaming, progress, or thinking changes', () => {
-    expect(
-      taskStreamLiveActivityKey({ streamingText: 'abc' }),
-    ).not.toBe(taskStreamLiveActivityKey({ streamingText: 'abcd' }));
-    expect(
-      taskStreamLiveActivityKey({ progressMessage: '正在读取页面' }),
-    ).not.toBe(taskStreamLiveActivityKey({ progressMessage: '正在整理结果' }));
-    expect(
-      taskStreamLiveActivityKey({ thinking: '先搜索' }),
-    ).not.toBe(taskStreamLiveActivityKey({ thinking: '再验证' }));
+    expect(taskStreamLiveActivityKey({ streamingText: 'abc' })).not.toBe(
+      taskStreamLiveActivityKey({ streamingText: 'abcd' }),
+    );
+    expect(taskStreamLiveActivityKey({ progressMessage: '正在读取页面' })).not.toBe(
+      taskStreamLiveActivityKey({ progressMessage: '正在整理结果' }),
+    );
+    expect(taskStreamLiveActivityKey({ thinking: '先搜索' })).not.toBe(
+      taskStreamLiveActivityKey({ thinking: '再验证' }),
+    );
   });
 });

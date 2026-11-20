@@ -125,13 +125,11 @@ describe('detectAntiBot — error + snapshot combination', () => {
 describe('describeSignal', () => {
   it('returns distinct Chinese labels per kind', () => {
     const rawMatch = 'x';
-    expect(
-      describeSignal({ type: 'captcha', confidence: 'high', rawMatch }),
-    ).toMatch(/验证码/);
+    expect(describeSignal({ type: 'captcha', confidence: 'high', rawMatch })).toMatch(/验证码/);
     expect(describeSignal({ type: 'verify', confidence: 'high', rawMatch })).toMatch(/人机/);
     expect(describeSignal({ type: 'block', confidence: 'high', rawMatch })).toMatch(/拦截/);
-    expect(
-      describeSignal({ type: 'cloudflare', confidence: 'high', rawMatch }),
-    ).toMatch(/Cloudflare/);
+    expect(describeSignal({ type: 'cloudflare', confidence: 'high', rawMatch })).toMatch(
+      /Cloudflare/,
+    );
   });
 });

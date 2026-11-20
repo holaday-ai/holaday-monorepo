@@ -1,6 +1,6 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 export function buildMaintenanceMigrationManifest(root) {
   const app = path.join(root, 'apps/orchestrator');

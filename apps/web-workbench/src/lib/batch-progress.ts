@@ -98,10 +98,7 @@ export function applyBatchProgressToDetail<T extends BatchProgressDetail>(
   return itemChanged ? { ...next, items } : next;
 }
 
-function applyBatchCounters<T extends BatchProgressRow>(
-  row: T,
-  frame: BatchProgressFrame,
-): T {
+function applyBatchCounters<T extends BatchProgressRow>(row: T, frame: BatchProgressFrame): T {
   return {
     ...row,
     status: frame.status,

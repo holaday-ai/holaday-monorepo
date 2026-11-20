@@ -106,7 +106,9 @@ describe('core admission database boundary', () => {
           () =>
             kind === 'plan'
               ? repo.persistAdvisoryPlan(operation(), '合成计划')
-              : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+              : repo.persistSuggestions(settlementOperation('completed'), [
+                  { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+                ]),
           { errorOutcome: 'known', dispatch: 'immediate' },
         );
         expect(await owned.result).toBe(false);
@@ -128,7 +130,9 @@ describe('core admission database boundary', () => {
         () =>
           kind === 'plan'
             ? repo.persistAdvisoryPlan(operation(), '合成计划')
-            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+            : repo.persistSuggestions(settlementOperation('completed'), [
+                { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+              ]),
         { errorOutcome: 'known', dispatch: 'immediate' },
       );
       expect(await owned.result).toBe(false);
@@ -149,7 +153,9 @@ describe('core admission database boundary', () => {
         () =>
           kind === 'plan'
             ? repo.persistAdvisoryPlan(operation(), '合成计划')
-            : repo.persistSuggestions(settlementOperation('completed'), ['整理后续执行清单']),
+            : repo.persistSuggestions(settlementOperation('completed'), [
+                { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+              ]),
         { errorOutcome: 'known', dispatch: 'immediate' },
       );
       expect(await owned.result).toBe(false);
@@ -203,7 +209,11 @@ describe('core admission database boundary', () => {
       },
     });
     const { repo, queries } = fixture();
-    expect(await repo.persistSuggestions(op, ['整理后续执行清单'])).toBe(true);
+    expect(
+      await repo.persistSuggestions(op, [
+        { label: '整理后续执行清单', prompt: '整理后续执行清单' },
+      ]),
+    ).toBe(true);
     const patch = queries.find((query) => query.sql.startsWith('update'));
     expect(patch?.sql).toContain('`execution_revision` = ?');
     expect(patch?.sql).toContain('`core_record_version` = ?');
@@ -473,7 +483,14 @@ describe('core settlement database boundary', () => {
     const update = queries.find((q) => q.sql.startsWith('update'));
     if (!update) throw new Error('missing settlement update');
     expect(JSON.stringify(queries)).not.toContain('SYNTHETIC_REJECTED_CANDIDATE');
-    expect(update.params).toContain(JSON.stringify({ tickCount: 1, reason: '质量校验未通过' }));
+    // FIX-30: the fixed reason may name what was found (fixed copy, never the detail).
+    expect(
+      update.params.some(
+        (param) =>
+          typeof param === 'string' &&
+          /^\{"tickCount":1,"reason":"质量校验未通过(?:：[^"]+)?"\}$/.test(param),
+      ),
+    ).toBe(true);
     // Base is the new allowed payload, never JSON_SET(oldResult, ...) retaining an old summary.
     expect(update.sql).toContain('`result` = JSON_SET(CAST(? AS JSON),');
   });

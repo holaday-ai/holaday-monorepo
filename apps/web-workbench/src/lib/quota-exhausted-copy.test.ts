@@ -20,10 +20,7 @@ describe('quota exhausted copy', () => {
     const copy = quotaExhaustedCopy('basic');
     expect(copy.headline).toBe('本月额度已用完');
     expect(copy.badge).toBe('基础版');
-    expect(copy.actions.map((action) => action.path)).toEqual([
-      '/plan#addons',
-      '/plan',
-    ]);
+    expect(copy.actions.map((action) => action.path)).toEqual(['/plan#addons', '/plan']);
   });
 
   it('keeps pro users focused on top-ups', () => {

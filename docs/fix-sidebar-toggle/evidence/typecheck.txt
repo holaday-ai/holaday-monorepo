@@ -1,0 +1,3 @@
+
+> @holaday/web-workbench@0.0.0 typecheck /Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench
+> tsc --noEmit && tsc --noEmit -p tsconfig.node.json

@@ -20,14 +20,31 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { type PlanId, newExternalId } from '@holaday/shared-types';
-import { and, asc, eq, gt, isNull, like, notLike, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, like, notLike, or, sql } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { type TaskFile, taskFiles } from '../db/schema/task-files.js';
 import { tasks } from '../db/schema/tasks.js';
-import type { StorageProvider } from './storage-provider.js';
-import { deleteStorageObjectForClosure, getSharedStorageProvider } from './storage-provider.js';
+import { users } from '../db/schema/users.js';
+import {
+  browserFileBytesMatch,
+  browserFileOriginSchema,
+  browserFileSourceSchema,
+  taskBrowserFileOriginSchema,
+} from './browser-file-origin.js';
+import {
+  type BrowserOutputInput,
+  type TaskBrowserOutputInput,
+  persistBrowserOutput,
+} from './browser-output.js';
+import type { StorageProvider, StorageReadOptions } from './storage-provider.js';
+import {
+  R2StorageProvider,
+  deleteStorageObjectForClosure,
+  getSharedStorageProvider,
+} from './storage-provider.js';
+import { persistLiveTaskOutput } from './task-output-publication.js';
 
 export type FileKind = 'input' | 'output';
 
@@ -713,7 +730,7 @@ export class FileService {
     if (row.status !== 'pending' || (row.expiresAt && row.expiresAt <= new Date())) {
       return { status: 'not_found' };
     }
-    const meta = await this.storage.stat(row.storagePath);
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     if (!meta || meta.sizeBytes <= 0) return { status: 'not_uploaded' };
     if (meta.sizeBytes > MAX_CLIENT_VIDEO_EXPORT_BYTES) return { status: 'too_large' };
     if (meta.contentType && meta.contentType.split(';', 1)[0]?.trim() !== 'video/mp4') {
@@ -777,7 +794,7 @@ export class FileService {
       .where(eq(taskFiles.externalId, opts.fileExternalId))
       .limit(1);
     if (!row || row.userId !== opts.userIdInternal) return { ok: false, reason: 'not_found' };
-    const meta = await this.storage.stat(row.storagePath);
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
     if (!meta) return { ok: false, reason: 'not_uploaded' };
     // Cap is derived from the STORED mime/filename (what actually landed),
     // not anything the client re-sends at confirm time.
@@ -821,7 +838,20 @@ export class FileService {
     filename: string;
     mimetype: string;
     buffer: Buffer;
+    requireLiveTask?: true;
+    canPublish?: () => boolean;
   }): Promise<TaskFile> {
+    if (opts.requireLiveTask) {
+      return persistLiveTaskOutput(
+        {
+          db: this.db,
+          storage: this.storage,
+          logger: this.logger,
+          expiresAt: new Date(Date.now() + outputFileTtlMs()),
+        },
+        { ...opts, filename: sanitiseFilename(opts.filename) },
+      );
+    }
     const externalId = newExternalId('file');
     const safeFilename = sanitiseFilename(opts.filename);
     const { storagePath } = await this.storage.put({
@@ -851,6 +881,86 @@ export class FileService {
       .limit(1);
     if (!row) throw new Error('storeOutput: row vanished after insert');
     return row;
+  }
+
+  /** A server-captured Home download; only this path may create a task-less output. */
+  async storeBrowserOutput(opts: BrowserOutputInput): Promise<TaskFile> {
+    return this.persistOriginalBrowserOutput({
+      ...opts,
+      source: browserFileOriginSchema.parse(opts.source),
+    });
+  }
+
+  /** A trusted original task download always retains its real owning task and digest. */
+  async storeTaskBrowserOutput(opts: TaskBrowserOutputInput): Promise<TaskFile> {
+    return this.persistOriginalBrowserOutput({
+      ...opts,
+      source: taskBrowserFileOriginSchema.parse(opts.source),
+    });
+  }
+
+  private async persistOriginalBrowserOutput(
+    opts: BrowserOutputInput | TaskBrowserOutputInput,
+  ): Promise<TaskFile> {
+    return persistBrowserOutput(
+      {
+        db: this.db,
+        storage: this.storage,
+        logger: this.logger,
+        expiresAt: new Date(Date.now() + outputFileTtlMs()),
+      },
+      { ...opts, filename: sanitiseFilename(opts.filename) },
+    );
+  }
+
+  /** Recent Home-origin files survive context teardown. Availability is metadata; reads verify bytes. */
+  async listBrowserOutputsForUser(userIdInternal: number) {
+    const rows = await this.db
+      .select()
+      .from(taskFiles)
+      .where(
+        and(
+          eq(taskFiles.userId, userIdInternal),
+          eq(taskFiles.kind, 'output'),
+          eq(
+            sql<string>`JSON_UNQUOTE(JSON_EXTRACT(${taskFiles.browserSource}, '$.kind'))`,
+            'personal_home',
+          ),
+        ),
+      )
+      .orderBy(desc(taskFiles.id))
+      .limit(50);
+    const items = [];
+    for (const row of rows) {
+      const source = browserFileSourceSchema.safeParse(row.browserSource);
+      if (
+        row.userId !== userIdInternal ||
+        row.kind === 'temp' ||
+        !source.success ||
+        source.data.kind !== 'personal_home'
+      )
+        continue;
+      const live =
+        row.status === 'active' && (!row.expiresAt || row.expiresAt.getTime() > Date.now());
+      const meta = live
+        ? await this.storage
+            .stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)))
+            .catch(() => null)
+        : null;
+      items.push({
+        fileId: row.externalId,
+        filename: row.filename,
+        sizeBytes: row.sizeBytes,
+        mimetype: row.mimetype,
+        expiresAt: row.expiresAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+        origin: source.data.origin,
+        taskId: source.data.taskId,
+        available: Boolean(meta && meta.sizeBytes === row.sizeBytes),
+        downloadUrl: `/api/files/${row.externalId}/download`,
+      });
+    }
+    return items;
   }
 
   /**
@@ -1114,7 +1224,10 @@ export class FileService {
   ): Promise<string | null> {
     const row = await this.readableRowForUser(fileExternalId, userIdInternal);
     if (!row) return null;
-    return this.storage.getSignedUrl(row.storagePath, { expiresInSeconds });
+    return this.storage.getSignedUrl(row.storagePath, {
+      ...(await this.legacyReadOwnerArgs(row))[0],
+      expiresInSeconds,
+    });
   }
 
   /**
@@ -1137,6 +1250,7 @@ export class FileService {
     if (!row) return null;
     const boundedTtlSeconds = Math.min(3_600, Math.max(60, Math.floor(ttlSeconds)));
     const signedUrl = await this.storage.getSignedUrl(row.storagePath, {
+      ...(await this.legacyReadOwnerArgs(row))[0],
       expiresInSeconds: boundedTtlSeconds,
     });
     return {
@@ -1144,6 +1258,18 @@ export class FileService {
       expiresAt: new Date(Date.now() + boundedTtlSeconds * 1_000),
       delivery: signedUrl ? 'signed' : 'authenticated',
     };
+  }
+
+  /** Bind legacy R2 reads to the database owner, not a user segment in the path. */
+  private async legacyReadOwnerArgs(row: TaskFile): Promise<[] | [StorageReadOptions]> {
+    if (!(this.storage instanceof R2StorageProvider) || !row.storagePath.startsWith('/')) return [];
+    const [owner] = await this.db
+      .select({ externalId: users.externalId })
+      .from(users)
+      .where(eq(users.id, row.userId))
+      .limit(1);
+    if (!owner?.externalId) throw new Error('Storage file owner unavailable');
+    return [{ ownerExternalId: owner.externalId }];
   }
 
   private async readableRowForUser(
@@ -1157,8 +1283,15 @@ export class FileService {
       .limit(1);
     if (!row || row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
-    const meta = await this.storage.stat(row.storagePath);
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
+    const meta = await this.storage.stat(row.storagePath, ...(await this.legacyReadOwnerArgs(row)));
+    if (meta && row.browserSource) {
+      const bytes = await this.storage.get(
+        row.storagePath,
+        ...(await this.legacyReadOwnerArgs(row)),
+      );
+      if (!bytes || !browserFileBytesMatch(row.browserSource, row.sizeBytes, bytes)) return null;
+    }
     return meta ? row : null;
   }
 
@@ -1200,9 +1333,14 @@ export class FileService {
     if (!row) return null;
     if (row.userId !== userIdInternal) return null;
     if (row.status !== 'active') return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
-    const buffer = await this.storage.get(row.storagePath);
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
+    const buffer = await this.storage.get(
+      row.storagePath,
+      ...(await this.legacyReadOwnerArgs(row)),
+    );
     if (!buffer) return null;
+    if (row.browserSource && !browserFileBytesMatch(row.browserSource, row.sizeBytes, buffer))
+      return null;
     return { row, buffer };
   }
 
@@ -1227,9 +1365,15 @@ export class FileService {
       if (!row) continue;
       if (row.userId !== userIdInternal) continue;
       if (row.status !== 'active') continue;
-      if (row.expiresAt && row.expiresAt < new Date()) continue;
-      const buffer = await this.storage.get(row.storagePath);
-      if (buffer) {
+      if (row.expiresAt && row.expiresAt <= new Date()) continue;
+      const buffer = await this.storage.get(
+        row.storagePath,
+        ...(await this.legacyReadOwnerArgs(row)),
+      );
+      if (
+        buffer &&
+        (!row.browserSource || browserFileBytesMatch(row.browserSource, row.sizeBytes, buffer))
+      ) {
         out.push({ row, buffer });
       } else {
         this.logger.warn({ fileId: id }, 'file: load skipped (storage read returned null)');

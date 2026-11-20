@@ -1,3 +1,38 @@
+import { BatchTaskDialog } from '@/components/BatchTaskDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
+import {
+  type BatchListCursor,
+  type NormalizedBatchDetail,
+  type NormalizedBatchRow,
+  batchDetailRemainingCount,
+  batchDetailSummary,
+  batchErrorMessage,
+  batchFinishedCount,
+  batchListSummary,
+  batchProgressPercent,
+  batchPromptImportStateReset,
+  batchRemainingCount,
+  batchShouldPoll,
+  batchStatusCopy,
+  batchStatusLabel,
+  mergeBatchRows,
+  normalizeBatchDetail,
+  normalizeBatchPage,
+  safeBatchCount,
+} from '@/lib/batch-page-state';
+import {
+  type BatchProgressFrame,
+  applyBatchProgressToDetail,
+  applyBatchProgressToRows,
+} from '@/lib/batch-progress';
+import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
+import { supportMailtoHref } from '@/lib/support-links';
+import { trpc } from '@/lib/trpc';
+import { onServerMessage } from '@/lib/ws';
+import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,41 +45,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/toast';
-import { trpc } from '@/lib/trpc';
-import { PageContainer, PageHeader, Section } from '@/pages/PageShell';
-import { BatchTaskDialog } from '@/components/BatchTaskDialog';
-import { batchUnsuccessfulCopy } from '@/lib/batch-copy';
-import {
-  batchDetailRemainingCount,
-  batchDetailSummary,
-  batchErrorMessage,
-  batchListSummary,
-  mergeBatchRows,
-  normalizeBatchPage,
-  batchPromptImportStateReset,
-  normalizeBatchDetail,
-  type NormalizedBatchDetail,
-  type NormalizedBatchRow,
-  type BatchListCursor,
-  batchFinishedCount,
-  batchProgressPercent,
-  batchRemainingCount,
-  batchShouldPoll,
-  batchStatusCopy,
-  batchStatusLabel,
-  safeBatchCount,
-} from '@/lib/batch-page-state';
-import {
-  applyBatchProgressToDetail,
-  applyBatchProgressToRows,
-  type BatchProgressFrame,
-} from '@/lib/batch-progress';
-import { humaniseTaskError, taskActionError } from '@/lib/error-copy';
-import { supportMailtoHref } from '@/lib/support-links';
-import { onServerMessage } from '@/lib/ws';
 
 /**
  * Phase 5b — batch tasks list + detail (one page, two modes).
@@ -87,8 +87,7 @@ function BatchList(): JSX.Element {
   // (multi-line composer detect), auto-open the create dialog with
   // those lines pre-filled. One-shot: we clear the state after using
   // it so a refresh doesn't re-open the dialog.
-  const incomingPrompts = (location.state as { initialPrompts?: string[] } | null)
-    ?.initialPrompts;
+  const incomingPrompts = (location.state as { initialPrompts?: string[] } | null)?.initialPrompts;
   const [dialogOpen, setDialogOpen] = React.useState(
     Array.isArray(incomingPrompts) && incomingPrompts.length > 1,
   );
@@ -112,44 +111,43 @@ function BatchList(): JSX.Element {
     }
   }, [hash, incomingPrompts, navigate, pathname, search]);
 
-  const loadPage = React.useCallback(async (cursor: BatchListCursor | null = null) => {
-    const requestId = reloadRequestRef.current + 1;
-    reloadRequestRef.current = requestId;
-    const append = cursor !== null;
-    if (append) setLoadingMore(true);
-    else setLoading(true);
-    try {
-      const list = await trpc.batchTasks.list.query({
-        limit: 50,
-        cursor: cursor
-          ? {
-              id: cursor.id,
-              createdAt:
-                cursor.createdAt instanceof Date
-                  ? cursor.createdAt
-                  : new Date(cursor.createdAt),
-            }
-          : undefined,
-      });
-      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
-      const page = normalizeBatchPage(list);
-      setRows((current) =>
-        append ? mergeBatchRows(current ?? [], page.items) : page.items,
-      );
-      setNextCursor(page.nextCursor);
-      setLoadError(null);
-    } catch (err) {
-      if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
-      const message = batchErrorMessage(err);
-      toast.show(taskActionError('批量任务暂时无法加载', message), 'error');
-      setLoadError(message);
-    } finally {
-      if (mountedRef.current && reloadRequestRef.current === requestId) {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+  const loadPage = React.useCallback(
+    async (cursor: BatchListCursor | null = null) => {
+      const requestId = reloadRequestRef.current + 1;
+      reloadRequestRef.current = requestId;
+      const append = cursor !== null;
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const list = await trpc.batchTasks.list.query({
+          limit: 50,
+          cursor: cursor
+            ? {
+                id: cursor.id,
+                createdAt:
+                  cursor.createdAt instanceof Date ? cursor.createdAt : new Date(cursor.createdAt),
+              }
+            : undefined,
+        });
+        if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
+        const page = normalizeBatchPage(list);
+        setRows((current) => (append ? mergeBatchRows(current ?? [], page.items) : page.items));
+        setNextCursor(page.nextCursor);
+        setLoadError(null);
+      } catch (err) {
+        if (!mountedRef.current || reloadRequestRef.current !== requestId) return;
+        const message = batchErrorMessage(err);
+        toast.show(taskActionError('批量任务暂时无法加载', message), 'error');
+        setLoadError(message);
+      } finally {
+        if (mountedRef.current && reloadRequestRef.current === requestId) {
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
-    }
-  }, [toast]);
+    },
+    [toast],
+  );
 
   const reload = React.useCallback(() => loadPage(null), [loadPage]);
 
@@ -164,9 +162,7 @@ function BatchList(): JSX.Element {
     return onServerMessage((msg) => {
       if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
-      setRows((current) =>
-        current ? applyBatchProgressToRows(current, msg) : current,
-      );
+      setRows((current) => (current ? applyBatchProgressToRows(current, msg) : current));
     });
   }, []);
 
@@ -193,7 +189,7 @@ function BatchList(): JSX.Element {
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               onClick={() => void reload()}
               disabled={loading}
               aria-label={loading ? '正在刷新批量任务' : '刷新批量任务'}
@@ -225,7 +221,10 @@ function BatchList(): JSX.Element {
         {loading && rows == null && (
           <div className="space-y-3">
             {[0, 1, 2].map((idx) => (
-              <div key={idx} className="flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] p-3">
+              <div
+                key={idx}
+                className="flex items-start gap-3 rounded-[8px] border border-[#DCDDDD] p-3"
+              >
                 <div className="h-7 w-7 rounded-md bg-[#EFEFEF]" />
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="h-3 w-40 rounded bg-[#EFEFEF]" />
@@ -246,13 +245,11 @@ function BatchList(): JSX.Element {
         )}
         {rows && rows.length === 0 && !loadError && (
           <div className="flex flex-col items-center gap-3 rounded-[8px] border border-dashed border-[#DCDDDD] bg-white px-6 py-12 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#EA1F59]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#DCDDDD] bg-white text-[#FF0061]">
               <Layers className="h-5 w-5" />
             </div>
             <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground/85">
-                一次提交多个任务
-              </div>
+              <div className="text-sm font-medium text-foreground/85">一次提交多个任务</div>
               <div className="max-w-md text-xs text-muted-foreground">
                 例如「逐个查询这 10 个竞品的最新动态」。按套餐并发：Basic 同时 3 个，Pro 同时 5 个。
               </div>
@@ -278,11 +275,9 @@ function BatchList(): JSX.Element {
                   size="sm"
                   disabled={loadingMore}
                   onClick={() => void loadPage(nextCursor)}
-                  className="h-8 rounded-[6px] border-[#DCDDDD] bg-white px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                  className="h-8 rounded-[6px] border-[#DCDDDD] bg-white px-3 text-xs text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
                 >
-                  {loadingMore && (
-                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />
-                  )}
+                  {loadingMore && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />}
                   {loadingMore ? '加载中…' : '加载更多批量任务'}
                 </Button>
               </div>
@@ -327,19 +322,17 @@ function BatchListRow({
         onClick={onOpen}
         className="group flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[#EFEFEF]/35"
       >
-        <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#EA1F59] transition-colors group-hover:border-[#EA1F59]/35">
+        <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#DCDDDD] bg-white text-[#FF0061] transition-colors group-hover:border-[#FF0061]/35">
           <Layers className="h-3.5 w-3.5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="line-clamp-1 text-sm font-medium group-hover:text-[#EA1F59]">
+              <div className="line-clamp-1 text-sm font-medium group-hover:text-[#FF0061]">
                 {row.name ?? `批量任务 · ${total} 项`}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span className={statusTone}>
-                  {batchStatusLabel(row.status)}
-                </span>
+                <span className={statusTone}>{batchStatusLabel(row.status)}</span>
                 <span>并发 {safeBatchCount(row.concurrency)}</span>
                 <span>{fmtDate(row.createdAt)}</span>
               </div>
@@ -432,9 +425,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
     return onServerMessage((msg) => {
       if (!mountedRef.current) return;
       if (!isBatchProgressFrame(msg)) return;
-      setDetail((current) =>
-        current ? applyBatchProgressToDetail(current, msg) : current,
-      );
+      setDetail((current) => (current ? applyBatchProgressToDetail(current, msg) : current));
     });
   }, []);
 
@@ -488,7 +479,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+                className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
                 onClick={() => void reload()}
                 disabled={loading}
                 aria-label={loading ? '正在刷新批量详情' : '刷新批量详情'}
@@ -509,7 +500,10 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
               <div className="h-3 w-32 rounded bg-[#EFEFEF]" />
               <div className="h-2 w-full rounded-full bg-[#EFEFEF]" />
               {[0, 1, 2].map((idx) => (
-                <div key={idx} className="flex items-start gap-3 border-t border-[#EFEFEF] py-3 first:border-t-0">
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 border-t border-[#EFEFEF] py-3 first:border-t-0"
+                >
                   <div className="h-4 w-4 rounded-full bg-[#EFEFEF]" />
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="h-3 w-20 rounded bg-[#EFEFEF]" />
@@ -561,7 +555,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="h-8 w-8 border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               onClick={() => void reload()}
               disabled={loading}
               aria-label={loading ? '正在刷新批量详情' : '刷新批量详情'}
@@ -578,7 +572,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-[#DCDDDD] bg-white text-[#EA1F59] hover:border-[#EA1F59]/35 hover:bg-white hover:text-[#EA1F59]"
+                className="border-[#DCDDDD] bg-white text-[#FF0061] hover:border-[#FF0061]/35 hover:bg-white hover:text-[#FF0061]"
                 onClick={() => setConfirmCancel(true)}
               >
                 取消批量
@@ -629,14 +623,11 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   <span className="font-mono">#{item.seq + 1}</span>
                   <span>{ITEM_STATUS_LABEL[item.status] ?? item.status}</span>
                 </div>
-                <div
-                  className="mt-0.5 line-clamp-2 text-sm text-foreground"
-                  title={item.prompt}
-                >
+                <div className="mt-0.5 line-clamp-2 text-sm text-foreground" title={item.prompt}>
                   {item.prompt}
                 </div>
                 {item.errorMessage && (
-                  <div className="mt-1 text-[11px] text-[#EA1F59]">
+                  <div className="mt-1 text-[11px] text-[#FF0061]">
                     {humaniseTaskError(item.errorMessage)}
                   </div>
                 )}
@@ -644,7 +635,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
                   <button
                     type="button"
                     onClick={() => navigate(`/?task=${encodeURIComponent(item.taskId!)}`)}
-                    className="mt-1 inline-flex items-center text-[11px] text-[#EA1F59] underline decoration-[#EA1F59]/40 underline-offset-2 transition-colors hover:text-[#EA1F59]"
+                    className="mt-1 inline-flex items-center text-[11px] text-[#FF0061] underline decoration-[#FF0061]/40 underline-offset-2 transition-colors hover:text-[#FF0061]"
                   >
                     打开任务详情 →
                   </button>
@@ -657,7 +648,7 @@ function BatchDetail({ batchId }: { batchId: string }): JSX.Element {
       <ConfirmDialog
         open={confirmCancel}
         title="取消这个批量任务？"
-        description={`未开始的项目会被取消。已在执行中的项目会继续完成，不会被中断。`}
+        description={'未开始的项目会被取消。已在执行中的项目会继续完成，不会被中断。'}
         confirmLabel="取消批量"
         destructive
         onClose={() => setConfirmCancel(false)}
@@ -695,13 +686,13 @@ function StatusNotice({
 }): JSX.Element {
   const isError = copy.title.includes('失败');
   return (
-    <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#EA1F59] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
+    <div className="mb-4 rounded-[8px] border border-[#DCDDDD] border-l-[#FF0061] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] [border-left-width:3px]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
           {isError ? (
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#EA1F59]" aria-hidden />
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#FF0061]" aria-hidden />
           ) : (
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#EA1F59]" aria-hidden />
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#FF0061]" aria-hidden />
           )}
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground/85">{copy.title}</div>
@@ -714,7 +705,7 @@ function StatusNotice({
               type="button"
               variant="outline"
               size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
               onClick={onRetry}
               disabled={loading}
             >
@@ -725,7 +716,7 @@ function StatusNotice({
               type="button"
               variant="outline"
               size="sm"
-              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+              className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
             >
               <a
                 href={supportMailtoHref({
@@ -758,7 +749,7 @@ function HardErrorState({
 }): JSX.Element {
   return (
     <div className="flex flex-col items-center gap-3 rounded-[8px] border border-[#DCDDDD] bg-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <AlertCircle className="h-8 w-8 text-[#EA1F59]" aria-hidden />
+      <AlertCircle className="h-8 w-8 text-[#FF0061]" aria-hidden />
       <div className="text-sm font-medium text-foreground/80">{title}</div>
       <div className="max-w-md text-xs leading-5 text-muted-foreground">{message}</div>
       <div className="mt-1 flex flex-wrap justify-center gap-2">
@@ -770,7 +761,7 @@ function HardErrorState({
           type="button"
           variant="outline"
           size="sm"
-          className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#EA1F59]"
+          className="border-[#DCDDDD] bg-white text-[#595757] hover:border-[#ADADAD] hover:bg-white hover:text-[#FF0061]"
         >
           <a
             href={supportMailtoHref({
@@ -794,13 +785,13 @@ function ItemStatusIcon({ status }: { status: string }): JSX.Element {
     return <AlertCircle className="h-4 w-4 text-[#FFC910]" />;
   }
   if (status === 'failed') {
-    return <XCircle className="h-4 w-4 text-[#EA1F59]" />;
+    return <XCircle className="h-4 w-4 text-[#FF0061]" />;
   }
   if (status === 'cancelled') {
     return <CircleSlash className="h-4 w-4 text-muted-foreground" />;
   }
   if (status === 'running') {
-    return <Loader2 className="h-4 w-4 animate-spin text-[#EA1F59]" />;
+    return <Loader2 className="h-4 w-4 animate-spin text-[#FF0061]" />;
   }
   return <div className="h-4 w-4 rounded-full border border-[#DCDDDD]" />;
 }
@@ -817,7 +808,7 @@ function BatchMetric({
   const toneClass = {
     success: 'border-[#42C0EF]/35 bg-[rgba(66,192,239,0.10)] text-[#1688AA]',
     warning: 'border-[#FFC910]/45 bg-[rgba(255,201,16,0.12)] text-[#8A6A00]',
-    danger: 'border-[#EA1F59]/30 bg-[rgba(234,31,89,0.08)] text-[#EA1F59]',
+    danger: 'border-[#FF0061]/30 bg-[rgba(255,0,97,0.08)] text-[#FF0061]',
     neutral: 'border-[#DCDDDD] bg-[#EFEFEF]/50 text-[#595757]',
     pending: 'border-[#FFC910]/45 bg-[rgba(255,201,16,0.12)] text-[#8A6A00]',
   }[tone];
@@ -835,7 +826,7 @@ function BatchMetric({
 function batchStatusTone(status: string): string {
   if (status === 'completed') return 'text-[#1688AA]';
   if (status === 'partial') return 'text-[#8A6A00]';
-  if (status === 'running') return 'text-[#EA1F59]';
+  if (status === 'running') return 'text-[#FF0061]';
   return 'text-muted-foreground';
 }
 
@@ -843,7 +834,7 @@ function batchProgressFillTone(status: string): string {
   if (status === 'completed') return 'bg-[#42C0EF]';
   if (status === 'partial') return 'bg-[#FFC910]';
   if (status === 'cancelled' || status === 'pending') return 'bg-[#ADADAD]';
-  return 'bg-[#EA1F59]';
+  return 'bg-[#FF0061]';
 }
 
 function fmtDate(input: string | Date | null | undefined): string {

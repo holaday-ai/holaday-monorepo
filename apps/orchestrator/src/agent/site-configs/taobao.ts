@@ -15,8 +15,7 @@ export const TAOBAO_SITE_CONFIG: SiteConfig = {
   siteId: 'taobao',
   domains: ['taobao.com', 'tmall.com', 'tmall.hk'],
   requiresAuth: false,
-  authNote:
-    '淘宝/天猫的下单 / 加购 / 个性化搜索需要登录。浏览公开列表通常不需要。',
+  authNote: '淘宝/天猫的下单 / 加购 / 个性化搜索需要登录。浏览公开列表通常不需要。',
   auth: {
     loginBodyPhrases: [
       '亲，请登录',

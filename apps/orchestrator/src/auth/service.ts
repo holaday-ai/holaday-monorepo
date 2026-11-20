@@ -4,8 +4,9 @@ import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import { accountClosureRequests } from '../db/schema/account-closures.js';
 import { users } from '../db/schema/users.js';
-import { signAccessToken, signAccountClosureRecoveryToken, signMfaChallengeToken } from './jwt.js';
+import { signAccountClosureRecoveryToken, signMfaChallengeToken } from './jwt.js';
 import { hashPassword, verifyPassword } from './password.js';
+import { issueSessionAccessToken } from './sessions.js';
 
 export interface PublicUser {
   externalId: string;
@@ -106,7 +107,7 @@ export class AuthService {
       throw new Error('user disappeared after insert');
     }
 
-    const accessToken = await issueAccessToken(row);
+    const accessToken = await issueAccessToken(this.db, row);
 
     return { user: toPublic(row), accessToken };
   }
@@ -140,7 +141,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after insert');
-    const accessToken = await issueAccessToken(row);
+    const accessToken = await issueAccessToken(this.db, row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -210,7 +211,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after insert');
-    const accessToken = await issueAccessToken(row);
+    const accessToken = await issueAccessToken(this.db, row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -346,7 +347,7 @@ export class AuthService {
       .where(eq(users.externalId, externalId))
       .limit(1);
     if (!row) throw new Error('user disappeared after sms insert');
-    const accessToken = await issueAccessToken(row);
+    const accessToken = await issueAccessToken(this.db, row);
     return { user: toPublic(row), accessToken };
   }
 
@@ -464,9 +465,10 @@ function toPublic(
 }
 
 function issueAccessToken(
+  database: DB,
   row: Pick<typeof users.$inferSelect, 'externalId' | 'plan' | 'authVersion'>,
 ): Promise<string> {
-  return signAccessToken({
+  return issueSessionAccessToken(database, {
     sub: row.externalId,
     plan: row.plan,
     authVersion: row.authVersion,
@@ -539,6 +541,6 @@ export async function issueLoginResult(
   }
   return {
     user: toPublic(row),
-    accessToken: await issueAccessToken(row),
+    accessToken: await issueAccessToken(database, row),
   };
 }

@@ -1,4 +1,3 @@
-import * as recoveryRuntime from './browser-first-cutover-runtime.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -6,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import * as recoveryRuntime from './browser-first-cutover-runtime.mjs';
 
 // SYNTHETIC protected material: no production disk or package proof.
 function syntheticCloudSources(scope) {
@@ -3151,9 +3151,7 @@ test('native display whole tree drift during final pre-dispatch source gate pres
 });
 
 test('cloud stop scope binds the originally reviewed detached handlers and refuses substituted identities', async () => {
-  const { firstCutoverCloudStopScope } = await import(
-    './browser-first-cutover-inventory.mjs'
-  );
+  const { firstCutoverCloudStopScope } = await import('./browser-first-cutover-inventory.mjs');
   assert.equal(typeof firstCutoverCloudStopScope, 'function');
   const snapshot = {
     hostname: 'qa',
@@ -3382,8 +3380,8 @@ for (const fault of [
               if (method === 'getMonitorData') return structuredClone(f.cloudManagers);
               await beforeSend?.();
               calls.push(role);
-              const row = f.cloudManagers.find((m) => m.pm_id === input.pmId),
-                config = row.pm2_env;
+              const row = f.cloudManagers.find((m) => m.pm_id === input.pmId);
+              const config = row.pm2_env;
               if (role === 'headed') {
                 const launch = recoveryRuntime.firstCutoverCloudBrowserRecoveryLaunch({
                   attempt: input.attempt,
@@ -3465,8 +3463,8 @@ for (const fault of [
           readCloudRecovery: async (input) => {
             const role = input.name === 'holaday-vnc' ? 'vnc' : 'headed';
             if (fault === `${role}-proof`) throw Error('QA_NATIVE_UNKNOWN');
-            const row = f.cloudManagers.find((m) => m.pm_id === input.pmId),
-              p = liveCensus().processes.find((p) => p.pid === row.pid);
+            const row = f.cloudManagers.find((m) => m.pm_id === input.pmId);
+            const p = liveCensus().processes.find((p) => p.pid === row.pid);
             const native = {
               purpose: 'cloud-recovery-native-observation',
               name: row.name,

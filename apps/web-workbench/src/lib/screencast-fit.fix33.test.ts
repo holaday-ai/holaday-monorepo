@@ -1,0 +1,132 @@
+import { describe, expect, it } from 'vitest';
+import {
+  framePixelRatio,
+  mapClientPointToBrowserFrame,
+  mapClientPointToScreencast,
+  placeScreencastActual,
+  placeScreencastContainTop,
+} from './screencast-fit';
+
+describe('FIX-33 #4 · the task browser shows the whole page', () => {
+  it('fit keeps the aspect ratio and fills the panel width', () => {
+    const placed = placeScreencastContainTop({
+      hostWidth: 599,
+      hostHeight: 835,
+      sourceWidth: 2560,
+      sourceHeight: 3568,
+    });
+    expect(placed?.width).toBe(599);
+    expect(placed && placed.height <= 835).toBe(true);
+    expect(placed && Math.abs(placed.width / placed.height - 2560 / 3568)).toBeLessThan(0.005);
+  });
+
+  it('100% shows one page CSS pixel per screen pixel', () => {
+    expect(placeScreencastActual({ sourceWidth: 2560, sourceHeight: 1600, pixelRatio: 2 })).toEqual(
+      { width: 1280, height: 800, scale: 0.5, offsetX: 0, offsetY: 0 },
+    );
+    expect(placeScreencastActual({ sourceWidth: 1280, sourceHeight: 800 })?.scale).toBe(1);
+  });
+
+  it('a click on the scaled page maps to the same page point (v1 and v2)', () => {
+    // 1280×800 frame drawn at 0.468 → a 599×374 rect at (681, 97); click at 90% / 50%.
+    const rect = { left: 681, top: 97, width: 599, height: 374.375 };
+    const clientX = rect.left + rect.width * 0.9;
+    const clientY = rect.top + rect.height * 0.5;
+    const v1 = mapClientPointToScreencast({
+      clientX,
+      clientY,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      sourceWidth: 1280,
+      sourceHeight: 800,
+    });
+    expect(v1.x).toBeCloseTo(1152, 0);
+    expect(v1.y).toBeCloseTo(400, 0);
+    const v2 = mapClientPointToBrowserFrame({
+      clientX,
+      clientY,
+      rect: { ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height } as DOMRect,
+      frame: {
+        frameId: 'f',
+        tabId: 't',
+        viewportRevision: 1,
+        cssWidth: 1280,
+        cssHeight: 800,
+        imageWidth: 2560,
+        imageHeight: 1600,
+        pageScaleFactor: 1,
+        offsetTop: 0,
+        scrollOffset: { x: 0, y: 0 },
+        capturedAt: Date.now(),
+      },
+    });
+    expect(v2?.x).toBeCloseTo(1152, 0);
+    expect(v2?.y).toBeCloseTo(400, 0);
+  });
+
+  it('FIX-34: 100% without v2 geometry treats a DPR-2 frame as 2× (drawn at half size)', () => {
+    expect(framePixelRatio(2560, 1280)).toBe(2);
+    expect(framePixelRatio(1280, 1280)).toBe(1);
+    expect(framePixelRatio(1440)).toBe(1);
+    expect(framePixelRatio(2880, 1440)).toBe(2);
+    expect(
+      placeScreencastActual({
+        sourceWidth: 2560,
+        sourceHeight: 1600,
+        pixelRatio: framePixelRatio(2560),
+      })?.width,
+    ).toBe(1280);
+  });
+});
+
+describe('DEPLOY-61 重跑 #2: a frame showing only the top of the layout', () => {
+  it('maps by the rows the image covers (1280x657 image of a 1280x800 page)', () => {
+    const frame = {
+      frameId: 'f',
+      tabId: 't',
+      viewportRevision: 1,
+      cssWidth: 1280,
+      cssHeight: 800,
+      imageWidth: 1280,
+      imageHeight: 657,
+      pageScaleFactor: 1,
+      offsetTop: 0,
+      scrollOffset: { x: 0, y: 0 },
+      capturedAt: 0,
+    };
+    // Google's search box centre (619.5, 352) shown in a 549x282 canvas.
+    const p = mapClientPointToBrowserFrame({
+      clientX: 619.5 * (549 / 1280),
+      clientY: 352 * (282 / 657),
+      rect: { left: 0, top: 0, width: 549, height: 282 },
+      frame,
+    });
+    expect(p?.x).toBeCloseTo(619.5, 0);
+    expect(p?.y).toBeCloseTo(352, 0);
+  });
+
+  it('a frame covering the whole layout maps exactly as before', () => {
+    const frame = {
+      frameId: 'f',
+      tabId: 't',
+      viewportRevision: 1,
+      cssWidth: 1280,
+      cssHeight: 800,
+      imageWidth: 2560,
+      imageHeight: 1600,
+      pageScaleFactor: 1,
+      offsetTop: 0,
+      scrollOffset: { x: 0, y: 0 },
+      capturedAt: 0,
+    };
+    const p = mapClientPointToBrowserFrame({
+      clientX: 50,
+      clientY: 30,
+      rect: { left: 0, top: 0, width: 100, height: 60 },
+      frame,
+    });
+    expect(p).toEqual({ x: 640, y: 400 });
+  });
+});

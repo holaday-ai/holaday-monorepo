@@ -352,6 +352,7 @@ export async function finalizeClaim(
   key: string,
   taskId: string,
   response: unknown,
+  createdReceipt?: { requestHash: string },
 ): Promise<boolean> {
   try {
     const result = await webhookWrite(() =>
@@ -366,15 +367,37 @@ export async function finalizeClaim(
           and(
             eq(webhookIdempotency.userId, userInternalId),
             eq(webhookIdempotency.idempotencyKey, key),
-            // Guard: only flip the placeholder. If another process
-            // already finalized, this UPDATE matches zero rows and
-            // we keep their finalized state.
-            eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
+            // Legacy calls may only flip the placeholder. Recovery calls
+            // may enrich their atomically linked task, with the same body hash.
+            createdReceipt
+              ? and(
+                  eq(webhookIdempotency.requestHash, createdReceipt.requestHash),
+                  eq(webhookIdempotency.taskId, taskId),
+                )
+              : eq(webhookIdempotency.taskId, CLAIM_PLACEHOLDER_TASK_ID),
           ),
         ),
     );
     const affected = readAffectedRows(result);
-    return affected > 0;
+    if (affected > 0) return true;
+    if (!createdReceipt) return false;
+    // MySQL can acknowledge an identical UPDATE with zero changed rows.
+    // Confirm the exact owned response instead of making a known task unknown.
+    const [existing] = await webhookDatabase(() =>
+      deps.db
+        .select({ responseJson: webhookIdempotency.responseJson })
+        .from(webhookIdempotency)
+        .where(
+          and(
+            eq(webhookIdempotency.userId, userInternalId),
+            eq(webhookIdempotency.idempotencyKey, key),
+            eq(webhookIdempotency.requestHash, createdReceipt.requestHash),
+            eq(webhookIdempotency.taskId, taskId),
+          ),
+        )
+        .limit(1),
+    );
+    return !!existing && canonicalize(existing.responseJson) === canonicalize(response);
   } catch (err) {
     deps.logger.warn(
       {

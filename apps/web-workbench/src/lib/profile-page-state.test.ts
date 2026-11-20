@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeProfileSnapshot,
-  profileLoadErrorCopy,
-  profileLoadErrorMessage,
   profileDisplayName,
   profileInitial,
+  profileLoadErrorCopy,
+  profileLoadErrorMessage,
   profilePageSummary,
   profileUpdateMailBody,
 } from './profile-page-state';
@@ -26,9 +26,7 @@ describe('profile page state helpers', () => {
         displayName: { unsafe: true },
       }),
     ).toEqual({ email: '', displayName: '' });
-    expect(() => normalizeProfileSnapshot(null)).toThrow(
-      '个人资料暂时无法读取，请刷新后重试。',
-    );
+    expect(() => normalizeProfileSnapshot(null)).toThrow('个人资料暂时无法读取，请刷新后重试。');
   });
 
   it('falls back from display name to email to unnamed', () => {

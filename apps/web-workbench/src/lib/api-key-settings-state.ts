@@ -44,10 +44,7 @@ export function normalizeApiKeyRows(value: unknown): ApiKeyRowView[] {
   });
 }
 
-export function normalizeFreshApiKey(
-  value: unknown,
-  fallbackName: string,
-): FreshApiKeyView {
+export function normalizeFreshApiKey(value: unknown, fallbackName: string): FreshApiKeyView {
   if (typeof value !== 'object' || value === null) {
     throw new Error('API Key 已创建，但结果暂时无法确认，请刷新后查看列表。');
   }
@@ -64,10 +61,7 @@ export function normalizeFreshApiKey(
   };
 }
 
-export function apiKeySettingsErrorMessage(
-  err: unknown,
-  fallback = '请稍后重试',
-): string {
+export function apiKeySettingsErrorMessage(err: unknown, fallback = '请稍后重试'): string {
   return pageErrorMessage(err, fallback);
 }
 
@@ -84,10 +78,7 @@ export function apiKeySettingsLoadErrorCopy(
   };
 }
 
-export function apiKeySettingsActionError(
-  action: string,
-  err: unknown,
-): string {
+export function apiKeySettingsActionError(action: string, err: unknown): string {
   return `${action}：${apiKeySettingsErrorMessage(err)}`;
 }
 

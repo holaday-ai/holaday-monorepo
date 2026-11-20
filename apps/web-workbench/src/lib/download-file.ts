@@ -1,8 +1,5 @@
 import { getAccessToken } from '@/lib/auth';
-import {
-  isFileUnavailable,
-  markFileUnavailableFromStatus,
-} from '@/lib/unavailable-file-registry';
+import { isFileUnavailable, markFileUnavailableFromStatus } from '@/lib/unavailable-file-registry';
 
 /**
  * Shared authed file download / fetch helpers. Centralised so the
@@ -27,6 +24,7 @@ export interface DownloadResult {
 export function safeDownloadFilename(filename: string): string {
   const trimmed = filename.trim();
   const cleaned = trimmed
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips control characters from download file names by design
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/^[.-]+|-+$/g, '')
@@ -39,6 +37,9 @@ interface BaseInput {
   url: string;
   /** Filename used for the download attribute. */
   filename: string;
+  /** Recheck the original account/view before sending and before delivering bytes. */
+  current?: () => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -46,18 +47,19 @@ interface BaseInput {
  * `ok: true` on success or a status/message tuple on failure so the
  * caller can craft a context-specific toast.
  */
-export async function downloadFileAuthed(
-  input: BaseInput,
-): Promise<DownloadResult> {
-  if (isFileUnavailable(input.url)) {
-    return { ok: false, status: 410, message: 'known unavailable file' };
-  }
-  const token = getAccessToken();
+export async function downloadFileAuthed(input: BaseInput): Promise<DownloadResult> {
   try {
+    input.current?.();
+    if (isFileUnavailable(input.url)) {
+      return { ok: false, status: 410, message: 'known unavailable file' };
+    }
+    const token = getAccessToken();
     const res = await fetch(input.url, {
       cache: 'no-store',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: input.signal,
     });
+    input.current?.();
     if (!res.ok) {
       markFileUnavailableFromStatus(input.url, res.status);
       return {
@@ -67,6 +69,7 @@ export async function downloadFileAuthed(
       };
     }
     const blob = await res.blob();
+    input.current?.();
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objectUrl;
@@ -96,9 +99,7 @@ export interface FetchBlobResult {
   message: string;
 }
 
-export function isUnavailableFileStatus(
-  status: number | null,
-): status is 404 | 410 {
+export function isUnavailableFileStatus(status: number | null): status is 404 | 410 {
   return status === 404 || status === 410;
 }
 
@@ -164,7 +165,7 @@ export function downloadFailureMessage(status: number | null): string {
     return '下载失败，请刷新页面后重试。';
   }
   if (isUnavailableFileStatus(status)) {
-    return '文件已失效，无法下载。';
+    return '文件已不可用';
   }
   return '下载失败，或链接已过期。';
 }

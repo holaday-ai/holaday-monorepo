@@ -1,0 +1,49 @@
+TAP version 13
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: ancestor replay waits for asynchronously loaded pagination control and fails if it never returns
+ok 1 - ancestor replay waits for asynchronously loaded pagination control and fails if it never returns
+  ---
+  duration_ms: 2843.956875
+  type: 'test'
+  ...
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: failed shared controls are retried instead of copied as successful coverage
+ok 2 - failed shared controls are retried instead of copied as successful coverage
+  ---
+  duration_ms: 621.153917
+  type: 'test'
+  ...
+# Subtest: canonical aliases cannot reuse failed, uncovered or P1-obscured coverage
+ok 3 - canonical aliases cannot reuse failed, uncovered or P1-obscured coverage
+  ---
+  duration_ms: 0.303792
+  type: 'test'
+  ...
+# Subtest: initial scene ignores hidden duplicates, waits for delayed visible seed content and rejects absent data
+not ok 4 - initial scene ignores hidden duplicates, waits for delayed visible seed content and rejects absent data
+  ---
+  duration_ms: 1001.423292
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/ui-suite/tests/replay-readiness.test.mjs:41:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    locator.waitFor: Timeout 800ms exceeded.
+    Call log:
+    [2m  - waiting for getByText('每日测试计划').first() to be visible[22m
+    [2m    7 × locator resolved to hidden <aside hidden="">每日测试计划</aside>[22m
+    
+  code: 'ERR_TEST_FAILURE'
+  name: 'TimeoutError'
+  stack: |-
+    waitForSeedContent (/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/ui-suite/lib/interaction.mjs:415:66)
+    TestContext.<anonymous> (/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/ui-suite/tests/replay-readiness.test.mjs:45:9)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5220.862833

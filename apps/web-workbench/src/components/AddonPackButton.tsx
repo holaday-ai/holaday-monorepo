@@ -12,21 +12,28 @@
  *     without polluting the other.
  */
 
-import * as React from 'react';
-import type { AddonPackId } from '@holaday/shared-types';
 import { pageErrorMessage } from '@/lib/page-error-copy';
 import { trpc } from '@/lib/trpc';
+import type { AddonPackId } from '@holaday/shared-types';
+import * as React from 'react';
 
 declare global {
   interface Window {
     paypal?: {
-      Buttons: (config: PayPalButtonsConfig) => { render: (selector: HTMLElement) => Promise<void> };
+      Buttons: (config: PayPalButtonsConfig) => {
+        render: (selector: HTMLElement) => Promise<void>;
+      };
     };
   }
 }
 
 interface PayPalButtonsConfig {
-  style?: { layout?: 'vertical' | 'horizontal'; shape?: 'rect' | 'pill'; color?: string; height?: number };
+  style?: {
+    layout?: 'vertical' | 'horizontal';
+    shape?: 'rect' | 'pill';
+    color?: string;
+    height?: number;
+  };
   createOrder: () => Promise<string>;
   onApprove: (data: { orderID: string }) => Promise<void>;
   onError?: (err: unknown) => void;
@@ -68,13 +75,7 @@ interface Props {
   onError?: (message: string) => void;
 }
 
-export function AddonPackButton({
-  packId,
-  clientId,
-  env,
-  onSuccess,
-  onError,
-}: Props): JSX.Element {
+export function AddonPackButton({ packId, clientId, env, onSuccess, onError }: Props): JSX.Element {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>('loading');
 

@@ -1,11 +1,7 @@
+import { type ToastItem, type ToastKind, enqueueToastItem } from '@/lib/toast-state';
+import { cn } from '@/lib/utils';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import * as React from 'react';
-import {
-  enqueueToastItem,
-  type ToastItem,
-  type ToastKind,
-} from '@/lib/toast-state';
-import { cn } from '@/lib/utils';
 
 interface ToastCtx {
   /**
@@ -29,16 +25,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
   const [items, setItems] = React.useState<ToastItem[]>([]);
   const idRef = React.useRef(0);
 
-  const show = React.useCallback<ToastCtx['show']>(
-    (text, kind = 'info', durationMs = 4000) => {
-      const id = ++idRef.current;
-      setItems((prev) => enqueueToastItem(prev, { id, text, kind }));
-      setTimeout(() => {
-        setItems((prev) => prev.filter((t) => t.id !== id));
-      }, durationMs);
-    },
-    [],
-  );
+  const show = React.useCallback<ToastCtx['show']>((text, kind = 'info', durationMs = 4000) => {
+    const id = ++idRef.current;
+    setItems((prev) => enqueueToastItem(prev, { id, text, kind }));
+    setTimeout(() => {
+      setItems((prev) => prev.filter((t) => t.id !== id));
+    }, durationMs);
+  }, []);
 
   const dismiss = React.useCallback((id: number) => {
     setItems((prev) => prev.filter((t) => t.id !== id));
@@ -63,14 +56,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
             className={cn(
               'pointer-events-auto group relative flex w-full items-start gap-3 overflow-hidden rounded-[8px] border bg-white/96 px-3.5 py-3 text-left text-sm text-foreground shadow-[0_14px_36px_rgba(15,23,42,0.13)] backdrop-blur-md transition-[border-color,box-shadow,transform] animate-fade-in hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(15,23,42,0.16)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 dark:bg-card/95',
               t.kind === 'error'
-                ? 'border-[#EA1F59]/28 dark:border-[#EA1F59]/35'
+                ? 'border-[#FF0061]/28 dark:border-[#FF0061]/35'
                 : 'border-[#DCDDDD] dark:border-white/10',
             )}
           >
             <span
               className={cn(
                 'absolute inset-y-0 left-0 w-0.5',
-                t.kind === 'error' ? 'bg-[#EA1F59]' : 'bg-[#42C0EF]',
+                t.kind === 'error' ? 'bg-[#FF0061]' : 'bg-[#42C0EF]',
               )}
               aria-hidden
             />
@@ -78,7 +71,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
               className={cn(
                 'mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] border bg-white',
                 t.kind === 'error'
-                  ? 'border-[#EA1F59]/25 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/25 text-[#FF0061]'
                   : 'border-[#42C0EF]/30 text-[#1688AA]',
               )}
               aria-hidden
@@ -89,9 +82,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
                 <CheckCircle2 className="h-3.5 w-3.5" />
               )}
             </span>
-            <span className="min-w-0 flex-1 break-words pr-1 leading-5">
-              {t.text}
-            </span>
+            <span className="min-w-0 flex-1 break-words pr-1 leading-5">{t.text}</span>
             <X className="mt-1 h-3.5 w-3.5 shrink-0 text-[#ADADAD] transition-colors group-hover:text-[#595757]" />
           </button>
         ))}

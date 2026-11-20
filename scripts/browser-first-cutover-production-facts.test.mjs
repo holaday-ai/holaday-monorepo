@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 test('default facts compose real writer records and refuse preserved or unattributed database owners', async () => {
@@ -73,6 +73,7 @@ test('default facts compose real writer records and refuse preserved or unattrib
   database.sessionAttribution.processes[0].identityDigest = createHash('sha256')
     .update(JSON.stringify({ bootId: host.bootId, owner: host.processes[0] }))
     .digest('hex');
+  // biome-ignore lint/style/useConst: assigned later in the test, after the reader closures capture it
   let persisted;
   const facts = m.createFirstCutoverProductionFacts(
     {
@@ -187,8 +188,8 @@ for (const fault of [
       inventoryDigest: 'c'.repeat(64),
     };
     const identity = { candidate: binding.candidate, bootId: 'd'.repeat(32) };
-    let now = 1000,
-      calls = 0;
+    let now = 1000;
+    let calls = 0;
     const record = { phase: 'reconciled', identity };
     const ctx = {
       binding,
@@ -381,9 +382,9 @@ for (const observedAtMs of [400, 1000])
       { id: 3, created_at: new Date(700) },
     ].map((r) => ({
       ...r,
-      external_id: 'QA_' + r.id,
+      external_id: `QA_${r.id}`,
       provider: 'wechat',
-      provider_order_id: 'ORDER_' + r.id,
+      provider_order_id: `ORDER_${r.id}`,
       provider_capture_id: null,
       amount_cents: 100,
       currency: 'CNY',

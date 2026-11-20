@@ -20,13 +20,15 @@ const IS_LOCAL = BASE.hostname === '127.0.0.1' || BASE.hostname === 'localhost';
 const LOCAL_HTTP_PORT = Number(process.env.HOLADAY_WEB_QA_HTTP_PORT ?? 3101);
 const LOCAL_WS_PORT = Number(process.env.HOLADAY_WEB_QA_WS_PORT ?? 3102);
 const RUN_ID = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
-const OUTPUT_DIR = process.env.HOLADAY_WEB_QA_OUTPUT_DIR ?? path.join('/tmp', `holaday-web-qa-${RUN_ID}`);
-const CHROME_PATH = process.env.HOLADAY_WEB_QA_CHROME_PATH
-  ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const OUTPUT_DIR =
+  process.env.HOLADAY_WEB_QA_OUTPUT_DIR ?? path.join('/tmp', `holaday-web-qa-${RUN_ID}`);
+const CHROME_PATH =
+  process.env.HOLADAY_WEB_QA_CHROME_PATH ??
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const LOCAL_QA_EMAIL = 'web-ui-qa@holaday.local';
 const LOCAL_QA_PASSWORD = 'holaday-ui-qa-password-2026';
-const QA_DATABASE_URL = process.env.DATABASE_URL
-  ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
+const QA_DATABASE_URL =
+  process.env.DATABASE_URL ?? 'mysql://holaday:holaday-dev@127.0.0.1:3306/holaday';
 const FIXTURE_SUFFIX = randomUUID().replaceAll('-', '').slice(0, 10);
 const BROWSER_FIXTURE_ID = `tsk_browser_qa_${FIXTURE_SUFFIX}`;
 const BROWSER_FIXTURE_TITLE = '浏览器界面验收';
@@ -149,7 +151,7 @@ function portIsOpen(port) {
 }
 
 async function ensureDockerServices() {
-  if (await portIsOpen(3306) && await portIsOpen(6379)) return;
+  if ((await portIsOpen(3306)) && (await portIsOpen(6379))) return;
 
   let docker = commandResult('docker', ['info', '--format', '{{.ServerVersion}}']);
   if (docker.status !== 0 && process.platform === 'darwin') {
@@ -172,7 +174,7 @@ async function ensureDockerServices() {
   }
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    if (await portIsOpen(3306) && await portIsOpen(6379)) return;
+    if ((await portIsOpen(3306)) && (await portIsOpen(6379))) return;
     await sleep(1_000);
   }
   throw new Error('MySQL/Redis did not become ready within 60 seconds.');
@@ -182,30 +184,25 @@ async function ensureLocalStack() {
   if (!IS_LOCAL) return;
 
   const backendHealth = `http://127.0.0.1:${LOCAL_HTTP_PORT}/healthz`;
-  if (!await urlIsReady(backendHealth)) {
+  if (!(await urlIsReady(backendHealth))) {
     log('Preparing local API...');
     await ensureDockerServices();
-    startProcess(
-      'orchestrator',
-      process.execPath,
-      ['--import', 'tsx', 'src/index.ts'],
-      {
-        cwd: ORCHESTRATOR_ROOT,
-        env: {
-          ...process.env,
-          DATABASE_URL: QA_DATABASE_URL,
-          REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
-          JWT_SECRET: process.env.JWT_SECRET ?? 'holaday-local-web-qa-secret-at-least-32-characters',
-          EXECUTOR_MODE: process.env.EXECUTOR_MODE ?? 'auto',
-          HTTP_PORT: String(LOCAL_HTTP_PORT),
-          WS_PORT: String(LOCAL_WS_PORT),
-        },
+    startProcess('orchestrator', process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+      cwd: ORCHESTRATOR_ROOT,
+      env: {
+        ...process.env,
+        DATABASE_URL: QA_DATABASE_URL,
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+        JWT_SECRET: process.env.JWT_SECRET ?? 'holaday-local-web-qa-secret-at-least-32-characters',
+        EXECUTOR_MODE: process.env.EXECUTOR_MODE ?? 'auto',
+        HTTP_PORT: String(LOCAL_HTTP_PORT),
+        WS_PORT: String(LOCAL_WS_PORT),
       },
-    );
+    });
     await waitForUrl(backendHealth, 30_000, 'orchestrator');
   }
 
-  if (!await urlIsReady(BASE_URL)) {
+  if (!(await urlIsReady(BASE_URL))) {
     log('Preparing local web app...');
     startProcess(
       'web-workbench',
@@ -268,10 +265,9 @@ async function createLocalBrowserFixture(email) {
   if (!IS_LOCAL || !email) return null;
   const connection = await mysql.createConnection(QA_DATABASE_URL);
   try {
-    const [users] = await connection.execute(
-      'SELECT id FROM users WHERE email = ? LIMIT 1',
-      [email],
-    );
+    const [users] = await connection.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [
+      email,
+    ]);
     const userId = users[0]?.id;
     if (!userId) throw new Error(`Local QA user was not found: ${email}`);
     await connection.execute(
@@ -292,12 +288,9 @@ async function createLocalBrowserFixture(email) {
         JSON.stringify({}),
       ],
     );
-    const finalScreenshot = fs.readFileSync(
-      path.join(
-        REPO_ROOT,
-        'apps/web-workbench/public/design-ref/video-hero.png',
-      ),
-    ).toString('base64');
+    const finalScreenshot = fs
+      .readFileSync(path.join(REPO_ROOT, 'apps/web-workbench/public/design-ref/video-hero.png'))
+      .toString('base64');
     await connection.execute(
       `INSERT INTO tasks (
         external_id, user_id, status, intent, title, result,
@@ -380,7 +373,12 @@ async function assertDialogFits(page, dialog) {
   if (!box) throw new Error('Dialog has no visible bounding box.');
   const viewport = page.viewportSize();
   if (!viewport) throw new Error('Browser viewport is unavailable.');
-  if (box.x < 0 || box.y < 0 || box.x + box.width > viewport.width || box.y + box.height > viewport.height) {
+  if (
+    box.x < 0 ||
+    box.y < 0 ||
+    box.x + box.width > viewport.width ||
+    box.y + box.height > viewport.height
+  ) {
     throw new Error(`Dialog overflows viewport ${viewport.width}x${viewport.height}.`);
   }
 }
@@ -390,20 +388,27 @@ async function assertDialogImagesReady(dialog) {
   const count = await images.count();
   if (count === 0) return;
   await images.evaluateAll(async (nodes) => {
-    await Promise.all(nodes.map(async (node) => {
-      if (!(node instanceof HTMLImageElement)) return;
-      if (!node.complete) {
-        await new Promise((resolve) => {
-          node.addEventListener('load', resolve, { once: true });
-          node.addEventListener('error', resolve, { once: true });
-        });
-      }
-      await node.decode().catch(() => undefined);
-    }));
+    await Promise.all(
+      nodes.map(async (node) => {
+        if (!(node instanceof HTMLImageElement)) return;
+        if (!node.complete) {
+          await new Promise((resolve) => {
+            node.addEventListener('load', resolve, { once: true });
+            node.addEventListener('error', resolve, { once: true });
+          });
+        }
+        await node.decode().catch(() => undefined);
+      }),
+    );
   });
-  const broken = await images.evaluateAll((nodes) => nodes.filter((node) => (
-    node instanceof HTMLImageElement && (node.naturalWidth === 0 || node.naturalHeight === 0)
-  )).map((node) => node.getAttribute('src')));
+  const broken = await images.evaluateAll((nodes) =>
+    nodes
+      .filter(
+        (node) =>
+          node instanceof HTMLImageElement && (node.naturalWidth === 0 || node.naturalHeight === 0),
+      )
+      .map((node) => node.getAttribute('src')),
+  );
   if (broken.length > 0) {
     throw new Error(`Dialog has ${broken.length} broken preview image(s): ${broken.join(', ')}`);
   }
@@ -428,13 +433,15 @@ async function exerciseRoute(page, route, viewport) {
   if (route.name === 'home') {
     const globalBrowserEntry = page.getByRole('button', { name: '浏览器工作区' });
     await globalBrowserEntry.waitFor({ state: 'visible' });
-    if (await globalBrowserEntry.locator('svg').count() === 0) {
+    if ((await globalBrowserEntry.locator('svg').count()) === 0) {
       throw new Error('The global browser workspace entry is missing its panel icon.');
     }
     await globalBrowserEntry.click();
     const idleBrowserWorkspace = page.getByRole('region', { name: '浏览器工作区' });
     await idleBrowserWorkspace.waitFor({ state: 'visible' });
-    await idleBrowserWorkspace.getByText('输入网址开始浏览', { exact: true }).waitFor({ state: 'visible' });
+    await idleBrowserWorkspace
+      .getByText('输入网址开始浏览', { exact: true })
+      .waitFor({ state: 'visible' });
     await idleBrowserWorkspace.getByLabel('浏览器工具栏').waitFor({ state: 'visible' });
     const browserLaunchBar = idleBrowserWorkspace.getByLabel(
       '浏览器启动栏 (输入网址或搜索内容，Enter 开始)',
@@ -469,9 +476,7 @@ async function exerciseRoute(page, route, viewport) {
         ),
       );
       const suggestionRows = new Set(
-        suggestionBoxes
-          .filter(Boolean)
-          .map((box) => Math.round(box.y / 8) * 8),
+        suggestionBoxes.filter(Boolean).map((box) => Math.round(box.y / 8) * 8),
       );
       if (suggestionBoxes.some((box) => !box || box.width < 100) || suggestionRows.size > 2) {
         throw new Error(
@@ -521,7 +526,7 @@ async function exerciseRoute(page, route, viewport) {
 
     const browserEntry = page.getByRole('button', { name: '打开网页' });
     await browserEntry.waitFor({ state: 'visible' });
-    if (await browserEntry.locator('svg').count() === 0) {
+    if ((await browserEntry.locator('svg').count()) === 0) {
       throw new Error('The 打开网页 entry is missing its browser icon.');
     }
     evidence.push('打开网页入口及图标可见');
@@ -549,10 +554,21 @@ async function exerciseRoute(page, route, viewport) {
       await page
         .getByLabel('浏览器目标地址 (正在打开，尚未确认到达)')
         .waitFor({ state: 'visible' });
-      if (await page.getByRole('alert').filter({ hasText: '需要登录' }).isVisible().catch(() => false)) {
+      if (
+        await page
+          .getByRole('alert')
+          .filter({ hasText: '需要登录' })
+          .isVisible()
+          .catch(() => false)
+      ) {
         throw new Error('The awaiting-user banner overlaps the fullscreen browser surface.');
       }
-      if (await page.getByRole('button', { name: '收起浏览器' }).isVisible().catch(() => false)) {
+      if (
+        await page
+          .getByRole('button', { name: '收起浏览器' })
+          .isVisible()
+          .catch(() => false)
+      ) {
         throw new Error('The collapsed-panel handle remains visible in fullscreen.');
       }
       const fullscreenShot = path.join(
@@ -581,7 +597,12 @@ async function exerciseRoute(page, route, viewport) {
       }
       await taskBrowserButton.click();
       await selectedBrowserPanel.waitFor({ state: 'visible' });
-      if (await selectedBrowserPanel.getByText('输入网址开始浏览', { exact: true }).isVisible().catch(() => false)) {
+      if (
+        await selectedBrowserPanel
+          .getByText('输入网址开始浏览', { exact: true })
+          .isVisible()
+          .catch(() => false)
+      ) {
         throw new Error('Desktop selected browser task reopened as the empty global workspace.');
       }
       evidence.push(
@@ -593,17 +614,29 @@ async function exerciseRoute(page, route, viewport) {
   if (viewport.name !== 'desktop') return evidence;
 
   if (route.name === 'video') {
-    const modelShot = path.join(OUTPUT_DIR, screenshotName(route.name, viewport.name, 'model-dialog'));
+    const modelShot = path.join(
+      OUTPUT_DIR,
+      screenshotName(route.name, viewport.name, 'model-dialog'),
+    );
     await openPicker(page, 'AI 模型', '选择视频模型', '关闭模型选择', modelShot);
-    const styleShot = path.join(OUTPUT_DIR, screenshotName(route.name, viewport.name, 'style-dialog'));
+    const styleShot = path.join(
+      OUTPUT_DIR,
+      screenshotName(route.name, viewport.name, 'style-dialog'),
+    );
     await openPicker(page, '风格样式', '选择氛围', '关闭风格选择', styleShot);
     evidence.push('视频模型和风格弹窗可打开、关闭且不越界');
   }
 
   if (route.name === 'image') {
-    const modelShot = path.join(OUTPUT_DIR, screenshotName(route.name, viewport.name, 'model-dialog'));
+    const modelShot = path.join(
+      OUTPUT_DIR,
+      screenshotName(route.name, viewport.name, 'model-dialog'),
+    );
     await openPicker(page, 'AI 模型', '选择图片模型', '关闭模型选择', modelShot);
-    const styleShot = path.join(OUTPUT_DIR, screenshotName(route.name, viewport.name, 'style-dialog'));
+    const styleShot = path.join(
+      OUTPUT_DIR,
+      screenshotName(route.name, viewport.name, 'style-dialog'),
+    );
     await openPicker(page, '风格样式', '选择图片风格', '关闭图片风格选择', styleShot);
     evidence.push('图片模型和风格弹窗可打开、关闭且不越界');
   }
@@ -625,10 +658,7 @@ async function checkRoute(browser, token, route, viewport) {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on('console', (message) => {
-    if (
-      message.type() === 'error' &&
-      !isExpectedSyntheticBrowserSocketError(message.text())
-    ) {
+    if (message.type() === 'error' && !isExpectedSyntheticBrowserSocketError(message.text())) {
       consoleErrors.push(message.text());
     }
   });
@@ -662,17 +692,21 @@ async function checkRoute(browser, token, route, viewport) {
     const bodyText = (await page.locator('body').innerText()).trim();
     if (bodyText.length < 40) throw new Error('Page rendered as an empty shell.');
 
-    const overlay = page.locator('[data-nextjs-dialog], .vite-error-overlay, #webpack-dev-server-client-overlay');
+    const overlay = page.locator(
+      '[data-nextjs-dialog], .vite-error-overlay, #webpack-dev-server-client-overlay',
+    );
     if (await overlay.count()) throw new Error('Framework error overlay is visible.');
 
     const layout = await page.evaluate(() => ({
-      horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      horizontalOverflow:
+        document.documentElement.scrollWidth - document.documentElement.clientWidth,
       fontStatus: document.fonts.status,
     }));
     if (layout.horizontalOverflow > 1) {
       throw new Error(`Document has ${layout.horizontalOverflow}px horizontal overflow.`);
     }
-    if (layout.fontStatus !== 'loaded') throw new Error(`Fonts are not ready: ${layout.fontStatus}.`);
+    if (layout.fontStatus !== 'loaded')
+      throw new Error(`Fonts are not ready: ${layout.fontStatus}.`);
 
     if (viewport.width <= 768) {
       const headingBox = await page.locator('h1').first().boundingBox();
@@ -729,10 +763,7 @@ async function checkResponsiveBrowserFixture(browser, token, viewport) {
   const page = await context.newPage();
   const consoleErrors = [];
   page.on('console', (message) => {
-    if (
-      message.type() === 'error' &&
-      !isExpectedSyntheticBrowserSocketError(message.text())
-    ) {
+    if (message.type() === 'error' && !isExpectedSyntheticBrowserSocketError(message.text())) {
       consoleErrors.push(message.text());
     }
   });
@@ -785,9 +816,7 @@ async function checkResponsiveBrowserFixture(browser, token, viewport) {
       );
     }
     if (viewport.width >= 768) {
-      const taskWorkspaceBox = await page
-        .getByTestId('workbench-main-panel')
-        .boundingBox();
+      const taskWorkspaceBox = await page.getByTestId('workbench-main-panel').boundingBox();
       if (!taskWorkspaceBox) {
         throw new Error('Task workspace has no visible bounds beside the browser panel.');
       }
@@ -823,13 +852,19 @@ async function checkResponsiveBrowserFixture(browser, token, viewport) {
         throw new Error('Desktop account dock extends below the reserved task header band.');
       }
     }
-    const reopenButton = viewport.width <= 768
-      ? page.getByRole('button', { name: '浏览器工作区' }).first()
-      : page.getByRole('button', { name: '需要登录' }).first();
+    const reopenButton =
+      viewport.width <= 768
+        ? page.getByRole('button', { name: '浏览器工作区' }).first()
+        : page.getByRole('button', { name: '需要登录' }).first();
     await reopenButton.click();
     await panel.waitFor({ state: 'visible' });
     await page.waitForTimeout(350);
-    if (await panel.getByText('输入网址开始浏览', { exact: true }).isVisible().catch(() => false)) {
+    if (
+      await panel
+        .getByText('输入网址开始浏览', { exact: true })
+        .isVisible()
+        .catch(() => false)
+    ) {
       throw new Error('Selected browser task reopened as the empty global workspace.');
     }
 
@@ -843,10 +878,7 @@ async function checkResponsiveBrowserFixture(browser, token, viewport) {
       throw new Error(`Console emitted ${consoleErrors.length} error(s).`);
     }
 
-    const screenshotPath = path.join(
-      OUTPUT_DIR,
-      screenshotName('browser-panel', viewport.name),
-    );
+    const screenshotPath = path.join(OUTPUT_DIR, screenshotName('browser-panel', viewport.name));
     await page.screenshot({ path: screenshotPath, fullPage: false });
     result.screenshot = screenshotPath;
     result.evidence = ['浏览器抽屉自动打开、收起和重新打开均可用'];
@@ -893,10 +925,8 @@ async function checkMobileTerminalEvidence(browser, token) {
       timeout: 30_000,
     });
     const panel = page.getByRole('region', { name: '浏览器工作区' });
-    if (!await panel.isVisible().catch(() => false)) {
-      await page
-        .getByRole('button', { name: '浏览器工作区', exact: true })
-        .click();
+    if (!(await panel.isVisible().catch(() => false))) {
+      await page.getByRole('button', { name: '浏览器工作区', exact: true }).click();
     }
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
     const evidenceTitle = panel.getByText('终态证据', { exact: true });
@@ -964,7 +994,7 @@ async function checkInlineTerminalEvidence(browser, token, viewport) {
       timeout: 30_000,
     });
     const panel = page.getByRole('region', { name: '浏览器工作区' });
-    if (!await panel.isVisible().catch(() => false)) {
+    if (!(await panel.isVisible().catch(() => false))) {
       const taskToggle = page.getByRole('button', {
         name: '查看浏览器',
         exact: true,
@@ -972,9 +1002,7 @@ async function checkInlineTerminalEvidence(browser, token, viewport) {
       if (await taskToggle.isVisible().catch(() => false)) {
         await taskToggle.click();
       } else {
-        await page
-          .getByRole('button', { name: '浏览器工作区', exact: true })
-          .click();
+        await page.getByRole('button', { name: '浏览器工作区', exact: true }).click();
       }
     }
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
@@ -1053,7 +1081,9 @@ async function checkInlineTerminalEvidence(browser, token, viewport) {
     );
     await page.screenshot({ path: screenshotPath, fullPage: false });
     result.screenshot = screenshotPath;
-    result.evidence = ['任务区与浏览器同平面，窄栏宽度不少于 360px，横向终态截图使用紧凑预览并提供全屏查看'];
+    result.evidence = [
+      '任务区与浏览器同平面，窄栏宽度不少于 360px，横向终态截图使用紧凑预览并提供全屏查看',
+    ];
     result.status = 'passed';
     return result;
   } catch (error) {
@@ -1074,7 +1104,9 @@ async function main() {
   log(`Holaday web QA: ${BASE_URL}`);
   log(`Artifacts: ${OUTPUT_DIR}`);
   const reportMetadata = buildQaReportMetadata({ isLocal: IS_LOCAL });
-  log('Scope: Chrome UI and fixture rendering only; live managed-browser egress is a separate release gate.');
+  log(
+    'Scope: Chrome UI and fixture rendering only; live managed-browser egress is a separate release gate.',
+  );
   if (IS_LOCAL) {
     assertSafeQaDatabase(QA_DATABASE_URL, {
       allowRemote: process.env.QA_ALLOW_REMOTE_DB === 'true',
@@ -1096,23 +1128,26 @@ async function main() {
       for (const route of ROUTES) {
         const result = await checkRoute(browser, auth.token, route, viewport);
         results.push(result);
-        log(`${result.status === 'passed' ? 'PASS' : 'FAIL'} ${result.size} ${result.route}${result.error ? ` - ${result.error}` : ''}`);
+        log(
+          `${result.status === 'passed' ? 'PASS' : 'FAIL'} ${result.size} ${result.route}${result.error ? ` - ${result.error}` : ''}`,
+        );
       }
     }
     if (IS_LOCAL) {
       for (const viewport of VIEWPORTS.filter((item) => item.name !== 'desktop')) {
         const result = await checkResponsiveBrowserFixture(browser, auth.token, viewport);
         results.push(result);
-        log(`${result.status === 'passed' ? 'PASS' : 'FAIL'} ${result.size} ${result.route}${result.error ? ` - ${result.error}` : ''}`);
+        log(
+          `${result.status === 'passed' ? 'PASS' : 'FAIL'} ${result.size} ${result.route}${result.error ? ` - ${result.error}` : ''}`,
+        );
       }
-      const terminalEvidenceResult = await checkMobileTerminalEvidence(
-        browser,
-        auth.token,
-      );
+      const terminalEvidenceResult = await checkMobileTerminalEvidence(browser, auth.token);
       results.push(terminalEvidenceResult);
-      log(`${terminalEvidenceResult.status === 'passed' ? 'PASS' : 'FAIL'} ${terminalEvidenceResult.size} ${terminalEvidenceResult.route}${terminalEvidenceResult.error ? ` - ${terminalEvidenceResult.error}` : ''}`);
-      for (const viewport of VIEWPORTS.filter((item) =>
-        item.name === 'compact-desktop' || item.name === 'tablet'
+      log(
+        `${terminalEvidenceResult.status === 'passed' ? 'PASS' : 'FAIL'} ${terminalEvidenceResult.size} ${terminalEvidenceResult.route}${terminalEvidenceResult.error ? ` - ${terminalEvidenceResult.error}` : ''}`,
+      );
+      for (const viewport of VIEWPORTS.filter(
+        (item) => item.name === 'compact-desktop' || item.name === 'tablet',
       )) {
         const inlineTerminalEvidenceResult = await checkInlineTerminalEvidence(
           browser,
@@ -1120,7 +1155,9 @@ async function main() {
           viewport,
         );
         results.push(inlineTerminalEvidenceResult);
-        log(`${inlineTerminalEvidenceResult.status === 'passed' ? 'PASS' : 'FAIL'} ${inlineTerminalEvidenceResult.size} ${inlineTerminalEvidenceResult.route}${inlineTerminalEvidenceResult.error ? ` - ${inlineTerminalEvidenceResult.error}` : ''}`);
+        log(
+          `${inlineTerminalEvidenceResult.status === 'passed' ? 'PASS' : 'FAIL'} ${inlineTerminalEvidenceResult.size} ${inlineTerminalEvidenceResult.route}${inlineTerminalEvidenceResult.error ? ` - ${inlineTerminalEvidenceResult.error}` : ''}`,
+        );
       }
     }
   } finally {
@@ -1132,12 +1169,16 @@ async function main() {
   const failures = results.filter((result) => result.status !== 'passed');
   await fsp.writeFile(
     reportPath,
-    `${JSON.stringify({
-      baseUrl: BASE_URL,
-      generatedAt: new Date().toISOString(),
-      ...reportMetadata,
-      results,
-    }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        baseUrl: BASE_URL,
+        generatedAt: new Date().toISOString(),
+        ...reportMetadata,
+        results,
+      },
+      null,
+      2,
+    )}\n`,
   );
   log(`Report: ${reportPath}`);
   if (failures.length > 0) {
@@ -1149,7 +1190,9 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  process.stderr.write(`Web QA failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(
+    `Web QA failed: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 } finally {
   stopStartedProcesses();

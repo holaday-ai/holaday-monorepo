@@ -1,14 +1,14 @@
-import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { pino } from 'pino';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { pino } from 'pino';
-import { OrdinaryMaintenance, type MaintenanceRecord } from '../execution/ordinary-maintenance.js';
-import { createScreencastProxy } from './screencast-proxy.js';
-import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
-import type { BrowserInstance } from '../browser-pool/types.js';
 import type { BrowserPool } from '../browser-pool/index.js';
+import type { BrowserInstance } from '../browser-pool/types.js';
+import { type MaintenanceRecord, OrdinaryMaintenance } from '../execution/ordinary-maintenance.js';
+import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
+import { createScreencastProxy } from './screencast-proxy.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -42,9 +42,9 @@ async function maintenance() {
   return m;
 }
 it('tracks pending upgrade auth and rechecks maintenance before choosing a browser', async () => {
-  const m = await maintenance(),
-    held = deferred(),
-    entered = deferred();
+  const m = await maintenance();
+  const held = deferred();
+  const entered = deferred();
   const peek = vi.fn(() => null);
   const proxy = createScreencastProxy({
     pool: { peek } as unknown as BrowserPool,
@@ -63,7 +63,7 @@ it('tracks pending upgrade auth and rechecks maintenance before choosing a brows
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('test address');
   const socket = new WebSocket(
-    'ws://127.0.0.1:' + address.port + '/screencast-ws/tsk_test?token=synthetic',
+    `ws://127.0.0.1:${address.port}/screencast-ws/tsk_test?token=synthetic`,
   );
   socket.on('error', () => {});
   const refused = new Promise<number>((resolve) =>
@@ -88,10 +88,10 @@ it('tracks pending upgrade auth and rechecks maintenance before choosing a brows
   expect(peek).not.toHaveBeenCalled();
   await m.waitForIdle(1000);
 });
-it('keeps an already-dispatched input owned but refuses later input and queued viewport', async () => {
-  const m = await maintenance(),
-    held = deferred(),
-    entered = deferred();
+it('keeps an already-dispatched input owned but refuses later input; a viewport message is ignored', async () => {
+  const m = await maintenance();
+  const held = deferred();
+  const entered = deferred();
   const instance = {
     taskId: 'tsk_maintenance',
     userId: 'usr_synthetic',
@@ -108,14 +108,10 @@ it('keeps an already-dispatched input owned but refuses later input and queued v
     await held.promise;
   });
   await bridge.attach({ handle });
-  binding.control.requestHuman();
-  const parked = binding.control.checkpoint(async () => {});
-  const token = binding.control.snapshot().lease ?? '';
   const send = () =>
     bridge.receive(
       JSON.stringify({
         type: 'input',
-        controlLease: token,
         payload: { type: 'insertText', text: 'synthetic' },
       }),
     );
@@ -124,7 +120,7 @@ it('keeps an already-dispatched input owned but refuses later input and queued v
   try {
     expect(m.snapshot().counts.active).toBeGreaterThan(0);
     await m.beginMaintenance();
-    await expect(send()).rejects.toThrow();
+    await expect(send()).rejects.toThrow('MAINTENANCE_INPUT_CLOSED');
     await bridge.receive(
       JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 800, height: 600 } }),
     );
@@ -132,8 +128,6 @@ it('keeps an already-dispatched input owned but refuses later input and queued v
   } finally {
     held.resolve();
     await input;
-    binding.control.returnToAgent(token);
-    await parked;
     binding.finish();
   }
   await m.waitForIdle(1000);

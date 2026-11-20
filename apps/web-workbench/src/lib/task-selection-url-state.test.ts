@@ -35,4 +35,3 @@ describe('task selection URL state', () => {
     ).toBe(false);
   });
 });
-

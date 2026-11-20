@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildDownloadUrl, DownloadManager, MAX_DOWNLOAD_BYTES } from './download-manager.js';
-import type { FileService } from './file-service.js';
 import type { TaskFile } from '../db/schema/task-files.js';
+import { DownloadManager, MAX_DOWNLOAD_BYTES, buildDownloadUrl } from './download-manager.js';
+import type { FileService } from './file-service.js';
 
 function fakeFileService(storedFilename = 'shot.png'): {
   service: FileService;
@@ -10,35 +10,37 @@ function fakeFileService(storedFilename = 'shot.png'): {
 } {
   const calls: Array<{ buffer: Buffer; filename: string; mimetype: string }> = [];
   const service = {
-    storeOutput: vi.fn(async (opts: {
-      buffer: Buffer;
-      filename: string;
-      mimetype: string;
-      userIdInternal: number;
-      userExternalId: string;
-      taskIdInternal: number;
-    }): Promise<TaskFile> => {
-      calls.push({
-        buffer: opts.buffer,
-        filename: opts.filename,
-        mimetype: opts.mimetype,
-      });
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      return {
-        id: 42,
-        externalId: 'file_test_abc',
-        userId: opts.userIdInternal,
-        taskId: opts.taskIdInternal,
-        kind: 'output',
-        filename: storedFilename,
-        mimetype: opts.mimetype,
-        sizeBytes: opts.buffer.length,
-        storagePath: `/tmp/${opts.userExternalId}/output/file_test_abc/${storedFilename}`,
-        status: 'active',
-        createdAt: new Date(),
-        expiresAt,
-      } as TaskFile;
-    }),
+    storeOutput: vi.fn(
+      async (opts: {
+        buffer: Buffer;
+        filename: string;
+        mimetype: string;
+        userIdInternal: number;
+        userExternalId: string;
+        taskIdInternal: number;
+      }): Promise<TaskFile> => {
+        calls.push({
+          buffer: opts.buffer,
+          filename: opts.filename,
+          mimetype: opts.mimetype,
+        });
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        return {
+          id: 42,
+          externalId: 'file_test_abc',
+          userId: opts.userIdInternal,
+          taskId: opts.taskIdInternal,
+          kind: 'output',
+          filename: storedFilename,
+          mimetype: opts.mimetype,
+          sizeBytes: opts.buffer.length,
+          storagePath: `/tmp/${opts.userExternalId}/output/file_test_abc/${storedFilename}`,
+          status: 'active',
+          createdAt: new Date(),
+          expiresAt,
+        } as TaskFile;
+      },
+    ),
   } as unknown as FileService;
   return { service, calls };
 }

@@ -10,18 +10,12 @@ describe('lazy load error helpers', () => {
         ),
       ),
     ).toBe(true);
-    expect(
-      isLazyLoadError('Importing a module script failed.'),
-    ).toBe(true);
+    expect(isLazyLoadError('Importing a module script failed.')).toBe(true);
   });
 
   it('detects legacy chunk load failures', () => {
-    expect(isLazyLoadError(new Error('ChunkLoadError: Loading chunk 42 failed.'))).toBe(
-      true,
-    );
-    expect(isLazyLoadError({ message: 'error loading dynamically imported module' })).toBe(
-      true,
-    );
+    expect(isLazyLoadError(new Error('ChunkLoadError: Loading chunk 42 failed.'))).toBe(true);
+    expect(isLazyLoadError({ message: 'error loading dynamically imported module' })).toBe(true);
   });
 
   it('keeps unrelated render errors generic', () => {
@@ -36,10 +30,7 @@ describe('lazy load error helpers', () => {
 
   it('uses update-specific copy for chunk failures', () => {
     expect(
-      lazyLoadErrorCopy(
-        new Error('Failed to fetch dynamically imported module'),
-        '任务详情',
-      ),
+      lazyLoadErrorCopy(new Error('Failed to fetch dynamically imported module'), '任务详情'),
     ).toEqual({
       kind: 'stale_version',
       title: '任务详情资源已更新',

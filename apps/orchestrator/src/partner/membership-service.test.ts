@@ -54,11 +54,16 @@ class FakeMembershipDb {
               this.orderByTexts.push(orderByText);
               return chain;
             },
-            limit: async (count: number) => this.selectRows(predicateText, orderByText).slice(0, count),
+            limit: async (count: number) =>
+              this.selectRows(predicateText, orderByText).slice(0, count),
             then: (
               onFulfilled?: ((value: PartnerMembership[]) => unknown) | null,
               onRejected?: ((reason: unknown) => unknown) | null,
-            ) => Promise.resolve(this.selectRows(predicateText, orderByText)).then(onFulfilled, onRejected),
+            ) =>
+              Promise.resolve(this.selectRows(predicateText, orderByText)).then(
+                onFulfilled,
+                onRejected,
+              ),
           };
           return chain;
         },
@@ -71,8 +76,8 @@ class FakeMembershipDb {
     const sourcePaymentExternalIds = rows.flatMap((row) =>
       row.sourcePaymentExternalId === null ? [] : [row.sourcePaymentExternalId],
     );
-    const matchingSourcePaymentExternalId = sourcePaymentExternalIds.find((sourcePaymentExternalId) =>
-      predicateText.includes(sourcePaymentExternalId),
+    const matchingSourcePaymentExternalId = sourcePaymentExternalIds.find(
+      (sourcePaymentExternalId) => predicateText.includes(sourcePaymentExternalId),
     );
     const matchingExternalId = rows
       .map((row) => row.externalId)
@@ -202,7 +207,9 @@ describe('PartnerMembershipService', () => {
     ]);
     const service = new PartnerMembershipService(fakeDb.asDB());
 
-    await expect(service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z'))).resolves.toBeNull();
+    await expect(
+      service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z')),
+    ).resolves.toBeNull();
   });
 
   it('does not treat a future-dated active row as active', async () => {
@@ -216,7 +223,9 @@ describe('PartnerMembershipService', () => {
     ]);
     const service = new PartnerMembershipService(fakeDb.asDB());
 
-    await expect(service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z'))).resolves.toBeNull();
+    await expect(
+      service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z')),
+    ).resolves.toBeNull();
   });
 
   it('does not treat a row expiring exactly now as active', async () => {
@@ -230,7 +239,9 @@ describe('PartnerMembershipService', () => {
     ]);
     const service = new PartnerMembershipService(fakeDb.asDB());
 
-    await expect(service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z'))).resolves.toBeNull();
+    await expect(
+      service.getActiveMembership(123, new Date('2026-07-02T00:00:00.000Z')),
+    ).resolves.toBeNull();
   });
 
   it('treats a row starting exactly now as active', async () => {
@@ -270,9 +281,11 @@ describe('PartnerMembershipService', () => {
     });
     expect(membership.externalId).toMatch(/^pay_/);
     expect(fakeDb.insertedValues).toHaveLength(1);
-    expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('source_payment_external_id'))).toBe(
-      true,
-    );
+    expect(
+      fakeDb.wherePredicateTexts.some((predicateText) =>
+        predicateText.includes('source_payment_external_id'),
+      ),
+    ).toBe(true);
   });
 
   it('returns an existing membership for the same source payment and same user without inserting', async () => {

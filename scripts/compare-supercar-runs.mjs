@@ -121,7 +121,7 @@ function main() {
   let stable = 0;
 
   const lines = [];
-  lines.push(`# Supercar Benchmark Comparison`);
+  lines.push('# Supercar Benchmark Comparison');
   lines.push('');
   lines.push(`New run: \`${jsonlPath}\``);
   lines.push('');
@@ -132,7 +132,9 @@ function main() {
     const base = BASELINE[id];
     const row = rows[id];
     if (!row) {
-      lines.push(`| ${id} | ${TASK_LABEL[id]} | ${statusEmoji(base.status)} ${base.status} | — | skipped | — | — | (no row in new run) |`);
+      lines.push(
+        `| ${id} | ${TASK_LABEL[id]} | ${statusEmoji(base.status)} ${base.status} | — | skipped | — | — | (no row in new run) |`,
+      );
       continue;
     }
     const delta = outcomeDelta(base.status, row.status);

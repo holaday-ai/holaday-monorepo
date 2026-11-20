@@ -1,17 +1,22 @@
-import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from 'pino';
+import { describe, expect, it, vi } from 'vitest';
+import { GeminiImageError } from './gemini-image-client.js';
 import {
-  runImageTask,
-  buildImagePrompt,
   type ImageAttachment,
   type SaveImageFn,
+  buildImagePrompt,
+  runImageTask,
 } from './image-runner.js';
-import { GeminiImageError } from './gemini-image-client.js';
 
 function fakeLogger(): Logger {
   const noop = vi.fn();
   return {
-    info: noop, warn: noop, debug: noop, error: noop, fatal: noop, trace: noop,
+    info: noop,
+    warn: noop,
+    debug: noop,
+    error: noop,
+    fatal: noop,
+    trace: noop,
     child: () => fakeLogger(),
   } as unknown as Logger;
 }
@@ -122,9 +127,7 @@ describe('runImageTask', () => {
         images: [{ buffer: Buffer.from('FIRST'), mimeType: 'image/png' }],
         model: 'gemini-3.1-flash-image',
       })
-      .mockRejectedValueOnce(
-        new GeminiImageError('request timed out', 'timeout'),
-      );
+      .mockRejectedValueOnce(new GeminiImageError('request timed out', 'timeout'));
     const saveOne = vi.fn(async (_img, index: number) => attachmentFor(index));
 
     const out = await runImageTask({
@@ -300,12 +303,10 @@ describe('runImageTask', () => {
   });
 
   it('does not deliver a locked-subject image that still fails after regeneration', async () => {
-    const generate = vi
-      .fn()
-      .mockResolvedValue({
-        images: [{ buffer: Buffer.from('WRONG'), mimeType: 'image/png' }],
-        model: 'gemini-3.1-flash-image',
-      });
+    const generate = vi.fn().mockResolvedValue({
+      images: [{ buffer: Buffer.from('WRONG'), mimeType: 'image/png' }],
+      model: 'gemini-3.1-flash-image',
+    });
     const verifySubject = vi.fn().mockResolvedValue({
       status: 'fail',
       confidence: 0.9,
@@ -396,9 +397,11 @@ describe('runImageTask', () => {
   });
 
   it('maps a content block to a friendly Chinese reason', async () => {
-    const generate = vi.fn().mockRejectedValue(
-      new GeminiImageError('blocked', 'blocked', undefined, 'PROHIBITED_CONTENT'),
-    );
+    const generate = vi
+      .fn()
+      .mockRejectedValue(
+        new GeminiImageError('blocked', 'blocked', undefined, 'PROHIBITED_CONTENT'),
+      );
     const out = await runImageTask({
       intent: '画一些违规内容',
       apiKey: 'k',
@@ -411,9 +414,9 @@ describe('runImageTask', () => {
   });
 
   it('maps a missing api key to an admin-facing reason', async () => {
-    const generate = vi.fn().mockRejectedValue(
-      new GeminiImageError('GEMINI_API_KEY not configured', 'no_api_key'),
-    );
+    const generate = vi
+      .fn()
+      .mockRejectedValue(new GeminiImageError('GEMINI_API_KEY not configured', 'no_api_key'));
     const out = await runImageTask({
       intent: '画一只猫',
       apiKey: '',
@@ -452,9 +455,7 @@ describe('runImageTask', () => {
   });
 
   it('does NOT degrade when NB2 itself fails (no Pro to fall back from)', async () => {
-    const generate = vi
-      .fn()
-      .mockRejectedValue(new GeminiImageError('overloaded', 'http', 503));
+    const generate = vi.fn().mockRejectedValue(new GeminiImageError('overloaded', 'http', 503));
     const out = await runImageTask({
       intent: '画一只猫', // NB2 route
       apiKey: 'k',

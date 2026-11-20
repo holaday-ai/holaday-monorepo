@@ -10,8 +10,8 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
-import { scheduledTasks } from './scheduled-tasks.js';
 import { plannedTasks } from './planned-tasks.js';
+import { scheduledTasks } from './scheduled-tasks.js';
 import { users } from './users.js';
 
 /**

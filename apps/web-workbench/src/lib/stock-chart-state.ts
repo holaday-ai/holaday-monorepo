@@ -55,11 +55,7 @@ export function stockChartAxisTicks(
     ];
   }
   const last = labels.length - 1;
-  const indexes = Array.from(new Set([
-    0,
-    Math.round(last / 2),
-    last,
-  ])).sort((a, b) => a - b);
+  const indexes = Array.from(new Set([0, Math.round(last / 2), last])).sort((a, b) => a - b);
   return indexes.map((index) => ({
     x: left + (index / Math.max(1, last)) * (right - left),
     label: formatStockDateLabel(labels[index] ?? ''),

@@ -2,9 +2,11 @@
  * Phase 14 — HOLA DAY Side Panel.
  *
  * The Side Panel is the "submit a task from any page" surface. It
- * lives next to whatever website the user is on, reads page context
- * (title / URL / selected text) automatically, and ships the intent
- * + context tail to tasks.create. Real-time progress comes from
+ * lives next to whatever website the user is on and previews metadata.
+ * The enabled task-tab launcher binds a background page by default;
+ * explicit current-page requests bind the captured original instead.
+ * The legacy context-tail path remains available behind the rollout gate.
+ * Real-time progress comes from
  * the SW (which is already on the WS for vision-loop / step events)
  * via chrome.runtime.sendMessage, mirroring the popup pattern.
  *
@@ -15,11 +17,16 @@
  * "在 popup 中查看任务" button at the bottom.
  */
 
+import {
+  BrowserTaskLaunches,
+  type BrowserTaskModeChoice,
+  resolveBrowserTaskMode,
+} from '@holaday/shared-types';
 import { useEffect, useRef, useState } from 'react';
 import { ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { humanizeExtensionError } from '../shared/error-copy.js';
 import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
-import { composeContextTail, getActivePageContext, type PageContext } from '../shared/page-context.js';
+import { type PageContext, getActivePageContext } from '../shared/page-context.js';
 import { sendRuntimeMessageWithRetry } from '../shared/runtime-message.js';
 import {
   type StoredUser,
@@ -29,23 +36,28 @@ import {
   getStoredUser,
   normalizeAccessToken,
   normalizeStoredUser,
-  setAccessToken,
   setStoredUser,
 } from '../shared/storage.js';
 import {
-  normalizeTaskSnapshot,
+  type CreateTaskResponse,
+  didTokenSwitchDuringTaskCreate,
+  extractCreatedTaskId,
+  shouldClearAuthAfterCreateUnauthorized,
+  shouldClearAuthAfterUnauthorized,
+} from './create-task-response.js';
+import { sidePanelLaunchDependencies, sidePanelLaunchJournal } from './durable-launch.js';
+import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
+import {
+  type ChromeDiscovery,
+  type ChromeLaunchTarget,
+  prepareSidePanelLaunch,
+} from './task-launch.js';
+import {
   type TaskStatus,
   type TaskView,
   type VisionProgressView,
+  normalizeTaskSnapshot,
 } from './task-snapshot.js';
-import {
-  didTokenSwitchDuringTaskCreate,
-  extractCreatedTaskId,
-  shouldClearAuthAfterUnauthorized,
-  shouldClearAuthAfterCreateUnauthorized,
-  type CreateTaskResponse,
-} from './create-task-response.js';
-import { MAX_SIDE_PANEL_INTENT_CHARS, normalizeSidePanelIntent } from './task-intent.js';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
 
@@ -75,15 +87,53 @@ const AUTH_ME_BODY_TIMEOUT_MS = 2_000;
 const CREATE_TASK_TIMEOUT_MS = 10_000;
 const CREATE_TASK_BODY_TIMEOUT_MS = 2_000;
 
+async function browserRequest<T>(
+  authToken: string,
+  procedure: string,
+  input?: unknown,
+  query = false,
+): Promise<T> {
+  const res = await fetchWithDeadline(
+    `${ORCHESTRATOR_HTTP}/trpc/tasks.${procedure}${query && input !== undefined ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ''}`,
+    {
+      method: input === undefined || query ? 'GET' : 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${authToken}` },
+      ...(input === undefined || query ? {} : { body: JSON.stringify(input) }),
+    },
+    20_000,
+    'sidepanel_browser_prepare_timeout',
+  );
+  const body = await responseJsonWithDeadline<{
+    result?: { data: T };
+    error?: { message?: string };
+  }>(res, 2_000, 'sidepanel_browser_prepare_body_timeout');
+  if (!res.ok || !body.result)
+    throw new Error(body.error?.message ?? `Chrome 连接暂时不可用（HTTP ${res.status}）`);
+  return body.result.data;
+}
+
 export function App() {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const authSyncSeq = useRef(0);
+  const launches = useRef(new BrowserTaskLaunches<ChromeLaunchTarget>());
+  const [backgroundTabs, setBackgroundTabs] = useState(false);
+  const [launchRecovery, setLaunchRecovery] = useState(false);
+  const [pendingLaunchId, setPendingLaunchId] = useState<string | null>(null);
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  const [recoveryRetry, setRecoveryRetry] = useState(0);
+  const recoveryInFlight = useRef(false);
+  const recoveryAttempts = useRef(0);
+  const recoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [taskMode, setTaskMode] = useState<BrowserTaskModeChoice>('auto');
 
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [intent, setIntent] = useState('');
+  const pendingLaunchDraft = useRef<{ intent: string; snapshot: string } | null>(null);
+  const latestLaunchDraft = useRef('');
+  latestLaunchDraft.current = JSON.stringify([intent, taskMode]);
   const [submitting, setSubmitting] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskView[]>([]);
@@ -94,6 +144,13 @@ export function App() {
   const mountedRef = useRef(true);
 
   function clearLocalSessionState(): void {
+    launches.current.clear();
+    setBackgroundTabs(false);
+    recoveryAttempts.current = 0;
+    setLaunchRecovery(false);
+    setPendingLaunchId(null);
+    setLaunchNotice(null);
+    setTaskMode('auto');
     setUser(null);
     setToken(null);
     setActiveTaskId(null);
@@ -104,6 +161,7 @@ export function App() {
   }
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -118,7 +176,9 @@ export function App() {
     try {
       do {
         tasksRefreshQueued.current = false;
-        const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({ type: 'holaday.tasks' });
+        const resp = await sendRuntimeMessageWithRetry<{ tasks?: unknown }>({
+          type: 'holaday.tasks',
+        });
         if (mountedRef.current && resp && 'tasks' in resp) {
           setTasks(normalizeTaskSnapshot(resp.tasks));
         }
@@ -200,6 +260,7 @@ export function App() {
       if (area !== 'local') return;
       const tokenChange = changes['holaday.access_token'];
       if (!tokenChange) return;
+      launches.current.clear();
       void (async () => {
         const seq = ++authSyncSeq.current;
         const newToken = normalizeAccessToken(tokenChange.newValue);
@@ -251,7 +312,7 @@ export function App() {
       try {
         do {
           queued = false;
-          const ctx = await getActivePageContext();
+          const ctx = await getActivePageContext({ metadataOnly: true });
           if (!cancelled) setPageContext(ctx);
         } while (!cancelled && queued);
       } finally {
@@ -263,10 +324,7 @@ export function App() {
     const tabsListener = () => {
       void refresh();
     };
-    const updatedListener = (
-      _tabId: number,
-      info: chrome.tabs.TabChangeInfo,
-    ) => {
+    const updatedListener = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
       // Re-read on URL changes and completed loads. Many SPA
       // transitions update title/content without a new tab URL.
       if (info.url || info.status === 'complete') void refresh();
@@ -283,6 +341,107 @@ export function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBackgroundTabs(false);
+    setLaunchRecovery(false);
+    recoveryAttempts.current = 0;
+    if (token)
+      void browserRequest<{ backgroundTaskTabs: boolean; launchRecovery?: boolean }>(
+        token,
+        'localChromeLaunchOptions',
+      )
+        .then((result) => {
+          if (!cancelled) {
+            setBackgroundTabs(result.backgroundTaskTabs === true);
+            setLaunchRecovery(result.launchRecovery === true);
+          }
+        })
+        .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || !launchRecovery || taskSubmitInFlight.current) return;
+    let cancelled = false;
+    const seq = authSyncSeq.current;
+    recoveryInFlight.current = true;
+    setSubmitting(true);
+    void (async () => {
+      try {
+        const verified = await fetchMe(token);
+        await assertLaunchSession(token, seq);
+        if (cancelled) return;
+        if (verified.kind !== 'ok') throw new Error('暂时无法核对原任务账号，请重新连接后继续。');
+        setUser(verified.user);
+        const deps = durableDependencies(token, seq);
+        await sidePanelLaunchJournal.cleanup(verified.user.externalId, deps);
+        const pending = await sidePanelLaunchJournal.pending(verified.user.externalId);
+        if (pending.length === 0) setPendingLaunchId(null);
+        for (const entry of pending) {
+          if (cancelled) return;
+          setPendingLaunchId(entry.clientRequestId);
+          const result = await sidePanelLaunchJournal.resume(
+            verified.user.externalId,
+            entry.clientRequestId,
+            deps,
+          );
+          await assertLaunchSession(token, seq);
+          if (cancelled) return;
+          setActiveTaskId(result.taskId);
+          const draft = pendingLaunchDraft.current;
+          if (
+            draft &&
+            draft.intent === entry.request.intent &&
+            draft.snapshot === latestLaunchDraft.current
+          ) {
+            setIntent('');
+            setTaskMode('auto');
+            pendingLaunchDraft.current = null;
+          }
+          setLaunchNotice('已找回此前提交的任务，未重复发送。');
+          setPendingLaunchId(null);
+          setError(null);
+          await sidePanelLaunchJournal.acknowledge(
+            verified.user.externalId,
+            result.operationId,
+            deps,
+          );
+        }
+        if (!cancelled) {
+          recoveryAttempts.current = 0;
+          await refreshTasksSnapshot();
+        }
+      } catch (err) {
+        if (!cancelled && seq === authSyncSeq.current) {
+          setError(humanizeExtensionError(err));
+          if (recoveryAttempts.current++ < 12) {
+            recoveryTimer.current = setTimeout(
+              () => {
+                recoveryTimer.current = null;
+                if (!cancelled) setRecoveryRetry((n) => n + 1);
+              },
+              Math.min(5000, 1000 * recoveryAttempts.current),
+            );
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          recoveryInFlight.current = false;
+          setSubmitting(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      recoveryInFlight.current = false;
+      if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+    };
+  }, [token, launchRecovery, recoveryRetry]);
 
   // Subscribe to SW snapshots so the result section reflects the
   // task's progress in real time without polling.
@@ -335,6 +494,19 @@ export function App() {
     }
   }
 
+  async function assertLaunchSession(authToken: string, seq: number): Promise<void> {
+    const current = normalizeAccessToken(await getAccessToken());
+    if (!mountedRef.current || seq !== authSyncSeq.current || current !== authToken)
+      throw new Error('登录态刚刚切换，请重新发送任务。');
+  }
+  function durableDependencies(authToken: string, seq: number) {
+    return sidePanelLaunchDependencies(
+      <T,>(procedure: string, input?: unknown, query?: boolean) =>
+        browserRequest<T>(authToken, procedure, input, query),
+      () => assertLaunchSession(authToken, seq),
+    );
+  }
+
   /**
    * "我已登录，重试" button: nudges the SW to retry the
    * localStorage-based auto-login from any open workbench tab. If
@@ -356,9 +528,7 @@ export function App() {
       const liftedToken = normalizeAccessToken(resp?.token);
       if (!liftedToken) {
         setStatus('error');
-        setError(
-          '没找到已登录的 holaday.ai 标签页。请到 holaday.ai 登录后再点重试。',
-        );
+        setError('没找到已登录的 holaday.ai 标签页。请到 holaday.ai 登录后再点重试。');
         return;
       }
       const result = await fetchMe(liftedToken);
@@ -371,7 +541,8 @@ export function App() {
         if (shouldClearAuthAfterUnauthorized(current, liftedToken)) {
           await Promise.allSettled([clearAccessToken(), clearStoredUser()]);
         } else if (current) {
-          if (mountedRef.current && seq === authSyncSeq.current) setStatus(user ? 'connected' : 'idle');
+          if (mountedRef.current && seq === authSyncSeq.current)
+            setStatus(user ? 'connected' : 'idle');
           return;
         }
         if (!mountedRef.current || seq !== authSyncSeq.current) return;
@@ -409,13 +580,100 @@ export function App() {
   async function createTask(): Promise<void> {
     const submittedIntent = normalizeSidePanelIntent(intent);
     if (!submittedIntent || !token) return;
-    if (taskSubmitInFlight.current) return;
+    if (taskSubmitInFlight.current || recoveryInFlight.current) return;
     taskSubmitInFlight.current = true;
     setSubmitting(true);
     setError(null);
+    const seq = authSyncSeq.current;
+    let reconcileAfterFailure = false;
+    setLaunchNotice(null);
+    pendingLaunchDraft.current = { intent: submittedIntent, snapshot: latestLaunchDraft.current };
     try {
-      const tail = composeContextTail(pageContext);
-      const fullIntent = tail ? `${submittedIntent}${tail}` : submittedIntent;
+      const assertSession = async () => {
+        const current = normalizeAccessToken(await getAccessToken());
+        if (!mountedRef.current || seq !== authSyncSeq.current || current !== token)
+          throw new Error('登录态刚刚切换，请重新发送任务。');
+      };
+      const capturedPage = await getActivePageContext({ metadataOnly: true });
+      await assertSession();
+      const discovery = await browserRequest<ChromeDiscovery>(token, 'localChromeTabs');
+      await assertSession();
+      const connection = async () => {
+        const state = await sendRuntimeMessageWithRetry<{
+          extensionClientId?: string;
+          ws?: { connected?: boolean };
+        }>({ type: 'holaday.status' });
+        return state?.ws?.connected === true ? (state.extensionClientId ?? null) : null;
+      };
+      if (discovery.launchRecovery) {
+        if (!capturedPage) throw new Error('请先选择要处理的网页。');
+        const extensionClientId = await connection();
+        await assertSession();
+        const source = discovery.tabs.find(
+          (t) =>
+            t.extensionClientId === extensionClientId &&
+            t.tabId === capturedPage?.tabId &&
+            t.expectedUrl === new URL(capturedPage.url).origin,
+        );
+        if (!source?.launchBrowserSessionId || !source.launchRecoveryReady)
+          throw new Error('请更新并连接原 Chrome 扩展后继续任务。');
+        const verified = await fetchMe(token);
+        await assertSession();
+        if (verified.kind !== 'ok') throw new Error('暂时无法核对任务账号，请重新连接后继续。');
+        setUser(verified.user);
+        if (user && user.externalId !== verified.user.externalId)
+          throw new Error('当前登录账号已更新，请核对侧栏账号后再次发送。');
+        const deps = durableDependencies(token, seq);
+        const result = await sidePanelLaunchJournal.run(
+          verified.user.externalId,
+          { intent: submittedIntent },
+          {
+            browserSessionId: source.launchBrowserSessionId,
+            tabId: source.tabId,
+            origin: source.expectedUrl,
+            selectionId: source.selectionId,
+            mode: resolveBrowserTaskMode(submittedIntent, taskMode),
+          },
+          deps,
+        );
+        await assertSession();
+        setActiveTaskId(result.taskId);
+        if (result.recovered) setLaunchNotice('已找回此前创建的任务，未重复发送。');
+        setPendingLaunchId(null);
+        if (pendingLaunchDraft.current?.snapshot === latestLaunchDraft.current) {
+          setIntent('');
+          setTaskMode('auto');
+          pendingLaunchDraft.current = null;
+        }
+        await sidePanelLaunchJournal.acknowledge(
+          verified.user.externalId,
+          result.operationId,
+          deps,
+        );
+        await refreshTasksSnapshot();
+        return;
+      }
+      const launch = await prepareSidePanelLaunch(
+        { intent: submittedIntent, page: capturedPage, session: seq, choice: taskMode },
+        {
+          discover: async () => discovery,
+          connection: async () => {
+            const status = await sendRuntimeMessageWithRetry<{
+              extensionClientId?: string;
+              ws?: { connected?: boolean };
+            }>({ type: 'holaday.status' });
+            return status?.ws?.connected === true ? (status.extensionClientId ?? null) : null;
+          },
+          prepare: (selection, preparationId) =>
+            browserRequest<ChromeLaunchTarget>(token, 'localChromeTaskTab', {
+              selection,
+              preparationId,
+            }),
+          assertSession,
+          legacyContext: getActivePageContext,
+          launches: launches.current,
+        },
+      );
       const res = await fetchWithDeadline(
         `${ORCHESTRATOR_HTTP}/trpc/tasks.create`,
         {
@@ -424,7 +682,7 @@ export function App() {
             'content-type': 'application/json',
             authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ intent: fullIntent }),
+          body: JSON.stringify(launch.body),
         },
         CREATE_TASK_TIMEOUT_MS,
         'sidepanel_create_task_timeout',
@@ -470,16 +728,23 @@ export function App() {
         throw new Error('任务已发送，但返回信息不完整；请打开 HOLA DAY 网页查看最新任务。');
       }
       setActiveTaskId(newTaskId);
+      if (launch.key) launches.current.complete(launch.key);
       setIntent('');
+      setTaskMode('auto');
       // Nudge the SW to push the latest snapshot — the SW updates
       // arrive via the listener above as the WS frames flow in.
       await refreshTasksSnapshot();
     } catch (err) {
       if (!mountedRef.current) return;
+      if (launchRecovery) {
+        setPendingLaunchId('unconfirmed');
+        reconcileAfterFailure = true;
+      }
       setError(humanizeExtensionError(err));
     } finally {
       taskSubmitInFlight.current = false;
       if (mountedRef.current) setSubmitting(false);
+      if (reconcileAfterFailure && mountedRef.current) setRecoveryRetry((n) => n + 1);
     }
   }
 
@@ -511,10 +776,7 @@ export function App() {
   const activeTask =
     (activeTaskId && tasks.find((t) => t.taskId === activeTaskId)) ||
     tasks.find(
-      (t) =>
-        t.status === 'planning' ||
-        t.status === 'executing' ||
-        t.status === 'awaiting_user',
+      (t) => t.status === 'planning' || t.status === 'executing' || t.status === 'awaiting_user',
     ) ||
     null;
 
@@ -535,9 +797,31 @@ export function App() {
       <ContextPreview context={pageContext} />
 
       <div style={panelStyle}>
+        {backgroundTabs ? (
+          <label style={metaSubStyle}>
+            任务页面
+            <select
+              aria-label="任务页面"
+              value={taskMode}
+              onChange={(event) => setTaskMode(event.currentTarget.value as BrowserTaskModeChoice)}
+              disabled={submitting}
+            >
+              <option value="auto">
+                {resolveBrowserTaskMode(intent) === 'current'
+                  ? '处理当前页（按你的指令）'
+                  : '独立任务页（默认）'}
+              </option>
+              <option value="independent">独立任务页</option>
+              <option value="current">处理当前页</option>
+            </select>
+            <div>独立任务页在后台执行，你可以继续浏览。</div>
+          </label>
+        ) : null}
         <textarea
           rows={3}
-          placeholder="想让 HOLA DAY 在这页面上做什么？"
+          placeholder={
+            backgroundTabs ? '想让 HOLA DAY 帮你完成什么？' : '想让 HOLA DAY 在这页面上做什么？'
+          }
           value={intent}
           maxLength={MAX_SIDE_PANEL_INTENT_CHARS}
           onChange={(e) => setIntent(e.currentTarget.value.slice(0, MAX_SIDE_PANEL_INTENT_CHARS))}
@@ -551,7 +835,27 @@ export function App() {
         >
           {submitting ? '提交中...' : '发送任务'}
         </button>
-        {error ? <div style={errorStyle}>{error}</div> : null}
+        {error ? (
+          <div role="alert" style={errorStyle}>
+            {error}
+          </div>
+        ) : null}
+        {pendingLaunchId ? (
+          <button
+            type="button"
+            style={miniBtn}
+            disabled={submitting}
+            onClick={() => {
+              recoveryAttempts.current = 0;
+              setRecoveryRetry((n) => n + 1);
+            }}
+          >
+            重新核对此前提交
+          </button>
+        ) : null}
+        {launchNotice ? (
+          <output style={{ ...metaSubStyle, display: 'block' }}>{launchNotice}</output>
+        ) : null}
       </div>
 
       <ActiveTaskCard task={activeTask} />
@@ -584,7 +888,9 @@ function ContextPreview({ context }: { context: PageContext | null }) {
 
 function ActiveTaskCard({ task }: { task: TaskView | null }) {
   if (!task) return null;
-  const phaseLabel = task.visionProgress ? renderVisionPhase(task.visionProgress) : null;
+  const phaseLabel = task.visionProgress
+    ? renderVisionPhase(task.visionProgress, task.status)
+    : null;
   return (
     <div style={taskCardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -627,7 +933,17 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
-function renderVisionPhase(p: VisionProgressView): string {
+function renderVisionPhase(p: VisionProgressView, status: TaskStatus): string {
+  switch (status) {
+    case 'cancelled':
+      return '任务已取消';
+    case 'partial_success':
+      return '任务部分完成';
+    case 'completed':
+      return '任务完成';
+    case 'failed':
+      return '任务失败';
+  }
   switch (p.phase) {
     case 'observing':
       return `截图观察${typeof p.tickIndex === 'number' ? ` · 第 ${p.tickIndex + 1} 轮` : ''}`;

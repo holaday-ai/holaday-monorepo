@@ -1,10 +1,10 @@
 // Shared QA-only read-only proof of the fixed copied runtime on either role.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { readFirstCutoverRecoveryRuntime } from '../browser-first-cutover-recovery-runtime.mjs';
 export async function verifyFirstCutoverQaRuntimeMaterials({
   containerId,
@@ -53,7 +53,7 @@ export async function verifyFirstCutoverQaRuntimeMaterials({
         return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
       }),
     ]),
-  ].map((name) => `/opt/holaday-recovery${name ? '/' + name : ''}`);
+  ].map((name) => `/opt/holaday-recovery${name ? `/${name}` : ''}`);
   const directoryStats = (
     await docker(['exec', containerId, '/usr/bin/stat', '-c', '%u %a %F', ...directories])
   ).stdout

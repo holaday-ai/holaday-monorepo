@@ -17,35 +17,34 @@
  * pages get the resolved `me` via `useOutletContext`.
  */
 
-import {
-  AlertCircle,
-  BarChart3,
-  GraduationCap,
-  LayoutDashboard,
-  LogOut,
-  RefreshCw,
-  ShieldCheck,
-  Users,
-  type LucideIcon,
-} from 'lucide-react';
-import * as React from 'react';
-import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { BrandIcon, BrandWordmark } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
-import { getAccessToken, clearAccessToken } from '@/lib/auth';
+import { clearAccessToken, getAccessToken } from '@/lib/auth';
 import {
+  type NormalizedAuthMeProfile,
   normalizeAuthMeProfile,
   preferredAuthDisplayName,
-  type NormalizedAuthMeProfile,
 } from '@/lib/auth-me-state';
 import { authGateFailureStatus } from '@/lib/auth-session';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import {
+  Activity,
+  AlertCircle,
+  BarChart3,
+  Cpu,
+  GraduationCap,
+  LayoutDashboard,
+  LogOut,
+  type LucideIcon,
+  RefreshCw,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
+import * as React from 'react';
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 
-type AdminMe = Pick<
-  NormalizedAuthMeProfile,
-  'userId' | 'email' | 'phone' | 'displayName' | 'role'
->;
+type AdminMe = Pick<NormalizedAuthMeProfile, 'userId' | 'email' | 'phone' | 'displayName' | 'role'>;
 
 interface AdminOutletContext {
   me: AdminMe;
@@ -114,13 +113,8 @@ export function AdminLayout(): JSX.Element {
     return (
       <div className="flex h-svh items-center justify-center bg-background px-5">
         <div className="w-full max-w-sm rounded-[8px] border border-[#DCDDDD] bg-white p-6 text-center shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-          <AlertCircle
-            className="mx-auto h-5 w-5 text-[#EA1F59]"
-            aria-hidden
-          />
-          <h1 className="mt-3 text-sm font-semibold text-foreground">
-            管理后台暂时无法验证权限
-          </h1>
+          <AlertCircle className="mx-auto h-5 w-5 text-[#FF0061]" aria-hidden />
+          <h1 className="mt-3 text-sm font-semibold text-foreground">管理后台暂时无法验证权限</h1>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             登录状态仍保留。请检查网络后重试。
           </p>
@@ -166,9 +160,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
             <BrandIcon />
             <BrandWordmark className="hidden h-3 sm:block" />
           </div>
-          <div className="hidden text-xs font-medium text-foreground/80 sm:block">
-            管理后台
-          </div>
+          <div className="hidden text-xs font-medium text-foreground/80 sm:block">管理后台</div>
           <div className="mt-0.5 hidden text-[11px] text-muted-foreground sm:block">经营驾驶舱</div>
         </Link>
       </div>
@@ -203,6 +195,18 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
           to="/admin/learning"
           active={pathname.startsWith('/admin/learning')}
         />
+        <AdminNavItem
+          icon={Cpu}
+          label="模型管理"
+          to="/admin/models"
+          active={pathname.startsWith('/admin/models')}
+        />
+        <AdminNavItem
+          icon={Activity}
+          label="系统自检"
+          to="/admin/self-check"
+          active={pathname.startsWith('/admin/self-check')}
+        />
       </nav>
       <div className="border-t border-[#EFEFEF] px-2 py-3 sm:px-3">
         <div className="hidden truncate px-2 text-[12px] font-medium text-foreground sm:block">
@@ -214,7 +218,7 @@ function AdminSideNav({ me }: { me: AdminMe }): JSX.Element {
         <Link
           to="/"
           title="返回工作台"
-          className="mt-2 flex items-center justify-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#EA1F59] sm:justify-start"
+          className="mt-2 flex items-center justify-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-[#EFEFEF] hover:text-[#FF0061] sm:justify-start"
         >
           <LogOut className="h-3.5 w-3.5" aria-hidden />
           <span className="hidden sm:inline">返回工作台</span>
@@ -242,7 +246,7 @@ function AdminNavItem({
   const cls = cn(
     'flex items-center justify-center gap-2 rounded-[8px] px-3 py-2 text-[13px] font-medium transition-colors sm:justify-start',
     active
-      ? 'bg-[rgba(234,31,89,0.10)] text-[#EA1F59]'
+      ? 'bg-[rgba(255,0,97,0.10)] text-[#FF0061]'
       : 'text-muted-foreground hover:bg-[#EFEFEF] hover:text-foreground',
     disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );
@@ -273,7 +277,8 @@ function AdminNavItem({
 export type { AdminOutletContext };
 
 // Logout helper for any admin page that wants it.
-export function logoutAndGoHome(): void {
+export async function logoutAndGoHome(): Promise<void> {
+  await trpc.auth.logout.mutate();
   clearAccessToken();
   window.location.href = '/login';
 }

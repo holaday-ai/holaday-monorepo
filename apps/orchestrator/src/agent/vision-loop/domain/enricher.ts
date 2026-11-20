@@ -99,9 +99,7 @@ export function buildDomainPrompt(domain: DomainName): string {
     '## 分析框架',
     cfg.analysis_framework,
     '',
-    ...(sourcesBlock
-      ? ['## 推荐数据源（按权威性排序）', sourcesBlock, '']
-      : []),
+    ...(sourcesBlock ? ['## 推荐数据源（按权威性排序）', sourcesBlock, ''] : []),
     '## 输出格式',
     cfg.output_format,
     '',

@@ -1,7 +1,7 @@
 import { newExternalId } from '@holaday/shared-types';
 import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
-import { partnerMemberships, type PartnerMembership } from '../db/schema/partner.js';
+import { type PartnerMembership, partnerMemberships } from '../db/schema/partner.js';
 
 const MEMBERSHIP_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -34,7 +34,9 @@ export function computeMembershipExpiry(startsAt: Date): Date {
 
 export class PartnerMembershipSourceConflictError extends Error {
   constructor(sourcePaymentExternalId: string) {
-    super(`partner membership source payment is already linked to another user: ${sourcePaymentExternalId}`);
+    super(
+      `partner membership source payment is already linked to another user: ${sourcePaymentExternalId}`,
+    );
     this.name = 'PartnerMembershipSourceConflictError';
   }
 }

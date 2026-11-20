@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { RoleDefinition } from '@holaday/shared-types';
+import { describe, expect, it } from 'vitest';
 import {
   groupRoleCatalogue,
   normalizeRoleListResponse,

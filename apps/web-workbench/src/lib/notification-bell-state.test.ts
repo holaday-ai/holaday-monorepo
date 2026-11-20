@@ -1,21 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mergeNotificationRows,
+  normalizeNotificationPage,
   notificationBadgeText,
   notificationButtonTitle,
   notificationErrorMessage,
   notificationListStatusCopy,
   notificationListSummary,
-  mergeNotificationRows,
-  normalizeNotificationPage,
   safeNotificationCount,
   shouldRenderCompactNotificationDot,
 } from './notification-bell-state';
 
 describe('notification bell state helpers', () => {
   it('summarizes loading, hard error, stale error, empty, and loaded states', () => {
-    expect(notificationListSummary({ loading: true, error: null, count: 0 })).toBe(
-      '通知加载中…',
-    );
+    expect(notificationListSummary({ loading: true, error: null, count: 0 })).toBe('通知加载中…');
     expect(notificationListSummary({ loading: false, error: 'offline', count: 0 })).toBe(
       '通知暂时无法加载',
     );
@@ -23,9 +21,7 @@ describe('notification bell state helpers', () => {
       '刷新失败 · 显示 2 条通知',
     );
     expect(notificationListSummary({ loading: false, error: null, count: 0 })).toBe('暂无通知');
-    expect(notificationListSummary({ loading: false, error: null, count: 3 })).toBe(
-      '3 条通知',
-    );
+    expect(notificationListSummary({ loading: false, error: null, count: 3 })).toBe('3 条通知');
   });
 
   it('builds status copy without treating empty notifications as an error', () => {
@@ -136,12 +132,10 @@ describe('notification bell state helpers', () => {
     };
 
     expect(
-      normalizeNotificationPage([{ ...base, plannedTaskId: 'pln_risk_1' }]).items[0]
-        ?.plannedTaskId,
+      normalizeNotificationPage([{ ...base, plannedTaskId: 'pln_risk_1' }]).items[0]?.plannedTaskId,
     ).toBe('pln_risk_1');
     expect(
-      normalizeNotificationPage([{ ...base, plannedTaskId: '   ' }]).items[0]
-        ?.plannedTaskId,
+      normalizeNotificationPage([{ ...base, plannedTaskId: '   ' }]).items[0]?.plannedTaskId,
     ).toBeNull();
   });
 });

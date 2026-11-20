@@ -19,6 +19,7 @@ import {
   hasParkedSupercarHandle,
   runSupercarTask,
   supercarAbort,
+  supercarHandoffToGenerate,
   supercarReply,
 } from './agent-loop.js';
 
@@ -43,6 +44,58 @@ function response(content: unknown[], stopReason: string) {
 describe('runSupercarTask credential takeover', () => {
   beforeEach(() => {
     createMessage.mockReset();
+  });
+  it('retains prior and final reply materials when the legacy loop hands off to generation', async () => {
+    createMessage
+      .mockResolvedValueOnce(
+        response([{ type: 'text', text: '请接管浏览器完成登录，然后回来继续。' }], 'end_turn'),
+      )
+      .mockResolvedValueOnce(
+        response([{ type: 'text', text: '请接管浏览器补充数据，然后回来继续。' }], 'end_turn'),
+      );
+    const page = {
+      url: () => 'https://example.com/report',
+      title: async () => 'Report',
+      evaluate: async () => 'Report',
+    };
+    const executor = {
+      resetPageForTask: async () => {},
+      getPage: async () => page,
+      screenshot: async () => ({ base64: 'dGVzdA==', viewportWidth: 1280, viewportHeight: 720 }),
+    } as unknown as PlaywrightExecutor;
+    let parks = 0;
+    const taskId = 'tsk_legacy_material_handoff';
+    const outcome = await runSupercarTask({
+      taskId,
+      intent: '读取报表，无法读取时分析用户补充的数据',
+      executor,
+      apiKey: 'test-key',
+      maxIterations: 3,
+      timeoutMs: 5000,
+      onAwaitingUser: async () => {
+        if (++parks === 1)
+          expect(
+            supercarReply(taskId, '登录完成并补充第一组备注', [
+              { type: 'text', text: 'FIRST-531' },
+            ]),
+          ).toBe(true);
+        else
+          expect(
+            supercarHandoffToGenerate(taskId, '数据如下：订单20、GMV100、ROI5', [
+              { type: 'text', text: 'A-731,31' },
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
+              },
+            ]),
+          ).toBe(true);
+      },
+    });
+    expect(outcome.status).toBe('handoff_to_generate');
+    expect(JSON.stringify(outcome.handoffAttachments)).toContain('FIRST-531');
+    expect(JSON.stringify(outcome.handoffAttachments)).toContain('A-731,31');
+    expect(JSON.stringify(outcome.handoffAttachments)).toContain('media_type');
+    expect(createMessage).toHaveBeenCalledTimes(2);
   });
 
   it('registers an abort handle before awaiting a non-browser lane', async () => {
@@ -487,7 +540,7 @@ describe('runSupercarTask credential takeover', () => {
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async () => ''),
       mouse: {
         move: vi.fn(async () => undefined),
@@ -590,9 +643,7 @@ describe('runSupercarTask credential takeover', () => {
           'tool_use',
         ),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'));
 
     let currentUrl = 'about:blank';
     const page = {
@@ -600,7 +651,7 @@ describe('runSupercarTask credential takeover', () => {
       goto: vi.fn(async (url: string) => {
         currentUrl = url;
       }),
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async (fn: unknown) => {
         if (String(fn).includes('textLength')) {
           return { textLength: 20, images: 0, iframes: 0, inputs: 1, buttons: 1 };
@@ -767,7 +818,7 @@ describe('runSupercarTask credential takeover', () => {
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
       evaluate: vi.fn(async () => ''),
       mouse: {
         move: vi.fn(async () => undefined),
@@ -826,20 +877,15 @@ describe('runSupercarTask credential takeover', () => {
   it('accepts an immediate reply when a text-only turn requests browser takeover', async () => {
     createMessage
       .mockResolvedValueOnce(
-        response(
-          [{ type: 'text', text: '请接管浏览器完成登录，然后回来继续。' }],
-          'end_turn',
-        ),
+        response([{ type: 'text', text: '请接管浏览器完成登录，然后回来继续。' }], 'end_turn'),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '已进入工作台。' }], 'end_turn'));
 
     let currentUrl = 'https://example.com/login';
     const page = {
       url: () => currentUrl,
-      title: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
-      evaluate: vi.fn(async () => currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard'),
+      title: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
+      evaluate: vi.fn(async () => (currentUrl.endsWith('/login') ? 'Sign in' : 'Dashboard')),
     };
     const executor = {
       resetPageForTask: vi.fn(async () => undefined),
@@ -884,9 +930,7 @@ describe('runSupercarTask credential takeover', () => {
           'tool_use',
         ),
       )
-      .mockResolvedValueOnce(
-        response([{ type: 'text', text: '操作已完成。' }], 'end_turn'),
-      );
+      .mockResolvedValueOnce(response([{ type: 'text', text: '操作已完成。' }], 'end_turn'));
 
     const page = {
       url: () => 'https://example.com/editor',

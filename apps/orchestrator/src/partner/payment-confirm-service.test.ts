@@ -3,15 +3,15 @@ import type { PartnerKycStatus } from '@holaday/shared-types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
-  partnerRechargeOrders,
   type PartnerLot,
   type PartnerMembership,
   type PartnerRechargeOrder,
+  partnerRechargeOrders,
 } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import {
-  PartnerPaymentConfirmService,
   PartnerPaymentConfirmReviewRequiredError,
+  PartnerPaymentConfirmService,
   partnerPaymentIdempotencyKey,
   validatePartnerPaymentConfirmHttpRequest,
 } from './payment-confirm-service.js';
@@ -58,9 +58,12 @@ class FakePartnerPaymentDb {
             },
             limit: async (count: number) => this.selectRows(table, predicateText).slice(0, count),
             then: (
-              onFulfilled?: ((value: Array<PartnerRechargeOrder | { id: number }>) => unknown) | null,
+              onFulfilled?:
+                | ((value: Array<PartnerRechargeOrder | { id: number }>) => unknown)
+                | null,
               onRejected?: ((reason: unknown) => unknown) | null,
-            ) => Promise.resolve(this.selectRows(table, predicateText)).then(onFulfilled, onRejected),
+            ) =>
+              Promise.resolve(this.selectRows(table, predicateText)).then(onFulfilled, onRejected),
           };
           return chain;
         },
@@ -100,7 +103,10 @@ class FakePartnerPaymentDb {
     };
   }
 
-  private selectRows(table: unknown, predicateText: string): Array<PartnerRechargeOrder | { id: number }> {
+  private selectRows(
+    table: unknown,
+    predicateText: string,
+  ): Array<PartnerRechargeOrder | { id: number }> {
     if (table === users) {
       const userId = this.findUserIdInPredicate(predicateText);
       return userId === null ? [] : [{ id: userId }];
@@ -382,7 +388,12 @@ describe('validatePartnerPaymentConfirmHttpRequest', () => {
     ],
     [
       'array shared secret header',
-      { expectedSecret: 'secret', providedSecret: ['secret'], partnerLedgerEnabled: true, body: {} },
+      {
+        expectedSecret: 'secret',
+        providedSecret: ['secret'],
+        partnerLedgerEnabled: true,
+        body: {},
+      },
       { statusCode: 401, error: 'unauthorized' },
     ],
     [
@@ -416,7 +427,8 @@ describe('validatePartnerPaymentConfirmHttpRequest', () => {
 describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   it('treats a missing order as an idempotent no-op', async () => {
     const fakeDb = new FakePartnerPaymentDb();
-    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } =
+      serviceWithFakes(fakeDb);
 
     await expect(service.confirmCapturedOrder(confirmInput)).resolves.toEqual({
       ok: true,
@@ -436,9 +448,12 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   ])('throws on %s without side effects', async (_name, patch, expectedMessage) => {
     const order = fakeOrder({ orderKind: 'membership' });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } =
+      serviceWithFakes(fakeDb);
 
-    await expect(service.confirmCapturedOrder({ ...confirmInput, ...patch })).rejects.toThrow(expectedMessage);
+    await expect(service.confirmCapturedOrder({ ...confirmInput, ...patch })).rejects.toThrow(
+      expectedMessage,
+    );
     expect(order.status).toBe('pending');
     expect(order.providerCaptureId).toBeNull();
     expect(fakeDb.updateRowsAffected).toEqual([]);
@@ -450,7 +465,8 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   it('completes a pending membership order and activates membership exactly once', async () => {
     const order = fakeOrder({ orderKind: 'membership', amountCnyCents: 999_00 });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } =
+      serviceWithFakes(fakeDb);
     const input = { ...confirmInput, amountCnyCents: 999_00 };
 
     await expect(service.confirmCapturedOrder(input)).resolves.toEqual({
@@ -487,7 +503,8 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
   it('completes a pending recharge order and creates one lot plus referral settlement across retry', async () => {
     const order = fakeOrder({ orderKind: 'recharge' });
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
-    const { service, membershipActivations, lotCreations, referralSettlements } = serviceWithFakes(fakeDb);
+    const { service, membershipActivations, lotCreations, referralSettlements } =
+      serviceWithFakes(fakeDb);
 
     await expect(service.confirmCapturedOrder(confirmInput)).resolves.toMatchObject({
       ok: true,
@@ -552,7 +569,9 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     const fakeDb = new FakePartnerPaymentDb({ orders: [current, other] });
     const { service, lotCreations } = serviceWithFakes(fakeDb);
 
-    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toThrow(/provider capture.*another partner order/i);
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toThrow(
+      /provider capture.*another partner order/i,
+    );
     expect(current.status).toBe('pending');
     expect(current.providerCaptureId).toBeNull();
     expect(fakeDb.updateRowsAffected).toEqual([]);
@@ -758,7 +777,9 @@ describe('PartnerPaymentConfirmService.confirmCapturedOrder', () => {
     const fakeDb = new FakePartnerPaymentDb({ orders: [order] });
     const { service, membershipActivations, lotCreations } = serviceWithFakes(fakeDb);
 
-    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toThrow(/unknown partner order kind/i);
+    await expect(service.confirmCapturedOrder(confirmInput)).rejects.toThrow(
+      /unknown partner order kind/i,
+    );
     expect(order.status).toBe('pending');
     expect(fakeDb.updateRowsAffected).toEqual([]);
     expect(membershipActivations).toHaveLength(0);

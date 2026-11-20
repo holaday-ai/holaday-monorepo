@@ -136,6 +136,22 @@ describe('numbered migration filename contract', () => {
         '0050_user_mfa.sql',
         '0051_account_closures.sql',
         '0052_feedback_cases.sql',
+        '0071_task_files_browser_source.sql',
+      ]),
+    );
+  });
+
+  it('refuses rollout until the Home file provenance column migration is applied', () => {
+    assert.throws(
+      () =>
+        assertDatabaseReadyForAppRollout(['0051_account_closures.sql', '0052_feedback_cases.sql']),
+      /0071_task_files_browser_source\.sql/,
+    );
+    assert.doesNotThrow(() =>
+      assertDatabaseReadyForAppRollout([
+        '0051_account_closures.sql',
+        '0052_feedback_cases.sql',
+        '0071_task_files_browser_source.sql',
       ]),
     );
   });
@@ -347,11 +363,14 @@ describe('team work item lifecycle schema contract', () => {
 describe('release database table and column contract', () => {
   it('blocks application rollout when any durable core identity column is missing', () => {
     const verifier = readFileSync(new URL('./verify-db-schema.ts', import.meta.url), 'utf8');
-    const tasksColumns = verifier.match(/\n  tasks: \[([^\]]+)\]/)?.[1] ?? '';
+    const tasksColumns = verifier.match(/\n {2}tasks: \[([^\]]+)\]/)?.[1] ?? '';
     for (const column of ['execution_id', 'execution_revision', 'core_record_version']) {
       assert.ok(tasksColumns.includes(`'${column}'`), `missing core rollout guard: ${column}`);
     }
-    const migration = readFileSync(new URL('../drizzle/0059_core_execution_identity.sql', import.meta.url), 'utf8');
+    const migration = readFileSync(
+      new URL('../drizzle/0059_core_execution_identity.sql', import.meta.url),
+      'utf8',
+    );
     const statements = splitMigrationStatements(migration);
     assert.equal(statements.length, 3);
     assert.deepEqual(findNonAdditiveMigrationStatements(statements), []);
@@ -458,6 +477,14 @@ describe('release database index contract', () => {
   }
 
   const validRows = [
+    {
+      table_name: 'tasks',
+      index_name: 'uk_tasks_public_cloud_continuation',
+      non_unique: 0,
+      seq_in_index: 1,
+      column_name: 'public_cloud_continuation_task_id',
+      sub_part: null,
+    },
     {
       table_name: 'feedback_cases',
       index_name: 'uk_feedback_cases_external_id',
@@ -842,6 +869,17 @@ describe('release database index contract', () => {
         ),
       ),
       ['payments.uk_payments_provider_order UNIQUE(provider, provider_order_id)'],
+    );
+  });
+
+  it('rejects a non-unique public-cloud continuation index', () => {
+    assert.deepEqual(
+      findMissingRequiredIndexes(
+        validRows.map((row) =>
+          row.index_name === 'uk_tasks_public_cloud_continuation' ? { ...row, non_unique: 1 } : row,
+        ),
+      ),
+      ['tasks.uk_tasks_public_cloud_continuation UNIQUE(public_cloud_continuation_task_id)'],
     );
   });
 

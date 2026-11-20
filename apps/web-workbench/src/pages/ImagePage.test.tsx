@@ -96,16 +96,16 @@ describe('ImagePage task creation', () => {
 
     const pageHeadings = screen.getAllByRole('heading', { level: 1 });
     expect(pageHeadings).toHaveLength(1);
-    expect(pageHeadings[0]?.textContent).toBe('图片任务');
-    expect(screen.getByRole('heading', { level: 2, name: '今天想做什么图？' })).toBeTruthy();
+    expect(pageHeadings[0]?.textContent).toBe('让想象，有了模样。');
+    expect(screen.getByRole('tablist', { name: '今天想做什么图' })).toBeTruthy();
   });
 
   it('groups generation settings and submission inside the creation region', () => {
     render(<ImagePage />);
 
     const creationRegion = screen.getByRole('region', { name: '图片创作区' });
-    expect(within(creationRegion).getByRole('button', { name: /生成设置/ })).toBeTruthy();
-    expect(within(creationRegion).getByRole('button', { name: '开始生成' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '生成设置' })).toBeTruthy();
+    expect(within(creationRegion).getByRole('button', { name: '准备生成' })).toBeTruthy();
   });
 
   it('refreshes a completed image task once when its result metadata has not arrived yet', async () => {
@@ -210,13 +210,13 @@ describe('ImagePage task creation', () => {
     const user = userEvent.setup();
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     await user.type(
       screen.getByRole('textbox', { name: '描述你想要的最终画面' }),
       '把主角放到夏日海边',
     );
 
-    expect(screen.getByRole('button', { name: '开始生成' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '准备生成' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText('请先添加一张清晰的主角图')).toBeTruthy();
   });
 
@@ -237,7 +237,7 @@ describe('ImagePage task creation', () => {
       });
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     const input = screen.getByLabelText('添加图片');
     await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
     await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
@@ -272,7 +272,7 @@ describe('ImagePage task creation', () => {
       );
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     const input = screen.getByLabelText('添加图片');
     await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
     await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
@@ -282,7 +282,7 @@ describe('ImagePage task creation', () => {
 
     expect(screen.getByRole('button', { name: '移除主角图' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '更换主角图' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: /灵感创作/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('tab', { name: /灵感创作/ }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '设为主角' }).hasAttribute('disabled')).toBe(true);
     expect(
       screen.getByRole('button', { name: '移除附件：first-subject.png' }).hasAttribute('disabled'),
@@ -311,7 +311,7 @@ describe('ImagePage task creation', () => {
       .mockRejectedValueOnce(new Error('上传失败'));
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     const input = screen.getByLabelText('添加图片');
     await user.upload(input, new File(['first'], 'first-subject.png', { type: 'image/png' }));
     await waitFor(() => expect(screen.getByText('first-subject.png')).toBeTruthy());
@@ -410,11 +410,11 @@ describe('ImagePage task creation', () => {
       await firstContinuation;
     });
 
-    const goals = screen.getByRole('group', { name: '今天想做什么图' });
+    const goals = screen.getByRole('tablist', { name: '今天想做什么图' });
     expect(
       within(goals)
-        .getByRole('button', { name: /灵感创作/ })
-        .getAttribute('aria-pressed'),
+        .getByRole('tab', { name: /灵感创作/ })
+        .getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.queryByText('主角参考图')).toBeNull();
   });
@@ -481,7 +481,7 @@ describe('ImagePage task creation', () => {
     );
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     await user.type(
       screen.getByRole('textbox', { name: '描述你想要的最终画面' }),
       '把主角放到夏日海边',
@@ -493,7 +493,7 @@ describe('ImagePage task creation', () => {
     await waitFor(() => expect(mocks.uploadFile).toHaveBeenCalledTimes(2));
     await user.click(screen.getByRole('button', { name: '设为主角' }));
 
-    const submit = screen.getByRole('button', { name: '开始生成' });
+    const submit = screen.getByRole('button', { name: '准备生成' });
     expect(submit.hasAttribute('disabled')).toBe(false);
     await user.dblClick(submit);
 
@@ -508,7 +508,7 @@ describe('ImagePage task creation', () => {
       undefined,
       undefined,
       expect.objectContaining({
-        model: 'nano_banana_2',
+        model: 'auto',
         aspectRatio: '1:1',
         imageCount: 2,
         mode: 'lock_subject',
@@ -526,11 +526,11 @@ describe('ImagePage task creation', () => {
     expect(
       (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement).value,
     ).toBe('');
-    const goals = screen.getByRole('group', { name: '今天想做什么图' });
+    const goals = screen.getByRole('tablist', { name: '今天想做什么图' });
     expect(
       within(goals)
-        .getByRole('button', { name: /锁定主角/ })
-        .getAttribute('aria-pressed'),
+        .getByRole('tab', { name: /锁定主角/ })
+        .getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.getByRole('button', { name: '添加主角图' })).toBeTruthy();
   });
@@ -562,11 +562,11 @@ describe('ImagePage task creation', () => {
     );
     await waitFor(() => expect(screen.getByText('submitted-reference.png')).toBeTruthy());
 
-    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    await user.click(screen.getByRole('button', { name: '准备生成' }));
     await waitFor(() => expect(mocks.createTask).toHaveBeenCalledTimes(1));
 
     expect(input.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: /锁定主角/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('tab', { name: /锁定主角/ }).hasAttribute('disabled')).toBe(true);
     expect(
       screen.getByRole('textbox', { name: '描述你想要的最终画面' }).hasAttribute('disabled'),
     ).toBe(true);
@@ -602,7 +602,7 @@ describe('ImagePage task creation', () => {
     mocks.createTask.mockResolvedValueOnce({ error: '服务暂时不可用' });
     render(<ImagePage />);
 
-    await user.click(screen.getByRole('button', { name: /锁定主角/ }));
+    await user.click(screen.getByRole('tab', { name: /锁定主角/ }));
     await user.type(
       screen.getByRole('textbox', { name: '描述你想要的最终画面' }),
       '把主角放到夏日海边',
@@ -612,7 +612,7 @@ describe('ImagePage task creation', () => {
       new File(['subject'], 'subject.png', { type: 'image/png' }),
     );
     await waitFor(() => expect(screen.getByText('subject.png')).toBeTruthy());
-    await user.click(screen.getByRole('button', { name: '开始生成' }));
+    await user.click(screen.getByRole('button', { name: '准备生成' }));
 
     expect(
       (screen.getByRole('textbox', { name: '描述你想要的最终画面' }) as HTMLTextAreaElement).value,

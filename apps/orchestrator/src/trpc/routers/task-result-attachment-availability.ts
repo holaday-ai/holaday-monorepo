@@ -19,11 +19,7 @@ export function annotateTaskResultAttachmentAvailability(
 
   let changed = false;
   const annotated = attachments.map((attachment) => {
-    if (
-      !attachment ||
-      typeof attachment !== 'object' ||
-      Array.isArray(attachment)
-    ) {
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
       return attachment;
     }
     const attachmentRecord = attachment as Record<string, unknown>;
@@ -32,8 +28,7 @@ export function annotateTaskResultAttachmentAvailability(
 
     if (typeof fileId === 'string' && !availableFileIds.has(fileId)) {
       const expiresAt = attachmentRecord.expiresAt;
-      const expiry =
-        typeof expiresAt === 'string' ? Date.parse(expiresAt) : Number.NaN;
+      const expiry = typeof expiresAt === 'string' ? Date.parse(expiresAt) : Number.NaN;
       if (!Number.isFinite(expiry) || expiry > now.getTime()) {
         nextAttachment = {
           ...nextAttachment,
@@ -42,9 +37,7 @@ export function annotateTaskResultAttachmentAvailability(
       }
     }
 
-    const posterFileId = localFileIdFromDownloadUrl(
-      attachmentRecord.posterUrl,
-    );
+    const posterFileId = localFileIdFromDownloadUrl(attachmentRecord.posterUrl);
     if (posterFileId && !availableFileIds.has(posterFileId)) {
       nextAttachment = {
         ...nextAttachment,
@@ -67,19 +60,13 @@ export function annotateTaskResultAttachmentAvailability(
 }
 
 function localFileIdFromDownloadUrl(value: unknown): string | null {
-  if (
-    typeof value !== 'string' ||
-    !value.startsWith('/') ||
-    value.startsWith('//')
-  ) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) {
     return null;
   }
   try {
     const url = new URL(value, 'https://holaday.local');
     if (url.origin !== 'https://holaday.local') return null;
-    const match = /^\/(?:api\/)?files\/([^/]+)\/download\/?$/.exec(
-      url.pathname,
-    );
+    const match = /^\/(?:api\/)?files\/([^/]+)\/download\/?$/.exec(url.pathname);
     return match?.[1] ?? null;
   } catch {
     return null;

@@ -35,17 +35,13 @@ export function luckyInsightGroups(reading: EnergyPeriodReading): LuckyInsightGr
   return groups.filter((group) => group.values.length > 0);
 }
 
-export function periodSourceLabel(
-  state: Pick<EnergyPeriodState, 'source' | 'reading'>,
-): string {
+export function periodSourceLabel(state: Pick<EnergyPeriodState, 'source' | 'reading'>): string {
   if (state.source === 'local-fallback') {
     return state.reading.providerRefreshPending
       ? PROVIDER_REFRESH_PENDING_COPY
       : 'Holaday 本地提示';
   }
-  return state.reading.freshness === 'stale'
-    ? 'DivineAPI 最近成功数据'
-    : 'DivineAPI 内容';
+  return state.reading.freshness === 'stale' ? 'DivineAPI 最近成功数据' : 'DivineAPI 内容';
 }
 
 export function hasCompleteRanking(ranking: EnergyAstrologyStateRanking): boolean {

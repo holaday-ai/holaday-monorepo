@@ -329,9 +329,7 @@ export const HOLADAY_SKILLS = [
 
 export type SkillId = (typeof HOLADAY_SKILLS)[number]['id'];
 
-const SKILL_BY_ID = new Map<string, HoladaySkill>(
-  HOLADAY_SKILLS.map((skill) => [skill.id, skill]),
-);
+const SKILL_BY_ID = new Map<string, HoladaySkill>(HOLADAY_SKILLS.map((skill) => [skill.id, skill]));
 
 export const LEGACY_SKILL_ID_ALIASES = {
   douyin: 'douyin-live-ops',
@@ -365,9 +363,7 @@ export function skillById(id: string): HoladaySkill | undefined {
 export function skillMatchesQuery(skill: HoladaySkill, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [skill.name, skill.id, ...skill.aliases].some((value) =>
-    value.toLowerCase().includes(q),
-  );
+  return [skill.name, skill.id, ...skill.aliases].some((value) => value.toLowerCase().includes(q));
 }
 
 export function normalizeSkillIds(value: unknown): SkillId[] {

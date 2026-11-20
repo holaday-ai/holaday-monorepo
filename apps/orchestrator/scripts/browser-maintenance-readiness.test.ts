@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { validateServicesEvidence } from '../src/execution/ordinary-maintenance-services.js';
 import { describe, expect, it, vi } from 'vitest';
+import { validateServicesEvidence } from '../src/execution/ordinary-maintenance-services.js';
 import {
   runMaintenanceReadinessCommand,
   verifyMaintenanceReadiness,

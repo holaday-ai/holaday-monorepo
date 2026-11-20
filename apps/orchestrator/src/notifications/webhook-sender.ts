@@ -30,8 +30,9 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import type { Logger } from 'pino';
-import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
+import { Agent, type Dispatcher, fetch as undiciFetch } from 'undici';
 import { isPublicInternetAddress } from '../agent/browser-network-policy.js';
+import { checkNotificationWebhookUrl, describeWebhookForLog } from './webhook-url-policy.js';
 
 export type NotificationPlatform = 'wecom' | 'feishu' | 'dingtalk' | 'custom';
 
@@ -87,9 +88,7 @@ export interface WebhookResolvedAddress {
   family: 4 | 6;
 }
 
-export type WebhookHostResolver = (
-  hostname: string,
-) => Promise<readonly WebhookResolvedAddress[]>;
+export type WebhookHostResolver = (hostname: string) => Promise<readonly WebhookResolvedAddress[]>;
 
 export interface ValidatedWebhookTarget {
   url: string;
@@ -99,13 +98,15 @@ export interface ValidatedWebhookTarget {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_ATTEMPTS = 2;
-const MAX_REDIRECTS = 5;
 const PRIVATE_TARGET_MESSAGE =
   'Webhook 仅允许连接安全的公网地址，不能使用本机、内网、链路本地或云元数据地址。';
 const DNS_TARGET_MESSAGE = 'Webhook 目标暂时无法安全解析，请检查地址后重试。';
 
 function normaliseHostname(hostname: string): string {
-  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
 }
 
 function isBlockedHostname(hostname: string): boolean {
@@ -137,47 +138,25 @@ async function defaultWebhookResolver(
 
 /**
  * Resolve and validate a webhook destination immediately before use.
- * Every DNS answer must be globally routable; mixed public/private answers are
- * rejected to avoid selecting the public address while leaving a rebinding
- * path to the private member.
+ *
+ * Layer 1 (Batch 10.3): `checkNotificationWebhookUrl` — https, port 443, no
+ * userinfo, exact platform host allowlist, robot-webhook path shape.
+ * Layer 2: every DNS answer must be globally routable; mixed public/private
+ * answers are rejected to avoid selecting the public address while leaving a
+ * rebinding path to the private member. The chosen address is then pinned
+ * for the connection.
  */
 export async function validateWebhookTarget(
   rawUrl: string,
-  options: { resolve?: WebhookHostResolver } = {},
+  options: { platform: string; resolve?: WebhookHostResolver },
 ): Promise<ValidatedWebhookTarget> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error('Webhook 地址格式无效，请检查后重试。');
-  }
-
-  if (url.protocol !== 'https:') {
-    throw new Error('Webhook 地址必须使用 https 协议，以保护通知内容和凭据。');
-  }
-  if (url.username || url.password) {
-    throw new Error('Webhook 地址不能包含用户名或密码。');
-  }
+  const policy = checkNotificationWebhookUrl(rawUrl, options.platform);
+  if (!policy.ok) throw new Error(policy.reason);
+  const url = policy.url;
 
   const hostname = normaliseHostname(url.hostname);
-  const literalFamily = isIP(hostname);
-  if (isBlockedHostname(hostname)) {
+  if (isBlockedHostname(hostname) || isIP(hostname) !== 0) {
     throw new Error(PRIVATE_TARGET_MESSAGE);
-  }
-  if (literalFamily !== 0) {
-    if (!isPublicInternetAddress(hostname)) {
-      throw new Error(PRIVATE_TARGET_MESSAGE);
-    }
-    return {
-      url: url.href,
-      hostname,
-      addresses: [
-        {
-          address: hostname,
-          family: literalFamily as 4 | 6,
-        },
-      ],
-    };
   }
 
   let resolved: readonly WebhookResolvedAddress[];
@@ -191,8 +170,7 @@ export async function validateWebhookTarget(
   }
   if (
     resolved.some(
-      ({ address, family }) =>
-        isIP(address) !== family || !isPublicInternetAddress(address),
+      ({ address, family }) => isIP(address) !== family || !isPublicInternetAddress(address),
     )
   ) {
     throw new Error(PRIVATE_TARGET_MESSAGE);
@@ -247,17 +225,14 @@ async function fetchWebhookHop(
 ): Promise<Response> {
   const dispatcher = createPinnedDispatcher(target);
   try {
-    const response = await fetchImpl(
-      target.url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        signal,
-        redirect: 'manual',
-        dispatcher,
-      } as unknown as RequestInit,
-    );
+    const response = await fetchImpl(target.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal,
+      redirect: 'manual',
+      dispatcher,
+    } as unknown as RequestInit);
     const snapshot = new Response(null, {
       status: response.status,
       statusText: response.statusText,
@@ -270,29 +245,22 @@ async function fetchWebhookHop(
   }
 }
 
-async function fetchWebhookWithRedirects(
-  initialUrl: string,
+/**
+ * One validated, address-pinned POST. Redirects are never followed: IM bot
+ * endpoints answer directly, and a 3xx is treated as a permanent failure so a
+ * compromised / spoofed answer cannot bounce the token-bearing request (or the
+ * notification body) somewhere else.
+ */
+async function fetchWebhookOnce(
+  url: string,
+  platform: string,
   body: string,
   signal: AbortSignal,
   fetchImpl: typeof globalThis.fetch,
   resolve: WebhookHostResolver | undefined,
 ): Promise<Response> {
-  let currentUrl = initialUrl;
-  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    const target = await validateWebhookTarget(currentUrl, { resolve });
-    const response = await fetchWebhookHop(fetchImpl, target, body, signal);
-    if (response.status < 300 || response.status >= 400) {
-      return response;
-    }
-
-    const location = response.headers.get('location');
-    if (!location) return response;
-    if (redirectCount === MAX_REDIRECTS) {
-      throw new Error('Webhook 重定向次数过多，已停止发送。');
-    }
-    currentUrl = new URL(location, target.url).href;
-  }
-  throw new Error('Webhook 重定向次数过多，已停止发送。');
+  const target = await validateWebhookTarget(url, { platform, resolve });
+  return fetchWebhookHop(fetchImpl, target, body, signal);
 }
 
 /**
@@ -326,10 +294,7 @@ export function formatPresetMessage(ctx: WebhookContext): string {
  *
  * Pure: doesn't mutate the input.
  */
-export function substituteTemplate(
-  template: unknown,
-  ctx: WebhookContext,
-): unknown {
+export function substituteTemplate(template: unknown, ctx: WebhookContext): unknown {
   if (typeof template === 'string') {
     return template
       .replace(/\{\{\s*title\s*\}\}/g, ctx.title)
@@ -358,10 +323,7 @@ export function substituteTemplate(
  * Throws on platform='custom' with no template (caller validation
  * problem; we don't want to silently POST an empty body).
  */
-export function buildPayload(
-  channel: WebhookChannel,
-  ctx: WebhookContext,
-): unknown {
+export function buildPayload(channel: WebhookChannel, ctx: WebhookContext): unknown {
   const text = formatPresetMessage(ctx);
   if (channel.platform === 'wecom') {
     return { msgtype: 'text', text: { content: text } };
@@ -400,10 +362,18 @@ export async function sendWebhook(
   ctx: WebhookContext,
   deps: WebhookSenderDeps = {},
 ): Promise<SendResult> {
-  const fetchImpl =
-    deps.fetch ?? (undiciFetch as unknown as typeof globalThis.fetch);
+  const fetchImpl = deps.fetch ?? (undiciFetch as unknown as typeof globalThis.fetch);
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+
+  // Batch 10.3 — deterministic URL policy first: a disallowed host / port /
+  // path never reaches DNS or fetch, and is not retried.
+  const where = describeWebhookForLog(channel.webhookUrl, channel.platform);
+  const policy = checkNotificationWebhookUrl(channel.webhookUrl, channel.platform);
+  if (!policy.ok) {
+    deps.logger?.warn({ ...where, reason: policy.reason }, 'webhook rejected by url policy');
+    return { ok: false, attempt: 0, error: policy.reason };
+  }
 
   let body: string;
   try {
@@ -422,8 +392,9 @@ export async function sendWebhook(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetchWebhookWithRedirects(
+      const res = await fetchWebhookOnce(
         channel.webhookUrl,
+        channel.platform,
         body,
         controller.signal,
         fetchImpl,
@@ -432,29 +403,26 @@ export async function sendWebhook(
       clearTimeout(timer);
       lastStatus = res.status;
       if (res.ok) {
-        deps.logger?.info(
-          { platform: channel.platform, status: res.status, attempt },
-          'webhook delivered',
-        );
+        deps.logger?.info({ ...where, status: res.status, attempt }, 'webhook delivered');
         return { ok: true, status: res.status, attempt };
       }
-      // 4xx is permanent — don't burn the retry slot.
-      if (res.status >= 400 && res.status < 500) {
-        lastError = `HTTP ${res.status} (permanent)`;
-        deps.logger?.warn(
-          { platform: channel.platform, status: res.status, attempt },
-          'webhook permanent failure',
-        );
+      // 3xx is never followed and 4xx is permanent — don't burn the retry slot.
+      if (res.status >= 300 && res.status < 500) {
+        lastError =
+          res.status < 400
+            ? `HTTP ${res.status} (redirect refused)`
+            : `HTTP ${res.status} (permanent)`;
+        deps.logger?.warn({ ...where, status: res.status, attempt }, 'webhook permanent failure');
         return { ok: false, status: res.status, attempt, error: lastError };
       }
       lastError = `HTTP ${res.status}`;
     } catch (err) {
       clearTimeout(timer);
-      lastError = err instanceof Error ? err.message : String(err);
-      deps.logger?.warn(
-        { platform: channel.platform, attempt, err: lastError },
-        'webhook attempt failed',
+      lastError = redactWebhookUrl(
+        err instanceof Error ? err.message : String(err),
+        channel.webhookUrl,
       );
+      deps.logger?.warn({ ...where, attempt, err: lastError }, 'webhook attempt failed');
     }
     // 500ms backoff between attempts. Don't sleep after the last
     // attempt (we're about to return anyway).
@@ -468,6 +436,20 @@ export async function sendWebhook(
     attempt: maxAttempts,
     ...(lastError ? { error: lastError } : {}),
   };
+}
+
+/** Error text may echo the request URL (token inside) — strip it. */
+export function redactWebhookUrl(message: string, webhookUrl: string): string {
+  if (!webhookUrl) return message;
+  let out = message.split(webhookUrl).join('[webhook]');
+  try {
+    const u = new URL(webhookUrl);
+    const secret = `${u.pathname}${u.search}`;
+    if (secret.length > 1) out = out.split(secret).join('/[redacted]');
+  } catch {
+    // unparseable URL never reached fetch
+  }
+  return out;
 }
 
 /**

@@ -2,10 +2,10 @@ import { newExternalId } from '@holaday/shared-types';
 import { eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import {
+  type NewPartnerRiskEvent,
+  type PartnerLot,
   partnerLots,
   partnerRiskEvents,
-  type PartnerLot,
-  type NewPartnerRiskEvent,
 } from '../db/schema/partner.js';
 
 const REVIEW_NOTE_MAX_LENGTH = 1000;
@@ -130,8 +130,10 @@ export class PartnerRiskLotService {
       }
 
       const existingMetadata = metadataRecord(lot.metadata);
-      const restoredStatus = normalizeRestorableLotStatus(existingMetadata.statusBeforeFreeze) ?? 'accumulating';
-      const restoredRiskStatus = normalizeRestorableRiskStatus(existingMetadata.riskStatusBeforeFreeze) ?? 'normal';
+      const restoredStatus =
+        normalizeRestorableLotStatus(existingMetadata.statusBeforeFreeze) ?? 'accumulating';
+      const restoredRiskStatus =
+        normalizeRestorableRiskStatus(existingMetadata.riskStatusBeforeFreeze) ?? 'normal';
       const metadata = {
         ...existingMetadata,
         riskResumedByUserId: reviewerUserId,
@@ -179,7 +181,11 @@ export class PartnerRiskLotService {
     const reviewerUserId = normalizePositiveSafeInteger(input.reviewerUserId, 'reviewerUserId');
     const reason = normalizeNonEmptyText(input.reason, 'reason', REVIEW_NOTE_MAX_LENGTH);
     const resolutionKind = normalizeCloseResolutionKind(input.resolutionKind);
-    const resolutionRef = normalizeOptionalText(input.resolutionRef, 'resolutionRef', CLOSE_RESOLUTION_REF_MAX_LENGTH);
+    const resolutionRef = normalizeOptionalText(
+      input.resolutionRef,
+      'resolutionRef',
+      CLOSE_RESOLUTION_REF_MAX_LENGTH,
+    );
     const now = normalizeDate(input.now ?? new Date(), 'now');
 
     return this.db.transaction(async (tx) => {
@@ -305,7 +311,11 @@ function normalizeNonEmptyText(value: string, field: string, maxLength = 128): s
   return normalized;
 }
 
-function normalizeOptionalText(value: string | undefined, field: string, maxLength: number): string | undefined {
+function normalizeOptionalText(
+  value: string | undefined,
+  field: string,
+  maxLength: number,
+): string | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim();
   if (!normalized) return undefined;
@@ -315,7 +325,9 @@ function normalizeOptionalText(value: string | undefined, field: string, maxLeng
   return normalized;
 }
 
-function normalizeCloseResolutionKind(value: PartnerRiskLotCloseResolutionKind | undefined): PartnerRiskLotCloseResolutionKind {
+function normalizeCloseResolutionKind(
+  value: PartnerRiskLotCloseResolutionKind | undefined,
+): PartnerRiskLotCloseResolutionKind {
   if (value === undefined) return 'manual';
   if (CLOSE_RESOLUTION_KINDS.includes(value)) return value;
   throw new RangeError('resolutionKind must be manual, refund, or fraud');

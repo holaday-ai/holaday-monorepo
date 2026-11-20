@@ -9,10 +9,14 @@ import {
 describe('isCtripFlightResultsUrl', () => {
   it('matches one-way and round-trip flight list URLs', () => {
     expect(
-      isCtripFlightResultsUrl('https://flights.ctrip.com/online/list/oneway-bjs-sha?depdate=2026-08-01'),
+      isCtripFlightResultsUrl(
+        'https://flights.ctrip.com/online/list/oneway-bjs-sha?depdate=2026-08-01',
+      ),
     ).toBe(true);
     expect(
-      isCtripFlightResultsUrl('https://flights.ctrip.com/online/list/round-bjs-sha?depdate=2026-08-01&rdate=2026-08-05'),
+      isCtripFlightResultsUrl(
+        'https://flights.ctrip.com/online/list/round-bjs-sha?depdate=2026-08-01&rdate=2026-08-05',
+      ),
     ).toBe(true);
   });
 
@@ -69,7 +73,10 @@ describe('extractCtripFlights', () => {
 describe('formatCtripFlightsTable', () => {
   it('sorts by price asc, caps at topN, marks no-booking + source', () => {
     const flights = extractCtripFlights(PAGE_TEXT);
-    const md = formatCtripFlightsTable(flights, { url: 'https://flights.ctrip.com/online/list/oneway-bjs-sha', topN: 3 });
+    const md = formatCtripFlightsTable(flights, {
+      url: 'https://flights.ctrip.com/online/list/oneway-bjs-sha',
+      topN: 3,
+    });
     expect(md).toContain('| 航空公司 | 出发-到达 | 是否直飞 | 价格(¥) |');
     expect(md).toContain('春秋航空'); // cheapest in
     expect(md).not.toContain('南方航空'); // 4th by price, dropped at topN=3
@@ -109,9 +116,7 @@ describe('buildCtripFlightHint', () => {
   it('still builds a directive (raw-text path) when the parser finds nothing', () => {
     // Real flight page text the parser doesn't recognize (no ¥ + times pairing),
     // but long enough to be a real page — model should still get the text.
-    const oddText =
-      '携程旅行 机票搜索结果 北京到上海 共找到 42 个航班 '.repeat(8) +
-      ' 航班信息以图形卡片展示，价格区间 700-1600 元，含直飞与经停选项。';
+    const oddText = `${'携程旅行 机票搜索结果 北京到上海 共找到 42 个航班 '.repeat(8)} 航班信息以图形卡片展示，价格区间 700-1600 元，含直飞与经停选项。`;
     const hint = buildCtripFlightHint({ pageText: oddText, url })!;
     expect(hint).toBeTruthy();
     expect(hint).not.toContain('初步解析'); // no parsed rows

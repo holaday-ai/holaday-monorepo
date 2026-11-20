@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SKILL_META, skillMetaById } from '../../agent/skills/skill-meta.js';
 import { __skillsInternals, skillsRouter } from './skills.js';
 
-const {
-  buildSkillListRows,
-  normalizeSelectedSkillIds,
-  toggleSelectedSkillIds,
-} = __skillsInternals;
+const { buildSkillListRows, normalizeSelectedSkillIds, toggleSelectedSkillIds } = __skillsInternals;
 
 describe('skills router preferences', () => {
   it('exposes the v1 skills catalogue instead of legacy expert cards', () => {
@@ -96,9 +92,7 @@ describe('skills router preferences', () => {
       exampleSummary: '从直播数据和内容中提炼流失原因、有效话术与下一场行动。',
     });
     expect(
-      buildSkillListRows([]).every(
-        (skill) => skill.experience.starterPrompts.length === 3,
-      ),
+      buildSkillListRows([]).every((skill) => skill.experience.starterPrompts.length === 3),
     ).toBe(true);
     expect('icon' in first).toBe(false);
   });

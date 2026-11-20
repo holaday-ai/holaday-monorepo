@@ -4,10 +4,12 @@ import {
   datetime,
   index,
   int,
+  json,
   mysqlTable,
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/mysql-core';
+import type { BrowserFileSource } from '../../files/browser-file-origin.js';
 import { tasks } from './tasks.js';
 import { users } from './users.js';
 
@@ -45,6 +47,8 @@ export const taskFiles = mysqlTable(
     mimetype: varchar('mimetype', { length: 96 }).notNull(),
     sizeBytes: int('size_bytes', { unsigned: true }).notNull(),
     storagePath: varchar('storage_path', { length: 512 }).notNull(),
+    /** Server-captured Home/task download origin + digest; legacy/input files retain null. */
+    browserSource: json('browser_source').$type<BrowserFileSource>(),
     /**
      * 'active' | 'expired'. Cron flips to 'expired' AFTER the on-disk
      * bytes have been unlinked. Audit-only — the download endpoint

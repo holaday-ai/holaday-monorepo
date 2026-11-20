@@ -121,6 +121,83 @@ describe('browser proxy established-session revocation', () => {
   });
 });
 
+it.each(['vnc', 'screencast'] as const)(
+  'closes %s within 60s when database revalidation hangs',
+  async (kind) => {
+    const upstream = new WebSocketServer({ port: 0 });
+    await once(upstream, 'listening');
+    const instance =
+      kind === 'vnc'
+        ? fakeInstance({ wsPort: (upstream.address() as AddressInfo).port })
+        : fakeScreencastInstance();
+    let release!: (valid: boolean) => void;
+    const revalidateSession = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const options = {
+      pool: fakePool(instance),
+      logger,
+      authenticateToken: async () => instance.userId,
+      revalidateSession,
+      sessionRevalidationIntervalMs: REVALIDATION_INTERVAL_MS,
+    };
+    const proxy = kind === 'vnc' ? createVncProxy(options) : createScreencastProxy(options);
+    const server = await serveProxy(proxy.handleUpgrade);
+    const client = new WebSocket(
+      `ws://127.0.0.1:${portOf(server)}/${kind}-ws/${instance.taskId}?token=stream-token`,
+      kind === 'vnc' ? ['binary'] : [],
+    );
+    const started = Date.now();
+    const closed = waitForClose(client, 5_000);
+    try {
+      await waitForOpen(client);
+      await expect(closed).resolves.toEqual({ code: 4401, reason: 'session revoked' });
+      expect(Date.now() - started).toBeLessThan(60_000);
+      expect(revalidateSession).toHaveBeenCalledTimes(1);
+      release(true);
+      await delay(50);
+      expect(client.readyState).toBe(WebSocket.CLOSED);
+      expect(revalidateSession).toHaveBeenCalledTimes(1);
+    } finally {
+      release?.(true);
+      await terminateClient(client);
+      await closeServer(server);
+      await closeWebSocketServer(upstream);
+    }
+  },
+);
+it('renews a healthy VNC session repeatedly without closing it', async () => {
+  const upstream = new WebSocketServer({ port: 0 });
+  await once(upstream, 'listening');
+  const instance = fakeInstance({ wsPort: (upstream.address() as AddressInfo).port });
+  const revalidateSession = vi.fn(async () => true);
+  const proxy = createVncProxy({
+    pool: fakePool(instance),
+    logger,
+    authenticateToken: async () => instance.userId,
+    revalidateSession,
+    sessionRevalidationIntervalMs: REVALIDATION_INTERVAL_MS,
+  });
+  const server = await serveProxy(proxy.handleUpgrade);
+  const client = new WebSocket(
+    `ws://127.0.0.1:${portOf(server)}/vnc-ws/${instance.taskId}?token=stream-token`,
+    ['binary'],
+  );
+  try {
+    await waitForOpen(client);
+    await delay(100);
+    expect(revalidateSession.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+  } finally {
+    await terminateClient(client);
+    await closeServer(server);
+    await closeWebSocketServer(upstream);
+  }
+});
+
 function fakeInstance(overrides: Partial<BrowserInstance> = {}): BrowserInstance {
   return {
     taskId: 'tsk_browser_proxy_revalidation',
@@ -195,9 +272,12 @@ function waitForOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-function waitForClose(socket: WebSocket): Promise<{ code: number; reason: string }> {
+function waitForClose(
+  socket: WebSocket,
+  timeoutMs = 1_000,
+): Promise<{ code: number; reason: string }> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('session revocation timeout')), 1_000);
+    const timer = setTimeout(() => reject(new Error('session revocation timeout')), timeoutMs);
     socket.once('close', (code, reason) => {
       clearTimeout(timer);
       resolve({ code, reason: reason.toString() });

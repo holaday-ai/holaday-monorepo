@@ -40,9 +40,7 @@ export class SlotAllocator {
         return this.slotAt(i);
       }
     }
-    throw new Error(
-      `SlotAllocator: all ${this.capacity} slots in use`,
-    );
+    throw new Error(`SlotAllocator: all ${this.capacity} slots in use`);
   }
 
   /**

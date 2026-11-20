@@ -1,0 +1,32 @@
+
+> @holaday/web-workbench@0.0.0 test /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> vitest run src/components/ui/sidebar-accessibility.test.tsx --maxWorkers=1 --minWorkers=1
+
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+
+ ❯ src/components/ui/sidebar-accessibility.test.tsx (3 tests | 1 failed) 17ms
+   × names automatically collapsed browser-workspace buttons even when manual state stays expanded 6ms
+     → expected '<div style="--sidebar-width:16rem;--s…' to contain 'data-icon-only="true"'
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ui/sidebar-accessibility.test.tsx > names automatically collapsed browser-workspace buttons even when manual state stays expanded
+AssertionError: expected '<div style="--sidebar-width:16rem;--s…' to contain 'data-icon-only="true"'
+
+Expected: "data-icon-only="true""
+Received: "<div style="--sidebar-width:16rem;--sidebar-width-icon:3rem" class="group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar"><div class="group peer hidden md:block text-sidebar-foreground" data-state="collapsed" data-collapsible="icon" data-variant="sidebar" data-side="left"><div class="hd-sidebar-spacer duration-[620ms] relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180 group-data-[collapsible=icon]:w-[--sidebar-width-icon]"></div><div class="duration-[620ms] fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none md:flex left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l"><div data-sidebar="sidebar" class="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"><button data-sidebar="menu-button" data-size="default" data-active="false" class="peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left outline-none ring-sidebar-ring transition-[width,height,padding] focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2 [&amp;&gt;span:last-child]:truncate [&amp;&gt;svg]:size-4 [&amp;&gt;svg]:shrink-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground h-8 text-sm" data-state="closed"><svg></svg><span>文件库</span></button></div></div></div></div>"
+
+ ❯ src/components/ui/sidebar-accessibility.test.tsx:20:20
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  22:29:12
+   Duration  483ms (transform 77ms, setup 0ms, collect 266ms, tests 17ms, environment 0ms, prepare 42ms)
+
+/Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @holaday/web-workbench@0.0.0 test: `vitest run src/components/ui/sidebar-accessibility.test.tsx --maxWorkers=1 --minWorkers=1`
+Exit status 1

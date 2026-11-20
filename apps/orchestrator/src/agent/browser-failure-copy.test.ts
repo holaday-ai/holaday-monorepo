@@ -4,9 +4,7 @@ import { friendlyBrowserFailureReason } from './browser-failure-copy.js';
 describe('friendlyBrowserFailureReason', () => {
   it('normalizes missing extension runtime errors', () => {
     expect(
-      friendlyBrowserFailureReason(
-        'Could not establish connection. Receiving end does not exist.',
-      ),
+      friendlyBrowserFailureReason('Could not establish connection. Receiving end does not exist.'),
     ).toBe('浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。');
     expect(friendlyBrowserFailureReason('浏览器扩展未连接，请打开 HOLA DAY 扩展后重试')).toBe(
       '浏览器扩展未连接。请打开 HOLA DAY 扩展后重试。',
@@ -22,9 +20,9 @@ describe('friendlyBrowserFailureReason', () => {
   });
 
   it('normalizes closed message ports as extension disconnects', () => {
-    expect(friendlyBrowserFailureReason('The message port closed before a response was received.')).toBe(
-      '浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。',
-    );
+    expect(
+      friendlyBrowserFailureReason('The message port closed before a response was received.'),
+    ).toBe('浏览器扩展连接已断开。请重新打开 HOLA DAY 扩展后重试。');
   });
 
   it('normalizes hibernated and raw browser session failures', () => {

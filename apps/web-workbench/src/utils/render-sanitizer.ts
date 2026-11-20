@@ -1,3 +1,5 @@
+import { formatSourceAttribution } from '@/lib/source-attribution';
+import { stripToolCallMarkup } from '@holaday/shared-types';
 /**
  * Phase 1 follow-up — SPA render-time sanitiser.
  *
@@ -145,27 +147,11 @@ const NARRATIVE_LINE_STARTERS = [
  */
 const NARRATIVE_LINE_RE = (() => {
   // Escape regex specials in the phrases (just in case).
-  const escaped = NARRATIVE_LINE_STARTERS.map((s) =>
-    s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  );
+  const escaped = NARRATIVE_LINE_STARTERS.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   // Match: line start, optional bullet/quote/space, one of the
   // phrases, anything else to end of line.
-  return new RegExp(
-    `^[ \\t]*(?:[-*>][ \\t]+)?(?:${escaped.join('|')})[^\\n]*$`,
-    'gim',
-  );
+  return new RegExp(`^[ \\t]*(?:[-*>][ \\t]+)?(?:${escaped.join('|')})[^\\n]*$`, 'gim');
 })();
-
-/**
- * Tool-XML envelope leak patterns — paranoid duplicate of the
- * backend sanitiser's coverage. Cheaper to do a defensive pass
- * here than to debug a stray `<tool_call>` rendering as raw text
- * in production.
- */
-const PAIRED_TOOL_TAG_RE =
-  /<(tool_call|tool_calls|tool_response|tool_use|tool_result|function_calls|function_call|function_response|invoke|parameter)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const ORPHAN_TOOL_TAG_RE =
-  /<\/?(?:tool_call|tool_calls|tool_response|tool_use|tool_result|function_calls|function_call|function_response|invoke|parameter)\b[^>]*\/?>/gi;
 
 /**
  * Image magic-byte base64 — JPEG/PNG/GIF/WEBP marker prefixes.
@@ -177,7 +163,8 @@ const IMAGE_MARKER_BASE64_RE =
 /**
  * Stop-reason markers leak occasionally on legacy rows.
  */
-const STOP_REASON_RE = /\[(?:STOP[_ ]REASON:[^\]]*|END[_ ]TURN|MAX[_ ]TOKENS|AWAITING[_ ]USER[_ ]INPUT)\]/gi;
+const STOP_REASON_RE =
+  /\[(?:STOP[_ ]REASON:[^\]]*|END[_ ]TURN|MAX[_ ]TOKENS|AWAITING[_ ]USER[_ ]INPUT)\]/gi;
 
 /**
  * Triple+ blank lines collapse — visual hygiene after strips.
@@ -193,9 +180,9 @@ const TRIPLE_BLANK_RE = /\n{3,}/g;
 export function sanitizeForRender(input: string | null | undefined): string {
   if (!input) return '';
   let text = input;
-  // 1. Tool-XML envelopes (paired + orphan).
-  text = text.replace(PAIRED_TOOL_TAG_RE, '');
-  text = text.replace(ORPHAN_TOOL_TAG_RE, '');
+  // 1. Tool-call syntax (`<tool_call>`, FIX-33 `<li_call><function>browser_use…`,
+  //    `{"action":…}`) — the backend filter's own code; code blocks stay as written.
+  text = stripToolCallMarkup(text);
   // 2. Markdown image references with screenshot / data-URL targets.
   text = text.replace(MARKDOWN_IMAGE_SCREENSHOT_RE, '');
   // 3. Bare screenshot filenames.
@@ -208,5 +195,5 @@ export function sanitizeForRender(input: string | null | undefined): string {
   text = text.replace(STOP_REASON_RE, '');
   // 7. Collapse blank-line gaps left by the strips.
   text = text.replace(TRIPLE_BLANK_RE, '\n\n');
-  return text.trim();
+  return formatSourceAttribution(text.trim());
 }

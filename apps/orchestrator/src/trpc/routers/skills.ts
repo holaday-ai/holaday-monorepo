@@ -61,9 +61,10 @@ function buildSkillListRows(enabledIds: Iterable<string>) {
  * column is NULL (free / new users) so consumers can iterate without
  * a null check.
  */
-async function loadEnabledIds(
-  ctx: { db: typeof import('../../db/client.js').db; userId: string },
-): Promise<string[]> {
+async function loadEnabledIds(ctx: {
+  db: typeof import('../../db/client.js').db;
+  userId: string;
+}): Promise<string[]> {
   const [row] = await ctx.db
     .select({ selectedSkills: users.selectedSkills, id: users.id })
     .from(users)

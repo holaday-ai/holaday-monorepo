@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
-import { partnerReferrals, type PartnerReferral } from '../db/schema/partner.js';
+import { type PartnerReferral, partnerReferrals } from '../db/schema/partner.js';
 import type { CreditLedgerService } from './credit-ledger-service.js';
-import {
-  PartnerReferralConflictError,
-  ReferralService,
-} from './referral-service.js';
+import { PartnerReferralConflictError, ReferralService } from './referral-service.js';
 
 type FakeReferralInsert = Omit<PartnerReferral, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -77,7 +74,9 @@ class FakeReferralDb {
         this.insertedValues.push(values);
         return {
           onDuplicateKeyUpdate: async (_config: unknown) => {
-            const existing = this.referrals.find((row) => row.inviteeUserId === values.inviteeUserId);
+            const existing = this.referrals.find(
+              (row) => row.inviteeUserId === values.inviteeUserId,
+            );
             if (existing) return;
             this.referrals.push({
               id: this.nextId,
@@ -260,7 +259,9 @@ describe('ReferralService.recordInvite', () => {
     ).rejects.toThrow(RangeError);
 
     await expect(
-      serviceWithFakes({ referrals: [fakeReferral({ inviterUserId: 111, inviteeUserId: 456 })] }).service.recordInvite({
+      serviceWithFakes({
+        referrals: [fakeReferral({ inviterUserId: 111, inviteeUserId: 456 })],
+      }).service.recordInvite({
         inviterUserId: 123,
         inviteeUserId: 456,
       }),

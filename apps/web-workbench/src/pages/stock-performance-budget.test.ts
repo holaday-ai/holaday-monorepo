@@ -2,7 +2,8 @@ import { existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const assetUrl = (name: string): URL => new URL(`../../public/assets/stocks/${name}`, import.meta.url);
+const assetUrl = (name: string): URL =>
+  new URL(`../../public/assets/stocks/${name}`, import.meta.url);
 
 describe('stock first-view performance budget', () => {
   it.each([

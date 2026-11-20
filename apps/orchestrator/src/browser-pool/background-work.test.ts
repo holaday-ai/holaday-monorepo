@@ -11,6 +11,9 @@ import { BrowserPool } from './browser-pool.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import type { PoolConfig } from './types.js';
 
+/** Owner-scoped hooks only run for identity (vault_allowed) browsers (D17-P1-01). */
+const IDENTITY_SESSION = { sessionPolicy: 'vault_allowed' as const };
+
 // Pool ordering uses a synthetic Browser; native close receipts have their own SDK suite.
 vi.mock('../agent/vision-loop/browser-close-receipt.js', () => ({
   bindBrowserCloseReceipt: (browser: { close(): Promise<void> }) => () => browser.close(),
@@ -165,10 +168,15 @@ afterEach(async () => {
 async function allocateOwned(pool: BrowserPool) {
   const drain = new ExecutionDrain();
   drain.open();
-  const root = startOwnedOperation(drain, 'request', () => pool.allocate('task', 'synthetic'), {
-    dispatch: 'immediate',
-    errorOutcome: 'known',
-  });
+  const root = startOwnedOperation(
+    drain,
+    'request',
+    () => pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION),
+    {
+      dispatch: 'immediate',
+      errorOutcome: 'known',
+    },
+  );
   drain.close();
   const instance = await root.result;
   return { drain, instance };
@@ -187,7 +195,7 @@ it('reserves background work before allocate returns, independently of the CDP r
 
 it('cancels the pending banner before closing its connection', async () => {
   const f = fixture();
-  await f.pool.allocate('task', 'synthetic');
+  await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
   f.state.showPages = true;
   const release = observe(f.pool.release('task'));
   await vi.advanceTimersByTimeAsync(6000);
@@ -203,12 +211,12 @@ it.each(['release', 'shutdown', 'adopt'] as const)(
     const f = fixture(async () => {
       await runBrowserOperation(() => hold.wait);
     });
-    await f.pool.allocate('task', 'synthetic');
+    await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
     await flush();
     let task = 'task';
     if (mode === 'adopt') {
       f.pool.retain(task, 20000);
-      expect(f.pool.adoptRetained(task, 'next', 'synthetic')).not.toBeNull();
+      expect(f.pool.adoptRetained(task, 'next', 'synthetic', 'vault_allowed')).not.toBeNull();
       task = 'next';
     }
     const done = observe<unknown>(mode === 'shutdown' ? f.pool.shutdown() : f.pool.release(task));
@@ -225,7 +233,7 @@ it.each(['release', 'shutdown', 'adopt'] as const)(
 
 it('waits for the actual banner SDK even after its two-second timeout', async () => {
   const f = fixture();
-  await f.pool.allocate('task', 'synthetic');
+  await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
   f.state.showPages = true;
   await vi.advanceTimersByTimeAsync(5500);
   expect(f.state.evaluations).toBe(1);
@@ -247,7 +255,7 @@ it('a timed-out hook still retains and waits for its original SDK', async () => 
     void raw.catch(() => {});
     await Promise.race([raw, Promise.resolve('caller-timeout')]);
   });
-  await f.pool.allocate('task', 'synthetic');
+  await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
   const release = observe(f.pool.release('task'));
   await vi.advanceTimersByTimeAsync(5000);
   expect(f.state.closes).toBe(0);
@@ -271,7 +279,7 @@ it.each(['release', 'shutdown'] as const)(
       }
       hookDone = true;
     });
-    await f.pool.allocate('task', 'synthetic');
+    await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
     await flush();
     expect(hookDone).toBe(true);
     expect(error).toBeDefined();
@@ -290,7 +298,7 @@ it('shutdown during allocation prevents late background work from starting', asy
     await ready.wait;
     return 'synthetic';
   };
-  const allocation = observe(f.pool.allocate('task', 'synthetic'));
+  const allocation = observe(f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION));
   await flush();
   const stop = observe(f.pool.shutdown());
   ready.release();
@@ -373,10 +381,10 @@ it.each(['release', 'shutdown', 'adopt'] as const)(
       void raw.catch(() => {});
       await Promise.race([raw, Promise.resolve('timeout')]);
     });
-    await f.pool.allocate('task', 'synthetic');
+    await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
     if (mode === 'adopt') {
       f.pool.retain('task', 20000);
-      f.pool.adoptRetained('task', 'next', 'synthetic');
+      f.pool.adoptRetained('task', 'next', 'synthetic', 'vault_allowed');
     }
     const closing = observe<unknown>(
       mode === 'shutdown' ? f.pool.shutdown() : f.pool.release(mode === 'adopt' ? 'next' : 'task'),
@@ -399,7 +407,7 @@ it('shutdown seals existing hook dispatch before waiting for another unfinished 
       calls++;
     });
   });
-  await f.pool.allocate('task', 'synthetic');
+  await f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION);
   const ready = gate();
   transport.ready = async () => {
     await ready.wait;
@@ -445,10 +453,15 @@ it('background reservation exhaustion closes the acquired connection and release
       })(),
     );
   };
-  const root = startOwnedOperation(drain, 'request', () => f.pool.allocate('task', 'synthetic'), {
-    dispatch: 'immediate',
-    errorOutcome: 'known',
-  });
+  const root = startOwnedOperation(
+    drain,
+    'request',
+    () => f.pool.allocate('task', 'synthetic', undefined, IDENTITY_SESSION),
+    {
+      dispatch: 'immediate',
+      errorOutcome: 'known',
+    },
+  );
   const allocation = observe(root.result);
   drain.close();
   await allocation.finished;
@@ -459,4 +472,12 @@ it('background reservation exhaustion closes the acquired connection and release
   expect(f.pool.stats().idle).toBe(2);
   for (const owner of competitors) drain.finish(owner);
   expect(drain.snapshot().idle).toBe(true);
+});
+
+it('an anonymous (公开云端) browser never runs the owner-scoped ready hook', async () => {
+  const hook = vi.fn(async () => {});
+  const f = fixture(hook);
+  await f.pool.allocate('task', 'synthetic', undefined, { sessionPolicy: 'anonymous' });
+  await flush();
+  expect(hook).not.toHaveBeenCalled();
 });

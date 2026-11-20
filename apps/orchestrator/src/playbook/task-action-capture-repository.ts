@@ -1,4 +1,5 @@
 import { newExternalId } from '@holaday/shared-types';
+import { desc, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readInsertId } from '../db/mysql-result.js';
 import {
@@ -31,6 +32,10 @@ export interface CreateActionCaptureInput {
   entryUrl?: string | null;
   inputValue?: string | null;
   screenshotAnchorId?: number | null;
+  /** Batch 06 (0062) — replay descriptor (role+name locator, wait, submit). */
+  replayJson?: unknown;
+  /** Batch 06 (0062) — 'cloud' | 'extension'. */
+  executorSource?: string | null;
 }
 
 export class TaskActionCaptureRepository {
@@ -53,8 +58,28 @@ export class TaskActionCaptureRepository {
       entryUrl: input.entryUrl ?? null,
       inputValue: input.inputValue ?? null,
       screenshotAnchorId: input.screenshotAnchorId ?? null,
+      ...(input.replayJson !== undefined ? { replayJson: input.replayJson } : {}),
+      ...(input.executorSource ? { executorSource: input.executorSource } : {}),
     };
     const insert = await this.db.insert(taskActionCaptures).values(values);
     return { ...(values as TaskActionCapture), id: readInsertId(insert) };
+  }
+
+  /**
+   * Batch 06 — attach result evidence to the task's LAST capture row (the
+   * trajectory's terminal step). No-op when the task has no captures.
+   */
+  async setOutcome(taskId: number, outcome: unknown): Promise<void> {
+    const [last] = await this.db
+      .select({ id: taskActionCaptures.id })
+      .from(taskActionCaptures)
+      .where(eq(taskActionCaptures.taskId, taskId))
+      .orderBy(desc(taskActionCaptures.actionIndex), desc(taskActionCaptures.id))
+      .limit(1);
+    if (!last) return;
+    await this.db
+      .update(taskActionCaptures)
+      .set({ outcomeJson: outcome })
+      .where(eq(taskActionCaptures.id, last.id));
   }
 }

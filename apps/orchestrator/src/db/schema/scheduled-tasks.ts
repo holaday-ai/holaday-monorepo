@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   datetime,
   index,
   int,
@@ -108,6 +109,19 @@ export const scheduledTasks = mysqlTable(
      * Stays at NULL until the first reminder fires.
      */
     lastReminderRun: datetime('last_reminder_run', { mode: 'date', fsp: 3 }),
+    /** Batch 10.3 (migration 0065) — push success outcomes too (default off). */
+    notifyOnSuccess: boolean('notify_on_success').notNull().default(false),
+    /** Batch 10.3 — notify when the failure streak reaches N (then every N). */
+    failureNotifyThreshold: int('failure_notify_threshold', { unsigned: true })
+      .notNull()
+      .default(1),
+    /** Batch 10.3 — current consecutive-failure streak; 0 after a success. */
+    consecutiveFailures: int('consecutive_failures', { unsigned: true }).notNull().default(0),
+    /**
+     * Batch 10.3 — task created by the latest dispatch whose terminal state
+     * the runner's settle pass has not folded into the streak yet.
+     */
+    pendingTaskId: bigint('pending_task_id', { mode: 'number', unsigned: true }),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

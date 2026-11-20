@@ -77,14 +77,18 @@ export interface StockRiskMonitorRunResultV1 extends StockRiskMonitorStateCompar
 }
 
 function signalSort(left: CanonicalStockRiskMonitorSignal, right: CanonicalStockRiskMonitorSignal) {
-  return SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
-    || SIGNAL_KEY_ORDER.indexOf(left.key) - SIGNAL_KEY_ORDER.indexOf(right.key)
-    || left.symbol.localeCompare(right.symbol);
+  return (
+    SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity] ||
+    SIGNAL_KEY_ORDER.indexOf(left.key) - SIGNAL_KEY_ORDER.indexOf(right.key) ||
+    left.symbol.localeCompare(right.symbol)
+  );
 }
 
 function changeSort(left: StockRiskChangeItem, right: StockRiskChangeItem) {
-  return SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
-    || SIGNAL_KEY_ORDER.indexOf(left.key) - SIGNAL_KEY_ORDER.indexOf(right.key);
+  return (
+    SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity] ||
+    SIGNAL_KEY_ORDER.indexOf(left.key) - SIGNAL_KEY_ORDER.indexOf(right.key)
+  );
 }
 
 function changeItem(
@@ -126,8 +130,12 @@ export function compareStockRiskMonitorState(
   current: readonly CanonicalStockRiskMonitorSignal[],
   checks: readonly StockRiskSourceCheck[],
 ): StockRiskMonitorStateComparison {
-  const previousByIdentity = new Map(previous.map((signal) => [`${signal.symbol}:${signal.key}`, signal]));
-  const currentByIdentity = new Map(current.map((signal) => [`${signal.symbol}:${signal.key}`, signal]));
+  const previousByIdentity = new Map(
+    previous.map((signal) => [`${signal.symbol}:${signal.key}`, signal]),
+  );
+  const currentByIdentity = new Map(
+    current.map((signal) => [`${signal.symbol}:${signal.key}`, signal]),
+  );
   const checkStatus = new Map(checks.map((check) => [check.key, check.status]));
 
   const added: StockRiskChangeItem[] = [];
@@ -169,9 +177,8 @@ export function stockRiskNotificationFingerprint(input: {
   resolved: readonly StockRiskChangeItem[];
   unavailableChecks: readonly StockRiskCheckKey[];
 }): string {
-  const normalizeChanges = (items: readonly StockRiskChangeItem[]) => [...items]
-    .sort(changeSort)
-    .map((item) => ({
+  const normalizeChanges = (items: readonly StockRiskChangeItem[]) =>
+    [...items].sort(changeSort).map((item) => ({
       key: item.key,
       severity: item.severity,
       previousSeverity: item.previousSeverity ?? null,
@@ -193,13 +200,9 @@ export function stockRiskNotificationFingerprint(input: {
 export function nextShanghaiPostmarketRun(now: Date): Date {
   if (Number.isNaN(now.getTime())) throw new Error('当前时间无效');
   const shanghai = new Date(now.getTime() + 8 * 60 * 60 * 1_000);
-  const cutoff = new Date(Date.UTC(
-    shanghai.getUTCFullYear(),
-    shanghai.getUTCMonth(),
-    shanghai.getUTCDate(),
-    8,
-    30,
-  ));
+  const cutoff = new Date(
+    Date.UTC(shanghai.getUTCFullYear(), shanghai.getUTCMonth(), shanghai.getUTCDate(), 8, 30),
+  );
   if (now.getTime() < cutoff.getTime()) return cutoff;
   cutoff.setUTCDate(cutoff.getUTCDate() + 1);
   return cutoff;

@@ -1,0 +1,34 @@
+TAP version 13
+# {"phase":"controls","done":0,"queued":0,"url":"blank"}
+# Subtest: nested popup dismissal replays from reset instead of clicking its departing parent
+not ok 1 - nested popup dismissal replays from reset instead of clicking its departing parent
+  ---
+  duration_ms: 1259.763667
+  type: 'test'
+  location: '/private/tmp/ui-p2-nested-menu-old.test.mjs:8:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'passed'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'passed'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///private/tmp/ui-p2-nested-menu-old.test.mjs:18:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1628.309208

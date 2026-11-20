@@ -1,0 +1,44 @@
+import { avatarSrc } from '@/lib/avatar-src';
+import { cn } from '@/lib/utils';
+import * as React from 'react';
+const CHARACTERS = [
+  'cute-cloud',
+  'casual-coffee',
+  'mature-ivory',
+  'cute-peach',
+  'casual-matcha',
+  'mature-indigo',
+];
+/** Stable fallback character; a member's uploaded photograph always takes precedence. */
+export function CharacterAvatar({
+  name,
+  seed = name,
+  src,
+  className,
+}: { name: string; seed?: string; src?: string | null; className?: string }): JSX.Element {
+  const hash = Array.from(seed).reduce(
+    (value, char) => (value * 31 + (char.codePointAt(0) ?? 0)) >>> 0,
+    0,
+  );
+  const fallback = `/holaday-ui/avatars/${CHARACTERS[hash % CHARACTERS.length]}.webp`;
+  const [failed, setFailed] = React.useState<string[]>([]);
+  // G7 / Q-8: a Google photo through /api/avatar; another site's address is not loaded.
+  const own = avatarSrc(src);
+  const photo = own && !failed.includes(own) ? own : fallback;
+  return (
+    <span className={cn('hd-character-avatar', className)} aria-hidden>
+      {failed.includes(photo) ? (
+        name.slice(0, 1)
+      ) : (
+        <img
+          data-character={photo === fallback}
+          src={photo}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed((values) => [...values, photo])}
+        />
+      )}
+    </span>
+  );
+}

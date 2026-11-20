@@ -1,3 +1,4 @@
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { describe, expect, it } from 'vitest';
 import { LocalChromeTaskSessions } from './local-chrome-task-session.js';
 
@@ -8,6 +9,58 @@ const selection = {
   selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
 };
 describe('local Chrome task ownership', () => {
+  it.each([false, true])(
+    'only requests file bytes with the explicit task file switch (%s)',
+    async (enabled) => {
+      const sessions = new LocalChromeTaskSessions();
+      let requested: readonly string[] = [];
+      const session = sessions.start(
+        'alice',
+        'task',
+        selection,
+        async (_user, options) => {
+          const command = options.args?.session;
+          if (command?.op === 'open') requested = command.protocol?.capabilities ?? [];
+          return {
+            ok: true,
+            result:
+              command?.op === 'close'
+                ? { ok: true, closed: true }
+                : {
+                    ok: true,
+                    sessionId: selection.selectionId,
+                    protocol: {
+                      ...USER_BROWSER_PROTOCOL,
+                      capabilities: [
+                        ...USER_BROWSER_PROTOCOL.capabilities,
+                        ...(enabled ? ['task_file_upload_v1'] : []),
+                      ],
+                    },
+                    observation: {
+                      tabId: 42,
+                      origin: 'https://work.example',
+                      title: 'Report',
+                      bodyText: 'Draft',
+                      ariaSnapshot: '',
+                      truncated: false,
+                      observationRevision: 1,
+                    },
+                  },
+          };
+        },
+        undefined,
+        { viewportV2: false, observationV2: false, replayV1: false, routingV2: true },
+        enabled ? { taskFilesV1: true } : undefined,
+      );
+      try {
+        expect(await session.client.open(selection)).toMatchObject({ ok: true });
+        expect(requested.includes('task_file_upload_v1')).toBe(enabled);
+        expect(session.client.fileUploadsEnabled).toBe(enabled);
+      } finally {
+        await sessions.finish('alice', 'task');
+      }
+    },
+  );
   it('reserves before admission and transfers the same seat to execution', async () => {
     const sessions = new LocalChromeTaskSessions();
     const reservation = sessions.reserve('alice', selection);

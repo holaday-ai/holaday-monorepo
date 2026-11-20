@@ -72,7 +72,7 @@ describe('energy progress', () => {
   });
 
   it('keeps scoped progress in memory when local storage is unavailable', () => {
-    const completedAt = new Date('2026-08-14T03:00:00.000Z');
+    const completedAt = new Date(2026, 7, 14, 12);
     vi.stubGlobal('window', {
       localStorage: {
         getItem: () => {
@@ -103,7 +103,7 @@ describe('energy progress', () => {
             experienceId: 'games',
             launchTarget: { type: 'game', gameId: 'catch-energy' },
             kind: 'game',
-            completedAt: '2026-08-14T03:00:00.000Z',
+            completedAt: completedAt.toISOString(),
           },
         ],
       },
@@ -484,7 +484,7 @@ describe('energy progress', () => {
   });
 
   it('removes saved cards and test actions without deleting completion history', () => {
-    const completedAt = new Date('2026-08-14T02:00:00.000Z');
+    const completedAt = new Date(2026, 7, 14, 12);
     recordEnergyCompletion('usr_a', 'tarot', completedAt);
     saveEnergyCardIds('usr_a', ['work-01']);
     saveLightTestAction('usr_a', 'work-focus', 'steady');

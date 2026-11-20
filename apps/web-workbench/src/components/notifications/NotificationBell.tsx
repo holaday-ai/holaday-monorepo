@@ -1,3 +1,4 @@
+import { useExclusiveOverlay } from '@/lib/top-level-overlay';
 /**
  * Phase 26B — global notification bell.
  *
@@ -18,6 +19,24 @@
  *   - Smooth scale+opacity entrance (matches calendar popovers)
  */
 
+import { Button } from '@/components/ui/button';
+import {
+  type NormalizedNotificationRow,
+  type NotificationListCursor,
+  groupNotifications,
+  mergeNotificationRows,
+  normalizeNotificationPage,
+  notificationBadgeText,
+  notificationButtonTitle,
+  notificationErrorMessage,
+  notificationListStatusCopy,
+  notificationListSummary,
+  safeNotificationCount,
+  shouldRenderCompactNotificationDot,
+} from '@/lib/notification-bell-state';
+import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
+import { sanitizeForRender } from '@/utils/render-sanitizer';
 import {
   AlertCircle,
   Bell,
@@ -34,23 +53,6 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
-import { cn } from '@/lib/utils';
-import { trpc } from '@/lib/trpc';
-import { sanitizeForRender } from '@/utils/render-sanitizer';
-import { Button } from '@/components/ui/button';
-import {
-  notificationBadgeText,
-  notificationButtonTitle,
-  notificationErrorMessage,
-  notificationListStatusCopy,
-  notificationListSummary,
-  mergeNotificationRows,
-  normalizeNotificationPage,
-  safeNotificationCount,
-  shouldRenderCompactNotificationDot,
-  type NormalizedNotificationRow,
-  type NotificationListCursor,
-} from '@/lib/notification-bell-state';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -67,7 +69,8 @@ export function NotificationBell({
 }: NotificationBellProps): JSX.Element {
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = React.useState<number>(0);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const setOpen = useExclusiveOverlay(open, setOpenState);
   const [items, setItems] = React.useState<NotificationRow[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -113,19 +116,19 @@ export function NotificationBell({
   // Outside-click + Esc dismissal when the dropdown is open.
   React.useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
+    const onClick = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onClick);
+    document.addEventListener('pointerdown', onClick, true);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('pointerdown', onClick, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   const fetchList = React.useCallback(async (cursor: NotificationListCursor | null = null) => {
     const requestId = listRequestRef.current + 1;
@@ -140,17 +143,13 @@ export function NotificationBell({
           ? {
               id: cursor.id,
               createdAt:
-                cursor.createdAt instanceof Date
-                  ? cursor.createdAt
-                  : new Date(cursor.createdAt),
+                cursor.createdAt instanceof Date ? cursor.createdAt : new Date(cursor.createdAt),
             }
           : undefined,
       });
       if (!mountedRef.current || listRequestRef.current !== requestId) return;
       const page = normalizeNotificationPage(res);
-      setItems((current) =>
-        append ? mergeNotificationRows(current, page.items) : page.items,
-      );
+      setItems((current) => (append ? mergeNotificationRows(current, page.items) : page.items));
       setNextCursor(page.nextCursor);
       setListError(null);
     } catch (err) {
@@ -165,12 +164,10 @@ export function NotificationBell({
   }, []);
 
   const handleToggle = React.useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev;
-      if (next) void fetchList(null);
-      return next;
-    });
-  }, [fetchList]);
+    const next = !open;
+    setOpen(next);
+    if (next) void fetchList(null);
+  }, [fetchList, open, setOpen]);
 
   const handleItemClick = React.useCallback(
     async (row: NotificationRow) => {
@@ -187,9 +184,7 @@ export function NotificationBell({
       // mark-read request never makes a notification feel dead.
       if (!row.isRead) {
         setItems((prev) =>
-          prev.map((r) =>
-            r.notificationId === row.notificationId ? { ...r, isRead: true } : r,
-          ),
+          prev.map((r) => (r.notificationId === row.notificationId ? { ...r, isRead: true } : r)),
         );
         setUnreadCount((c) => Math.max(0, safeNotificationCount(c) - 1));
         try {
@@ -203,7 +198,7 @@ export function NotificationBell({
         }
       }
     },
-    [fetchList, open, refreshCount],
+    [fetchList, open, refreshCount, setOpen],
   );
 
   const handleMarkAll = React.useCallback(async () => {
@@ -248,11 +243,12 @@ export function NotificationBell({
         title={buttonTitle}
         aria-expanded={open}
         className={cn(
-          'relative flex h-11 w-11 items-center justify-center text-[#595757] transition-colors hover:text-[#EA1F59] dark:text-foreground/70 dark:hover:text-[#EA1F59]',
+          'relative flex h-11 w-11 items-center justify-center text-[#595757] transition-colors hover:text-[#FF0061] dark:text-foreground/70 dark:hover:text-[#FF0061]',
           placement === 'topbar'
             ? 'rounded-full bg-transparent hover:bg-[#EFEFEF]/55 dark:hover:bg-white/10'
-            : 'rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] hover:border-[#EA1F59]/20 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#EA1F59]/35 dark:hover:bg-[#EA1F59]/10',
-          open && 'border-[#EA1F59]/25 bg-[#EA1F59]/5 text-[#EA1F59] shadow-[0_10px_26px_rgba(234,31,89,0.08)] dark:border-[#EA1F59]/35 dark:bg-[#EA1F59]/10',
+            : 'rounded-[10px] border border-[#DCDDDD]/60 bg-white/55 shadow-[0_4px_12px_rgba(17,24,39,0.035)] hover:border-[#FF0061]/20 hover:bg-[#FF0061]/5 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-[#FF0061]/35 dark:hover:bg-[#FF0061]/10',
+          open &&
+            'border-[#FF0061]/25 bg-[#FF0061]/5 text-[#FF0061] shadow-[0_10px_26px_rgba(255,0,97,0.08)] dark:border-[#FF0061]/35 dark:bg-[#FF0061]/10',
         )}
       >
         <Bell className="h-4 w-4" />
@@ -265,7 +261,7 @@ export function NotificationBell({
                 ? 'right-1 top-1 h-2 w-2'
                 : '-right-0.5 -top-0.5 h-4 min-w-[16px] px-1 text-[10px]',
             )}
-            style={{ backgroundColor: '#EA1F59' }}
+            style={{ backgroundColor: '#FF0061' }}
           >
             {compactBadge ? null : badge}
           </span>
@@ -280,7 +276,7 @@ export function NotificationBell({
               ? 'right-0 top-full mt-1 w-[min(calc(100vw-24px),360px)] origin-top-right'
               : placement === 'topbar'
                 ? 'right-0 top-full mt-3 w-[320px] origin-top-right rounded-[16px]'
-              : 'bottom-full right-0 mb-2 w-[244px] origin-bottom-right',
+                : 'bottom-full right-0 mb-2 w-[244px] origin-bottom-right',
           )}
         >
           <div className="flex items-center justify-between gap-3 border-b border-[#DCDDDD]/80 px-3 py-2.5 dark:border-white/10">
@@ -295,7 +291,7 @@ export function NotificationBell({
                 variant="ghost"
                 onClick={() => void handleMarkAll()}
                 disabled={markingAll}
-                className="h-8 rounded-[6px] px-2.5 text-xs hover:bg-[#EA1F59]/5 hover:text-[#EA1F59] dark:hover:bg-white/10"
+                className="h-8 rounded-[6px] px-2.5 text-xs hover:bg-[#FF0061]/5 hover:text-[#FF0061] dark:hover:bg-white/10"
               >
                 {markingAll ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
@@ -308,7 +304,7 @@ export function NotificationBell({
           </div>
           <div className="max-h-[400px] overflow-y-auto">
             {actionError && (
-              <div className="border-b border-[#EA1F59]/20 bg-[#EA1F59]/10 px-3 py-2 text-xs leading-5 text-[#EA1F59] dark:border-[#EA1F59]/30">
+              <div className="border-b border-[#FF0061]/20 bg-[#FF0061]/10 px-3 py-2 text-xs leading-5 text-[#FF0061] dark:border-[#FF0061]/30">
                 {actionError}
               </div>
             )}
@@ -323,10 +319,7 @@ export function NotificationBell({
               <NotificationSkeleton />
             ) : items.length === 0 ? (
               listError ? (
-                <NotificationHardError
-                  message={listError}
-                  onRetry={() => void fetchList(null)}
-                />
+                <NotificationHardError message={listError} onRetry={() => void fetchList(null)} />
               ) : (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">
                   还没有通知
@@ -334,13 +327,41 @@ export function NotificationBell({
               )
             ) : (
               <>
-                {items.map((row) => (
-                  <NotificationItem
-                    key={row.notificationId}
-                    row={row}
-                    onClick={() => void handleItemClick(row)}
-                  />
-                ))}
+                {groupNotifications(items).map(({ key, dateLabel, members }) =>
+                  members.length === 1 ? (
+                    <NotificationItem
+                      key={key}
+                      row={members[0]!}
+                      onClick={() => void handleItemClick(members[0]!)}
+                    />
+                  ) : (
+                    <details
+                      key={key}
+                      className="border-b border-border/60 px-3 py-2.5 last:border-0"
+                    >
+                      <summary
+                        className="cursor-pointer text-sm text-foreground"
+                        title="展开相同通知，逐条查看"
+                      >
+                        {dateLabel} · {sanitizeForRender(members[0]!.title)} · {members.length}{' '}
+                        条相同通知
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {members.filter((row) => !row.isRead).length} 条未读
+                        </span>
+                      </summary>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                        {sanitizeForRender(members[0]!.message)}
+                      </p>
+                      {members.map((row) => (
+                        <NotificationItem
+                          key={row.notificationId}
+                          row={row}
+                          onClick={() => void handleItemClick(row)}
+                        />
+                      ))}
+                    </details>
+                  ),
+                )}
                 {nextCursor && (
                   <div className="flex justify-center border-t border-[#DCDDDD]/70 px-3 py-2.5 dark:border-white/10">
                     <Button
@@ -349,7 +370,7 @@ export function NotificationBell({
                       variant="ghost"
                       disabled={loadingMore}
                       onClick={() => void fetchList(nextCursor)}
-                      className="h-8 rounded-[6px] px-3 text-xs text-[#595757] hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                      className="h-8 rounded-[6px] px-3 text-xs text-[#595757] hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
                     >
                       {loadingMore && (
                         <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden />
@@ -391,7 +412,7 @@ function NotificationStatusNotice({
     <div className="border-b border-[#DCDDDD]/70 px-3 py-2.5 dark:border-white/10">
       <div className="flex items-start gap-2">
         {isError ? (
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#EA1F59]" aria-hidden />
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FF0061]" aria-hidden />
         ) : (
           <Loader2
             className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
@@ -409,7 +430,7 @@ function NotificationStatusNotice({
             size="sm"
             onClick={onRetry}
             disabled={loading}
-            className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-2.5 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-2.5 text-xs text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
           >
             {loading ? '重试中…' : '重试'}
           </Button>
@@ -428,7 +449,7 @@ function NotificationHardError({
 }): JSX.Element {
   return (
     <div className="px-3 py-5 text-center">
-      <AlertCircle className="mx-auto h-6 w-6 text-[#EA1F59]" aria-hidden />
+      <AlertCircle className="mx-auto h-6 w-6 text-[#FF0061]" aria-hidden />
       <div className="mt-2 text-[13px] font-medium text-foreground/85">通知暂时无法加载</div>
       <div className="mx-auto mt-1 max-w-[210px] text-[11px] leading-5 text-muted-foreground">
         {message}
@@ -436,7 +457,7 @@ function NotificationHardError({
       <Button
         type="button"
         size="sm"
-        className="mt-3 h-8 rounded-[7px] bg-[#EA1F59] px-3 text-xs text-white hover:bg-[#EA1F59]/90"
+        className="mt-3 h-8 rounded-[7px] bg-[#FF0061] px-3 text-xs text-white hover:bg-[#FF0061]/90"
         onClick={onRetry}
       >
         重试
@@ -479,7 +500,7 @@ function NotificationItem({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-start gap-2.5 border-b border-[#DCDDDD]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-[#EA1F59]/5 dark:border-white/10 dark:hover:bg-white/10"
+      className="flex w-full items-start gap-2.5 border-b border-[#DCDDDD]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-[#FF0061]/5 dark:border-white/10 dark:hover:bg-white/10"
     >
       <span
         className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] text-white"
@@ -502,14 +523,12 @@ function NotificationItem({
             {formatRelative(row.createdAt)}
           </span>
         </div>
-        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-          {row.message}
-        </p>
+        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{row.message}</p>
       </div>
       {!row.isRead && (
         <span
           className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full"
-          style={{ backgroundColor: '#EA1F59' }}
+          style={{ backgroundColor: '#FF0061' }}
           aria-label="未读"
         />
       )}
@@ -588,7 +607,7 @@ function NotificationDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
             aria-label="关闭"
             title="关闭"
           >
@@ -597,7 +616,7 @@ function NotificationDetailModal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {body.trim() ? (
-            <div className="prose prose-sm prose-neutral max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-h1:text-base prose-h1:font-semibold prose-h2:mt-4 prose-h2:text-sm prose-h2:font-semibold prose-h3:text-xs prose-h3:font-semibold prose-p:my-1.5 prose-a:text-[#EA1F59] prose-a:decoration-[#EA1F59]/35 prose-strong:font-semibold prose-strong:text-foreground prose-table:my-2 prose-table:text-xs prose-th:text-foreground prose-td:align-top prose-code:rounded prose-code:bg-[#EFEFEF]/70 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:prose-code:bg-white/10">
+            <div className="prose prose-sm prose-neutral max-w-none leading-relaxed text-foreground prose-headings:text-foreground prose-h1:text-base prose-h1:font-semibold prose-h2:mt-4 prose-h2:text-sm prose-h2:font-semibold prose-h3:text-xs prose-h3:font-semibold prose-p:my-1.5 prose-a:text-[#FF0061] prose-a:decoration-[#FF0061]/35 prose-strong:font-semibold prose-strong:text-foreground prose-table:my-2 prose-table:text-xs prose-th:text-foreground prose-td:align-top prose-code:rounded prose-code:bg-[#EFEFEF]/70 prose-code:px-1 prose-code:text-[11px] dark:prose-invert dark:prose-code:bg-white/10">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
             </div>
           ) : (
@@ -612,7 +631,7 @@ function NotificationDetailModal({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigate(plannedHref)}
-                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
               >
                 查看规划记录
               </Button>
@@ -622,7 +641,7 @@ function NotificationDetailModal({
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigate(scheduleHref)}
-                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#EA1F59]/25 hover:bg-[#EA1F59]/5 hover:text-[#EA1F59]"
+                className="h-8 rounded-[6px] border-[#DCDDDD]/75 px-3 text-xs text-[#595757] hover:border-[#FF0061]/25 hover:bg-[#FF0061]/5 hover:text-[#FF0061]"
               >
                 在定时任务中查看
               </Button>
@@ -636,16 +655,14 @@ function NotificationDetailModal({
 }
 
 export function notificationColor(type: string): string {
-  if (type === 'task_failed') return '#EA1F59';
+  if (type === 'task_failed') return '#FF0061';
   if (type === 'task_complete') return '#42C0EF';
-  if (type === 'task_reminder') return '#EA1F59';
+  if (type === 'task_reminder') return '#FF0061';
   if (type === 'task_started') return '#FFC910';
   return '#ADADAD';
 }
 
-export function scheduledNotificationHref(
-  scheduledTaskInternalId: number | null,
-): string | null {
+export function scheduledNotificationHref(scheduledTaskInternalId: number | null): string | null {
   if (scheduledTaskInternalId === null) return null;
   if (!Number.isSafeInteger(scheduledTaskInternalId) || scheduledTaskInternalId <= 0) {
     return null;

@@ -4,8 +4,8 @@
  * the real `.env` and reset the module-level cache between cases.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   _resetMasterKeyCacheForTests,
   decryptCookieJson,
@@ -61,9 +61,7 @@ describe('cookie-crypto', () => {
     expect(blob.encryptedBlob.length).toBeGreaterThan(0);
     const tampered = Buffer.from(blob.encryptedBlob);
     tampered[0] = tampered[0]! ^ 0x01;
-    expect(() =>
-      decryptCookieJson({ ...blob, encryptedBlob: tampered }),
-    ).toThrow();
+    expect(() => decryptCookieJson({ ...blob, encryptedBlob: tampered })).toThrow();
   });
 
   it('rejects a tampered auth tag', () => {

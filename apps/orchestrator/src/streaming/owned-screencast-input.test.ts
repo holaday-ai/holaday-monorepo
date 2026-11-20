@@ -3,8 +3,11 @@ import { browserControlSessions } from '../agent/supercar/browser-control-sessio
 import type { BrowserInstance } from '../browser-pool/types.js';
 import { createOwnedScreencastInputBridge } from './owned-screencast-input.js';
 
-describe('owned screencast input assembly', () => {
-  it('shares the running control, rejecting unconfirmed input and a replaced pool instance', async () => {
+const text = (value: string) =>
+  JSON.stringify({ type: 'input', payload: { type: 'insertText', text: value } });
+
+describe('owned screencast input assembly (REBUILD-4 共同操作)', () => {
+  it('routes input through the running control with no lease, rejecting a replaced pool instance', async () => {
     const instance = {
       taskId: 'tsk_input',
       userId: 'usr_owner',
@@ -13,39 +16,72 @@ describe('owned screencast input assembly', () => {
     let current = instance;
     const binding = browserControlSessions.start(instance);
     const effects: string[] = [];
-    const bridge = createOwnedScreencastInputBridge({
-      instance,
-      peek: () => current,
-      releasePressed: async () => {
-        effects.push('release');
-      },
-    });
+    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => current });
     await bridge.attach({
       handle: async () => {
         effects.push('input');
       },
     });
-    const send = (controlLease?: string) =>
-      bridge.receive(
-        JSON.stringify({ type: 'input', controlLease, payload: { type: 'insertText', text: 'x' } }),
-      );
-    await expect(send()).rejects.toThrow();
-    binding.control.requestHuman();
-    const parked = binding.control.checkpoint(async () => undefined);
-    const token = binding.control.snapshot().lease ?? '';
-    await send(token);
-    binding.control.returnToAgent(token);
-    await parked;
-    expect(effects).toEqual(['input', 'release']);
-    current = { ...instance };
-    await expect(send(token)).rejects.toThrow('browser_session_changed');
-    expect(effects).toEqual(['input', 'release']);
-    binding.control.close();
-    await parked;
+    try {
+      await bridge.receive(text('x'));
+      expect(effects).toEqual(['input']);
+      // The person's input is recorded on the running control: the assistant yields to it.
+      expect(binding.control.humanInputLog().count).toBe(1);
+      expect(binding.control.humanBusy()).toBe(true);
+      expect(binding.control.snapshot()).toEqual({ phase: 'agent', lease: null, error: null });
+      current = { ...instance };
+      await expect(bridge.receive(text('y'))).rejects.toThrow('browser_session_changed');
+      expect(effects).toEqual(['input']);
+    } finally {
+      binding.finish();
+    }
+  });
+
+  it('after the run finished, input goes through a fresh open review control', async () => {
+    const instance = {
+      taskId: 'tsk_review',
+      userId: 'usr_owner',
+      status: 'ready',
+    } as BrowserInstance;
+    const binding = browserControlSessions.start(instance);
+    binding.finish();
+    const effects: string[] = [];
+    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => instance });
+    await bridge.attach({
+      handle: async () => {
+        effects.push('input');
+      },
+    });
+    await bridge.receive(text('x'));
+    expect(effects).toEqual(['input']);
+    const review = browserControlSessions.openForViewer(instance);
+    expect(review?.control).not.toBe(binding.control);
+    expect(review?.control.humanInputLog().count).toBe(1);
+    review?.control.close();
+  });
+
+  it('refuses input when no run bound the browser, or the browser is not ready', async () => {
+    const instance = {
+      taskId: 'tsk_unbound',
+      userId: 'usr_owner',
+      status: 'ready',
+    } as BrowserInstance;
+    const effects: string[] = [];
+    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => instance });
+    await bridge.attach({
+      handle: async () => {
+        effects.push('input');
+      },
+    });
+    await expect(bridge.receive(text('x'))).rejects.toThrow('browser_control_unavailable');
+    const binding = browserControlSessions.start(instance);
+    (instance as { status: string }).status = 'stopping';
+    await expect(bridge.receive(text('x'))).rejects.toThrow('browser_session_changed');
+    expect(effects).toEqual([]);
     binding.finish();
   });
 
-  it('does not apply layout changes outside the actual runner checkpoint', async () => {
+  it('ignores a viewport message: nothing is resized and nothing is recorded', async () => {
     const instance = {
       taskId: 'tsk_resize',
       userId: 'usr_owner',
@@ -53,24 +89,17 @@ describe('owned screencast input assembly', () => {
     } as BrowserInstance;
     const binding = browserControlSessions.start(instance);
     const effects: string[] = [];
-    const bridge = createOwnedScreencastInputBridge({
-      instance,
-      peek: () => instance,
-      onViewportApplied: () => effects.push('ack'),
-    });
+    const bridge = createOwnedScreencastInputBridge({ instance, peek: () => instance });
     await bridge.attach({
-      handle: async () => {
-        effects.push('resize');
+      handle: async (message) => {
+        effects.push(message.type);
       },
     });
     await bridge.receive(
       JSON.stringify({ type: 'input', payload: { type: 'viewport', width: 800, height: 600 } }),
     );
     expect(effects).toEqual([]);
-    await binding.control.checkpoint(async () => {
-      effects.push('observe');
-    });
-    expect(effects).toEqual(['resize', 'ack', 'observe']);
+    expect(binding.control.humanBusy()).toBe(false);
     binding.finish();
   });
 });

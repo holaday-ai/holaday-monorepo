@@ -1,8 +1,5 @@
+import { discoveryFeedSearch, parseDiscoveryFeed } from '@/lib/stock-discovery-route';
 import { describe, expect, it } from 'vitest';
-import {
-  discoveryFeedSearch,
-  parseDiscoveryFeed,
-} from '@/lib/stock-discovery-route';
 
 describe('stock discovery route state', () => {
   it('defaults absent or malformed feeds to all discovery items', () => {

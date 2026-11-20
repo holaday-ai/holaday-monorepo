@@ -1,0 +1,14 @@
+[
+  {
+    "route": "task:generate:executing",
+    "width": 1200,
+    "height": 1000,
+    "issue": {
+      "rule": "dead-control",
+      "severity": "P1",
+      "control": "进行中的任务无法批量删除",
+      "detail": "no observable effect",
+      "screenshot": "artifacts/1200x1000-task_generate_executing-control-52.png"
+    }
+  }
+]

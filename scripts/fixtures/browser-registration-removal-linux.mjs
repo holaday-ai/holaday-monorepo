@@ -1,4 +1,3 @@
-import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 // Disposable, private-PID Linux QA. No production access or credentials.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
@@ -26,6 +25,7 @@ import {
   recordFirstCutoverFailure,
   resumeFirstCutoverCandidateWorker,
 } from '/source/browser-first-cutover-host.mjs';
+import { ingressDiagnosticStage } from '/source/browser-first-cutover-ingress-diagnostics.mjs';
 import {
   classifyFirstCutoverHostPair,
   classifyFirstCutoverRetirementPair,

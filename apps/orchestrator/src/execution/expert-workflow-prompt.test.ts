@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
 import { CONTENT_TOPIC_WORKFLOW } from './expert-workflow-content-topic.js';
+import { DOUYIN_REVIEW_WORKFLOW } from './expert-workflow-douyin.js';
+import type { NamedValidatorResult } from './expert-workflow-intake.js';
 import {
-  buildFollowUpFooter,
-  buildReportSystemPrompt,
   FOLLOW_UP_ACTIONS_MARKER_CLOSE,
   FOLLOW_UP_ACTIONS_MARKER_OPEN,
+  buildFollowUpFooter,
+  buildReportSystemPrompt,
 } from './expert-workflow-prompt.js';
-import type { NamedValidatorResult } from './expert-workflow-intake.js';
 
 const W = DOUYIN_REVIEW_WORKFLOW;
 

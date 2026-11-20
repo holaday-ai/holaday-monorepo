@@ -1,16 +1,26 @@
+import {
+  type BrowserCapabilities,
+  instanceBrowserCapabilities,
+} from '../../config/browser-capabilities.js';
 import { BrowserControl } from './browser-control.js';
+import type { HeldBrowserInput } from './browser-control.js';
 
 interface BrowserBinding {
   taskId: string;
   userId: string;
   executor?: object;
+  capabilities?: BrowserCapabilities;
 }
 interface ControlSession {
   control: BrowserControl;
   active: boolean;
 }
 
-/** Weak identity keys prevent a replacement browser from inheriting a lease. */
+/**
+ * Weak identity keys: a replacement browser never inherits another one's control. REBUILD-4: there
+ * is no lease — a control is open (the person may use the browser) until a new run replaces it or
+ * the browser stops.
+ */
 export class BrowserControlSessions {
   private readonly entries = new WeakMap<BrowserBinding, ControlSession>();
   private readonly controlledExecutors = new WeakSet<object>();
@@ -55,7 +65,13 @@ export class BrowserControlSessions {
     if (previous?.control.snapshot().error === 'input_outcome_unknown')
       throw new Error('browser_input_outcome_unknown');
     previous?.control.close();
-    const entry = { control: new BrowserControl(), active: true };
+    const entry = {
+      control: new BrowserControl(Date.now, {
+        collaborationV2: instanceBrowserCapabilities(instance).collaborationV2,
+        activity: previous?.control.humanActivity,
+      }),
+      active: true,
+    };
     this.entries.set(instance, entry);
     return {
       control: entry.control,
@@ -67,20 +83,87 @@ export class BrowserControlSessions {
     };
   }
 
-  /** Caller has verified a terminal DB task and the same restored pool instance. */
+  /**
+   * REBUILD-4: the control a viewer's input goes through — the running task's, or, once its run has
+   * finished (the runner closed it), a fresh review control on the same browser. Null when no run
+   * ever bound this browser.
+   *
+   * 复审 #1 (建议修 #2): this path does not read the task's DB status. What stands in for review()'s
+   * 「the caller checked the task is terminal」 is the run's own end: a review control is opened only
+   * after the run that bound this browser called finish() (entry.active false, its control closed and
+   * every accepted input settled). A task is run by one runner at a time, and the next run's start()
+   * closes the review control before it acts — so a viewer never gets a control beside a running task.
+   * While a stop is still winding down (closed, runner not finished) the closed control is returned:
+   * its runHuman refuses (browser_control_closed) and the screen is told (input-closed).
+   */
+  openForViewer(instance: BrowserBinding): ControlSession | null {
+    const entry = this.entries.get(instance);
+    if (!entry) return null;
+    if (entry.active || entry.control.snapshot().phase !== 'closed') return entry;
+    if (!entry.control.isSettled() || entry.control.snapshot().error) return null;
+    return this.review(instance);
+  }
+
+  /**
+   * 复审 #1 #1: the viewer is holding an input until a fresh frame names it (no coordinates, no
+   * contents): the running task's assistant yields as for any input. Never opens a control.
+   */
+  noteViewerBusy(instance: BrowserBinding): void {
+    const entry = this.entries.get(instance);
+    if (entry?.control.canAgentAct()) entry.control.noteHumanInput('pending');
+  }
+
+  noteViewerActivity(instance: BrowserBinding, source: object, input: HeldBrowserInput): void {
+    const entry = this.entries.get(instance);
+    if (entry?.control.canAgentAct()) entry.control.setHeldInput(source, input);
+  }
+
+  viewerHasHeldInput(instance: BrowserBinding, source: object): boolean {
+    return this.entries.get(instance)?.control.hasHeldInput(source) ?? false;
+  }
+
+  /**
+   * Caller has verified a terminal DB task and the same restored pool instance. REBUILD-4: the person
+   * just uses the finished task's browser — the open review control is reused; no lease, no handback.
+   */
   review(instance: BrowserBinding): ControlSession {
     this.claimControlled(instance);
     const previous = this.entries.get(instance);
     if (previous?.active || (previous && !previous.control.isSettled()))
       throw new Error('browser_runner_active');
     if (previous?.control.snapshot().error) throw new Error('browser_input_outcome_unknown');
-    if (previous?.control.snapshot().phase === 'human') return previous;
-    previous?.control.close();
-    const entry = { control: new BrowserControl(), active: false };
+    if (previous && previous.control.snapshot().phase !== 'closed') return previous;
+    const entry = {
+      control: new BrowserControl(Date.now, {
+        collaborationV2: instanceBrowserCapabilities(instance).collaborationV2,
+        activity: previous?.control.humanActivity,
+      }),
+      active: false,
+    };
     this.entries.set(instance, entry);
-    entry.control.requestHuman();
-    void entry.control.checkpoint(async () => undefined).finally(() => entry.control.close());
     return entry;
+  }
+
+  /**
+   * BROWSER-HOME-1: wait (at most `timeoutMs`) for the person's inputs on this browser's current
+   * control to settle, so a run can start() on it. True when nothing is in flight (or no control).
+   */
+  async inputSettledWithin(instance: BrowserBinding, timeoutMs: number): Promise<boolean> {
+    const entry = this.entries.get(instance);
+    if (entry?.control.tracksHeldInput) {
+      await entry.control.yieldToHuman({ maxWaitMs: Math.max(0, timeoutMs) });
+      return !entry.control.humanBusy();
+    }
+    if (!entry || entry.control.isSettled()) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+    });
+    try {
+      return await Promise.race([entry.control.settled().then(() => true as const), timedOut]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async quarantine(instance: BrowserBinding, stop: () => Promise<boolean>): Promise<void> {

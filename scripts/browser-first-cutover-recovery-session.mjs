@@ -1,4 +1,3 @@
-import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -9,6 +8,7 @@ import {
   inspectFirstCutoverRecoveryTarget,
   restoreFirstCutoverAgeBackup,
 } from './browser-first-cutover-backup.mjs';
+import { ingressDiagnosticError } from './browser-first-cutover-ingress-diagnostics.mjs';
 import { createFirstCutoverSessionWire } from './browser-first-cutover-ingress-session.mjs';
 
 const fail = (stage, previous) => {

@@ -183,3 +183,7 @@ envelope, inspect `pm2 logs akshare-mcp-http --lines 40 --nostream`.
 unauthenticated and must stay loopback-only (`127.0.0.1:8848`).
 Never expose it through nginx, a public firewall rule, or a public
 DNS record.
+
+## SPA UI acceptance before publication
+
+Run the [local UI deployment task template](ui-suite/deploy-task-template.md) on the frozen candidate. `pnpm ui:audit` must finish with exit 0: P1 findings, missing baselines, incomplete coverage or an unfinished report block publication. Archive the JSON/Markdown report and screenshots with the deployment evidence. Baseline updates require review; the initial baseline is not permission to ignore failures. After a separately authorized release, rerun the same candidate locally and record the deployed SPA digest independently. This check uses local seed data only and grants no deployment authorization.

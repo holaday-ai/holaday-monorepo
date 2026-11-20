@@ -15,10 +15,26 @@ export function summariseIntent(intent: string, maxLen = 20): string {
   // Drop polite opening phrases. Longest-match-first so "能不能" wins
   // before "能".
   const OPENINGS = [
-    '麻烦你帮我', '麻烦帮我', '劳驾帮我', '请帮我', '能不能帮我',
-    '能否帮我', '可以帮我吗', '可以帮我', '你能帮我',
-    '你能', '你可以', '可以', '能否', '能不能',
-    '帮我', '帮忙', '请', '麻烦', '劳驾', '拜托',
+    '麻烦你帮我',
+    '麻烦帮我',
+    '劳驾帮我',
+    '请帮我',
+    '能不能帮我',
+    '能否帮我',
+    '可以帮我吗',
+    '可以帮我',
+    '你能帮我',
+    '你能',
+    '你可以',
+    '可以',
+    '能否',
+    '能不能',
+    '帮我',
+    '帮忙',
+    '请',
+    '麻烦',
+    '劳驾',
+    '拜托',
   ];
   for (const o of OPENINGS) {
     if (t.startsWith(o)) {
@@ -26,6 +42,21 @@ export function summariseIntent(intent: string, maxLen = 20): string {
       break;
     }
   }
+
+  // FIX-57 复审 #1-1d: 「使用云端浏览器，」「用浏览器」 says how, not what — drop it, and
+  // name a pasted address by its site so the row tells tasks apart.
+  t = t
+    .replace(
+      /^(?:请)?(?:使用|用|在|通过)?(?:云端|本地|真实)?浏览器(?:里|中|上)?(?:帮我)?[,，、:：\s]*/u,
+      '',
+    )
+    .replace(/(?:打开|访问|进入)\s*(https?:\/\/\S+)\s*/u, (m: string, url: string) => {
+      const name = addressName(url);
+      return name ? `${name} ` : m;
+    })
+    .replace(/https?:\/\/\S+/gu, (url) => addressName(url) ?? url)
+    .replace(/\s{2,}/g, ' ')
+    .trimStart();
 
   // Drop softening particles anywhere near the start.
   t = t.replace(/^(先|然后|接下来|顺便|顺路)[,，]?\s*/, '');
@@ -49,7 +80,52 @@ export function summariseIntent(intent: string, maxLen = 20): string {
   }
 
   t = t.trim();
-  if (t.length <= maxLen) return t;
-  // Trim by char (not byte) so CJK is safe.
-  return `${t.slice(0, maxLen - 1).trim()}…`;
+  return truncateAtBoundary(t, maxLen);
+}
+
+/**
+ * FIX-57 复审 #2-3: cut by whole characters (an emoji is one, never half of a surrogate
+ * pair), and where possible at a space or punctuation mark near the end.
+ */
+export function truncateAtBoundary(text: string, maxLen: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= maxLen) return text;
+  if (maxLen <= 1) return '…';
+  const keep = chars.slice(0, maxLen - 1);
+  const floor = Math.ceil((maxLen - 1) / 2);
+  for (let i = keep.length - 1; i >= floor; i--) {
+    if (/[\s,，。、;；:：!！?？)）」】]/u.test(keep[i] ?? '')) {
+      const cut = keep
+        .slice(0, /[)）」】]/u.test(keep[i] ?? '') ? i + 1 : i)
+        .join('')
+        .trim();
+      if (cut) return `${cut}…`;
+    }
+  }
+  return `${keep.join('').trim()}…`;
+}
+
+const ADDRESS_NAMES: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)item\.(?:m\.)?jd\.com$/, '京东商品页'],
+  [/(^|\.)search\.jd\.com$/, '京东搜索'],
+  [/(^|\.)jd\.com$/, '京东'],
+  [/(^|\.)xiaohongshu\.com$/, '小红书笔记'],
+  [/(^|\.)zhihu\.com$/, '知乎问题'],
+  [/(^|\.)douyin\.com$/, '抖音视频'],
+  [/(^|\.)amap\.com$/, '高德地图'],
+  [/(^|\.)amazon\.[a-z.]+$/, '亚马逊'],
+  [/(^|\.)youtube\.com$/, 'YouTube'],
+  [/(^|\.)wikipedia\.org$/, '维基百科'],
+  [/(^|\.)baike\.baidu\.com$/, '百度百科'],
+  [/(^|\.)ctrip\.com$/, '携程'],
+];
+
+/** A pasted address of a known site, by the site's name; others stay as written. */
+function addressName(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return ADDRESS_NAMES.find(([re]) => re.test(host))?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runVideoPipeline, type VideoPipelineDeps } from './video-pipeline.js';
 import type { VideoScript } from './types.js';
+import { type VideoPipelineDeps, runVideoPipeline } from './video-pipeline.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
@@ -78,10 +78,7 @@ describe('runVideoPipeline', () => {
     }));
     const { deps } = makeDeps({ renderBrollClip, lipSyncSegment });
 
-    const out = await runVideoPipeline(
-      { script: SCRIPT, minimumSegmentDurationMs: 2_500 },
-      deps,
-    );
+    const out = await runVideoPipeline({ script: SCRIPT, minimumSegmentDurationMs: 2_500 }, deps);
 
     expect(out.timeline.segments.map((segment) => segment.durationMs)).toEqual([
       2_500, 2_500, 3_000,
@@ -136,7 +133,9 @@ describe('runVideoPipeline', () => {
         throw new Error('fal down');
       },
     });
-    await expect(runVideoPipeline({ script: SCRIPT, retries: 2 }, deps)).rejects.toThrow('fal down');
+    await expect(runVideoPipeline({ script: SCRIPT, retries: 2 }, deps)).rejects.toThrow(
+      'fal down',
+    );
     expect(logger.error).toHaveBeenCalled();
   });
 
@@ -153,8 +152,8 @@ describe('runVideoPipeline', () => {
 
   it('throws on an empty script', async () => {
     const { deps } = makeDeps();
-    await expect(
-      runVideoPipeline({ script: { title: 'x', segments: [] } }, deps),
-    ).rejects.toThrow(/no segments/);
+    await expect(runVideoPipeline({ script: { title: 'x', segments: [] } }, deps)).rejects.toThrow(
+      /no segments/,
+    );
   });
 });

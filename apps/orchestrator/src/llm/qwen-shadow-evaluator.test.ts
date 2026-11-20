@@ -6,8 +6,7 @@ const ENVIRONMENT = {
   DASHSCOPE_WORKSPACE_ID: 'legacy-workspace',
   DASHSCOPE_INTL_API_KEY: 'intl-key',
   DASHSCOPE_INTL_ANTHROPIC_BASE_URL: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
-  DASHSCOPE_INTL_RESPONSES_BASE_URL:
-    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  DASHSCOPE_INTL_RESPONSES_BASE_URL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   DASHSCOPE_INTL_WORKSPACE_ID: 'intl-workspace',
   DASHSCOPE_CN_API_KEY: 'cn-key',
   DASHSCOPE_CN_ANTHROPIC_BASE_URL: 'https://dashscope.aliyuncs.com/apps/anthropic',

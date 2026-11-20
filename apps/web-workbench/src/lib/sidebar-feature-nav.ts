@@ -6,7 +6,11 @@ export interface SidebarFeatureNavItem {
 
 export interface SidebarFeatureNavFlags {
   cosmicEnabled: boolean;
+  /** HIDE-1: 股市任务 (default hidden). */
+  ashareEnabled?: boolean;
   partnerEnabled?: boolean;
+  /** BROWSER-HOME-1: 云浏览器 (server flag via auth.me.browserHomeEnabled; default hidden). */
+  browserHomeEnabled?: boolean;
 }
 
 export function filterSidebarFeatureNavItems<T extends SidebarFeatureNavItem>(
@@ -15,7 +19,9 @@ export function filterSidebarFeatureNavItems<T extends SidebarFeatureNavItem>(
 ): T[] {
   return items.filter((item) => {
     if (item.href === '/cosmic') return flags.cosmicEnabled;
+    if (item.href === '/stocks') return flags.ashareEnabled === true;
     if (item.href === '/partner') return flags.partnerEnabled === true;
+    if (item.href === '/browser') return flags.browserHomeEnabled === true;
     return true;
   });
 }

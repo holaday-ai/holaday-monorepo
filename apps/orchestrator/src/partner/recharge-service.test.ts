@@ -3,11 +3,11 @@ import type { PartnerKycStatus } from '@holaday/shared-types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
-  partnerLots,
-  partnerRechargeOrders,
   type PartnerLot,
   type PartnerMembership,
   type PartnerRechargeOrder,
+  partnerLots,
+  partnerRechargeOrders,
 } from '../db/schema/partner.js';
 import type { KycService } from './kyc-service.js';
 import type { PartnerMembershipService } from './membership-service.js';
@@ -86,7 +86,9 @@ class FakeRechargeDb {
           return {
             onDuplicateKeyUpdate: async (_config: unknown) => {
               this.orderDuplicateKeyUpdateCalls += 1;
-              const existing = this.orders.find((row) => row.idempotencyKey === orderValues.idempotencyKey);
+              const existing = this.orders.find(
+                (row) => row.idempotencyKey === orderValues.idempotencyKey,
+              );
               if (existing) return;
               this.orders.push({
                 id: this.nextOrderId,
@@ -109,7 +111,9 @@ class FakeRechargeDb {
           return {
             onDuplicateKeyUpdate: async (_config: unknown) => {
               this.lotDuplicateKeyUpdateCalls += 1;
-              const existing = this.lots.find((row) => row.rechargeOrderId === lotValues.rechargeOrderId);
+              const existing = this.lots.find(
+                (row) => row.rechargeOrderId === lotValues.rechargeOrderId,
+              );
               if (existing) return;
               this.lots.push({
                 id: this.nextLotId,
@@ -140,7 +144,8 @@ class FakeRechargeDb {
             then: (
               onFulfilled?: ((value: Array<PartnerRechargeOrder | PartnerLot>) => unknown) | null,
               onRejected?: ((reason: unknown) => unknown) | null,
-            ) => Promise.resolve(this.selectRows(table, predicateText)).then(onFulfilled, onRejected),
+            ) =>
+              Promise.resolve(this.selectRows(table, predicateText)).then(onFulfilled, onRejected),
           };
           return chain;
         },
@@ -148,7 +153,10 @@ class FakeRechargeDb {
     };
   }
 
-  private selectRows(table: unknown, predicateText: string): Array<PartnerRechargeOrder | PartnerLot> {
+  private selectRows(
+    table: unknown,
+    predicateText: string,
+  ): Array<PartnerRechargeOrder | PartnerLot> {
     if (table === partnerRechargeOrders) {
       if (predicateText.includes('user_id') && predicateText.includes('completed')) {
         return this.orders.filter(
@@ -168,7 +176,9 @@ class FakeRechargeDb {
       const byExternalId = this.lots.find((row) => predicateText.includes(row.externalId));
       if (byExternalId) return [byExternalId];
       const byRechargeOrderId = this.lots.find(
-        (row) => predicateText.includes('recharge_order_id') && predicateText.includes(String(row.rechargeOrderId)),
+        (row) =>
+          predicateText.includes('recharge_order_id') &&
+          predicateText.includes(String(row.rechargeOrderId)),
       );
       return byRechargeOrderId ? [byRechargeOrderId] : [];
     }
@@ -338,15 +348,22 @@ describe('RechargeService createPendingOrder', () => {
     const fakeDb = new FakeRechargeDb();
     const service = serviceWithGates(fakeDb, { membership: null, kycStatus: 'passed' });
 
-    await expect(service.createPendingOrder(validRechargeOrderInput)).rejects.toBeInstanceOf(RechargeGateError);
+    await expect(service.createPendingOrder(validRechargeOrderInput)).rejects.toBeInstanceOf(
+      RechargeGateError,
+    );
     expect(fakeDb.orderRowsCreated).toBe(0);
   });
 
   it('blocks recharge orders when KYC has not passed', async () => {
     const fakeDb = new FakeRechargeDb();
-    const service = serviceWithGates(fakeDb, { membership: fakeActiveMembership(), kycStatus: 'pending' });
+    const service = serviceWithGates(fakeDb, {
+      membership: fakeActiveMembership(),
+      kycStatus: 'pending',
+    });
 
-    await expect(service.createPendingOrder(validRechargeOrderInput)).rejects.toBeInstanceOf(RechargeGateError);
+    await expect(service.createPendingOrder(validRechargeOrderInput)).rejects.toBeInstanceOf(
+      RechargeGateError,
+    );
     expect(fakeDb.orderRowsCreated).toBe(0);
   });
 
@@ -367,7 +384,9 @@ describe('RechargeService createPendingOrder', () => {
     });
     expect(row.externalId).toMatch(/^pay_/);
     expect(fakeDb.orderRowsCreated).toBe(1);
-    expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key'))).toBe(true);
+    expect(
+      fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('idempotency_key')),
+    ).toBe(true);
   });
 
   it('uses configured single recharge limits when creating pending orders', async () => {
@@ -558,9 +577,11 @@ describe('RechargeService createLotForCapturedRecharge', () => {
     expect(row.releaseEndsAt.toISOString()).toBe('2027-10-30T03:04:05.006Z');
     expect(fakeDb.lotRowsCreated).toBe(1);
     expect(fakeDb.lotDuplicateKeyUpdateCalls).toBe(1);
-    expect(fakeDb.wherePredicateTexts.some((predicateText) => predicateText.includes('recharge_order_id'))).toBe(
-      true,
-    );
+    expect(
+      fakeDb.wherePredicateTexts.some((predicateText) =>
+        predicateText.includes('recharge_order_id'),
+      ),
+    ).toBe(true);
   });
 
   it('rejects rollingThirtyDayCnyCents below the current amount', async () => {
@@ -664,19 +685,22 @@ describe('RechargeService createLotForCapturedRecharge', () => {
   it.each([
     ['different amount', { amountCnyCents: 11_000_00, rollingThirtyDayCnyCents: 11_000_00 }],
     ['different user', { userId: 456 }],
-  ])('throws a conflict error for an existing recharge-order lot with a %s', async (_name, patch) => {
-    const fakeDb = new FakeRechargeDb({ lots: [fakeLot()] });
-    const service = new RechargeService(fakeDb.asDB());
+  ])(
+    'throws a conflict error for an existing recharge-order lot with a %s',
+    async (_name, patch) => {
+      const fakeDb = new FakeRechargeDb({ lots: [fakeLot()] });
+      const service = new RechargeService(fakeDb.asDB());
 
-    await expect(
-      service.createLotForCapturedRecharge({
-        userId: 123,
-        rechargeOrderId: 77,
-        amountCnyCents: 10_000_00,
-        rollingThirtyDayCnyCents: 10_000_00,
-        now: new Date('2026-07-01T03:04:05.006Z'),
-        ...patch,
-      }),
-    ).rejects.toBeInstanceOf(RechargeLotConflictError);
-  });
+      await expect(
+        service.createLotForCapturedRecharge({
+          userId: 123,
+          rechargeOrderId: 77,
+          amountCnyCents: 10_000_00,
+          rollingThirtyDayCnyCents: 10_000_00,
+          now: new Date('2026-07-01T03:04:05.006Z'),
+          ...patch,
+        }),
+      ).rejects.toBeInstanceOf(RechargeLotConflictError);
+    },
+  );
 });

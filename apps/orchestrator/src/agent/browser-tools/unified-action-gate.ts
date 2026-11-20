@@ -1,0 +1,1380 @@
+import {
+  type LoginContext,
+  type SelectedChromeSessionCommand,
+  type UserBrowserTargetDescription,
+  readLoginContext,
+} from '@holaday/shared-types';
+import type { CDPSession, ElementHandle, Frame, Locator, Page } from 'playwright';
+import { stripInternalRefs, stripSnapshotSyntax } from '../internal-refs.js';
+import { buildAuthParkQuestion, detectCaptchaPage } from '../login-detector.js';
+import type { RunSupercarOptions, SupercarAwaitingKind } from '../supercar/agent-loop.js';
+import { isAffirmativeActionConfirmation } from '../supercar/runtime-action-policy.js';
+import { probeBrowserBlocker } from './browser-blocker-probe.js';
+import { amazonVerificationUrl, verificationPost } from './cloud-observation.js';
+import {
+  type ConsentTarget,
+  consentButton,
+  consentRefusalMessage,
+  consentSentence,
+  consentToggle,
+  contactField,
+  contactRefusalMessage,
+  userAskedToConsent,
+  userGaveValue,
+} from './consent-guard.js';
+import { LOGIN_POPUP_NOTICE } from './full-page-read.js';
+import type { ActionGateDecision } from './unified-browser-loop.js';
+import type { UnifiedBrowserAction } from './unified-tools.js';
+
+type BeforeAction = NonNullable<RunSupercarOptions['onBeforeAction']>;
+export type RuntimeActionDescriptor = Parameters<BeforeAction>[0];
+
+const DESCRIBE_TIMEOUT_MS = 2_000;
+const MAX_FRAME_DEPTH = 5;
+/** FIX-61B P0-1: every question parked for the user — no snapshot syntax, no element handle. */
+const userFacing = (text: string): string => stripInternalRefs(stripSnapshotSyntax(text));
+const CONFIRM_DEFAULT_QUESTION = '即将执行可能产生外部影响的操作。请明确回复“确认执行”后继续。';
+const NOT_CONFIRMED_REASON = '用户未确认不可逆操作，本次任务已停止，页面进度已保留。';
+const TAKEOVER_RESUME_MESSAGE =
+  '用户已在画面上处理过，刚才的操作没有由 Agent 执行。请重新 snapshot 确认页面状态后继续。';
+const TARGET_CHANGED_MESSAGE =
+  '确认期间页面已变化，刚才确认的操作没有执行。请重新 snapshot，需要时会再次请用户确认。';
+
+/** Form submission targets that move money, place orders or delete things. */
+const TRANSACTION_ACTION_RE =
+  /pay|payment|checkout|cashier|order|settle|purchase|transfer|withdraw|delete|remove|destroy|unsubscribe|支付|付款|下单|订单|删除/i;
+const TRANSACTION_FIELD_RE =
+  /金额|价格|总价|付款|支付|银行卡|卡号|有效期|收款|转账|汇款|提现|充值|删除|amount|price|total|payment|card|cvv|cvc|expir|iban|transfer|withdraw|delete/i;
+
+interface ElementSignals {
+  visibleText: string | null;
+  ariaLabel: string | null;
+  title: string | null;
+  placeholder: string | null;
+  name: string | null;
+  type: string | null;
+  tagName: string | null;
+  url: string | null;
+  /** What the action acts on, bound into a confirmation: link target, form submission. */
+  href?: string | null;
+  formAction?: string | null;
+  formMethod?: string | null;
+  /** The hit is a host whose internals cannot be seen (closed shadow / custom element). */
+  opaque?: boolean;
+  /** FIX-36 复审 #1: a login field (account, phone, code, or any box of a login block). */
+  credentialForm?: boolean;
+  /** FIX-36 复审 #1: a login / sign-up / authorize / 「获取验证码」 control. */
+  loginControl?: boolean;
+  /** G2i: the click toggles a checkbox / radio / switch — its label and current state. */
+  toggle?: { label: string; checked: boolean; drawn?: boolean } | null;
+}
+
+/** What Enter in a field submits: the real form semantics, not just a button. */
+interface SubmitContext {
+  hasForm: boolean;
+  action: string | null;
+  /** The `action` attribute as written (a relative target is still bound). */
+  rawAction: string | null;
+  method: string | null;
+  submitControl: ElementSignals | null;
+  fieldSignal: string;
+  hasAmountField: boolean;
+  searchLike: boolean;
+}
+
+/**
+ * Signals of the element a click on `node` acts on: `node` is the deepest hit
+ * (CDP hit-testing pierces open and closed shadow roots and in-process frames),
+ * climbed to its closest actionable ancestor across shadow boundaries, so an
+ * icon inside a button inside a web component reads as the button. Includes
+ * the action's object (link href, form action/method). `{ iframe: true }` when
+ * the hit is a frame element the caller must descend into.
+ * Serialised into the page via `toString()`: no closures, no named inner
+ * helpers (bundlers' `__name` wrappers must not be serialised).
+ */
+const READ_ACTIONABLE = (
+  node: Node,
+): (ElementSignals & { iframe?: false }) | { iframe: true } | null => {
+  const el = (node.nodeType === 1 ? node : node.parentElement) as Element | null;
+  if (!el) return null;
+  const doc = el.ownerDocument;
+  const tag = String(el.tagName || '').toLowerCase();
+  if (tag === 'iframe' || tag === 'frame') return { iframe: true };
+  const selector =
+    'button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick]';
+  // BROWSER-AUTOPILOT-1: a blank document surface (no control, link or form) is an
+  // ordinary click with no label — never the whole page's text, never "unknown".
+  // A document root can itself be a labelled control; retain its real signals.
+  if (
+    (el === doc.body || el === doc.documentElement) &&
+    !el.matches(selector) &&
+    !el.hasAttribute('aria-label') &&
+    typeof (el as HTMLElement).onclick !== 'function'
+  )
+    return {
+      visibleText: null,
+      ariaLabel: null,
+      title: null,
+      placeholder: null,
+      name: null,
+      type: null,
+      tagName: tag || null,
+      url: doc.location ? doc.location.href : null,
+      href: null,
+      formAction: null,
+      formMethod: null,
+    };
+  let actionable: Element | null = null;
+  let cur: Element | null = el;
+  for (let hops = 0; cur && hops < 200; hops += 1) {
+    if (cur.matches(selector)) {
+      actionable = cur;
+      break;
+    }
+    const parent: Element | null = cur.parentElement;
+    if (parent) cur = parent;
+    else {
+      const root = cur.getRootNode() as ShadowRoot | Document;
+      cur = 'host' in root ? root.host : null;
+    }
+  }
+  const target = actionable ?? el;
+  const text = String((target as HTMLElement).innerText || target.textContent || '')
+    .trim()
+    .slice(0, 200);
+  const input = target as HTMLInputElement;
+  const value =
+    target.tagName === 'INPUT' && ['submit', 'button'].includes(input.type) ? input.value : '';
+  const link = target.closest('a[href]') as HTMLAnchorElement | null;
+  const form = (input.form ?? target.closest('form')) as HTMLFormElement | null;
+  const submitter = target.tagName === 'BUTTON' || target.tagName === 'INPUT';
+  // G2i: what a click on a checkbox / radio / switch (or its label) ticks, named by its label.
+  const toggleRole = /^(?:checkbox|switch|radio|menuitemcheckbox|menuitemradio)$/i;
+  let box: Element | null = null;
+  if (target.tagName === 'INPUT' && /^(?:checkbox|radio)$/i.test(input.type)) box = target;
+  else if (toggleRole.test(target.getAttribute('role') || '')) box = target;
+  else if (target.tagName === 'LABEL') {
+    const control = (target as HTMLLabelElement).control;
+    box =
+      control &&
+      control.tagName === 'INPUT' &&
+      /^(?:checkbox|radio)$/i.test((control as HTMLInputElement).type)
+        ? control
+        : target.querySelector(
+            'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"]',
+          );
+  }
+  // GOAL2 H4 (Q-6 #3): a box drawn as a plain element (`<i class="agree-check">` next to 「我已阅读并
+  // 同意《用户协议》」), no checkbox semantics, little or no text of its own: the short text around
+  // it names what it ticks. Its class says whether it is ticked.
+  let drawn = false;
+  // 复审 #2-7: whole class words (`agree-check`, `ui-checkbox`), never 「checkout」「ticket」, and
+  // never a close button.
+  const words = `${target.getAttribute('class') || ''} ${target.getAttribute('id') || ''}`
+    .split(/[\s_-]+|(?<=[a-z])(?=[A-Z])/)
+    .filter(Boolean);
+  if (
+    !box &&
+    /^(?:DIV|SPAN|I|EM|B|LI|LABEL)$/.test(target.tagName) &&
+    // 复审 #3-6: a drawn box has no text, or only a mark; 「同意」 with text is a button.
+    // 复审 #4-1: an icon-font glyph (`&#xe60f;`), a symbol or a zero-width space is no text.
+    !text.replace(/[\p{Co}\p{So}\u200b-\u200f\ufeff\s]/gu, '') &&
+    !/[×✕╳]/.test(text) &&
+    words.some((word) =>
+      // 复审 #3-5: 「icon-unchecked」「checked」「ticked」「agreed」 too.
+      /^(?:un)?(?:check(?:ed|box|mark)?|tick(?:ed)?)$|^(?:agree(?:d|ment)?|consent|radio|switch|box)$/i.test(
+        word,
+      ),
+    ) &&
+    !words.some((word) => /^(?:close|dismiss|cancel|clear|delete|remove)$/i.test(word))
+  ) {
+    box = target;
+    drawn = true;
+  }
+  let toggle: { label: string; checked: boolean; drawn?: boolean } | null = null;
+  if (box) {
+    const parts: string[] = [];
+    parts.push(box.getAttribute('aria-label') || '');
+    for (const id of (box.getAttribute('aria-labelledby') || '').split(/\s+/)) {
+      const ref = id ? doc.getElementById(id) : null;
+      if (ref) parts.push(ref.textContent || '');
+    }
+    const boxInput = box as HTMLInputElement;
+    if (boxInput.labels)
+      for (const label of Array.from(boxInput.labels)) parts.push(label.textContent || '');
+    const wrapping = box.closest('label');
+    if (wrapping) parts.push(wrapping.textContent || '');
+    if (box !== target) parts.push(text);
+    if (box.getAttribute('role')) parts.push((box as HTMLElement).innerText || '');
+    // No label: the short text right around the box (「<input type=checkbox> I accept the terms」).
+    const around = String((box.parentElement as HTMLElement | null)?.innerText || '').trim();
+    if (!parts.join('').trim() && around.length <= 120) parts.push(around);
+    // Its name only when nothing names it (a survey's name="agreement_q1" is not its answer).
+    if (!parts.join('').trim())
+      parts.push(box.getAttribute('name') || '', box.getAttribute('id') || '');
+    toggle = {
+      ...(drawn ? { drawn: true } : {}),
+      label: parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+      checked:
+        box.tagName === 'INPUT'
+          ? boxInput.checked
+          : drawn
+            ? // 复审 #2-7: the ticked state may sit on the box or the row around it.
+              // 复审 #3-4: the box's own class may say 「active / selected / on」; a container's
+              // only 「checked / ticked」 (a panel's 「active」 is no tick).
+              /(?:^|[\s_-])(?:checked|is-checked|ticked|active|selected|on)(?:$|[\s_-])/i.test(
+                box.getAttribute('class') || '',
+              ) ||
+              box.getAttribute('aria-checked') === 'true' ||
+              [box.parentElement, box.parentElement?.parentElement].some(
+                (node) =>
+                  !!node &&
+                  (/(?:^|[\s_-])(?:checked|is-checked|ticked)(?:$|[\s_-])/i.test(
+                    node.getAttribute('class') || '',
+                  ) ||
+                    node.getAttribute('aria-checked') === 'true'),
+              )
+            : box.getAttribute('aria-checked') === 'true',
+    };
+  }
+  return {
+    visibleText: text || value || null,
+    ariaLabel: target.getAttribute('aria-label'),
+    title: target.getAttribute('title'),
+    placeholder: target.getAttribute('placeholder'),
+    name: target.getAttribute('name'),
+    type: target.getAttribute('type'),
+    tagName: String(target.tagName || '').toLowerCase() || null,
+    url: doc.location ? doc.location.href : null,
+    href: link ? `${link.href} ${link.getAttribute('href') ?? ''}` : null,
+    formAction: form
+      ? [
+          (submitter && input.formAction) || form.action || '',
+          target.getAttribute('formaction') ?? form.getAttribute('action') ?? '',
+        ].join(' ') || null
+      : null,
+    // 复审 #2: a submit button's own formmethod wins over the form's method.
+    formMethod: form
+      ? (
+          (submitter && target.getAttribute('formmethod')) ||
+          form.getAttribute('method') ||
+          'get'
+        ).toLowerCase()
+      : null,
+    // A custom element (or host) with no readable content and no open shadow
+    // root: whatever is inside it cannot be seen from here.
+    opaque:
+      !actionable && !text && String(el.tagName || '').includes('-') && !el.shadowRoot
+        ? true
+        : undefined,
+    toggle,
+  };
+};
+
+/** Signals of the field itself (typing, selecting): no hit-testing. */
+const READ_SELF = (el: Element): ElementSignals => ({
+  visibleText:
+    String((el as HTMLElement).innerText || '')
+      .trim()
+      .slice(0, 200) || null,
+  ariaLabel: el.getAttribute('aria-label'),
+  title: el.getAttribute('title'),
+  placeholder: el.getAttribute('placeholder'),
+  name: el.getAttribute('name') || el.getAttribute('id'),
+  type: el.getAttribute('type'),
+  tagName: String(el.tagName || '').toLowerCase() || null,
+  url: document.location ? document.location.href : null,
+});
+
+const READ_SUBMIT_CONTEXT = (el: Element): SubmitContext => {
+  const form = (el as HTMLInputElement).form ?? el.closest('form');
+  const fields = form
+    ? Array.from(form.querySelectorAll('input, textarea, select')).slice(0, 40)
+    : [el];
+  const parts: string[] = [];
+  let hasAmountField = false;
+  for (const field of fields) {
+    const input = field as HTMLInputElement;
+    const labelText = input.labels
+      ? Array.from(input.labels)
+          .map((label) => label.textContent || '')
+          .join(' ')
+      : '';
+    const piece = [
+      input.name,
+      input.id,
+      input.getAttribute('placeholder'),
+      input.getAttribute('aria-label'),
+      labelText,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .slice(0, 120);
+    parts.push(piece);
+    if (input.type === 'number' || input.inputMode === 'decimal') hasAmountField = true;
+  }
+  const submit = form?.querySelector(
+    'button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]',
+  );
+  // FIX-30 review blocker 1: Enter goes through without asking only for a strong
+  // search signal; a placeholder/class/name saying search is how a chat box looks too.
+  const rawFormAction = form?.getAttribute('action') || '';
+  const actionPath = rawFormAction.replace(/^(?:[a-z]+:)?\/\/[^/]+/i, '');
+  // FIX-31 review: a support/chat box worded like search is never a search box.
+  const chatLike =
+    /客服|聊天|留言|咨询|对话|\bchat|\bmessages?\b|\bask\b|\bsupport\b|\bconversation/i.test(
+      [
+        el.getAttribute('name'),
+        el.getAttribute('id'),
+        el.getAttribute('placeholder'),
+        el.getAttribute('aria-label'),
+        el.getAttribute('class'),
+        form?.getAttribute('id'),
+        form?.getAttribute('class'),
+      ].join(' '),
+    );
+  const fieldSearch =
+    String(el.getAttribute('type') || '').toLowerCase() === 'search' ||
+    el.getAttribute('role') === 'searchbox' ||
+    // Known site rules: IKEA's header search and Gaode's route from/to boxes are
+    // bare inputs, no form.
+    (/(?:^|\s)s-input(?:\s|$)/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)ikea\.(?:cn|com)$/i.test(location.hostname)) ||
+    // FIX-32: Best Buy's header search is a bare textarea; Enter opens
+    // /site/searchpage.jsp?st=… by GET (DOM and request checked 2026-10-22).
+    (el.getAttribute('id') === 'autocomplete-search-bar' &&
+      /(?:^|\.)bestbuy\.com$/i.test(location.hostname)) ||
+    (/(?:^|\s)LocationItem_input/.test(el.getAttribute('class') || '') &&
+      /(?:^|\.)amap\.com$/i.test(location.hostname)) ||
+    // FIX-53 #6 (Deploy-53 local b-m01): the page Gaode serves the cloud browser has a bare
+    // `#searchipt` (no class, no form; DOM checked 2026-11-03), where Enter searches.
+    (el.getAttribute('id') === 'searchipt' && /(?:^|\.)amap\.com$/i.test(location.hostname));
+  // YouTube's search form posts to /results (FIX-31 core-04).
+  const formSearch =
+    !!form &&
+    (form.getAttribute('role') === 'search' ||
+      /^(?:\/|\/?(?:[\w.-]+\/)*)(?:s|results|search(?:page)?(?:\.[a-z]{2,5})?)(?:[/?#]|$)/i.test(
+        actionPath,
+      ) ||
+      /[?&](?:q|query|wd|kw|keyword|k)=/i.test(rawFormAction) ||
+      // Known site rules (DOM checked 2026-10-22): Bilibili's header search and
+      // Gaode's search panel have no action and no button.
+      (form.id === 'nav-searchform' && /(?:^|\.)bilibili\.com$/i.test(location.hostname)) ||
+      (/^SearchPanel_searchForm/.test(form.getAttribute('class') || '') &&
+        /(?:^|\.)amap\.com$/i.test(location.hostname)));
+  // Enter submits through the form's default button, which may carry its own formmethod.
+  const method = (
+    submit?.getAttribute('formmethod') ||
+    form?.getAttribute('method') ||
+    'get'
+  ).toLowerCase();
+  return {
+    hasForm: Boolean(form),
+    action: form ? (form as HTMLFormElement).action || null : null,
+    rawAction: form ? form.getAttribute('action') : null,
+    method: form ? method : null,
+    submitControl: submit
+      ? {
+          visibleText:
+            String((submit as HTMLElement).innerText || (submit as HTMLInputElement).value || '')
+              .trim()
+              .slice(0, 200) || null,
+          ariaLabel: submit.getAttribute('aria-label'),
+          title: submit.getAttribute('title'),
+          placeholder: null,
+          name: submit.getAttribute('name'),
+          type: submit.getAttribute('type') || 'submit',
+          tagName: String(submit.tagName || '').toLowerCase() || null,
+          url: document.location ? document.location.href : null,
+        }
+      : null,
+    fieldSignal: parts.join(' ').slice(0, 1200),
+    hasAmountField,
+    searchLike: !chatLike && (formSearch || fieldSearch) && method !== 'post',
+  };
+};
+
+function descriptor(
+  kind: RuntimeActionDescriptor['kind'],
+  signals: ElementSignals | null,
+  fallbackLabel: string | null,
+  pageUrl: string,
+): RuntimeActionDescriptor {
+  return {
+    kind,
+    label: signals?.visibleText ?? fallbackLabel,
+    ariaLabel: signals?.ariaLabel ?? null,
+    title: signals?.title ?? null,
+    placeholder: signals?.placeholder ?? null,
+    name: signals?.name ?? null,
+    inputType: signals?.type ?? null,
+    tagName: signals?.tagName ?? null,
+    ...(signals?.href ? { href: signals.href.split(' ')[0] ?? null } : {}),
+    pageUrl: signals?.url ?? pageUrl,
+    ...(signals?.credentialForm ? { credentialForm: true } : {}),
+    ...(signals?.loginControl ? { loginControl: true } : {}),
+  };
+}
+
+/** Whether the page probe reports a login popup on this page (FIX-36 #9 whole-page read). */
+async function loginPopupShown(page: Page): Promise<boolean> {
+  const hit = await withTimeout(probeBrowserBlocker(page));
+  return !!hit && 'disposition' in hit && hit.message === LOGIN_POPUP_NOTICE;
+}
+
+const READ_LOGIN_CALL = `function (popup) { return (${readLoginContext.toString()})(this, popup); }`;
+
+/** The target's place in a login step, read on the very node the action acts on. */
+async function loginContextOf(
+  binding: TargetBinding | null,
+  popup: boolean,
+): Promise<LoginContext | null> {
+  if (binding?.kind === 'handle')
+    return withTimeout(binding.handle.evaluate(readLoginContext, popup));
+  if (binding?.kind === 'cdp') {
+    const result = await withTimeout(
+      binding.session.send('Runtime.callFunctionOn', {
+        objectId: binding.objectId,
+        functionDeclaration: READ_LOGIN_CALL,
+        arguments: [{ value: popup }],
+        returnByValue: true,
+      }),
+    );
+    return (result?.result.value as LoginContext | undefined) ?? null;
+  }
+  return null;
+}
+
+/**
+ * The target's login context. Whether the probe reports a login popup only matters when the
+ * two readings differ (a block that says 登录 without a code box): only then is the page
+ * probed — a probe before every action slows clicks on a busy page (Gaode) into stale refs.
+ */
+async function loginContextFor(
+  binding: TargetBinding | null,
+  page: Page,
+): Promise<LoginContext | null> {
+  const plain = await loginContextOf(binding, false);
+  if (!plain || (plain.loginField && plain.loginControl)) return plain;
+  const ifPopup = await loginContextOf(binding, true);
+  if (
+    !ifPopup ||
+    (ifPopup.loginField === plain.loginField &&
+      ifPopup.loginControl === plain.loginControl &&
+      ifPopup.loginBlock === plain.loginBlock)
+  )
+    return plain;
+  return (await loginPopupShown(page)) ? ifPopup : plain;
+}
+
+/** A read target with its login context folded into its signals. */
+async function withLogin(target: ReadTarget | null, page: Page): Promise<ReadTarget | null> {
+  if (!target) return null;
+  const login = await loginContextFor(target.binding, page);
+  return login?.loginControl
+    ? { ...target, signals: { ...target.signals, loginControl: true } }
+    : target;
+}
+
+async function withTimeout<T>(work: Promise<T>): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), DESCRIBE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Ties a confirmation to the node it was given for (not just its label). */
+type TargetBinding =
+  | { kind: 'cdp'; session: CDPSession; objectId: string }
+  | { kind: 'handle'; handle: ElementHandle }
+  | { kind: 'remote'; elementId: string; tabId: number; frameId: string; origin: string };
+
+interface ReadTarget {
+  signals: ElementSignals;
+  binding: TargetBinding;
+}
+
+/**
+ * Per-gate-call helper owning the CDP session used for hit-testing and for
+ * comparing bound nodes; closed when the gate decision is made.
+ */
+export class TargetProbe {
+  private session: CDPSession | null | undefined;
+  constructor(private readonly page: Page) {}
+  async cdp(): Promise<CDPSession | null> {
+    if (this.session === undefined) {
+      this.session = await withTimeout(
+        (async () => {
+          const session = await this.page.context().newCDPSession(this.page);
+          await session.send('DOM.getDocument', { depth: 0 });
+          return session;
+        })(),
+      );
+    }
+    return this.session;
+  }
+  async close(): Promise<void> {
+    await this.session?.detach().catch(() => {});
+    this.session = undefined;
+  }
+}
+
+const READ_ACTIONABLE_CALL = `function () { return (${READ_ACTIONABLE.toString()})(this); }`;
+
+/**
+ * The real target at viewport point (x, y) via Chromium hit-testing
+ * (`DOM.getNodeForLocation`), which pierces open and closed shadow roots and
+ * in-process frames and, like a click, skips pointer-events:none elements. `undefined` when CDP is unavailable or the hit is an
+ * out-of-process frame (the caller falls back), null when nothing is there.
+ */
+async function cdpTargetAt(
+  probe: TargetProbe,
+  x: number,
+  y: number,
+): Promise<ReadTarget | null | undefined> {
+  const session = await probe.cdp();
+  if (!session) return undefined;
+  const read = await withTimeout(
+    (async () => {
+      const hit = await session.send('DOM.getNodeForLocation', {
+        x: Math.round(x),
+        y: Math.round(y),
+        includeUserAgentShadowDOM: false,
+        // Hit-test like a real click: pointer-events:none overlays (tooltips,
+        // decorations) are transparent to the mouse, so they must be to the
+        // gate too, or it reads the overlay while the click lands beneath.
+        ignorePointerEventsNone: false,
+      });
+      const { object } = await session.send('DOM.resolveNode', {
+        backendNodeId: hit.backendNodeId,
+      });
+      if (!object.objectId) return null;
+      const result = await session.send('Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        functionDeclaration: READ_ACTIONABLE_CALL,
+        returnByValue: true,
+      });
+      return {
+        objectId: object.objectId,
+        value: result.result.value as ReturnType<typeof READ_ACTIONABLE>,
+      };
+    })(),
+  );
+  if (!read) return undefined;
+  if (!read.value) return null;
+  if (read.value.iframe) return undefined;
+  return { signals: read.value, binding: { kind: 'cdp', session, objectId: read.objectId } };
+}
+
+/**
+ * Fallback without CDP (or into an out-of-process frame): the element at the
+ * point, descending through iframes and open shadow roots. A closed shadow
+ * root or unreadable custom element ends as an `opaque` host. Null when any
+ * hop cannot be read.
+ */
+async function fallbackTargetAt(page: Page, x: number, y: number): Promise<ReadTarget | null> {
+  let frame: Frame = page.mainFrame();
+  let px = x;
+  let py = y;
+  for (let depth = 0; depth <= MAX_FRAME_DEPTH; depth += 1) {
+    const handle = (await withTimeout(
+      frame.evaluateHandle(
+        (point) => {
+          let el = document.elementFromPoint(point.x, point.y);
+          for (let level = 0; el?.shadowRoot && level < 32; level += 1) {
+            const inner = el.shadowRoot.elementFromPoint(point.x, point.y);
+            if (!inner || inner === el) break;
+            el = inner;
+          }
+          return el;
+        },
+        { x: px, y: py },
+      ),
+    )) as ElementHandle<Element> | null;
+    const element = handle?.asElement() ?? null;
+    if (!element) return null;
+    const read = await withTimeout(element.evaluate(READ_ACTIONABLE));
+    if (!read) return null;
+    if (!read.iframe) return { signals: read, binding: { kind: 'handle', handle: element } };
+    const child = await withTimeout(element.contentFrame());
+    const offset = await withTimeout(
+      element.evaluate((frameEl) => {
+        const rect = frameEl.getBoundingClientRect();
+        const style = getComputedStyle(frameEl);
+        return {
+          left: rect.left + frameEl.clientLeft + (Number.parseFloat(style.paddingLeft) || 0),
+          top: rect.top + frameEl.clientTop + (Number.parseFloat(style.paddingTop) || 0),
+        };
+      }),
+    );
+    if (!child || !offset) return null;
+    frame = child;
+    px -= offset.left;
+    py -= offset.top;
+  }
+  return null;
+}
+
+async function targetAtPoint(
+  probe: TargetProbe,
+  page: Page,
+  x: number,
+  y: number,
+): Promise<ReadTarget | null> {
+  const viaCdp = await cdpTargetAt(probe, x, y);
+  return viaCdp == null ? fallbackTargetAt(page, x, y) : viaCdp;
+}
+
+/** A ref'd element is clicked at its centre after scrolling: read what is hit there. */
+async function targetAtRef(probe: TargetProbe, locator: Locator): Promise<ReadTarget | null> {
+  await withTimeout(locator.scrollIntoViewIfNeeded({ timeout: DESCRIBE_TIMEOUT_MS }));
+  // A `display: contents` link (BBC article cards, FIX-24 core-07) has no box of
+  // its own: aim at the first child that is laid out; the hit is still read.
+  let box = await withTimeout(locator.boundingBox());
+  for (let i = 0; !box && i < 3; i++)
+    box = await withTimeout(locator.locator(`xpath=./*[${i + 1}]`).boundingBox());
+  if (!box) return null;
+  return targetAtPoint(probe, locator.page(), box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/** Whether two bindings are the very same node (never true across kinds/sessions). */
+async function sameTarget(a: TargetBinding | null, b: TargetBinding | null): Promise<boolean> {
+  if (!a || !b) return a === b;
+  if (a.kind === 'remote' && b.kind === 'remote')
+    return (
+      a.elementId === b.elementId &&
+      a.tabId === b.tabId &&
+      a.frameId === b.frameId &&
+      a.origin === b.origin
+    );
+  if (a.kind === 'cdp' && b.kind === 'cdp') {
+    if (a.session !== b.session) return false;
+    const result = await withTimeout(
+      a.session.send('Runtime.callFunctionOn', {
+        objectId: b.objectId,
+        functionDeclaration: 'function (other) { return this === other; }',
+        arguments: [{ objectId: a.objectId }],
+        returnByValue: true,
+      }),
+    );
+    return result?.result.value === true;
+  }
+  if (a.kind === 'handle' && b.kind === 'handle') {
+    return (
+      (await withTimeout(b.handle.evaluate((node, other) => node === other, a.handle))) === true
+    );
+  }
+  return false;
+}
+
+/** Descriptors for one action plus why its target could not be verified, if so. */
+export interface UnifiedActionDescription {
+  descriptors: RuntimeActionDescriptor[];
+  /** Set when a write target could not be read: the gate then asks the user. */
+  unverified: string | null;
+  /** Gate-level reason that this submission is transactional regardless of labels. */
+  transactional: string | null;
+  /** The node(s) a confirmation is bound to; re-checked before acting. */
+  bindings?: Array<TargetBinding | null>;
+  /** What the action acts on (link target, form action/method/fields), bound too. */
+  objects?: string;
+  /** The site's own verification step this action would submit to: handed over, never sent. */
+  verification?: string | null;
+  /** G2i: the click ticks / accepts an agreement — the user's own request must ask for it. */
+  consent?: ConsentTarget | null;
+  /** G2i: typing into a mailbox / phone box — only a value the user gave is typed. */
+  contact?: { kind: 'email' | 'phone'; value: string } | null;
+}
+
+/**
+ * FIX-35 (BENCH p02 rerun): amazon's 「Continue shopping」 interstitial is a bot check whose
+ * button posts to /checkpoint/validate. Clicking it passes the check for the user, so the
+ * click is handed over before it runs, not reported after it has gone out.
+ */
+function verificationTarget(
+  base: string,
+  form: { rawAction: string | null; method: string | null } | null,
+  href?: string | null,
+): string | null {
+  const resolve = (value: string) => {
+    try {
+      return new URL(value, base).href;
+    } catch {
+      return null;
+    }
+  };
+  // 复审 #1: a link is a GET — only amazon's own (host-anchored) verification step counts.
+  for (const token of href?.split(' ') ?? []) {
+    const url = token ? resolve(token) : null;
+    if (url && amazonVerificationUrl(url)) return url;
+  }
+  if (!form) return null;
+  // The action as written; a form without one submits to the page itself, where only
+  // amazon's own verification page counts. The generic /captcha|/challenge paths need a
+  // POST to an action the form names.
+  const raw = form.rawAction?.trim() ?? '';
+  const url = resolve(raw || base);
+  if (!url) return null;
+  if (amazonVerificationUrl(url)) return url;
+  return raw && form.method?.toLowerCase() === 'post' && verificationPost(url) ? url : null;
+}
+
+/**
+ * G7 hotfix (INBOX Q-13; G7 A/B new-amazon-sg / reg-new-amazon-sg): amazon.sg now serves its
+ * 「Continue shopping」 bot check at the home page's own URL and verifies through a background
+ * POST /_sec/verify, so the button posts nowhere FIX-35 could see and the click went through —
+ * passing the check for the user. The page itself is judged: a bot-check page (its title or its
+ * opening text, `detectCaptchaPage`) and a button that continues / verifies / proves you are human
+ * is the site's own verification step — handed over, never clicked.
+ */
+const BOT_CHECK_BUTTON_RE =
+  /continue shopping|try different image|^\s*(?:continue|submit|verify|confirm|proceed|try again|start verification|continue to (?:site|website|page))\s*$|verify (?:you are|i am|that you are) (?:a )?human|i'?m not a robot|i am not a robot|i am human|not a robot|start verification|继续购物|继续访问|^\s*(?:继续|验证|提交|立即验证|点击验证|开始验证|按住验证)\s*$|我不是机器人/i;
+const LOGIN_CONTROL_LABEL_RE =
+  /获取|发送|短信|登录|登陆|注册|授权|sign ?in|log ?in|sign ?up|send code|get code/i;
+/** 复审 P2: a search engine's results page is a list of pages, never a bot check itself. */
+const SEARCH_RESULTS_RE =
+  /^https?:\/\/(?:www\.)?(?:(?:m\.)?baidu\.com\/s\b|google\.[a-z.]+\/search\b|(?:cn\.)?bing\.com\/search\b|sogou\.com\/web\b|so\.com\/s\b|duckduckgo\.com\/)/i;
+/** 复审 P2: a bot-check page says little; a readable page (an article about captchas) says more. */
+const BOT_CHECK_MAX_TEXT = 2500;
+
+/** The page itself is a bot check: its URL / title / opening text say so and it holds little else. */
+export function onBotCheckPage(
+  page: { url: string; title: string | null; text: string | null; textLength?: number } | null,
+): boolean {
+  if (!page || SEARCH_RESULTS_RE.test(page.url)) return false;
+  if ((page.textLength ?? page.text?.length ?? 0) > BOT_CHECK_MAX_TEXT) return false;
+  return detectCaptchaPage({ url: page.url, title: page.title, prominentText: page.text }).matched;
+}
+
+/** A button label as the runtime gives it (`button "Continue"`): its quoted name, else the text. */
+function buttonName(label: string): string {
+  return (label.match(/"([^"]+)"/)?.[1] ?? label).trim();
+}
+
+export function botCheckClick(
+  page: { url: string; title: string | null; text: string | null; textLength?: number } | null,
+  labels: ReadonlyArray<string | null | undefined>,
+): string | null {
+  if (!onBotCheckPage(page)) return null;
+  // 复审 P1: each label on its own (the runtime label is 「button "Continue"」, and joined labels
+  // never matched a one-word button).
+  const names = labels.filter((label): label is string => Boolean(label?.trim())).map(buttonName);
+  // A login popup's 「获取验证码」「发送验证码」「登录」 is a login control (refused by the login rule),
+  // never the bot check.
+  if (!names.length || names.some((name) => LOGIN_CONTROL_LABEL_RE.test(name))) return null;
+  return names.some((name) => BOT_CHECK_BUTTON_RE.test(name)) ? page!.url : null;
+}
+
+/** The page's title, opening text (bounded) and text length for the bot-check rule. */
+const READ_PAGE_HEAD = (): { title: string; text: string; textLength: number } => {
+  const all = String(document.body?.innerText || '');
+  return {
+    title: String(document.title || '').slice(0, 200),
+    text: all.slice(0, 800),
+    textLength: all.length,
+  };
+};
+
+const UNREADABLE_HOST = '目标位于无法读取内部内容的页面组件中';
+
+/** A typed / selected field's own signals, with whether it is a login field. */
+async function fieldSignals(
+  handle: ElementHandle | null,
+  page: Page,
+): Promise<ElementSignals | null> {
+  const signals = handle ? await withTimeout(handle.evaluate(READ_SELF)) : null;
+  if (!signals || !handle) return signals;
+  const login = await loginContextFor({ kind: 'handle', handle }, page);
+  return login?.loginField ? { ...signals, credentialForm: true } : signals;
+}
+
+/** G2i: a click that would tick a consent box, or a button that accepts as a whole. */
+function clickConsent(
+  signals: ElementSignals | null,
+  fallbackLabel: string | null,
+): ConsentTarget | null {
+  if (!signals) return null;
+  if (signals.toggle) {
+    const consent = consentToggle({
+      label: signals.toggle.label || fallbackLabel || '',
+      checked: signals.toggle.checked,
+    });
+    if (!signals.toggle.drawn) return consent;
+    // 复审 #2-7: a drawn box is judged like a sentence — closing a cookie banner is no consent.
+    if (consent && consent.kind !== 'cookie') return consent;
+  }
+  const tag = (signals.tagName ?? '').toLowerCase();
+  const type = (signals.type ?? '').toLowerCase();
+  const plain = ['div', 'span', 'li', 'p', 'label', 'i', 'em'].includes(tag);
+  const buttonLike =
+    plain ||
+    tag === 'button' ||
+    tag === 'a' ||
+    (tag === 'input' && ['submit', 'button'].includes(type));
+  if (!buttonLike) return null;
+  return (
+    consentButton([signals.visibleText, signals.ariaLabel, signals.title, fallbackLabel]) ??
+    // 复审: a custom checkbox drawn as a div / span with the agreement sentence as its text.
+    (plain ? consentSentence(signals.visibleText ?? signals.ariaLabel) : null)
+  );
+}
+
+function clickDescription(
+  target: ReadTarget | null,
+  fallbackLabel: string | null,
+  pageUrl: string,
+  unreadable: string,
+  pageHead: { title: string; text: string; textLength: number } | null = null,
+): UnifiedActionDescription {
+  const signals = target?.signals ?? null;
+  return {
+    descriptors: [descriptor('click', signals, fallbackLabel, pageUrl)],
+    consent: clickConsent(signals, fallbackLabel),
+    unverified: !signals ? unreadable : signals.opaque ? UNREADABLE_HOST : null,
+    transactional: null,
+    bindings: [target?.binding ?? null],
+    objects: JSON.stringify([
+      signals?.href ?? null,
+      signals?.formAction ?? null,
+      signals?.formMethod ?? null,
+    ]),
+    verification:
+      verificationTarget(
+        signals?.url ?? pageUrl,
+        signals?.formAction != null
+          ? {
+              // `formAction` is 「resolved as-written」; the as-written part is the action.
+              rawAction: signals.formAction.split(' ').slice(1).join(' '),
+              method: signals.formMethod ?? null,
+            }
+          : null,
+        signals?.href,
+      ) ??
+      botCheckClick(
+        pageHead && !signals?.loginControl && !signals?.credentialForm
+          ? { url: pageUrl, ...pageHead }
+          : null,
+        [signals?.visibleText, signals?.ariaLabel, signals?.title, fallbackLabel],
+      ),
+  };
+}
+
+/**
+ * The descriptors the runtime policy judges for one unified action. Mirrors
+ * the legacy loop: clicks / typing are judged by their target element, a
+ * navigation by its URL. Unified-only shapes map onto those kinds: `click_at`
+ * and `download` are clicks, `select` is a click on the chosen option, and
+ * `type` with `submit` also submits the field's form (judged by its real
+ * semantics, not only a visible submit button). Click targets are the real
+ * hit (shadow roots and frames pierced). A target that cannot be read is
+ * reported as unverified — never treated as harmless.
+ */
+export async function describeUnifiedAction(
+  page: Page,
+  action: UnifiedBrowserAction,
+  labelForRef: (ref: string) => string | null,
+  probe: TargetProbe = new TargetProbe(page),
+  root: Frame = page.mainFrame(),
+  resolveRef?: (ref: string) => Locator,
+): Promise<UnifiedActionDescription> {
+  const pageUrl = root.url();
+  const plain = (descriptors: RuntimeActionDescriptor[]): UnifiedActionDescription => ({
+    descriptors,
+    unverified: null,
+    transactional: null,
+  });
+  const ref = 'ref' in action && action.ref ? action.ref : null;
+  const locator = ref ? (resolveRef?.(ref) ?? root.locator(`aria-ref=${ref}`)) : null;
+  // A ref that resolves to nothing cannot act; the executor reports it stale.
+  if (locator && (await withTimeout(locator.count())) === 0) return plain([]);
+  switch (action.tool) {
+    case 'navigate':
+      return plain([{ kind: 'navigate', url: action.url }]);
+    case 'click':
+    case 'download':
+      return clickDescription(
+        await withLogin(locator ? await targetAtRef(probe, locator) : null, page),
+        labelForRef(action.ref),
+        pageUrl,
+        '无法读取要点击的元素',
+        await withTimeout(page.evaluate(READ_PAGE_HEAD)),
+      );
+    case 'click_at':
+      return clickDescription(
+        await withLogin(await targetAtPoint(probe, page, action.x, action.y), page),
+        null,
+        pageUrl,
+        '无法识别该坐标处的元素（可能位于无法读取的嵌入页面中）',
+        await withTimeout(page.evaluate(READ_PAGE_HEAD)),
+      );
+    case 'select': {
+      const handle = locator ? await withTimeout(locator.elementHandle()) : null;
+      const signals = await fieldSignals(handle, page);
+      return {
+        descriptors: [{ ...descriptor('click', signals, null, pageUrl), label: action.value }],
+        unverified: signals ? null : '无法读取下拉框',
+        transactional: null,
+        bindings: [handle ? { kind: 'handle', handle } : null],
+        objects: JSON.stringify([action.value]),
+        // 复审 P2: choosing an option that agrees (「Yes, subscribe me」) is the same tick.
+        consent: consentToggle({ label: action.value, checked: false }),
+      };
+    }
+    case 'type': {
+      const handle = locator ? await withTimeout(locator.elementHandle()) : null;
+      const signals = await fieldSignals(handle, page);
+      const typed = descriptor('type', signals, labelForRef(action.ref), pageUrl);
+      const binding: TargetBinding | null = handle ? { kind: 'handle', handle } : null;
+      if (!signals)
+        return {
+          descriptors: [typed],
+          unverified: '无法读取输入框',
+          transactional: null,
+          bindings: [binding],
+        };
+      // G2i: a mailbox / phone box outside a login form (a login box is refused by the policy).
+      const contactKind = signals.credentialForm ? null : contactField(typed);
+      const contact = contactKind ? { kind: contactKind, value: action.text } : null;
+      if (!action.submit) return { ...plain([typed]), bindings: [binding], contact };
+      const form = handle ? await withTimeout(handle.evaluate(READ_SUBMIT_CONTEXT)) : null;
+      if (!form)
+        return {
+          descriptors: [typed],
+          unverified: '无法读取所属表单',
+          transactional: null,
+          bindings: [binding],
+        };
+      const submit = descriptor(
+        'click',
+        form.submitControl ?? { ...signals, tagName: 'button', type: 'submit' },
+        labelForRef(action.ref),
+        form.action ?? pageUrl,
+      );
+      const transactional =
+        (form.action && TRANSACTION_ACTION_RE.test(form.action)) ||
+        TRANSACTION_FIELD_RE.test(form.fieldSignal) ||
+        form.hasAmountField
+          ? '这次回车会提交一个涉及付款、订单或删除的表单'
+          : null;
+      // No visible submit control is not an exemption: Enter still submits.
+      const unverified =
+        !transactional && !form.submitControl && !form.searchLike
+          ? '无法确认回车会提交什么（表单没有可识别的提交按钮）'
+          : null;
+      return {
+        descriptors: [typed, submit],
+        contact,
+        unverified,
+        transactional,
+        bindings: [binding],
+        objects: JSON.stringify([
+          form.action,
+          form.rawAction,
+          form.method,
+          form.fieldSignal,
+          form.submitControl?.visibleText ?? null,
+        ]),
+        // 复审 P2: typing and submitting on a bot-check page (the type-the-characters box) is the
+        // check itself, wherever its form posts.
+        verification:
+          verificationTarget(pageUrl, form) ??
+          // 复核 P2: a login field keeps the login rule (a password on /signin/challenge is no captcha).
+          (!signals.credentialForm &&
+          onBotCheckPage(
+            await withTimeout(page.evaluate(READ_PAGE_HEAD)).then((head) =>
+              head ? { url: pageUrl, ...head } : null,
+            ),
+          )
+            ? pageUrl
+            : null),
+      };
+    }
+    default:
+      // snapshot / extract / screenshot / wait_for / back / scroll / upload:
+      // the legacy loop gates none of these.
+      return plain([]);
+  }
+}
+
+export interface UnifiedActionGateOptions {
+  locatorForAction?: (action: UnifiedBrowserAction, ref: string) => Locator;
+  frameForAction?: (action: UnifiedBrowserAction) => Frame;
+  page: Page;
+  onBeforeAction: BeforeAction;
+  labelForRef: (ref: string) => string | null;
+  /** Parks the task until the user replies; null on timeout or abort. */
+  park: (question: string, awaitingKind: SupercarAwaitingKind) => Promise<string | null>;
+  /** True when the task was cancelled (vs. the takeover window timing out). */
+  aborted: () => boolean;
+  /**
+   * Re-checked after a confirmation and before the action runs: the task must
+   * still be live (not cancelled, lease held). A "确认执行" never outranks a
+   * cancellation.
+   */
+  stillLive?: () => Promise<boolean>;
+  onConfirmed?: (descriptor: RuntimeActionDescriptor) => void;
+  onVetoed?: (descriptor: RuntimeActionDescriptor, reason: string | undefined) => void;
+  /**
+   * FIX-61 DEPLOY-61 P1-2: a read-only task (isReadOnlyIntent). A target that cannot be read is
+   * then not clicked and not asked about — the assistant re-reads the page, closes what covers
+   * it or takes another route. A transactional context is still confirmed.
+   */
+  readOnly?: boolean;
+  /**
+   * G2i: the user's own request. Agreement / consent / subscription boxes are ticked, and
+   * mailbox / phone boxes typed, only when it asks for that (or gives that value).
+   */
+  userIntent?: string | null;
+}
+
+/** FIX-61 DEPLOY-61 P1-2: what a read-only task is told instead of a confirmation. */
+export const UNREADABLE_READONLY_MESSAGE =
+  '这个元素读不出来（可能被弹窗或遮罩挡住，或者没有显示出来），没有点它。只读任务不要点读不出来的元素：先 snapshot 重读页面；有弹窗或遮罩就点它的关闭按钮（×、关闭、我知道了、稍后再说），不要登录、不要做验证；关不掉就换一条路（直接打开结果页的网址、用页面上别的入口或换一个公开页面）；都不行就如实 finish：拿到了什么、缺什么、卡在哪一步。';
+
+/** Comparable identity of the targets a confirmation was given for. */
+function targetSignature(description: UnifiedActionDescription): string {
+  return JSON.stringify([
+    description.objects ?? null,
+    ...description.descriptors.map((d) => [
+      d.kind,
+      d.label ?? null,
+      d.ariaLabel ?? null,
+      d.tagName ?? null,
+      d.inputType ?? null,
+      d.url ?? null,
+      d.pageUrl ?? null,
+      d.name ?? null,
+      d.title ?? null,
+      d.placeholder ?? null,
+      d.pageTxSignal ?? null,
+    ]),
+  ]);
+}
+
+/** The confirmed action still acts on the same node(s) and the same object. */
+async function sameConfirmedTarget(
+  confirmed: UnifiedActionDescription,
+  fresh: UnifiedActionDescription,
+): Promise<boolean> {
+  if (fresh.unverified !== confirmed.unverified || fresh.transactional !== confirmed.transactional)
+    return false;
+  if (targetSignature(fresh) !== targetSignature(confirmed)) return false;
+  const before = confirmed.bindings ?? [];
+  const after = fresh.bindings ?? [];
+  if (before.length !== after.length) return false;
+  for (const [index, binding] of before.entries()) {
+    if (!(await sameTarget(binding, after[index] ?? null))) return false;
+  }
+  return true;
+}
+
+/**
+ * Legacy LIVE-VETO for the unified loop (agent-loop `vetoOutcome`): every
+ * live write is judged before it runs; the landed URL is judged after it ran.
+ *  - requiresConfirmation → park as `browser_action`; only an affirmative reply
+ *    runs the action, anything else stops the task as cancelled.
+ *  - requiresTakeover (password / OTP fields) → park for takeover; the pending
+ *    action is never replayed, the model re-observes the page.
+ *  - any other refusal → the task fails with the policy reason.
+ *  - no reply within the takeover window → awaiting_user; task cancel → cancelled.
+ * Fail closed: a write target that cannot be read, or an Enter that submits a
+ * transactional or unidentifiable form, needs the same confirmation. After a
+ * confirmation the task must still be live and the target unchanged.
+ */
+export function createUnifiedActionGate(options: UnifiedActionGateOptions) {
+  return async (
+    action: UnifiedBrowserAction,
+    phase: 'before' | 'after',
+  ): Promise<ActionGateDecision> => {
+    const probe = new TargetProbe(options.page);
+    try {
+      return await createDescriptionActionGate<UnifiedBrowserAction>({
+        ...options,
+        pageUrl: () => options.page.url(),
+        stillLive: async () =>
+          !options.page.isClosed() && (!options.stillLive || (await options.stillLive())),
+        describe: async (nextAction, nextPhase) =>
+          nextPhase === 'before'
+            ? describeUnifiedAction(
+                options.page,
+                nextAction,
+                options.labelForRef,
+                probe,
+                options.frameForAction?.(nextAction),
+                options.locatorForAction
+                  ? (ref) => options.locatorForAction!(nextAction, ref)
+                  : undefined,
+              )
+            : LANDING_TOOLS.has(nextAction.tool)
+              ? {
+                  descriptors: [{ kind: 'navigate', url: options.page.url() }],
+                  unverified: null,
+                  transactional: null,
+                }
+              : { descriptors: [], unverified: null, transactional: null },
+      })(action, phase);
+    } finally {
+      await probe.close();
+    }
+  };
+}
+
+export interface DescriptionActionGateOptions<Action>
+  extends Omit<UnifiedActionGateOptions, 'page' | 'labelForRef'> {
+  pageUrl: () => string;
+  describe: (action: Action, phase: 'before' | 'after') => Promise<UnifiedActionDescription>;
+}
+export function createDescriptionActionGate<Action>(options: DescriptionActionGateOptions<Action>) {
+  const cancelled: ActionGateDecision = {
+    kind: 'stop',
+    outcome: { status: 'cancelled', steps: 0 },
+  };
+  const parkEnded = (question: string): ActionGateDecision =>
+    options.aborted()
+      ? cancelled
+      : {
+          kind: 'stop',
+          outcome: { status: 'awaiting_user', reason: 'timeout', message: question, steps: 0 },
+        };
+
+  /** 'proceed' | 'confirmed' when the user said yes | a terminal / skip decision. */
+  const confirm = async (
+    question: string,
+    descriptor: RuntimeActionDescriptor,
+  ): Promise<'confirmed' | ActionGateDecision> => {
+    const reply = await options.park(userFacing(question), 'browser_action');
+    if (reply === null) return parkEnded(question);
+    if (options.aborted()) return cancelled;
+    if (isAffirmativeActionConfirmation(reply)) {
+      options.onConfirmed?.(descriptor);
+      return 'confirmed';
+    }
+    return {
+      kind: 'stop',
+      outcome: { status: 'cancelled', reason: NOT_CONFIRMED_REASON, steps: 0 },
+    };
+  };
+
+  const judge = async (
+    item: RuntimeActionDescriptor,
+    failClosed: string | null,
+  ): Promise<'proceed' | 'confirmed' | ActionGateDecision> => {
+    const verdict = await options.onBeforeAction(item);
+    const where = item.pageUrl ?? item.url ?? options.pageUrl();
+    // FIX-36 #9: refused, not run, and the agent carries on (a login form's account box).
+    if (!verdict.allowed && verdict.refuse) return { kind: 'skip', message: verdict.refuse };
+    if (!verdict.allowed && verdict.requiresTakeover) {
+      const kind = verdict.awaitingKind ?? 'login';
+      const question = buildAuthParkQuestion(kind, where);
+      const reply = await options.park(userFacing(question), kind);
+      if (reply === null) return parkEnded(question);
+      return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
+    }
+    if (!verdict.allowed && verdict.requiresConfirmation)
+      return confirm(verdict.question ?? CONFIRM_DEFAULT_QUESTION, item);
+    if (!verdict.allowed) {
+      options.onVetoed?.(item, verdict.reason);
+      return {
+        kind: 'stop',
+        outcome: {
+          status: 'failed',
+          reason: verdict.reason ?? `${item.kind} blocked by safety policy`,
+          steps: 0,
+        },
+      };
+    }
+    if (failClosed) {
+      if (unreadableOnly && options.readOnly)
+        return { kind: 'skip', message: UNREADABLE_READONLY_MESSAGE };
+      return confirm(`${failClosed}，它可能是付款、下单、删除或发送等操作。确认继续执行吗？`, item);
+    }
+    return 'proceed';
+  };
+  let unreadableOnly = false;
+
+  return async (action: Action, phase: 'before' | 'after'): Promise<ActionGateDecision> => {
+    const description = await options.describe(action, phase);
+    // G2i: agreeing and the user's own contact details are the user's — refused, the task goes on.
+    if (phase === 'before') {
+      const consent = description.consent;
+      if (consent && !userAskedToConsent(options.userIntent, consent.kind))
+        return { kind: 'skip', message: consentRefusalMessage(consent) };
+      const contact = description.contact;
+      if (contact && !userGaveValue(options.userIntent, contact.value, contact.kind))
+        return { kind: 'skip', message: contactRefusalMessage(contact.kind) };
+    }
+    if (phase === 'before' && description.verification) {
+      const question = buildAuthParkQuestion('captcha', description.verification);
+      const reply = await options.park(userFacing(question), 'captcha');
+      if (reply === null) return parkEnded(question);
+      return { kind: 'skip', message: TAKEOVER_RESUME_MESSAGE };
+    }
+    let confirmed = false;
+    const last = description.descriptors.length - 1;
+    for (const [index, item] of description.descriptors.entries()) {
+      // Unknown / transactional context applies to the action as a whole:
+      // ask once, on its final (submitting) descriptor.
+      const failClosed =
+        index === last && !confirmed ? (description.transactional ?? description.unverified) : null;
+      unreadableOnly = !description.transactional && failClosed === description.unverified;
+      const decision = await judge(item, failClosed);
+      if (decision === 'confirmed') confirmed = true;
+      else if (decision !== 'proceed') return decision;
+    }
+    if (!confirmed || phase === 'after') return { kind: 'proceed' };
+    // The user said yes while parked: before acting, the task must still be
+    // live and the target must be the one they confirmed.
+    if (options.aborted()) return cancelled;
+    if (options.stillLive && !(await options.stillLive())) return cancelled;
+    // Same node and same object as confirmed — a same-name replacement or a
+    // changed href / form action is a different action: re-observe, re-confirm.
+    const fresh = await options.describe(action, 'before');
+    if (!(await sameConfirmedTarget(description, fresh))) {
+      return { kind: 'skip', message: TARGET_CHANGED_MESSAGE };
+    }
+    return { kind: 'proceed' };
+  };
+}
+
+/** Actions after which the landed URL is re-judged (a click can navigate or redirect). */
+const LANDING_TOOLS = new Set<UnifiedBrowserAction['tool']>([
+  'navigate',
+  'click',
+  'type',
+  'select',
+  'click_at',
+  'download',
+  'back',
+]);
+
+type UserAction = Extract<SelectedChromeSessionCommand, { op: 'act' }>['action'];
+/** Transaction-context marker for the policy when the page address is a payment/order step. */
+const USER_PAGE_TRANSACTION_SIGNAL = '交易页面 checkout';
+/** Decode only extension-read signals. Model hints never enter this descriptor. */
+export function describeUserBrowserAction(
+  action: UserAction,
+  target: UserBrowserTargetDescription,
+): UnifiedActionDescription {
+  const identity = {
+    bindings: [
+      {
+        kind: 'remote' as const,
+        elementId: target.elementId,
+        tabId: target.tabId,
+        frameId: target.frameId,
+        origin: target.origin,
+      },
+    ],
+    // The confirmed page is part of what the action acts on.
+    objects: JSON.stringify([target.objectDigest, target.page.url, target.page.transactional]),
+  };
+  const element = target.element;
+  // Authorization stays the frame's exact origin (bindings); business context
+  // is the tab's current page as read by the extension — path only, plus a
+  // transaction flag computed there over the full address.
+  const pageTxSignal = target.page.transactional ? USER_PAGE_TRANSACTION_SIGNAL : null;
+  const descriptor: RuntimeActionDescriptor = {
+    kind: action.kind === 'type' ? 'type' : 'click',
+    label: element.visibleText,
+    ariaLabel: element.ariaLabel,
+    title: element.title,
+    placeholder: element.placeholder,
+    name: element.name,
+    inputType: element.inputType,
+    tagName: element.tagName,
+    pageUrl: target.page.url,
+    pageTxSignal,
+    // FIX-36 复审 #1: typing / selecting in a login field, and any key there but Escape
+    // (Enter would submit the login), are refused; so is a login / authorize / next control.
+    // 复审 #2: any key but Escape on a button of a login block may submit it too.
+    ...((element.loginField ||
+      (action.kind === 'key' && (element.loginControl || element.loginBlock))) &&
+    !(action.kind === 'key' && action.payload.key === 'Escape')
+      ? { credentialForm: true }
+      : {}),
+    ...(element.loginControl && action.kind === 'click' ? { loginControl: true } : {}),
+  };
+  // G2i: the extension reads no label or checked state for a box: its own name stands for it.
+  const toggleTarget =
+    /^(?:checkbox|radio)$/i.test(element.inputType ?? '') ||
+    /^(?:checkbox|switch|radio)$/i.test(element.role ?? '');
+  // 复审 P2: Space on a focused box ticks it like a click.
+  const toggles =
+    action.kind === 'click' ||
+    (action.kind === 'key' && /(?:^|\+)(?:space|spacebar| )$/i.test(action.payload.key));
+  const consent = !toggles
+    ? null
+    : action.kind === 'key' && !toggleTarget
+      ? null
+      : toggleTarget
+        ? consentToggle({
+            // Its name only when nothing names it (复审: a survey's name is not its answer).
+            label:
+              [element.visibleText, element.ariaLabel, element.title].filter(Boolean).join(' ') ||
+              (element.name ?? ''),
+            checked: false,
+          })
+        : consentButton([element.visibleText, element.ariaLabel, element.title]);
+  const contactKind =
+    action.kind === 'type' && !descriptor.credentialForm ? contactField(descriptor) : null;
+  const typedText = action.kind === 'type' ? String(action.payload.text ?? '') : '';
+  const contact = contactKind ? { kind: contactKind, value: typedText } : null;
+  const form = target.form;
+  const activates =
+    action.kind === 'key' &&
+    /(?:^|\+)(enter|numpadenter|return|space|spacebar| )$/i.test(action.payload.key);
+  const submit =
+    Boolean(form) &&
+    (activates ||
+      (action.kind === 'click' &&
+        (element.inputType === 'submit' ||
+          element.inputType === 'image' ||
+          (element.tagName === 'button' && element.inputType !== 'button'))));
+  if (!submit || !form)
+    return {
+      ...identity,
+      consent,
+      contact,
+      descriptors: [descriptor],
+      unverified:
+        (action.kind === 'click' || activates) &&
+        /删除|提交|保存|\b(?:delete|submit|save)\b/i.test(
+          [element.visibleText, element.ariaLabel, element.title].join(' '),
+        )
+          ? '写入或提交操作需要用户确认'
+          : null,
+      transactional: null,
+    };
+  const transactional =
+    form.transactionalAction ||
+    TRANSACTION_ACTION_RE.test(form.action || '') ||
+    TRANSACTION_FIELD_RE.test(form.fieldSignal || '') ||
+    form.hasAmountField;
+  const control = form.submitControl;
+  return {
+    ...identity,
+    consent,
+    contact,
+    descriptors: [
+      descriptor,
+      {
+        kind: 'click',
+        label: control?.visibleText ?? element.visibleText,
+        ariaLabel: control?.ariaLabel ?? element.ariaLabel,
+        tagName: control?.tagName ?? 'button',
+        inputType: control?.inputType ?? 'submit',
+        pageUrl: form.action ?? target.page.url,
+        pageTxSignal: [form.fieldSignal, pageTxSignal].filter(Boolean).join(' ') || null,
+      },
+    ],
+    transactional: transactional ? '这次操作会提交涉及付款、订单或删除的表单' : null,
+    unverified: !form.searchLike ? '提交表单需要用户确认' : null,
+  };
+}

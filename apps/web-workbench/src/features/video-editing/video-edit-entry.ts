@@ -22,7 +22,8 @@ export function canContinueEditing({
   taskStatus,
   now = Date.now(),
 }: ContinueEditingInput): boolean {
-  if (!capabilityEnabled || !artifact.fileId || !artifact.mimetype.startsWith('video/')) return false;
+  if (!capabilityEnabled || !artifact.fileId || !artifact.mimetype.startsWith('video/'))
+    return false;
   if (artifact.availability === 'unavailable') return false;
   if (taskStatus !== undefined && !TERMINAL_VIDEO_STATUSES.has(taskStatus)) return false;
   if (artifact.expiresAt) {

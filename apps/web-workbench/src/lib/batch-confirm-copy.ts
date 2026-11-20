@@ -11,7 +11,9 @@ const RISK_LABEL: Record<BatchConfirmState['risk'], string> = {
   high: '高风险操作',
 };
 
-export function batchConfirmDisplayIndex(batch: Pick<BatchConfirmState, 'batchIndex' | 'batchTotal'>): number {
+export function batchConfirmDisplayIndex(
+  batch: Pick<BatchConfirmState, 'batchIndex' | 'batchTotal'>,
+): number {
   const bounded = Math.max(1, batch.batchIndex);
   return Math.min(batch.batchTotal, bounded);
 }

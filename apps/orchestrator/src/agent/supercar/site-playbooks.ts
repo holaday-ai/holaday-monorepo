@@ -163,7 +163,8 @@ export const PLAYBOOKS: Record<string, SitePlaybook> = {
       flightSearchUrl: 'https://flights.ctrip.com/online/list/oneway-{from}-{to}?depdate={date}',
       roundTripSearchUrl:
         'https://flights.ctrip.com/online/list/round-{from}-{to}?depdate={date}&rdate={returnDate}',
-      hotelSearchUrl: 'https://hotels.ctrip.com/hotels/list?city={cityId}&checkin={in}&checkout={out}',
+      hotelSearchUrl:
+        'https://hotels.ctrip.com/hotels/list?city={cityId}&checkin={in}&checkout={out}',
     },
     preferredLane: 'browser_cdp',
     antiBot: 'medium',

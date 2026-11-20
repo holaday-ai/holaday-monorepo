@@ -59,7 +59,8 @@ describe('classifyRuntimeAction', () => {
     expect(verdict.requiresConfirmation).not.toBe(true);
     expect(verdict.requiresTakeover).toBe(true);
     expect(verdict.awaitingKind).toBe('login');
-    expect(verdict.reason).toContain('接管');
+    expect(verdict.reason).toContain('这一步需要你来');
+    expect(verdict.reason).not.toContain('接管');
   });
 });
 
@@ -73,4 +74,34 @@ describe('isAffirmativeActionConfirmation', () => {
     'does not treat an ambiguous or negative reply as confirmation: %s',
     (message) => expect(isAffirmativeActionConfirmation(message)).toBe(false),
   );
+});
+
+describe('FIX-62 P1-7: a link named by its whole search card is judged by its title', () => {
+  const card =
+    'Weather https://www.nea.gov.sg/corporate-functions/weather  Government officials will NEVER ask you to transfer money or disclose bank log-in details over a phone call · Visit ScamShield or call the 24/7 ScamShield Helpline';
+  it('core-02: the NEA weather link is clicked without asking', () => {
+    expect(
+      classifyRuntimeAction({
+        kind: 'click',
+        label: card,
+        tagName: 'a',
+        href: 'https://www.nea.gov.sg/corporate-functions/weather',
+      }).allowed,
+    ).toBe(true);
+  });
+  it('a link whose title itself is an act still asks', () => {
+    expect(
+      classifyRuntimeAction({
+        kind: 'click',
+        label: 'Transfer money  to another account now',
+        tagName: 'a',
+        href: 'https://bank.example/transfer',
+      }).requiresConfirmation,
+    ).toBe(true);
+  });
+  it('a button with the same text still asks (only links to web pages are judged by title)', () => {
+    expect(
+      classifyRuntimeAction({ kind: 'click', label: card, tagName: 'button' }).requiresConfirmation,
+    ).toBe(true);
+  });
 });

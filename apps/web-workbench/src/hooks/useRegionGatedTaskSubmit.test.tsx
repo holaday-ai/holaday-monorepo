@@ -21,6 +21,7 @@ describe('useRegionGatedTaskSubmit', () => {
     const submit = vi.fn(async () => ({ ok: true }));
     const { result } = renderHook(() =>
       useRegionGatedTaskSubmit({
+        selectionEnabled: true,
         region: null,
         assignRegion,
         refreshMe,
@@ -48,6 +49,7 @@ describe('useRegionGatedTaskSubmit', () => {
     const submit = vi.fn(async () => ({ ok: true }));
     const { result } = renderHook(() =>
       useRegionGatedTaskSubmit({
+        selectionEnabled: true,
         region: 'cn',
         assignRegion: vi.fn(),
         refreshMe: vi.fn(),
@@ -75,6 +77,7 @@ describe('useRegionGatedTaskSubmit', () => {
     const submit = vi.fn(async () => ({ ok: true }));
     const { result } = renderHook(() =>
       useRegionGatedTaskSubmit({
+        selectionEnabled: true,
         region: null,
         assignRegion,
         refreshMe: vi.fn(async () => ({ modelDataRegion: 'cn' as const })),
@@ -102,6 +105,7 @@ describe('useRegionGatedTaskSubmit', () => {
     const submit = vi.fn();
     const { result } = renderHook(() =>
       useRegionGatedTaskSubmit({
+        selectionEnabled: true,
         region: null,
         assignRegion: vi.fn(),
         refreshMe: vi.fn(),
@@ -121,6 +125,7 @@ describe('useRegionGatedTaskSubmit', () => {
     const submit = vi.fn();
     const { result } = renderHook(() =>
       useRegionGatedTaskSubmit({
+        selectionEnabled: true,
         region: null,
         assignRegion: vi.fn(async () => ({ region: 'intl' as const, changed: true })),
         refreshMe: vi.fn(async () => null),
@@ -135,5 +140,29 @@ describe('useRegionGatedTaskSubmit', () => {
     expect(result.current.dialogOpen).toBe(true);
     expect(result.current.error).toBe('区域已保存，但暂时无法刷新账号状态，请重试。');
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('FIX-60 BOSS 决定: with the selection off (the default) a task without a region goes straight through', async () => {
+    const submit = vi.fn(async () => ({ ok: true }));
+    const assignRegion = vi.fn();
+    for (const selectionEnabled of [false, undefined]) {
+      const { result } = renderHook(() =>
+        useRegionGatedTaskSubmit({
+          region: null,
+          ...(selectionEnabled === undefined ? {} : { selectionEnabled }),
+          assignRegion,
+          refreshMe: vi.fn(),
+          submit,
+        }),
+      );
+      let decision: unknown;
+      await act(async () => {
+        decision = await result.current.requestSubmit(payload);
+      });
+      expect(decision).toEqual({ kind: 'submitted', result: { ok: true } });
+      expect(result.current.dialogOpen).toBe(false);
+    }
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(assignRegion).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,10 @@
 import { inspect } from 'node:util';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  partnerRechargeOrders,
   type PartnerLot,
   type PartnerRechargeOrder,
   type PartnerWithdrawalRequest,
+  partnerRechargeOrders,
 } from '../../db/schema/partner.js';
 import { users } from '../../db/schema/users.js';
 
@@ -78,10 +78,10 @@ vi.mock('../../partner/risk-lot-service.js', async (importOriginal) => {
   };
 });
 
-import { adminRouter } from './admin.js';
-import { __adminPartnerInternals } from './admin-partner.js';
-import { WithdrawalGateError } from '../../partner/withdrawal-service.js';
 import { PartnerRiskLotTransitionError } from '../../partner/risk-lot-service.js';
+import { WithdrawalGateError } from '../../partner/withdrawal-service.js';
+import { __adminPartnerInternals } from './admin-partner.js';
+import { adminRouter } from './admin.js';
 
 type FakeUserRow = {
   id: number;
@@ -176,7 +176,9 @@ function fakeOrder(overrides: Partial<PartnerRechargeOrder> = {}): PartnerRechar
   };
 }
 
-function fakeWithdrawal(overrides: Partial<PartnerWithdrawalRequest> = {}): PartnerWithdrawalRequest {
+function fakeWithdrawal(
+  overrides: Partial<PartnerWithdrawalRequest> = {},
+): PartnerWithdrawalRequest {
   return {
     id: 20,
     externalId: 'pay_withdrawal_1',
@@ -262,7 +264,9 @@ describe('admin.partner router', () => {
   });
 
   it('is mounted under admin.partner and keeps the admin role gate', async () => {
-    const caller = adminRouter.createCaller(makeContext(new FakeAdminPartnerDb({ adminRole: 'user' })));
+    const caller = adminRouter.createCaller(
+      makeContext(new FakeAdminPartnerDb({ adminRole: 'user' })),
+    );
 
     await expect(caller.partner.overview()).rejects.toMatchObject({
       code: 'FORBIDDEN',
@@ -352,10 +356,12 @@ describe('admin.partner router', () => {
       deduped: false,
     });
 
-    const result = await adminRouter.createCaller(makeContext()).partner.approveReviewRequiredOrder({
-      orderExternalId: 'pay_order_1',
-      note: '人工复核放行',
-    });
+    const result = await adminRouter
+      .createCaller(makeContext())
+      .partner.approveReviewRequiredOrder({
+        orderExternalId: 'pay_order_1',
+        note: '人工复核放行',
+      });
 
     expect(result).toMatchObject({
       status: 'completed',
@@ -419,7 +425,9 @@ describe('admin.partner router', () => {
 
   it('passes withdrawal review actions through the ledger-aware service', async () => {
     approveWithdrawalMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'approved' }));
-    rejectWithdrawalMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'rejected', rejectionReason: 'bank mismatch' }));
+    rejectWithdrawalMock.mockResolvedValueOnce(
+      fakeWithdrawal({ status: 'rejected', rejectionReason: 'bank mismatch' }),
+    );
     markWithdrawalPaidMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'paid' }));
     markWithdrawalReturnedMock.mockResolvedValueOnce(fakeWithdrawal({ status: 'returned' }));
     const caller = adminRouter.createCaller(makeContext()).partner;
@@ -510,13 +518,21 @@ describe('admin.partner router', () => {
         lotExternalId: 'pay_risk_lot_1',
         reason: 'bank dispute signal',
       }),
-    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'frozen', riskStatus: 'frozen' });
+    ).resolves.toMatchObject({
+      lotExternalId: 'pay_risk_lot_1',
+      status: 'frozen',
+      riskStatus: 'frozen',
+    });
     await expect(
       caller.resumeRiskLot({
         lotExternalId: 'pay_risk_lot_1',
         note: 'manual review cleared',
       }),
-    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'releasing', riskStatus: 'review' });
+    ).resolves.toMatchObject({
+      lotExternalId: 'pay_risk_lot_1',
+      status: 'releasing',
+      riskStatus: 'review',
+    });
     await expect(
       caller.closeRiskLot({
         lotExternalId: 'pay_risk_lot_1',
@@ -524,7 +540,11 @@ describe('admin.partner router', () => {
         resolutionKind: 'refund',
         resolutionRef: 'wx-refund-20260705',
       }),
-    ).resolves.toMatchObject({ lotExternalId: 'pay_risk_lot_1', status: 'closed', riskStatus: 'frozen' });
+    ).resolves.toMatchObject({
+      lotExternalId: 'pay_risk_lot_1',
+      status: 'closed',
+      riskStatus: 'frozen',
+    });
 
     expect(freezeRiskLotMock).toHaveBeenCalledWith({
       lotExternalId: 'pay_risk_lot_1',
@@ -918,9 +938,9 @@ describe('partner reconciliation safety', () => {
     ).requireCompleteReconciliationRows;
 
     expect(requireCompleteReconciliationRows).toBeTypeOf('function');
-    expect(() =>
-      requireCompleteReconciliationRows?.([{ id: 1 }, { id: 2 }], 1, 'orders'),
-    ).toThrow(/narrow the date range/i);
+    expect(() => requireCompleteReconciliationRows?.([{ id: 1 }, { id: 2 }], 1, 'orders')).toThrow(
+      /narrow the date range/i,
+    );
   });
 });
 
@@ -928,7 +948,10 @@ describe('partner overview coverage', () => {
   it('returns the requested page and marks hidden queue rows', () => {
     const capOverviewRows = (
       __adminPartnerInternals as unknown as {
-        capOverviewRows?: <T>(rows: T[], limit: number) => {
+        capOverviewRows?: <T>(
+          rows: T[],
+          limit: number,
+        ) => {
           rows: T[];
           truncated: boolean;
         };

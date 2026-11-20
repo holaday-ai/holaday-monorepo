@@ -3,10 +3,10 @@ import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import {
-  partnerLots,
-  partnerMonthlyReleases,
   type PartnerLot,
   type PartnerMonthlyRelease,
+  partnerLots,
+  partnerMonthlyReleases,
 } from '../db/schema/partner.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
 import { calculateReleaseSlice } from './partner-rules.js';
@@ -26,7 +26,13 @@ function normalizeReleaseMonth(value: string): string {
   const [yearText, monthText] = value.split('-');
   const year = Number(yearText);
   const month = Number(monthText);
-  if (!Number.isInteger(year) || year < 1000 || !Number.isInteger(month) || month < 1 || month > 12) {
+  if (
+    !Number.isInteger(year) ||
+    year < 1000 ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
     throw new RangeError('releaseMonth must be a valid calendar month');
   }
 
@@ -59,19 +65,28 @@ function isLotEligibleForReleaseMonth(lot: PartnerLot, releaseMonth: string): bo
   if (lot.riskStatus !== 'normal') return false;
   if (lot.status !== 'release_pending' && lot.status !== 'releasing') return false;
 
-  return dateToUtcMonth(lot.releaseStartsAt) <= releaseMonth && releaseMonth <= dateToUtcMonth(lot.releaseEndsAt);
+  return (
+    dateToUtcMonth(lot.releaseStartsAt) <= releaseMonth &&
+    releaseMonth <= dateToUtcMonth(lot.releaseEndsAt)
+  );
 }
 
-function releaseTotal(row: Pick<PartnerMonthlyRelease, 'principalCreditCents' | 'bonusCreditCents'>): number {
+function releaseTotal(
+  row: Pick<PartnerMonthlyRelease, 'principalCreditCents' | 'bonusCreditCents'>,
+): number {
   return row.principalCreditCents + row.bonusCreditCents;
 }
 
-function latestReleaseRow(rows: readonly PartnerMonthlyRelease[]): PartnerMonthlyRelease | undefined {
-  return [...rows].sort((a, b) => {
-    const byMonth = a.releaseMonth.localeCompare(b.releaseMonth);
-    if (byMonth !== 0) return byMonth;
-    return a.id - b.id;
-  }).at(-1);
+function latestReleaseRow(
+  rows: readonly PartnerMonthlyRelease[],
+): PartnerMonthlyRelease | undefined {
+  return [...rows]
+    .sort((a, b) => {
+      const byMonth = a.releaseMonth.localeCompare(b.releaseMonth);
+      if (byMonth !== 0) return byMonth;
+      return a.id - b.id;
+    })
+    .at(-1);
 }
 
 function canProgressLotStatus(status: string): boolean {
@@ -90,8 +105,14 @@ export function calculateMonthlyReleaseWithBudget(input: {
   targetCreditCents: number;
   budgetCreditCents: number;
 }) {
-  const targetCreditCents = assertNonNegativeSafeInteger(input.targetCreditCents, 'targetCreditCents');
-  const budgetCreditCents = assertNonNegativeSafeInteger(input.budgetCreditCents, 'budgetCreditCents');
+  const targetCreditCents = assertNonNegativeSafeInteger(
+    input.targetCreditCents,
+    'targetCreditCents',
+  );
+  const budgetCreditCents = assertNonNegativeSafeInteger(
+    input.budgetCreditCents,
+    'budgetCreditCents',
+  );
   const releasedCreditCents = Math.min(targetCreditCents, budgetCreditCents);
 
   return {
@@ -130,7 +151,11 @@ export class ReleaseService {
   }
 
   private async readLot(lotId: number): Promise<PartnerLot | undefined> {
-    const [lot] = await this.db.select().from(partnerLots).where(eq(partnerLots.id, lotId)).limit(1);
+    const [lot] = await this.db
+      .select()
+      .from(partnerLots)
+      .where(eq(partnerLots.id, lotId))
+      .limit(1);
     return lot;
   }
 
@@ -160,7 +185,12 @@ export class ReleaseService {
     const [row] = await this.db
       .select()
       .from(partnerMonthlyReleases)
-      .where(and(eq(partnerMonthlyReleases.lotId, lotId), eq(partnerMonthlyReleases.releaseMonth, releaseMonth)))
+      .where(
+        and(
+          eq(partnerMonthlyReleases.lotId, lotId),
+          eq(partnerMonthlyReleases.releaseMonth, releaseMonth),
+        ),
+      )
       .limit(1);
     return row;
   }
@@ -204,7 +234,10 @@ export class ReleaseService {
     const lot = await this.readLot(lotId);
     if (!lot) return;
     const latest = latestReleaseRow(rows);
-    const releasedPrincipalCreditCents = rows.reduce((sum, row) => sum + row.principalCreditCents, 0);
+    const releasedPrincipalCreditCents = rows.reduce(
+      (sum, row) => sum + row.principalCreditCents,
+      0,
+    );
     const releasedBonusCreditCents = rows.reduce((sum, row) => sum + row.bonusCreditCents, 0);
     const status =
       canProgressLotStatus(lot.status) && rows.length > 0
@@ -245,7 +278,10 @@ export class ReleaseService {
     budgetCreditCents: number;
   }): Promise<MonthlyReleaseSummary> {
     const releaseMonth = normalizeReleaseMonth(input.releaseMonth);
-    const budgetCreditCents = assertNonNegativeSafeInteger(input.budgetCreditCents, 'budgetCreditCents');
+    const budgetCreditCents = assertNonNegativeSafeInteger(
+      input.budgetCreditCents,
+      'budgetCreditCents',
+    );
     await this.transitionAccumulatedLotsToReleasePending({ now: monthBoundsUtc(releaseMonth).end });
     const existingReleasesForMonth = await this.readReleasesForMonth(releaseMonth);
     const existingReleaseByLotId = new Map(existingReleasesForMonth.map((row) => [row.lotId, row]));
@@ -253,7 +289,10 @@ export class ReleaseService {
     const eligibleLots = await this.readEligibleLots(releaseMonth);
 
     let releaseCount = existingReleasesForMonth.length;
-    let totalReleasedCreditCents = existingReleasesForMonth.reduce((sum, row) => sum + releaseTotal(row), 0);
+    let totalReleasedCreditCents = existingReleasesForMonth.reduce(
+      (sum, row) => sum + releaseTotal(row),
+      0,
+    );
     let remainingBudgetCreditCents = Math.max(0, budgetCreditCents - totalReleasedCreditCents);
 
     for (const release of existingReleasesForMonth) {
@@ -276,18 +315,28 @@ export class ReleaseService {
         (sum, row) => sum + row.principalCreditCents,
         0,
       );
-      const priorReleasedBonusCreditCents = priorReleases.reduce((sum, row) => sum + row.bonusCreditCents, 0);
+      const priorReleasedBonusCreditCents = priorReleases.reduce(
+        (sum, row) => sum + row.bonusCreditCents,
+        0,
+      );
       const totalReleasedPrincipalCreditCents = allReleases.reduce(
         (sum, row) => sum + row.principalCreditCents,
         0,
       );
-      const totalReleasedBonusCreditCents = allReleases.reduce((sum, row) => sum + row.bonusCreditCents, 0);
-      const latestCarryForwardCreditCents = latestReleaseRow(priorReleases)?.carryForwardCreditCents ?? 0;
+      const totalReleasedBonusCreditCents = allReleases.reduce(
+        (sum, row) => sum + row.bonusCreditCents,
+        0,
+      );
+      const latestCarryForwardCreditCents =
+        latestReleaseRow(priorReleases)?.carryForwardCreditCents ?? 0;
       const remainingPrincipalCreditCents = Math.max(
         0,
         lot.principalCreditCents - totalReleasedPrincipalCreditCents,
       );
-      const remainingBonusCreditCents = Math.max(0, lot.lockedBonusCreditCents - totalReleasedBonusCreditCents);
+      const remainingBonusCreditCents = Math.max(
+        0,
+        lot.lockedBonusCreditCents - totalReleasedBonusCreditCents,
+      );
       const remainingReleaseMonths = Math.max(1, PARTNER_RELEASE_MONTHS - priorReleases.length);
       const slice = calculateReleaseSlice({
         principalCreditCents: lot.principalCreditCents,
@@ -309,10 +358,7 @@ export class ReleaseService {
         remainingPrincipalCreditCents,
         slice.principalCreditCents + latestCarryForwardCreditCents,
       );
-      const principalCreditCents = Math.min(
-        releasedCreditCents,
-        principalCapacityCreditCents,
-      );
+      const principalCreditCents = Math.min(releasedCreditCents, principalCapacityCreditCents);
       const bonusCreditCents = Math.min(
         releasedCreditCents - principalCreditCents,
         Math.min(slice.bonusCreditCents, remainingBonusCreditCents),

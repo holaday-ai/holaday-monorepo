@@ -1,3 +1,7 @@
+import {
+  browserCapabilities,
+  instanceBrowserCapabilities,
+} from '../config/browser-capabilities.js';
 /**
  * BrowserPool — per-task Xvfb + Brave + x11vnc + websockify quartets.
  *
@@ -54,9 +58,11 @@ import {
 } from '@holaday/shared-types';
 import type { Logger } from 'pino';
 import { defaultBrowserNetworkPolicy } from '../agent/browser-network-policy.js';
+import { browserProxyUpstreams } from '../agent/browser-tools/domain-egress.js';
+import { routingUnreliable } from '../agent/search-fallback/search-results-page.js';
 import { PlaywrightExecutor } from '../agent/vision-loop/playwright-executor.js';
-import { ExecutionDrain } from '../execution/execution-drain.js';
 import type { ExecutionAdmission } from '../execution/execution-admission.js';
+import { ExecutionDrain } from '../execution/execution-drain.js';
 import {
   type OperationLifetime,
   captureOperationScopeVeto,
@@ -67,6 +73,7 @@ import { BrokerBootSession } from './broker-boot-session.js';
 import { BrokerPoolRuntime, type OriginalBrokerGroup } from './broker-pool-runtime.js';
 import { BrokerVncIngress, type BrokerVncIngressRequest } from './broker-vnc-ingress.js';
 import type { BrokerVncSessionAccess, BrokerVncSessionRequest } from './broker-vnc-session.js';
+import { egressLearning } from './egress-learning.js';
 import { BrowserEgressProxy } from './egress-proxy.js';
 import { SlotAllocator } from './port-allocator.js';
 import {
@@ -78,7 +85,16 @@ import {
   spawnXvfb,
   waitForCdpReady,
 } from './spawn.js';
-import type { BrowserInstance, BrowserSlot, PoolConfig, PoolStats } from './types.js';
+import {
+  BROWSER_HOME_SESSION_PREFIX,
+  type BrowserInstance,
+  type BrowserSessionPolicy,
+  type BrowserSessionTarget,
+  type BrowserSlot,
+  type PoolConfig,
+  type PoolStats,
+  sessionPolicyOf,
+} from './types.js';
 
 /** Thrown by allocate() when capacity is reached. Callers should
  *  map this to a 503-equivalent user-facing error, not a 500. */
@@ -123,6 +139,23 @@ interface PoolProcessRecord {
   failure?: Error;
 }
 
+/**
+ * FIX-54 #8: the retention reason of a task waiting for the person's reply (parkForReply, at most
+ * 30 minutes). Unlike a terminal-review retention it holds its slot: capacity reclaim and
+ * follow-up adoption skip it, so while it lasts the pool has one slot fewer for new tasks.
+ */
+export const AWAITING_REPLY = 'awaiting-reply';
+
+/** BROWSER-HOME-1: a user's cloud browser lent to one of their tasks (keyed by that task id). */
+interface BrowserHomeLoan {
+  readonly userId: string;
+  /** `bhs_<userId>` — where the browser goes back to. */
+  readonly homeId: string;
+  readonly instance: BrowserInstance;
+  /** The session's own idle timeout, restored on return. */
+  readonly idleTimeoutMs?: number;
+}
+
 export class BrowserPool {
   readonly #strict: boolean;
   #brokerRuntime?: BrokerPoolRuntime;
@@ -141,6 +174,8 @@ export class BrowserPool {
     { userId: string; promise: Promise<BrowserInstance>; cancelled: boolean }
   >();
   private readonly retentionTimers = new Map<string, NodeJS.Timeout>();
+  /** BROWSER-HOME-1: task id → the cloud browser it holds (see lendBrowserHome). */
+  private readonly browserHomeLoans = new Map<string, BrowserHomeLoan>();
   private readonly releasePromises = new Map<string, Promise<boolean>>();
   private readonly backgroundWork = new WeakMap<BrowserInstance, PoolBackgroundWork>();
   private readonly processRecords = new Set<PoolProcessRecord>();
@@ -163,7 +198,16 @@ export class BrowserPool {
     if (mode !== undefined && mode !== STRICT_POOL) throw brokerInvalid();
     this.#strict = mode === STRICT_POOL;
     this.allocator = new SlotAllocator(config);
-    this.egressProxy = new BrowserEgressProxy({ logger });
+    // PROXY-BROWSER-1: with BROWSER_DOMAIN_PROXY_* in browser mode, each user's
+    // Chrome reaches Google through that user's fixed ISP endpoint.
+    // OPEN-ANY-SITE-1: sites seen refusing the datacenter egress join the list
+    // from the next launch (each launch fixes its list when it starts).
+    const upstreams = browserProxyUpstreams();
+    this.egressProxy = new BrowserEgressProxy({
+      logger,
+      upstreams,
+      ...(upstreams ? { learned: () => egressLearning().sites() } : {}),
+    });
     if (!this.#strict) mkdirSync(config.baseDir, { recursive: true });
   }
 
@@ -285,6 +329,7 @@ export class BrowserPool {
     userId: string,
     viewportProfile?: BrowserViewportProfile,
     pendingVeto?: () => void,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const allocation = currentOperationLifetime();
     this.#checkBroker();
@@ -333,6 +378,19 @@ export class BrowserPool {
       const connected = await record.executor.connect(cdp.endpoint, { cdpHeaders: cdp.headers });
       this.#checkBroker(record);
       if (!connected.ok) throw brokerInvalid();
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (
+        sessionPolicyOf(session) === 'personal_home' &&
+        session?.cloudProfileId &&
+        !this.config.prepareSession
+      )
+        throw new Error('cloud_profile_runtime_required');
+      if (
+        sessionPolicyOf(session) === 'vault_allowed' ||
+        (sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId)
+      )
+        await this.config.prepareSession?.(userId, record.executor, session);
+      this.#checkBroker(record);
       const now = Date.now();
       const instance: BrowserInstance = {
         transport: 'broker',
@@ -340,6 +398,11 @@ export class BrowserPool {
         taskId,
         userId,
         executor: record.executor,
+        capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
+        ...(sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId
+          ? { cloudProfileId: session.cloudProfileId }
+          : {}),
         status: 'ready',
         createdAt: now,
         lastActiveAt: now,
@@ -374,12 +437,19 @@ export class BrowserPool {
     if (record.instance) record.instance.status = 'draining';
     // Cleanup may not depend on dispatch permission or erase physical slots.
     record.stopping = Promise.resolve().then(async () => {
-      const outcomes = await Promise.allSettled([
+      const background = await Promise.allSettled([
         record.instance && this.backgroundWork.get(record.instance)?.stop(),
+      ]);
+      const session = await Promise.allSettled([
+        record.executor && this.config.finishSession?.(record.executor),
+      ]);
+      const outcomes = await Promise.allSettled([
         Promise.resolve().then(() => record.executor?.disconnect()),
         Promise.resolve().then(() => record.group?.close()),
       ]);
-      if (outcomes.some((outcome) => outcome.status === 'rejected')) {
+      if (
+        [...background, ...session, ...outcomes].some((outcome) => outcome.status === 'rejected')
+      ) {
         const lifetime = this.#brokerLifetime;
         if (lifetime) lifetime.drain.markUnknown(lifetime.owner);
         throw brokerInvalid();
@@ -441,6 +511,7 @@ export class BrowserPool {
     let lastActivity = Date.now();
     return record.group.vncSession({
       ...request,
+      viewportV2: instanceBrowserCapabilities(instance).viewportV2,
       veto: () => {
         originalVeto();
         this.#vetoBroker(record);
@@ -484,6 +555,8 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    /** The task's target site: only a matching site grant applies (default: none). */
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const caller = this.#strict ? currentOperationLifetime() : undefined;
     let originalScopeVeto: (() => void) | undefined;
@@ -528,6 +601,18 @@ export class BrowserPool {
       throw new Error('POOL_PROCESS_CLEANUP_PENDING');
     }
 
+    session = {
+      ...session,
+      capabilities: Object.freeze({ ...(session?.capabilities ?? browserCapabilities(userId)) }),
+    };
+    // REBUILD-4 第 4 条: the assistant's page is always at least 1280×800 — a phone viewer sees a
+    // scaled frame; the page is never sized to the viewer.
+    if (
+      dimensionsForProfile(viewportProfile).width < 1280 ||
+      dimensionsForProfile(viewportProfile).height < 800
+    )
+      viewportProfile = 'desktop';
+
     let resolve!: (instance: BrowserInstance) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<BrowserInstance>((yes, no) => {
@@ -556,12 +641,12 @@ export class BrowserPool {
         caller.drain.assertDispatch(caller.owner);
         this.#checkBroker();
         pendingVeto();
-        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto);
+        return this.#spawnBroker(taskId, userId, viewportProfile, pendingVeto, session);
       }
       if (!this.#strict && this.allocator.isFull()) {
         await this.releaseOldestRetained('capacity-reclaim');
       }
-      return this.spawnInstance(taskId, userId, viewportProfile);
+      return this.spawnInstance(taskId, userId, viewportProfile, session);
     })().then(resolve, reject);
     try {
       return await promise;
@@ -603,6 +688,18 @@ export class BrowserPool {
   }
 
   /**
+   * BROWSER-HOME-1: give one instance its own idle timeout (the cloud-browser home session keeps
+   * 15 minutes) without changing the pool-wide BROWSER_IDLE_TIMEOUT_MS. Lives on the instance, so
+   * a later allocation under the same id starts from the pool default again.
+   */
+  setIdleTimeout(taskId: string, idleTimeoutMs: number): boolean {
+    const inst = this.instances.get(taskId);
+    if (!inst || !Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) return false;
+    inst.idleTimeoutMs = Math.floor(idleTimeoutMs);
+    return true;
+  }
+
+  /**
    * Keep a completed task's browser alive on a renewable idle lease.
    * A retained instance never reserves capacity ahead of new work: allocate()
    * reclaims the oldest retained browser before returning PoolCapacityError.
@@ -614,6 +711,10 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
       return false;
     }
+    // G2d: a browser whose route table went wrong (a route removal that did not finish) is not
+    // kept for a follow-up task; the caller releases it. A task still waiting for a reply keeps
+    // its own browser (no other task can adopt that hold).
+    if (reason !== AWAITING_REPLY && this.routingBroken(inst)) return false;
 
     const durationMs = Math.max(1, Math.floor(ttlMs));
     const retainedUntil = Date.now() + durationMs;
@@ -635,6 +736,31 @@ export class BrowserPool {
   }
 
   /**
+   * FIX-54 #8: end a retention while the task still runs — an awaiting-reply hold whose reply
+   * came (or whose wait ended). The browser goes back on the idle clock from now.
+   */
+  unretain(taskId: string): boolean {
+    const inst = this.instances.get(taskId);
+    if (!inst || inst.retainedUntil == null) return false;
+    const timer = this.retentionTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    this.retentionTimers.delete(taskId);
+    const now = Date.now();
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    inst.lastActiveAt = now;
+    const bound = this.#brokerBindings.get(inst);
+    if (bound) {
+      bound.retained = false;
+      bound.retainedUntil = undefined;
+      bound.retentionTtlMs = undefined;
+      bound.lastActiveAt = now;
+    }
+    return true;
+  }
+
+  /**
    * Move a retained terminal browser to a follow-up task. The browser process,
    * profile, cookies and current page stay intact; only the pool ownership key
    * changes. This is deliberately limited to retained instances so a follow-up
@@ -644,10 +770,14 @@ export class BrowserPool {
     sourceTaskId: string,
     destinationTaskId: string,
     userId: string,
+    /** The follow-up's own policy: an anonymous task never adopts an identity context (and vice versa). */
+    sessionPolicy: BrowserSessionPolicy,
   ): BrowserInstance | null {
     if (this.shuttingDown) return null;
     const source = this.instances.get(sourceTaskId);
     if (source && !this.processesRunning(source)) return null;
+    // FIX-54 #8: an awaiting-reply hold belongs to a task that is still running.
+    if (source?.retentionReason === AWAITING_REPLY) return null;
     const broker = source && this.#brokerBindings.get(source);
     if (
       this.#strict &&
@@ -673,6 +803,10 @@ export class BrowserPool {
     if (!inst || inst.status !== 'ready' || inst.userId !== userId || inst.retainedUntil == null) {
       return null;
     }
+    // A browser without a recorded policy counts as anonymous (fail closed).
+    if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
+    // G2d: routes the follow-up installs (search guard, results page) may silently not apply.
+    if (this.routingBroken(inst)) return null;
 
     const retentionTimer = this.retentionTimers.get(sourceTaskId);
     if (retentionTimer) clearTimeout(retentionTimer);
@@ -706,6 +840,236 @@ export class BrowserPool {
       }
     }
     return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: lend the user's own cloud browser (`bhs_<userId>`) to one of their tasks.
+   * The process, page, cookies and history stay exactly as they are; only the pool key moves to
+   * the task (as adoptRetained does), so the task's stream, input and touch reach the same
+   * browser. The source id is derived from `userId` — a caller can never name another user's
+   * browser — and the instance must be owned by that user. At most one task holds it: once lent
+   * it is no longer under `bhs_`, so a second lend finds nothing. Returns null when not lent.
+   */
+  lendBrowserHome(
+    userId: string,
+    taskId: string,
+    /** The task's policy must match this personal browser, never a public anonymous task. */
+    sessionPolicy: BrowserSessionPolicy,
+  ): BrowserInstance | null {
+    if (this.shuttingDown || !userId) return null;
+    const homeId = `${BROWSER_HOME_SESSION_PREFIX}${userId}`;
+    if (!taskId || taskId === homeId || taskId.startsWith(BROWSER_HOME_SESSION_PREFIX)) return null;
+    const inst = this.instances.get(homeId);
+    if (!inst || inst.taskId !== homeId || inst.userId !== userId || inst.status !== 'ready')
+      return null;
+    if (!this.processesRunning(inst)) return null;
+    if (this.browserHomeHolder(userId)) return null;
+    // A home browser is never on a review lease; one that is would not be the session.
+    if (inst.retainedUntil != null) return null;
+    if ((inst.sessionPolicy ?? 'anonymous') !== sessionPolicy) return null;
+    if (!this.destinationFree(taskId) || this.releasePromises.has(homeId)) return null;
+    const broker = this.#brokerBindings.get(inst);
+    if (this.#strict && !broker) return null;
+
+    const loan: BrowserHomeLoan = {
+      userId,
+      homeId,
+      instance: inst,
+      ...(inst.idleTimeoutMs !== undefined ? { idleTimeoutMs: inst.idleTimeoutMs } : {}),
+    };
+    this.moveInstanceKey(inst, homeId, taskId, broker);
+    // While the task holds it the browser follows the task's lifecycle (pool idle default).
+    delete inst.idleTimeoutMs;
+    if (!this.loanBrokerValid(inst)) {
+      this.moveInstanceKey(inst, taskId, homeId, broker);
+      if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
+      return null;
+    }
+    this.browserHomeLoans.set(taskId, loan);
+    this.logger.info({ userId, taskId }, 'pool: lent the cloud browser to a task');
+    return inst;
+  }
+
+  /**
+   * BROWSER-HOME-1: give a lent cloud browser back to `bhs_<userId>` when its task ends (any
+   * terminal state). Ends any hold the task left on it (awaiting-reply / review lease) and restores
+   * the session's own idle timeout. Null when there is nothing to give back — the loan is unknown,
+   * belongs to another user, was ended (the person closed the session) or the browser is gone /
+   * stopping — and the caller then finishes the task browser the normal way.
+   */
+  returnBrowserHome(taskId: string, userId: string): BrowserInstance | null {
+    const loan = this.browserHomeLoans.get(taskId);
+    if (!loan || loan.userId !== userId) return null;
+    this.browserHomeLoans.delete(taskId);
+    const inst = this.instances.get(taskId);
+    if (
+      this.shuttingDown ||
+      !inst ||
+      inst !== loan.instance ||
+      inst.taskId !== taskId ||
+      inst.userId !== userId ||
+      inst.status !== 'ready' ||
+      !this.processesRunning(inst) ||
+      this.releasePromises.has(taskId) ||
+      // G2d: the next task lent this browser would install its routes into a broken table.
+      this.routingBroken(inst)
+    )
+      return null;
+    if (!this.destinationFree(loan.homeId)) return null;
+    const broker = this.#brokerBindings.get(inst);
+    // Atomic (P2-7): the broker is checked before the key moves (with the task's hold already
+    // lifted, as the return lifts it) and again after; any failure restores the hold and puts the
+    // key back, so the instance is never left half-moved. On null the caller finishes the task
+    // browser the normal way (retain / release under the task id).
+    const retention = {
+      until: inst.retainedUntil,
+      reason: inst.retentionReason,
+      ttlMs: inst.retentionTtlMs,
+      broker: broker
+        ? {
+            retained: broker.retained,
+            until: broker.retainedUntil,
+            ttlMs: broker.retentionTtlMs,
+          }
+        : null,
+    };
+    const restoreRetention = () => {
+      if (retention.until !== undefined) inst.retainedUntil = retention.until;
+      if (retention.reason !== undefined) inst.retentionReason = retention.reason;
+      if (retention.ttlMs !== undefined) inst.retentionTtlMs = retention.ttlMs;
+      if (broker && retention.broker) {
+        broker.retained = retention.broker.retained;
+        broker.retainedUntil = retention.broker.until;
+        broker.retentionTtlMs = retention.broker.ttlMs;
+      }
+    };
+    delete inst.retainedUntil;
+    delete inst.retentionReason;
+    delete inst.retentionTtlMs;
+    if (broker) {
+      broker.retained = false;
+      broker.retainedUntil = undefined;
+      broker.retentionTtlMs = undefined;
+    }
+    if (!this.loanBrokerValid(inst)) {
+      restoreRetention();
+      return null;
+    }
+    this.moveInstanceKey(inst, taskId, loan.homeId, broker);
+    if (!this.loanBrokerValid(inst)) {
+      this.moveInstanceKey(inst, loan.homeId, taskId, broker);
+      restoreRetention();
+      return null;
+    }
+    // Committed: the task's hold (awaiting-reply / review lease) ends with it.
+    const retentionTimer = this.retentionTimers.get(taskId);
+    if (retentionTimer) clearTimeout(retentionTimer);
+    this.retentionTimers.delete(taskId);
+    if (loan.idleTimeoutMs !== undefined) inst.idleTimeoutMs = loan.idleTimeoutMs;
+    this.logger.info({ userId, taskId }, 'pool: cloud browser returned to its session');
+    return inst;
+  }
+
+  /** G2d: the task's search guard marked this browser's routing unreliable (route removal stalled). */
+  private routingBroken(inst: BrowserInstance): boolean {
+    if (!routingUnreliable(inst.executor)) return false;
+    this.logger.warn(
+      { taskId: inst.taskId, userId: inst.userId },
+      'pool: browser routing unreliable; not kept for another task',
+    );
+    return true;
+  }
+
+  /**
+   * BROWSER-HOME-1: whether the instance's broker record (strict mode) still checks out. True
+   * without a broker (non-strict pools). A separate method so a test can make the check fail.
+   */
+  private loanBrokerValid(inst: BrowserInstance): boolean {
+    const broker = this.#brokerBindings.get(inst);
+    if (!broker) return true;
+    try {
+      this.#checkBroker(broker);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * BROWSER-HOME-1 (P1-1): this task's run may still be acting in the browser (the watchdog fired
+   * on a wedged run), so the browser must never go back to the person: the loan ends here and the
+   * task's browser is released the normal way. True when the task held a loan.
+   */
+  forfeitBrowserHomeLoan(taskId: string): boolean {
+    return this.browserHomeLoans.delete(taskId);
+  }
+
+  /**
+   * BROWSER-HOME-1: the person closed their cloud browser while a task holds it. The loan ends
+   * (nothing is given back later); the task keeps the browser until its normal release.
+   */
+  endBrowserHomeLoan(userId: string): string | null {
+    const holder = this.browserHomeHolder(userId);
+    if (holder) this.browserHomeLoans.delete(holder);
+    return holder;
+  }
+
+  /** BROWSER-HOME-1: the task currently holding this user's cloud browser, or null. */
+  browserHomeHolder(userId: string): string | null {
+    for (const [taskId, loan] of this.browserHomeLoans) {
+      if (loan.userId !== userId) continue;
+      const inst = this.instances.get(taskId);
+      if (inst === loan.instance && inst.taskId === taskId && inst.status === 'ready')
+        return taskId;
+      // The browser stopped (or moved) while lent: the loan is over.
+      if (!inst || inst !== loan.instance || inst.taskId !== taskId)
+        this.browserHomeLoans.delete(taskId);
+    }
+    return null;
+  }
+
+  /**
+   * BROWSER-HOME-1: the user's cloud browser wherever it is — under `bhs_<userId>` or lent to one
+   * of their tasks. Never another user's instance.
+   */
+  peekBrowserHome(userId: string): BrowserInstance | null {
+    const homeId = `${BROWSER_HOME_SESSION_PREFIX}${userId}`;
+    const holder = this.browserHomeHolder(userId);
+    const inst = this.peek(holder ?? homeId);
+    if (!inst || inst.userId !== userId || inst.taskId !== (holder ?? homeId)) return null;
+    return inst;
+  }
+
+  /** No instance, allocation, release or process cleanup is pending under this pool key. */
+  private destinationFree(taskId: string): boolean {
+    if (this.instances.has(taskId)) return false;
+    if (this.allocationPromises.has(taskId) || this.releasePromises.has(taskId)) return false;
+    if (
+      Array.from(this.processRecords).some(
+        (record) => record.taskId === taskId && !record.instance,
+      ) ||
+      (this.#strict && Array.from(this.#brokerRecords).some((record) => record.taskId === taskId))
+    )
+      return false;
+    return true;
+  }
+
+  private moveInstanceKey(
+    inst: BrowserInstance,
+    from: string,
+    to: string,
+    broker: BrokerInstanceRecord | undefined,
+  ): void {
+    const now = Date.now();
+    this.instances.delete(from);
+    inst.taskId = to;
+    inst.lastActiveAt = now;
+    this.instances.set(to, inst);
+    if (broker) {
+      broker.revision++;
+      broker.taskId = to;
+      broker.lastActiveAt = now;
+    }
   }
 
   /**
@@ -836,6 +1200,8 @@ export class BrowserPool {
           'pool: teardown error (continuing)',
         );
       });
+    // Keyed by the spawning task, which a follow-up's adoption does not change.
+    await this.closeEgressRoute(this.instanceProcesses.get(inst)?.taskId ?? taskId);
     this.allocator.release({
       index: inst.index,
       display: inst.display,
@@ -862,7 +1228,10 @@ export class BrowserPool {
   private scheduleRetentionExpiry(taskId: string): void {
     const existingTimer = this.retentionTimers.get(taskId);
     if (existingTimer) clearTimeout(existingTimer);
-    if (this.maintenancePaused) { this.retentionTimers.delete(taskId); return; }
+    if (this.maintenancePaused) {
+      this.retentionTimers.delete(taskId);
+      return;
+    }
 
     const inst = this.instances.get(taskId);
     const bound = inst && this.#brokerBindings.get(inst);
@@ -933,6 +1302,8 @@ export class BrowserPool {
       if (this.#strict && !this.processesRunning(inst)) continue;
       if (inst.userId !== userId) continue;
       if (inst.status !== 'ready') continue;
+      // BROWSER-HOME-1: the task-less home browser is reached only by its own id.
+      if (inst.taskId.startsWith(BROWSER_HOME_SESSION_PREFIX)) continue;
       if (!best || inst.lastActiveAt > best.lastActiveAt) {
         best = inst;
       }
@@ -952,7 +1323,10 @@ export class BrowserPool {
     return (
       this.allocator.availableCount() > 0 ||
       Array.from(this.instances.values()).some(
-        (inst) => inst.status === 'ready' && inst.retainedUntil != null,
+        (inst) =>
+          inst.status === 'ready' &&
+          inst.retainedUntil != null &&
+          inst.retentionReason !== AWAITING_REPLY,
       )
     );
   }
@@ -968,13 +1342,22 @@ export class BrowserPool {
     this.gcTimer = setInterval(() => {
       let original: Promise<void>;
       try {
-        original = admission ? admission.runRoot(async () => this.runGcSweep()).result : this.runGcSweep();
-      } catch { return; /* Admission rejected before GC dispatched. */ }
+        original = admission
+          ? admission.runRoot(async () => this.runGcSweep()).result
+          : this.runGcSweep();
+      } catch {
+        return; /* Admission rejected before GC dispatched. */
+      }
       this.gcRuns.add(original);
-      void original.then(() => { this.gcRuns.delete(original); }, () => {
-        this.gcFailed = true;
-        this.gcRuns.delete(original);
-      });
+      void original.then(
+        () => {
+          this.gcRuns.delete(original);
+        },
+        () => {
+          this.gcFailed = true;
+          this.gcRuns.delete(original);
+        },
+      );
     }, GC_INTERVAL_MS);
     this.gcTimer.unref?.();
   }
@@ -998,9 +1381,19 @@ export class BrowserPool {
     return this.maintenancePause;
   }
   assertMaintenanceIdle(): void {
-    if (this.#strict || !this.maintenancePaused || this.gcTimer || this.gcRuns.size || this.gcFailed ||
-      this.instances.size || this.allocationPromises.size || this.releasePromises.size ||
-      this.processRecords.size || this.retentionTimers.size || this.allocator.usedCount())
+    if (
+      this.#strict ||
+      !this.maintenancePaused ||
+      this.gcTimer ||
+      this.gcRuns.size ||
+      this.gcFailed ||
+      this.instances.size ||
+      this.allocationPromises.size ||
+      this.releasePromises.size ||
+      this.processRecords.size ||
+      this.retentionTimers.size ||
+      this.allocator.usedCount()
+    )
       throw new Error('MAINTENANCE_POOL_UNPROVEN');
   }
 
@@ -1063,10 +1456,10 @@ export class BrowserPool {
 
   private async runGcSweep(): Promise<void> {
     const now = Date.now();
-    const cutoff = now - this.config.idleTimeoutMs;
     const stale: string[] = [];
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready') continue;
+      const cutoff = now - (inst.idleTimeoutMs ?? this.config.idleTimeoutMs);
       if (this.#strict) {
         const bound = this.#brokerBindings.get(inst);
         if (!bound) continue;
@@ -1096,7 +1489,9 @@ export class BrowserPool {
     let oldest: BrowserInstance | null = null;
     for (const inst of this.instances.values()) {
       if (inst.status !== 'ready' || inst.retainedUntil == null) continue;
-      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Infinity)) {
+      // FIX-54 #8: capacity never takes the browser a person is coming back to.
+      if (inst.retentionReason === AWAITING_REPLY) continue;
+      if (!oldest || inst.retainedUntil < (oldest.retainedUntil ?? Number.POSITIVE_INFINITY)) {
         oldest = inst;
       }
     }
@@ -1114,6 +1509,7 @@ export class BrowserPool {
     taskId: string,
     userId: string,
     viewportProfile?: BrowserViewportProfile,
+    session?: BrowserSessionTarget,
   ): Promise<BrowserInstance> {
     const lifetime = currentOperationLifetime();
     if (this.allocator.isFull()) {
@@ -1181,7 +1577,8 @@ export class BrowserPool {
         /* mkdirSync race / perm — will fail below with a clearer error */
       }
 
-      const proxyServer = await this.egressProxy.start();
+      // One listener per launch, keyed by the spawning task (kept across adoption).
+      const proxyServer = await this.egressProxy.startFor(userId, taskId);
       assertActive();
       let xvfb: SpawnedProcess | null = null;
       let x11vnc: SpawnedProcess | null = null;
@@ -1253,6 +1650,19 @@ export class BrowserPool {
       if (!connectResult.ok) {
         throw new Error(`PlaywrightExecutor.connect failed: ${connectResult.error}`);
       }
+      // Anonymous tasks never reach the session hook (no vault/cookie/profile load).
+      if (
+        sessionPolicyOf(session) === 'personal_home' &&
+        session?.cloudProfileId &&
+        !this.config.prepareSession
+      )
+        throw new Error('cloud_profile_runtime_required');
+      if (
+        sessionPolicyOf(session) === 'vault_allowed' ||
+        (sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId)
+      )
+        await this.config.prepareSession?.(userId, executor, session);
+      assertActive();
       const now = Date.now();
       instance = {
         ...slot,
@@ -1260,6 +1670,11 @@ export class BrowserPool {
         userId,
         userDataDir,
         executor,
+        capabilities: session?.capabilities,
+        sessionPolicy: sessionPolicyOf(session),
+        ...(sessionPolicyOf(session) === 'personal_home' && session?.cloudProfileId
+          ? { cloudProfileId: session.cloudProfileId }
+          : {}),
         xvfbPid: xvfb?.pid ?? 0,
         bravePid: browserProcess.pid,
         x11vncPid: x11vnc?.pid ?? 0,
@@ -1331,15 +1746,24 @@ export class BrowserPool {
             /* legacy best effort */
           }
         }
+      await this.closeEgressRoute(taskId);
       this.allocator.release(slot);
       this.processRecords.delete(record);
       throw err;
     }
   }
 
+  /** The launch's ISP/mobile listener goes with its browser; its traffic is logged. */
+  private async closeEgressRoute(routeKey: string): Promise<void> {
+    const metrics = await this.egressProxy.closeRoute(routeKey).catch(() => null);
+    if (metrics?.tunnels || metrics?.failures)
+      this.logger.info({ routeKey, ...metrics }, 'pool: ISP egress traffic for this browser');
+  }
+
   private async tearDownInstance(inst: BrowserInstance): Promise<void> {
     if (this.#strict || inst.transport === 'broker') throw brokerInvalid();
     const background = await Promise.allSettled([this.backgroundWork.get(inst)?.stop()]);
+    background.push(...(await Promise.allSettled([this.config.finishSession?.(inst.executor)])));
     const record = this.instanceProcesses.get(inst);
     if (record?.strict) {
       const disconnected = await Promise.allSettled([

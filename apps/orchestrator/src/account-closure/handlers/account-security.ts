@@ -10,6 +10,13 @@ export const accountSecurityClosureHandler = createRelationalDeleteHandler({
   // user row on the still-unreleased email identity.
   targets: [
     rowsOwnedThroughParent({
+      tableName: 'auth_sessions',
+      parentTableName: 'users',
+      childParentColumn: 'user_external_id',
+      parentJoinColumn: 'external_id',
+      parentUserColumn: 'id',
+    }),
+    rowsOwnedThroughParent({
       tableName: 'verification_codes',
       parentTableName: 'users',
       childParentColumn: 'email',
@@ -18,6 +25,7 @@ export const accountSecurityClosureHandler = createRelationalDeleteHandler({
     }),
     directUserRows('user_mfa_recovery_codes'),
     directUserRows('webhook_idempotency'),
+    directUserRows('model_catalog_events', 'actor_user_id'),
     directUserRows('api_keys'),
     directUserRows('sessions'),
     directUserRows('user_profiles'),

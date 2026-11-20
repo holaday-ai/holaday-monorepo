@@ -1,0 +1,46 @@
+TAP version 13
+# Subtest: energy choices fit their available content width even when the window uses desktop media queries
+not ok 1 - energy choices fit their available content width even when the window uses desktop media queries
+  ---
+  duration_ms: 342.47525
+  type: 'test'
+  location: '/Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/ui-suite/tests/energy-layout.test.mjs:8:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    choices must fit at 600px available width
+    + actual - expected
+    
+    + [
+    +   '+专注',
+    +   '+放松',
+    +   '+自信',
+    +   '+好心情'
+    + ]
+    - []
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0: '+专注'
+    1: '+放松'
+    2: '+自信'
+    3: '+好心情'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/ui-suite/tests/energy-layout.test.mjs:16:11)
+    runNextTicks (node:internal/process/task_queues:64:5)
+    process.processImmediate (node:internal/timers:452:9)
+    process.callbackTrampoline (node:internal/async_hooks:130:17)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 586.451084

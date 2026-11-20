@@ -1,6 +1,6 @@
+import { Button } from '@/components/ui/button';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 
 export type PlannedScope = 'occurrence' | 'future' | 'series';
 export type PlannedScopeActionKind = 'reschedule' | 'remove' | 'update';
@@ -44,9 +44,7 @@ export function PlannedScopeDialog({
           }}
         >
           <Dialog.Title>{TITLES[kind]}</Dialog.Title>
-          <Dialog.Description>
-            这是重复规划。已完成的运行记录不会被修改。
-          </Dialog.Description>
+          <Dialog.Description>这是重复规划。已完成的运行记录不会被修改。</Dialog.Description>
           <button ref={firstChoiceRef} type="button" onClick={() => onSelect('occurrence')}>
             仅这一次<span>只调整当前日程</span>
           </button>

@@ -10,7 +10,12 @@ vi.mock('@/components/AdminLayout', () => ({
   AdminLayout: () => <div>admin shell</div>,
 }));
 vi.mock('@/components/AppShell', () => ({
-  AppShell: () => <><div>product shell</div><Outlet /></>,
+  AppShell: () => (
+    <>
+      <div>product shell</div>
+      <Outlet />
+    </>
+  ),
 }));
 vi.mock('@/pages/ImagePage', () => ({ ImagePage: () => <div>image studio route</div> }));
 vi.mock('@/pages/VideoPage', () => ({ VideoPage: () => <div>video studio route</div> }));

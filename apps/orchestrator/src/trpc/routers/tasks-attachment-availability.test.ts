@@ -53,9 +53,7 @@ describe('task result attachment availability', () => {
       },
     };
 
-    expect(
-      annotateTaskResultAttachmentAvailability(result, new Set(), now),
-    ).toEqual(result);
+    expect(annotateTaskResultAttachmentAvailability(result, new Set(), now)).toEqual(result);
   });
 
   it('marks a missing local poster unavailable without touching external posters', () => {
@@ -81,12 +79,7 @@ describe('task result attachment availability', () => {
     expect(
       annotateTaskResultAttachmentAvailability(
         result,
-        new Set([
-          'file_video',
-          'file_video_legacy',
-          'file_video_external',
-          'file_poster_active',
-        ]),
+        new Set(['file_video', 'file_video_legacy', 'file_video_external', 'file_poster_active']),
         now,
       ),
     ).toEqual({
@@ -108,8 +101,6 @@ describe('task result attachment availability', () => {
         ],
       },
     });
-    expect(result.metadata.attachments[0]).not.toHaveProperty(
-      'posterAvailability',
-    );
+    expect(result.metadata.attachments[0]).not.toHaveProperty('posterAvailability');
   });
 });

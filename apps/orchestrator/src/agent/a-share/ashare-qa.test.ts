@@ -112,6 +112,24 @@ describe('matchAshareQa', () => {
     ).toBeNull();
   });
 
+  it.each([
+    '用 DCF 算一下宁德时代的合理估值',
+    '/行业 白酒',
+    '帮我测算一下这家公司的目标价和合理价位区间',
+    '用 dcf 模型估一下内在价值，给出详细推导过程',
+  ])('上下文内估值/研究命令词进合规框架（不落通用路径）：%s', async (intent) => {
+    const r = await resolveAshareInContext({ intent, watchlist: WL, now: NOW }, async () => []);
+    expect(r.hasSignal).toBe(true);
+  });
+
+  it('上下文内无 A股信号的普通请求仍放行通用路径', async () => {
+    const r = await resolveAshareInContext(
+      { intent: '帮我写一份本周工作周报', watchlist: WL, now: NOW },
+      async () => [],
+    );
+    expect(r).toEqual({ match: null, hasSignal: false, indexIntent: false });
+  });
+
   it('上下文内遇到非 A 股证券查询 → 放回通用路径，不给 A 股引导兜底', async () => {
     const r = await resolveAshareInContext(
       {
@@ -242,7 +260,8 @@ describe('buildAshareFactCard', () => {
     expect(md).toContain('③（如有）为分析师判断·未经证实');
     expect(md).toContain('**均不构成投资建议**');
     expect(md).toContain('## 贵州茅台（600519）');
-    expect(md).toContain('收盘 1,279.00，涨跌幅 +0.24%，成交额 32.30亿元');
+    // FIX-33：价格带日期；fixture 日线行没给日期就如实写「日期未提供」。
+    expect(md).toContain('收盘（日期未提供） 1,279.00，涨跌幅 +0.24%，成交额 32.30亿元');
     // 公告：当日 + 含空格链接 encodeURI
     expect(md).toContain(
       '06-12 贵州茅台2025年度股东会决议公告 — [巨潮](http://www.cninfo.com.cn/d?t=2026-06-12%2020:50)',

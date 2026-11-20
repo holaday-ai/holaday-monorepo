@@ -1,10 +1,5 @@
-import { Writable } from 'node:stream';
-import {
-  ingressDiagnosticError,
-  readinessDiagnosticError,
-} from './browser-first-cutover-ingress-diagnostics.mjs';
-import { createFirstCutoverProductionFacts } from './browser-first-cutover-production-facts.mjs';
 import { createHash } from 'node:crypto';
+import { Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
@@ -20,8 +15,8 @@ import {
 } from './browser-first-cutover-backup.mjs';
 import { connectFirstCutoverGatewaySession } from './browser-first-cutover-gateway-session.mjs';
 import {
-  createFirstCutoverCoordinatorIdentity,
   assertFirstCutoverReconciliationRead,
+  createFirstCutoverCoordinatorIdentity,
   createFirstCutoverRetirementObserver,
   exportFirstCutoverSourceBackup,
   readFirstCutoverAttributedWriters,
@@ -36,10 +31,15 @@ import {
   resumeFirstCutoverCandidateWorker,
 } from './browser-first-cutover-host.mjs';
 import {
+  ingressDiagnosticError,
+  readinessDiagnosticError,
+} from './browser-first-cutover-ingress-diagnostics.mjs';
+import {
   createFirstCutoverIngressPair,
   readFirstCutoverExecutionSiteScope,
 } from './browser-first-cutover-ingress-session.mjs';
 import { compareCutoverMysqlSnapshots } from './browser-first-cutover-mysql.mjs';
+import { createFirstCutoverProductionFacts } from './browser-first-cutover-production-facts.mjs';
 import { connectFirstCutoverRecoverySession } from './browser-first-cutover-recovery-session.mjs';
 import { retireLocalFirstCutoverProducers } from './browser-first-cutover-registrations.mjs';
 import {

@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  parseNumeric,
   evalArithmetic,
+  parseNumeric,
   sumLoopColumn,
   withinDerivationTolerance,
 } from './derivation-check.js';
@@ -50,7 +50,9 @@ describe('evalArithmetic (safe, no eval)', () => {
     expect(evalArithmetic('(revenue - cost) / cost * 100', r, NO)).toBeCloseTo(66.667, 2);
   });
   it('resolves sum(loop.col)', () => {
-    expect(evalArithmetic('sum(items.price)', NO, (a) => (a === 'items.price' ? 13 : null))).toBe(13);
+    expect(evalArithmetic('sum(items.price)', NO, (a) => (a === 'items.price' ? 13 : null))).toBe(
+      13,
+    );
     expect(evalArithmetic('sum(items.price) + 2', NO, () => 13)).toBe(15);
   });
   it('returns null on unresolved id / bad syntax / div-by-zero', () => {

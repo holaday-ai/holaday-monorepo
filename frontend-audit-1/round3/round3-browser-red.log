@@ -1,0 +1,17 @@
+1440 browser_executing activity controls must sit above the text input helper
+1440 browser_awaiting_user activity controls must sit above the text input helper
+1440 scrape_completed Expected values to be strictly equal:
+
+null !== 'true'
+
+1280 browser_executing activity controls must sit above the text input helper
+1280 browser_awaiting_user activity controls must sit above the text input helper
+1280 scrape_completed Expected values to be strictly equal:
+
+null !== 'true'
+
+1024 browser_executing activity controls must sit above the text input helper
+1024 browser_awaiting_user activity controls must sit above the text input helper
+1024 scrape_completed Expected values to be strictly equal:
+
+null !== 'true'

@@ -1,8 +1,8 @@
-import { lstat, realpath } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { realpathSync } from 'node:fs';
+import { lstat, realpath } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 const directory = '/var/lib/holaday/ordinary-maintenance';
 const execFileAsync = promisify(execFile);

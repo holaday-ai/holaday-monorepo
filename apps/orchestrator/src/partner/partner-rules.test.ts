@@ -47,7 +47,9 @@ describe('partner rules', () => {
   });
 
   it('splits full 120 percent claim into twelve monthly releases', () => {
-    expect(calculateReleaseSlice({ principalCreditCents: 12_000_00, lockedBonusCreditCents: 2_400_00 })).toEqual({
+    expect(
+      calculateReleaseSlice({ principalCreditCents: 12_000_00, lockedBonusCreditCents: 2_400_00 }),
+    ).toEqual({
       principalCreditCents: 1_000_00,
       bonusCreditCents: 200_00,
       totalCreditCents: 1_200_00,

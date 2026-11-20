@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-06",
+  "fidelityAccepted": false,
+  "productionDeployed": false,
+  "environment": "isolated local fixture; mocked reads; writes blocked; no production API",
+  "frontendTests": {
+    "passed": 2569,
+    "failed": 3,
+    "newFailures": 0,
+    "exitCode": 1,
+    "baselineFailures": [
+      "task-hub-state.test.ts: formats dates and errors defensively",
+      "energy-progress.test.ts: keeps scoped progress in memory when local storage is unavailable",
+      "energy-progress.test.ts: removes saved cards and test actions without deleting completion history"
+    ]
+  },
+  "lint": "passed",
+  "typecheck": "passed: tsc --noEmit and tsconfig.node.json",
+  "productionBuild": "passed; large chunk warning remains",
+  "diffCheck": "passed",
+  "backendFilesChanged": false,
+  "remainingGaps": "report.md"
+}

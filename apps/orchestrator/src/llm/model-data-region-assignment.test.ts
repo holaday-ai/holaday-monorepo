@@ -7,6 +7,7 @@ import {
   __modelDataRegionAssignmentInternals,
   assignOrganizationModelDataRegion,
   assignPersonalModelDataRegion,
+  ensurePersonalModelDataRegion,
 } from './model-data-region-assignment.js';
 
 type Region = 'cn' | 'intl';
@@ -275,5 +276,34 @@ describe('model data region assignment', () => {
     expect(query.sql).toContain('`organizations`.`external_id` = ?');
     expect(query.sql).toContain('`organization_members`.`status` = ?');
     expect(query.params).toEqual(['usr_a', 'active', 'org_a', 'active', 'active', 1]);
+  });
+});
+
+describe('FIX-60 BOSS 决定: the first task writes the entry region once', () => {
+  it('writes an empty personal region', async () => {
+    const fake = makeAssignmentDb();
+    await expect(
+      ensurePersonalModelDataRegion({ db: fake.db, actorExternalId: 'usr_a', region: 'intl' }),
+    ).resolves.toEqual({ region: 'intl', assigned: true });
+    expect(fake.state.userRegion).toBe('intl');
+  });
+
+  it.each(['cn', 'intl'] as const)(
+    'keeps a region that is already there (%s) whatever the entry says',
+    async (existing) => {
+      const fake = makeAssignmentDb({ userRegion: existing });
+      const other = existing === 'cn' ? 'intl' : 'cn';
+      await expect(
+        ensurePersonalModelDataRegion({ db: fake.db, actorExternalId: 'usr_a', region: other }),
+      ).resolves.toEqual({ region: existing, assigned: false });
+      expect(fake.state.userRegion).toBe(existing);
+    },
+  );
+
+  it('rejects an unknown account', async () => {
+    const fake = makeAssignmentDb({ userExists: false });
+    await expect(
+      ensurePersonalModelDataRegion({ db: fake.db, actorExternalId: 'usr_x', region: 'cn' }),
+    ).rejects.toMatchObject({ code: 'UNKNOWN_ACTOR' });
   });
 });

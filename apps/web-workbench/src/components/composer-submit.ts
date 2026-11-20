@@ -1,6 +1,11 @@
 import { taskActionError } from '@/lib/error-copy';
 
-export type ComposerSubmitResult = void | { ok?: boolean; error?: string };
+export type ComposerSubmitResult = void | {
+  ok?: boolean;
+  error?: string;
+  notice?: string;
+  browserOperationId?: string;
+};
 
 export const keepComposerOnSubmitFailure = { ok: false } as const;
 export const clearComposerOnSubmitSuccess = { ok: true } as const;
@@ -14,9 +19,7 @@ export function shouldClearComposerAfterSubmit(result: unknown): boolean {
   return submitResult.ok !== false;
 }
 
-export function composerSubmitErrorMessage(
-  raw: string | null | undefined,
-): string {
+export function composerSubmitErrorMessage(raw: string | null | undefined): string {
   return taskActionError('提交失败', raw);
 }
 

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  computeTeamProjectsEnabled,
-  parseTeamProjectsAllowlist,
-} from './team-project-access.js';
+import { computeTeamProjectsEnabled, parseTeamProjectsAllowlist } from './team-project-access.js';
 
 describe('team projects access gate', () => {
   it('stays off when the global flag is disabled', () => {
@@ -46,9 +43,7 @@ describe('team projects access gate', () => {
 
     expect(parsed.allowAll).toBe(true);
     expect(parsed.allowlist).toEqual(new Set());
-    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(
-      true,
-    );
+    expect(computeTeamProjectsEnabled(true, parsed.allowlist, 'usr_b', parsed.allowAll)).toBe(true);
   });
 
   it('fails closed when a non-empty CSV contains blank entries', () => {

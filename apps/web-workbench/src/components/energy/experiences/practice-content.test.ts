@@ -11,7 +11,9 @@ describe('practice content', () => {
       expect(practice.steps.length).toBeLessThanOrEqual(4);
       expect(practice.estimatedSeconds).toBeGreaterThanOrEqual(30);
       expect(practice.estimatedSeconds).toBeLessThanOrEqual(120);
-      expect(practice.steps.every((step) => step.title.length > 0 && step.body.length > 0)).toBe(true);
+      expect(practice.steps.every((step) => step.title.length > 0 && step.body.length > 0)).toBe(
+        true,
+      );
       expect(practice.completionTitle.length).toBeGreaterThan(0);
       expect(practice.completionAction.length).toBeGreaterThan(0);
     }

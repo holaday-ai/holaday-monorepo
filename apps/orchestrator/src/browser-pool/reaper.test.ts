@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { findOrphanProcessIds, parsePsProcessList, signalProcessOrGroup } from './reaper.js';
 import type { PoolConfig } from './types.js';
-import {
-  findOrphanProcessIds,
-  parsePsProcessList,
-  signalProcessOrGroup,
-} from './reaper.js';
 
 const config: PoolConfig = {
   maxInstances: 3,
@@ -38,6 +34,9 @@ describe('browser-pool orphan reaper', () => {
     });
 
     expect(signalProcessOrGroup(101, 'SIGTERM', kill)).toBe(true);
-    expect(kill.mock.calls).toEqual([[-101, 'SIGTERM'], [101, 'SIGTERM']]);
+    expect(kill.mock.calls).toEqual([
+      [-101, 'SIGTERM'],
+      [101, 'SIGTERM'],
+    ]);
   });
 });

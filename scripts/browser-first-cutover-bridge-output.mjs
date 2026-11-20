@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 export function observeCutoverChild(child) {
-  let buffer = Buffer.alloc(0),
-    final,
-    outputUnproven = false,
-    protocolFrames = 0,
-    stderrBytes = 0;
+  let buffer = Buffer.alloc(0);
+  let final;
+  let outputUnproven = false;
+  let protocolFrames = 0;
+  let stderrBytes = 0;
   const stderr = createHash('sha256');
   child.stderr.on('data', (b) => {
     stderrBytes += b.length;

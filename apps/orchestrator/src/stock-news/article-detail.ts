@@ -148,15 +148,19 @@ function decodeHtml(value: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#x([\da-f]+);/gi, (_match, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 16)),
+    );
 }
 
 function plainText(value: string): string {
-  return decodeHtml(value
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim());
+  return decodeHtml(
+    value
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  );
 }
 
 function isReadableParagraph(value: string): boolean {
@@ -169,10 +173,12 @@ function uniqueReadableParagraphs(paragraphs: string[]): string[] {
 }
 
 function articleBodyParagraphs(value: string): string[] {
-  const sourceText = decodeHtml(value
-    .replace(/<br\s*\/?>/gi, '\n\n')
-    .replace(/<\/p\s*>/gi, '\n\n')
-    .replace(/<[^>]+>/g, ' '));
+  const sourceText = decodeHtml(
+    value
+      .replace(/<br\s*\/?>/gi, '\n\n')
+      .replace(/<\/p\s*>/gi, '\n\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
   const explicitParagraphs = sourceText
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
@@ -197,7 +203,8 @@ function jsonLdArticleParagraphs(html: string): string[] {
         if (!current || typeof current !== 'object' || seen.has(current)) continue;
         seen.add(current);
         const record = current as Record<string, unknown>;
-        if (typeof record.articleBody === 'string') paragraphs.push(...articleBodyParagraphs(record.articleBody));
+        if (typeof record.articleBody === 'string')
+          paragraphs.push(...articleBodyParagraphs(record.articleBody));
         if (Array.isArray(record['@graph'])) queue.push(...record['@graph']);
         if (Array.isArray(record.mainEntity)) queue.push(...record.mainEntity);
       }
@@ -216,7 +223,9 @@ export function htmlArticleParagraphs(html: string): string[] {
   const paragraphs = Array.from(sanitized.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi))
     .map((match) => plainText(match[1] ?? ''))
     .filter(isReadableParagraph);
-  return paragraphs.length > 0 ? uniqueReadableParagraphs(paragraphs) : jsonLdArticleParagraphs(html);
+  return paragraphs.length > 0
+    ? uniqueReadableParagraphs(paragraphs)
+    : jsonLdArticleParagraphs(html);
 }
 
 async function pdfArticleParagraphs(bytes: Uint8Array): Promise<string[]> {

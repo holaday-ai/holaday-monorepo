@@ -25,7 +25,10 @@ const aliasCrxToStub: Record<string, string> =
 // Runtime behaviour is unaffected; vite6 accepts the plugin fine.
 export default defineConfig({
   plugins: [
-    { name: 'holaday-local-qa-config', configResolved: (config) => assertLocalQaBuildEnv(config.env) },
+    {
+      name: 'holaday-local-qa-config',
+      configResolved: (config) => assertLocalQaBuildEnv(config.env),
+    },
     react(),
     crx({ manifest }) as unknown as PluginOption,
   ],

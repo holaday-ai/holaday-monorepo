@@ -72,9 +72,7 @@ const ERROR_ORDER: readonly PlannedEditorErrorKey[] = [
   'customDays',
 ];
 
-export function firstPlannedEditorError(
-  errors: PlannedEditorErrors,
-): PlannedEditorErrorKey | null {
+export function firstPlannedEditorError(errors: PlannedEditorErrors): PlannedEditorErrorKey | null {
   return ERROR_ORDER.find((key) => Boolean(errors[key])) ?? null;
 }
 

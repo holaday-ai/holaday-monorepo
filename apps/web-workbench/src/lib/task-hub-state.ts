@@ -1,5 +1,5 @@
-import { pageErrorMessage } from './page-error-copy';
 import type { AwaitingKind } from './awaiting-user-copy';
+import { pageErrorMessage } from './page-error-copy';
 import { taskDisplayTitle } from './task-display-copy';
 import { deriveTaskProductState } from './task-product-state';
 
@@ -17,10 +17,7 @@ export type HistoryServerTaskStatus =
   | 'failed'
   | 'cancelled';
 
-export type HistoryStatusServerFilter =
-  | HistoryServerTaskStatus
-  | HistoryServerTaskStatus[]
-  | null;
+export type HistoryStatusServerFilter = HistoryServerTaskStatus | HistoryServerTaskStatus[] | null;
 
 export const historyRunningStatuses = [
   'pending',
@@ -185,7 +182,7 @@ export function taskHubRowTone(input: TaskHubProductStateInput): string {
   const state = toTaskHubProductState(input);
   if (state.lifecycle !== 'terminal') return '';
   if (state.outcome === 'failed') {
-    return 'bg-[#EA1F59]/[0.035] shadow-[inset_3px_0_0_rgba(234,31,89,0.4)]';
+    return 'bg-[#FF0061]/[0.035] shadow-[inset_3px_0_0_rgba(255,0,97,0.4)]';
   }
   if (state.outcome === 'partial_success') {
     return 'bg-[#FFC910]/[0.05] shadow-[inset_3px_0_0_rgba(255,201,16,0.5)]';
@@ -214,12 +211,7 @@ export type TaskHubStatusTone =
   | 'running'
   | 'unknown';
 
-export type TaskHubStatusIconKind =
-  | 'success'
-  | 'attention'
-  | 'failed'
-  | 'inactive'
-  | 'running';
+export type TaskHubStatusIconKind = 'success' | 'attention' | 'failed' | 'inactive' | 'running';
 
 export function taskHubStatusTone(input: TaskHubProductStateInput): TaskHubStatusTone {
   const state = toTaskHubProductState(input);
@@ -299,7 +291,10 @@ export function mergeTaskHubRowsById<T extends { readonly taskId: string }>(
   return merged;
 }
 
-export function formatTaskHubTime(value: string | number | Date | null | undefined, now = new Date()): string {
+export function formatTaskHubTime(
+  value: string | number | Date | null | undefined,
+  now = new Date(),
+): string {
   if (value == null) return '—';
   const ts =
     typeof value === 'string'
@@ -327,9 +322,7 @@ export function normalizeTaskHubRows(value: unknown): NormalizedTaskHubRow[] {
 }
 
 export function normalizeTaskHubCursor(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function normalizeTaskHubRow(value: unknown): NormalizedTaskHubRow | null {

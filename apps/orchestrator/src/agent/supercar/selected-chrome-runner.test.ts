@@ -1,5 +1,8 @@
+import { rm } from 'node:fs/promises';
 import type { SelectedChromeSessionCommand } from '@holaday/shared-types';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { env } from '../../config/env.js';
+import { browserOutputFixture } from '../../files/testing/browser-output-fixture.js';
 import type {
   MessagesAdapter,
   NeutralMessagesRequest,
@@ -7,11 +10,18 @@ import type {
 } from '../../llm/messages-adapter.js';
 import { MessagesAdapterError } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
+import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
-import { BrowserControl } from './browser-control.js';
+import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
 import { SelectedChromeClient } from './selected-chrome-client.js';
-import { runSelectedChromeTask } from './selected-chrome-runner.js';
+import {
+  UNVERIFIED_TARGET_REASON,
+  isActivationKey,
+  runSelectedChromeTask,
+  selectedChromeActionVerdict,
+  toCapturedToolCall,
+} from './selected-chrome-runner.js';
 
 const sessionId = 'a249b41c-fd70-47fb-883d-2b70f033234f';
 const selectionId = '5d09732c-d41d-421b-a61f-287093fc440b';
@@ -56,9 +66,11 @@ function createHarness(
     actGate?: Promise<void>;
     unknownAct?: boolean;
     notAppliedAct?: boolean;
+    tabClosedAct?: boolean;
     appliedObservationFailure?: boolean;
     closeUnconfirmed?: boolean;
     closeGate?: Promise<void>;
+    control?: BrowserControl;
   } = {},
 ) {
   let bodyText = 'Draft';
@@ -66,7 +78,7 @@ function createHarness(
   const observeDelaysMs = [...(config.observeDelaysMs ?? [])];
   const requests: NeutralMessagesRequest[] = [];
   const commands: SelectedChromeSessionCommand[] = [];
-  const control = new BrowserControl();
+  const control = config.control ?? new BrowserControl();
   const send = vi.fn(
     async (
       _userId: string,
@@ -94,6 +106,12 @@ function createHarness(
         return {
           ok: false,
           result: { ok: false, error: 'transport_timeout', actionOutcome: 'unknown' },
+        };
+      }
+      if (command.op === 'act' && config.tabClosedAct) {
+        return {
+          ok: false,
+          result: { ok: false, error: 'tab_closed', actionOutcome: 'not_applied' },
         };
       }
       if (command.op === 'act' && !config.notAppliedAct) bodyText = 'Saved';
@@ -142,6 +160,28 @@ function createHarness(
   };
   return { client, control, send, commands, requests, messagesAdapter, modelCreate };
 }
+
+/** REBUILD-4: a control whose clock the test moves; `passIdle()` lets 2 s pass and wakes a wait. */
+function sharedControl() {
+  let skew = 0;
+  const control = new BrowserControl(() => Date.now() + skew);
+  let waits = 0;
+  const yieldToHuman = control.yieldToHuman.bind(control);
+  control.yieldToHuman = (options) => {
+    if (control.humanBusy()) waits++;
+    return yieldToHuman(options);
+  };
+  return {
+    control,
+    waits: () => waits,
+    passIdle: async () => {
+      skew += HUMAN_IDLE_MS;
+      await control.runHuman(async () => {});
+    },
+  };
+}
+
+const DO_IT_YOURSELF = '这一步需要你来：请直接在 Chrome 里完成。';
 
 function finish(evidenceText: string, id = 'finish-1') {
   return response(id, [
@@ -352,6 +392,40 @@ describe('runSelectedChromeTask', () => {
     });
   });
 
+  it.each([1, 2])(
+    'requires exactly the requested two generated CSV receipts with %i saved',
+    async (count) => {
+      const replies = [toolReply('create_file', fileInput)];
+      if (count === 2)
+        replies.push(
+          toolReply('create_file', { ...fileInput, filename: 'monthly.csv' }, 'monthly'),
+        );
+      replies.push(finish('Draft'));
+      const h = createHarness(replies);
+      let next = 0;
+      const result = await runFileCase(h, {
+        intent: '生成两个 CSV 文件，一个按地区，一个按月份',
+        createFileFormats: ['csv'],
+        maxIterations: replies.length,
+        onCreateFile: async ({ filename }) => {
+          const fileId = `saved_${++next}`;
+          return { ...fileReceipt, filename, fileId, downloadUrl: `/api/files/${fileId}/download` };
+        },
+      });
+      expect(result.status).toBe(count === 2 ? 'completed' : 'failed');
+    },
+  );
+  it('stops after a returned storage error without invoking another generated write', async () => {
+    const h = createHarness([
+      toolReply('create_file', fileInput),
+      toolReply('create_file', fileInput, 'retry'),
+    ]);
+    const store = vi.fn(async () => ({ error: 'receipt lost after commit' }));
+    expect(
+      await runFileCase(h, { createFileFormats: ['csv'], onCreateFile: store, maxIterations: 2 }),
+    ).toMatchObject({ status: 'failed' });
+    expect(store).toHaveBeenCalledOnce();
+  });
   it('can deliver a requested CSV when the reference filename is ZIP', async () => {
     const h = createHarness([toolReply('create_file', fileInput), finish('Draft')]);
     expect(
@@ -385,7 +459,7 @@ describe('runSelectedChromeTask', () => {
     const onCreateFile = vi.fn(async () => fileReceipt);
     const result = await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
     expect(onCreateFile).toHaveBeenCalledTimes(1);
-    expect(onCreateFile).toHaveBeenCalledWith(fileInput);
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining(fileInput));
     expect(result.status).toBe('completed');
     expect(result.summary).toContain('```holaday-file\n');
     expect(result.summary).toContain('"fileId":"file-qa"');
@@ -463,7 +537,7 @@ describe('runSelectedChromeTask', () => {
     const h = createHarness([toolReply('create_file', { ...fileInput, content }), finish('Draft')]);
     const onCreateFile = vi.fn(async () => fileReceipt);
     await runFileCase(h, { createFileFormats: ['csv'], onCreateFile });
-    expect(onCreateFile).toHaveBeenCalledWith({ ...fileInput, content });
+    expect(onCreateFile).toHaveBeenCalledWith(expect.objectContaining({ ...fileInput, content }));
   });
 
   it.each(['给我一个可下载的 CSV 附件', '整理为 CSV 文件', 'Create a CSV and a JSON file'])(
@@ -520,7 +594,7 @@ describe('runSelectedChromeTask', () => {
             type: 'tool_use',
             id: 'act',
             name: 'browser_act',
-            input: { action: { kind: 'key', payload: { key: 'Enter' } } },
+            input: { action: { kind: 'key', payload: { key: 'Tab' } } },
           },
         ]),
         finish('Saved'),
@@ -555,47 +629,7 @@ describe('runSelectedChromeTask', () => {
     expect(h.commands.map((command) => command.op)).toContain('observe');
   });
 
-  it('discards an action blocked locally by takeover before dispatch', async () => {
-    const h = createHarness([
-      response('observe-act', [
-        { type: 'tool_use', id: 'observe', name: 'browser_observe', input: {} },
-        {
-          type: 'tool_use',
-          id: 'act',
-          name: 'browser_act',
-          input: { action: { kind: 'key', payload: { key: 'Enter' } } },
-        },
-      ]),
-      finish('Draft'),
-    ]);
-    const ticks: import('./agent-loop.js').SupercarTickEvent[] = [];
-    const running = runSelectedChromeTask({
-      taskId: 'pre-dispatch-handoff',
-      intent: 'Inspect draft',
-      messagesAdapter: h.messagesAdapter,
-      client: h.client,
-      control: h.control,
-      target,
-      onTick: (tick) => {
-        ticks.push(tick);
-        if (tick.execution?.actionKind === 'selected_chrome_observe') h.control.requestHuman();
-      },
-    });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing lease');
-    h.control.returnToAgent(lease);
-    expect(await running).toMatchObject({ status: 'completed' });
-    expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
-    expect(ticks.map((tick) => tick.execution?.actionKind)).toEqual([
-      'selected_chrome_observe',
-      'selected_chrome_plan_discarded',
-      'selected_chrome_handoff',
-      'selected_chrome_finish',
-    ]);
-    expect(JSON.stringify(h.requests.at(-1)?.messages)).toContain('human');
-  });
-  it.each(['click', 'wait'] as const)(
+  it.each(['type', 'wait'] as const)(
     'does not turn a %s not_applied receipt into a completed action',
     async (kind) => {
       const action =
@@ -607,6 +641,7 @@ describe('runSelectedChromeTask', () => {
                 description: 'Save',
                 strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
               },
+              payload: { text: 'Draft' },
             };
       const h = createHarness(
         [
@@ -642,6 +677,35 @@ describe('runSelectedChromeTask', () => {
       ]);
     },
   );
+
+  it('stops with a clear reason when the selected tab was closed', async () => {
+    const action = {
+      kind: 'type',
+      payload: { text: 'Draft' },
+      selector: {
+        description: 'Save',
+        strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+      },
+    };
+    const h = createHarness(
+      [response('act', [{ type: 'tool_use', id: 'act', name: 'browser_act', input: { action } }])],
+      { tabClosedAct: true },
+    );
+    const outcome = await runSelectedChromeTask({
+      taskId: 'tab-closed',
+      intent: 'Save the draft',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control: h.control,
+      target,
+    });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      reason: expect.stringContaining('标签页已被关闭'),
+    });
+    // No further model round after the tab is gone.
+    expect(h.modelCreate).toHaveBeenCalledTimes(1);
+  });
 
   it('uses distinct receipt indexes for multiple tools in a single model round', async () => {
     const h = createHarness([
@@ -686,7 +750,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save',
                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -736,7 +801,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save',
                   strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -774,7 +840,7 @@ describe('runSelectedChromeTask', () => {
           name: 'browser_act',
           input: {
             action:
-              '{"kind":"click","selector":{"description":"Save button","strategies":[{"kind":"role","role":"button","name":"Save"}]}}',
+              '{"kind":"type","selector":{"description":"Save button","strategies":[{"kind":"role","role":"button","name":"Save"}]},"payload":{"text":"Draft"}}',
           },
         },
       ]),
@@ -792,7 +858,8 @@ describe('runSelectedChromeTask', () => {
     expect(h.commands.filter((c) => c.op === 'act')).toMatchObject([
       expect.objectContaining({
         action: {
-          kind: 'click',
+          kind: 'type',
+          payload: { text: 'Draft' },
           selector: {
             description: 'Save button',
             scope: { timeoutMs: 5000 },
@@ -854,7 +921,108 @@ describe('runSelectedChromeTask', () => {
     expect(JSON.stringify(h.requests[1]?.messages)).toContain('invalid_tool_input');
   });
 
-  it('routes decoded string payment actions through the existing human handoff', async () => {
+  it.each([
+    [
+      'click',
+      {
+        kind: 'click',
+        selector: {
+          description: 'Save',
+          strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+        },
+      },
+    ],
+    ['Enter', { kind: 'key', payload: { key: 'Enter' } }],
+    [
+      'Space on a control',
+      {
+        kind: 'key',
+        selector: {
+          description: 'Save',
+          strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
+        },
+        payload: { key: ' ' },
+      },
+    ],
+  ] as const)(
+    'hands an unverified %s to the user and never dispatches it (fail closed)',
+    async (_label, action) => {
+      // Only model selector hints are known here, not the real target.
+      expect(selectedChromeActionVerdict(action as never)).toEqual({
+        allowed: false,
+        reason: UNVERIFIED_TARGET_REASON,
+      });
+      const h = createHarness([
+        response('act', [{ type: 'tool_use', id: 'act', name: 'browser_act', input: { action } }]),
+        finish('Draft'),
+      ]);
+      const thinking: string[] = [];
+      const outcome = await runSelectedChromeTask({
+        taskId: `unverified-${_label}`,
+        intent: 'Save the draft',
+        messagesAdapter: h.messagesAdapter,
+        client: h.client,
+        control: h.control,
+        target,
+        onThinking: (text) => void thinking.push(text),
+      });
+      // REBUILD-4: no takeover — the person is told to do it in Chrome, the assistant replans.
+      expect(outcome).toMatchObject({ status: 'completed' });
+      expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
+      expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
+      expect(thinking.join('\n')).not.toMatch(/接管|交还/);
+      expect(h.control.snapshot().lease).toBeNull();
+    },
+  );
+
+  it.each([
+    'Enter',
+    'Space',
+    ' ',
+    'NumpadEnter',
+    'Control+Enter',
+    'Shift+Space',
+    'Meta+Enter',
+    'Alt+Space',
+    'Control+Shift+Enter',
+    'Shift+ ',
+  ])('treats %j as an activating key (modifiers included)', (key) => {
+    expect(isActivationKey(key)).toBe(true);
+    expect(selectedChromeActionVerdict({ kind: 'key', payload: { key } })).toEqual({
+      allowed: false,
+      reason: UNVERIFIED_TARGET_REASON,
+    });
+  });
+
+  it.each(['Tab', 'Shift+Tab', 'Control+a', 'ArrowDown', 'Escape', 'Control++'])(
+    'does not treat %j as activating',
+    (key) => {
+      expect(isActivationKey(key)).toBe(false);
+    },
+  );
+
+  it('keeps non-activating input on the policy verdict', () => {
+    expect(selectedChromeActionVerdict({ kind: 'key', payload: { key: 'Tab' } })).toEqual({
+      allowed: true,
+    });
+    expect(
+      selectedChromeActionVerdict({
+        kind: 'type',
+        selector: {
+          description: '标题',
+          strategies: [{ kind: 'label', value: '标题' }],
+          scope: { timeoutMs: 5000 },
+          selfHeal: true,
+        },
+        payload: { text: '草稿' },
+      }),
+    ).toEqual({ allowed: true });
+    expect(
+      selectedChromeActionVerdict({ kind: 'goto', payload: { url: 'https://example.test/' } }),
+    ).toEqual({ allowed: true });
+  });
+
+  it('routes decoded string payment actions to the person (这一步需要你来)', async () => {
     const h = createHarness([
       response('string-payment', [
         {
@@ -869,24 +1037,22 @@ describe('runSelectedChromeTask', () => {
       ]),
       finish('Draft'),
     ]);
-    const running = runSelectedChromeTask({
+    const thinking: string[] = [];
+    const outcome = await runSelectedChromeTask({
       taskId: 'string-payment',
       intent: 'Continue',
       messagesAdapter: h.messagesAdapter,
       client: h.client,
       control: h.control,
       target,
+      onThinking: (text) => void thinking.push(text),
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 200 });
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
-    h.control.returnToAgent(lease);
-    expect(await running).toMatchObject({ status: 'completed' });
+    expect(outcome).toMatchObject({ status: 'completed' });
+    expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
     expect(h.commands.filter((c) => c.op === 'act')).toHaveLength(0);
   });
 
-  it('opens Draft, applies one click, observes Saved evidence, finishes, and closes', async () => {
+  it('opens Draft, applies one input, observes Saved evidence, finishes, and closes', async () => {
     const h = createHarness([
       response('model-1', [
         {
@@ -895,7 +1061,8 @@ describe('runSelectedChromeTask', () => {
           name: 'browser_act',
           input: {
             action: {
-              kind: 'click',
+              kind: 'type',
+              payload: { text: 'Draft' },
               selector: {
                 description: 'Save button',
                 strategies: [{ kind: 'role', role: 'button', name: 'Save' }],
@@ -943,26 +1110,26 @@ describe('runSelectedChromeTask', () => {
     );
   });
 
-  it('rejects a non-Qwen provider before any model or browser command', async () => {
-    const h = createHarness([]);
-    const create = vi.fn();
+  it('runs a catalog-selected non-Qwen brain through the same loop', async () => {
+    const h = createHarness([finish('Draft')]);
+    // The admin model catalog decides which brains exist; the runner no longer
+    // refuses Claude/GPT adapters resolved by the model runtime.
     const messagesAdapter: MessagesAdapter = {
       metadata: { provider: 'anthropic', model: 'claude-fixture' },
-      create,
+      create: (request, options) => h.messagesAdapter.create(request, options),
     };
 
     const outcome = await runSelectedChromeTask({
       taskId: 'provider-gate',
-      intent: 'Do not run',
+      intent: 'Find the draft',
       messagesAdapter,
       client: h.client,
       control: h.control,
       target,
     });
 
-    expect(outcome).toMatchObject({ status: 'failed', iterations: 0 });
-    expect(create).not.toHaveBeenCalled();
-    expect(h.send).not.toHaveBeenCalled();
+    expect(outcome).not.toMatchObject({ reason: '本机 Chrome 任务只允许使用千问模型。' });
+    expect(outcome.iterations).toBeGreaterThan(0);
   });
 
   it.each(['', 'Missing'])(
@@ -1044,7 +1211,7 @@ describe('runSelectedChromeTask', () => {
             input: {
               action: {
                 kind: 'key',
-                payload: { key: 'Enter' },
+                payload: { key: 'Tab' },
               },
             },
           },
@@ -1069,8 +1236,40 @@ describe('runSelectedChromeTask', () => {
     expect(h.modelCreate).toHaveBeenCalledTimes(1);
   });
 
-  it('discards a model action planned while Chrome is taken over and refreshes after handback', async () => {
-    const h = createHarness([]);
+  it('discards a plan after a completed human edit even when the idle window elapsed during model thinking', async () => {
+    let now = 10_000;
+    const control = new BrowserControl(() => now, { collaborationV2: true });
+    const h = createHarness([], { control });
+    h.modelCreate
+      .mockImplementationOnce(async () => {
+        await control.runHuman(async () => {}, 'insertText');
+        now += 3_000;
+        return response('stale-after-idle', [
+          {
+            type: 'tool_use',
+            id: 'stale-goto',
+            name: 'browser_act',
+            input: { action: { kind: 'goto', payload: { url: 'https://work.example/old-plan' } } },
+          },
+        ]);
+      })
+      .mockResolvedValueOnce(finish('Draft', 'fresh-finish'));
+    const outcome = await runSelectedChromeTask({
+      taskId: 'idle-replan',
+      intent: 'Inspect the draft',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control,
+      target,
+    });
+    expect(outcome.status).toBe('completed');
+    expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
+    expect(h.modelCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('discards a model action planned while the person used the browser and re-reads the page', async () => {
+    const shared = sharedControl();
+    const h = createHarness([], { control: shared.control });
     const accounting = records();
     const ticks: unknown[] = [];
     let resolveFirst!: (value: NeutralMessagesResponse) => void;
@@ -1101,7 +1300,8 @@ describe('runSelectedChromeTask', () => {
       },
     });
     await vi.waitFor(() => expect(resolveFirst).toBeTypeOf('function'));
-    h.control.requestHuman();
+    // The person clicks in the shared browser while the model plans.
+    await h.control.runHuman(async () => {}, 'mouseDown');
     resolveFirst(
       response('stale-model-action', [
         {
@@ -1112,10 +1312,9 @@ describe('runSelectedChromeTask', () => {
         },
       ]),
     );
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
+    await vi.waitFor(() => expect(shared.waits()).toBe(1));
+    expect(h.modelCreate).toHaveBeenCalledTimes(1);
+    await shared.passIdle();
 
     const outcome = await running;
 
@@ -1193,7 +1392,7 @@ describe('runSelectedChromeTask', () => {
     expect(outcome).toMatchObject({ status: 'timeout' });
     expect(modelOptions?.timeoutMs).toBeGreaterThan(0);
     expect(modelOptions?.timeoutMs).toBeLessThanOrEqual(20);
-    expect(modelOptions?.maxRetries).toBe(0);
+    expect(modelOptions?.maxRetries).toBe(2);
     expect(h.control.snapshot().phase).toBe('closed');
     expect(h.commands.at(-1)?.op).toBe('close');
   });
@@ -1293,6 +1492,26 @@ describe('runSelectedChromeTask', () => {
     expect(JSON.stringify(failingAccounting.values)).not.toContain('private provider body');
   });
 
+  it('shows a safe permissions reason for a permanent provider failure', async () => {
+    const h = createHarness([]);
+    h.modelCreate.mockRejectedValue(
+      new MessagesAdapterError('PROVIDER_ERROR', 'private provider body', 403),
+    );
+    const result = await runSelectedChromeTask({
+      taskId: 'permissions',
+      intent: 'Inspect',
+      messagesAdapter: h.messagesAdapter,
+      client: h.client,
+      control: h.control,
+      target,
+    });
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: '模型服务拒绝访问，请联系管理员检查工作空间和模型权限。',
+    });
+    expect(h.modelCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('hands a guarded password action to the user and never replays it', async () => {
     const h = createHarness([
       response('password-action', [
@@ -1324,14 +1543,10 @@ describe('runSelectedChromeTask', () => {
       target,
       onThinking: (text) => void thinking.push(text),
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
-
     expect(await running).toMatchObject({ status: 'completed' });
     expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
-    expect(thinking.join('\n')).toContain('Chrome');
+    expect(thinking.join('\n')).toContain(DO_IT_YOURSELF);
+    expect(JSON.stringify(h.commands)).not.toContain('never-send-this');
   });
 
   it('passes visible label strategy hints to the existing irreversible-action policy', async () => {
@@ -1365,35 +1580,34 @@ describe('runSelectedChromeTask', () => {
       control: h.control,
       target,
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'), { timeout: 200 });
-    const lease = h.control.snapshot().lease;
-    if (!lease) throw new Error('missing human lease');
-    h.control.returnToAgent(lease);
-
     expect(await running).toMatchObject({ status: 'completed' });
     expect(h.commands.filter((command) => command.op === 'act')).toHaveLength(0);
   });
 
-  it('cancellation releases a manual checkpoint and closes without replaying its action', async () => {
-    const h = createHarness([
-      response('password-action-cancelled', [
-        {
-          type: 'tool_use',
-          id: 'password-type-cancelled',
-          name: 'browser_act',
-          input: {
-            action: {
-              kind: 'type',
-              selector: {
-                description: 'Password',
-                strategies: [{ kind: 'placeholder', value: 'Password' }],
+  it('cancellation while waiting for a busy person closes without replaying its action', async () => {
+    const shared = sharedControl();
+    const h = createHarness(
+      [
+        response('password-action-cancelled', [
+          {
+            type: 'tool_use',
+            id: 'password-type-cancelled',
+            name: 'browser_act',
+            input: {
+              action: {
+                kind: 'type',
+                selector: {
+                  description: 'Password',
+                  strategies: [{ kind: 'placeholder', value: 'Password' }],
+                },
+                payload: { text: 'never-send-this' },
               },
-              payload: { text: 'never-send-this' },
             },
           },
-        },
-      ]),
-    ]);
+        ]),
+      ],
+      { control: shared.control },
+    );
     const abort = new AbortController();
     const running = runSelectedChromeTask({
       taskId: 'cancel-manual-checkpoint',
@@ -1403,8 +1617,12 @@ describe('runSelectedChromeTask', () => {
       control: h.control,
       target,
       signal: abort.signal,
+      // The person types in Chrome right as they are asked to do this step.
+      onThinking: (text) => {
+        if (text.includes(DO_IT_YOURSELF)) h.control.noteHumanInput('keyDown');
+      },
     });
-    await vi.waitFor(() => expect(h.control.snapshot().phase).toBe('human'));
+    await vi.waitFor(() => expect(shared.waits()).toBe(1));
     abort.abort();
 
     expect(await running).toMatchObject({ status: 'cancelled', iterations: 1 });
@@ -1426,7 +1644,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save button',
                   strategies: [{ kind: 'text', value: 'Save' }],
@@ -1480,7 +1699,8 @@ describe('runSelectedChromeTask', () => {
             name: 'browser_act',
             input: {
               action: {
-                kind: 'click',
+                kind: 'type',
+                payload: { text: 'Draft' },
                 selector: {
                   description: 'Save button',
                   strategies: [{ kind: 'text', value: 'Save' }],
@@ -1520,7 +1740,8 @@ describe('runSelectedChromeTask', () => {
       name: 'browser_act',
       input: {
         action: {
-          kind: 'click',
+          kind: 'type',
+          payload: { text: 'Draft' },
           selector: {
             description: 'Save button',
             strategies: [{ kind: 'text', value: 'Save' }],
@@ -1570,4 +1791,252 @@ describe('runSelectedChromeTask', () => {
     expect(outcome.status).toBe('failed');
     expect(outcome.reason).toContain('关闭未确认');
   });
+});
+
+describe('toCapturedToolCall (extension capture)', () => {
+  const selector = (strategies: Record<string, unknown>[], nth?: number) =>
+    ({
+      description: 'd',
+      strategies,
+      scope: { timeoutMs: 5_000, ...(nth ? { nth } : {}) },
+      selfHeal: true,
+    }) as never;
+
+  it('turns a role strategy into a role+name replay locator', () => {
+    expect(
+      toCapturedToolCall(
+        {
+          kind: 'click',
+          selector: selector(
+            [
+              { kind: 'css', value: '#x' },
+              { kind: 'role', role: 'button', name: '搜索' },
+            ],
+            2,
+          ),
+        },
+        'https://shop.example',
+      ),
+    ).toEqual({
+      op: 'click',
+      locator: { role: 'button', name: '搜索', nth: 2 },
+      pageUrl: 'https://shop.example',
+    });
+  });
+
+  it('maps a labelled field to a named textbox and keeps the typed text for redaction', () => {
+    expect(
+      toCapturedToolCall(
+        {
+          kind: 'type',
+          selector: selector([{ kind: 'label', value: '邮箱' }]),
+          payload: { text: 'a@example.com' },
+        },
+        undefined,
+      ),
+    ).toEqual({ op: 'type', locator: { role: 'textbox', name: '邮箱' }, text: 'a@example.com' });
+  });
+
+  it('records navigation and skips non-replayable actions', () => {
+    expect(
+      toCapturedToolCall({ kind: 'goto', payload: { url: 'https://a.example/' } }, undefined),
+    ).toEqual({ op: 'navigate', url: 'https://a.example/' });
+    expect(toCapturedToolCall({ kind: 'wait', payload: { ms: 10 } }, undefined)).toBeNull();
+  });
+});
+
+describe('selected Chrome task file reading and statistics', () => {
+  const roots: string[] = [];
+  const enabled = env.BROWSER_TASK_FILES_V1;
+  afterEach(async () => {
+    env.BROWSER_TASK_FILES_V1 = enabled;
+    for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  });
+  async function owned(text = 'name,amount\nalice,0.1\nbob,0.2\n', taskId = 'task-a') {
+    env.BROWSER_TASK_FILES_V1 = true;
+    const f = await browserOutputFixture();
+    roots.push(f.root);
+    const row = await f.service.storeUpload({
+      userIdInternal: 7,
+      userExternalId: 'usr_alice',
+      filename: 'report.csv',
+      mimetype: 'text/csv',
+      buffer: Buffer.from(text),
+    });
+    let active = true;
+    const scope = new BrowserTaskFiles({
+      taskId,
+      userId: 7,
+      files: f.service,
+      active: async () => active,
+    });
+    scope.admitValidated(await f.service.loadMany([row.externalId], 7));
+    return {
+      ...f,
+      scope,
+      fileId: row.externalId,
+      revoke: () => {
+        active = false;
+      },
+    };
+  }
+  const call = (name: string, input: unknown, id = name) =>
+    response(id, [{ type: 'tool_use', id, name, input }]);
+  const done = (extra = {}) =>
+    call('browser_finish', {
+      status: 'completed',
+      summary: '已读取报表并核对结果。',
+      evidenceText: 'Draft',
+      ...extra,
+    });
+  function run(h: ReturnType<typeof createHarness>, scope: BrowserTaskFiles, maxIterations = 3) {
+    return runSelectedChromeTask({
+      taskId: 'task-a',
+      intent: '读取报表并分析数据',
+      target,
+      client: h.client,
+      control: h.control,
+      messagesAdapter: h.messagesAdapter,
+      browserTaskFiles: scope,
+      maxIterations,
+    });
+  }
+  function results(request: NeutralMessagesRequest) {
+    return request.messages
+      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+      .flatMap((b) =>
+        b.type === 'tool_result' && typeof b.content === 'string' ? [JSON.parse(b.content)] : [],
+      );
+  }
+  it('reads owned files without requiring extension upload capability', async () => {
+    const f = await owned();
+    const h = createHarness([call('read_task_file', { fileId: f.fileId }), done()]);
+    const result = await run(h, f.scope);
+    expect(result.status).toBe('completed');
+    expect(h.requests[0]?.tools?.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['read_task_file', 'analyze_task_table']),
+    );
+    expect(JSON.stringify(h.requests[0])).toContain(f.fileId);
+    expect(results(h.requests[1]!).find((r) => r.fileId === f.fileId)).toMatchObject({
+      ok: true,
+      text: 'name,amount\nalice,0.1\nbob,0.2\n',
+      coverage: { complete: true },
+    });
+  });
+  it('rejects a complete finish after reading only a prefix', async () => {
+    const f = await owned();
+    const h = createHarness([call('read_task_file', { fileId: f.fileId, maxChars: 5 }), done()]);
+    expect((await run(h, f.scope, 2)).status).toBe('failed');
+  });
+  it('marks a deliberately partial file answer as partial', async () => {
+    const f = await owned();
+    const h = createHarness([
+      call('read_task_file', { fileId: f.fileId, maxChars: 5 }),
+      done({ summary: '部分完成：只读取了文件开头，未分析全文。' }),
+    ]);
+    const result = await run(h, f.scope, 2);
+    expect(result).toMatchObject({ status: 'completed', partial: { wanted: 1 } });
+  });
+  it('allows a complete finish once all file ranges have actually been read', async () => {
+    const f = await owned();
+    const h = createHarness([
+      call('read_task_file', { fileId: f.fileId, maxChars: 5 }, 'read-first'),
+      call('read_task_file', { fileId: f.fileId, offset: 5 }, 'read-rest'),
+      done(),
+    ]);
+    expect((await run(h, f.scope)).status).toBe('completed');
+    expect(
+      results(h.requests[2]!)
+        .filter((r) => r.fileId === f.fileId)
+        .at(-1),
+    ).toMatchObject({ coverage: { complete: true } });
+  });
+  it('computes the entire owned CSV and checks statistic bindings before finish', async () => {
+    const f = await owned(`channel,amount\n${'web,0.10\n'.repeat(10000)}store,99.90\n`);
+    const h = createHarness([]);
+    let turn = 0;
+    h.messagesAdapter.create = async (request) => {
+      h.requests.push(request);
+      if (++turn === 1)
+        return call('analyze_task_table', {
+          fileId: f.fileId,
+          mode: 'aggregate',
+          metrics: [{ op: 'sum', column: 'B' }, { op: 'count_rows' }],
+        });
+      const table = results(request).at(-1)!;
+      expect(table).toMatchObject({ ok: true, complete: true, scope: { scannedRows: 10001 } });
+      expect(table.overall.map((m: { value: string }) => m.value)).toEqual(['1099.9', '10001']);
+      return done({
+        fields: table.overall.map((m: { id: string; name: string; value: string }) => ({
+          name: m.name,
+          value: m.value,
+          fileId: f.fileId,
+          tableFactId: m.id,
+        })),
+      });
+    };
+    expect((await run(h, f.scope)).status).toBe('completed');
+  });
+  it.each(['unbound', 'forged', 'unseen-groups', 'invalid-number'])(
+    'refuses an unverified complete statistics answer: %s',
+    async (kind) => {
+      const f = await owned(
+        kind === 'invalid-number'
+          ? 'name,amount\nalice,bad\n'
+          : 'name,amount\nalice,0.1\nbob,0.2\n',
+      );
+      const h = createHarness([]);
+      let turn = 0;
+      h.messagesAdapter.create = async (request) => {
+        h.requests.push(request);
+        if (++turn === 1)
+          return call('analyze_task_table', {
+            fileId: f.fileId,
+            mode: 'aggregate',
+            metrics: [{ op: 'sum', column: 'B' }],
+            ...(kind === 'unseen-groups' ? { groupBy: ['A'], limit: 1 } : {}),
+          });
+        const table = results(request).at(-1)!;
+        const m = table.overall?.[0];
+        return done(
+          kind === 'unbound' || !m
+            ? {}
+            : {
+                fields: [
+                  {
+                    name: m.name,
+                    value: kind === 'forged' ? '9999' : m.value,
+                    fileId: f.fileId,
+                    tableFactId: m.id,
+                  },
+                ],
+              },
+        );
+      };
+      expect((await run(h, f.scope, 2)).status).toBe('failed');
+    },
+  );
+  it('does not complete file work after task or account authority is revoked', async () => {
+    const f = await owned();
+    const h = createHarness([]);
+    let turn = 0;
+    h.messagesAdapter.create = async (request) => {
+      h.requests.push(request);
+      if (++turn === 1) return call('read_task_file', { fileId: f.fileId });
+      f.revoke();
+      return done();
+    };
+    expect((await run(h, f.scope, 2)).status).toBe('failed');
+  });
+  it.each(['flag-off', 'other-task'])(
+    'withholds file content outside an enabled matching scope: %s',
+    async (kind) => {
+      const f = await owned(undefined, kind === 'other-task' ? 'other-task' : 'task-a');
+      if (kind === 'flag-off') env.BROWSER_TASK_FILES_V1 = false;
+      const h = createHarness([call('read_task_file', { fileId: f.fileId }), done()]);
+      await run(h, f.scope, 2);
+      expect(h.requests[0]?.tools?.map((t) => t.name)).not.toContain('read_task_file');
+      expect(JSON.stringify(h.requests)).not.toContain('alice,0.1');
+    },
+  );
 });

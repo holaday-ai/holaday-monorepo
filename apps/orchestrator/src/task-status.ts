@@ -1,8 +1,4 @@
-export type TaskTerminalStatus =
-  | 'completed'
-  | 'partial_success'
-  | 'failed'
-  | 'cancelled';
+export type TaskTerminalStatus = 'completed' | 'partial_success' | 'failed' | 'cancelled';
 
 export const TASK_ACTIVE_STATUSES = [
   'pending',
@@ -15,12 +11,7 @@ export const TASK_ACTIVE_STATUSES = [
 
 export type TaskActiveStatus = (typeof TASK_ACTIVE_STATUSES)[number];
 
-export const TASK_QUEUE_DEPTH_STATUSES = [
-  'pending',
-  'planning',
-  'queued',
-  'executing',
-] as const;
+export const TASK_QUEUE_DEPTH_STATUSES = ['pending', 'planning', 'queued', 'executing'] as const;
 
 export type TaskQueueDepthStatus = (typeof TASK_QUEUE_DEPTH_STATUSES)[number];
 

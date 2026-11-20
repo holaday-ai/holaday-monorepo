@@ -1,3 +1,5 @@
+import { USER_BROWSER_ACTIVITY_CAPABILITY, USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
+import { importSelectedSession } from './session-import.js';
 /**
  * Phase 25 — extension-side tool executor (Mode B v0.1).
  *
@@ -35,8 +37,15 @@ import type {
 import { withDeadline } from '../shared/deadline.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import { sanitizePageContextUrl } from '../shared/page-context.js';
+import { browserLaunchSessionId } from './browser-launch-profile.js';
 import { sendCriticalClientMessage } from './critical-send.js';
-import { listReadableTabs, readSelectedTab, resetTabSelectionsForTests } from './selected-tab-read.js';
+import {
+  listReadableTabs,
+  prepareIndependentTaskTab,
+  readSelectedTab,
+  releasePreparedTaskTab,
+  resetTabSelectionsForTests,
+} from './selected-tab-read.js';
 import { getCurrentWsToken } from './ws-client.js';
 
 type ExtensionToolCall = Extract<ServerMessage, { type: 'server.extension.tool_call' }>;
@@ -168,17 +177,17 @@ export async function getActiveTabForExtensionTool(
   );
   const candidates = candidateGroups.flat();
 
-  return pickBestTabCandidate(candidates, (tab) => isNavigablePageTab(tab, opts))
-    ?? pickBestTabCandidate(candidates, (tab) => isNonInternalTab(tab, opts));
+  return (
+    pickBestTabCandidate(candidates, (tab) => isNavigablePageTab(tab, opts)) ??
+    pickBestTabCandidate(candidates, (tab) => isNonInternalTab(tab, opts))
+  );
 }
 
 function pickBestTabCandidate(
   candidates: Array<{ tab: chrome.tabs.Tab; queryIndex: number; tabIndex: number }>,
   predicate: (tab: chrome.tabs.Tab | undefined) => tab is chrome.tabs.Tab,
 ): chrome.tabs.Tab | null {
-  const [best] = candidates
-    .filter(({ tab }) => predicate(tab))
-    .sort(compareTabCandidates);
+  const [best] = candidates.filter(({ tab }) => predicate(tab)).sort(compareTabCandidates);
   return best?.tab ?? null;
 }
 
@@ -254,9 +263,7 @@ export function waitForTabComplete(
     const previousUrl = opts.previousUrl ?? '';
     const targetUrl = opts.targetUrl ?? '';
     const requireNavigationSignal = Boolean(
-      previousUrl &&
-        targetUrl &&
-        stripHash(previousUrl) !== stripHash(targetUrl),
+      previousUrl && targetUrl && stripHash(previousUrl) !== stripHash(targetUrl),
     );
     let sawNavigationSignal = !requireNavigationSignal;
     const cleanup = (): void => {
@@ -284,7 +291,10 @@ export function waitForTabComplete(
     };
     listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
       if (id !== tabId) return;
-      if (info.status === 'loading' || (info.url && stripHash(info.url) !== stripHash(previousUrl))) {
+      if (
+        info.status === 'loading' ||
+        (info.url && stripHash(info.url) !== stripHash(previousUrl))
+      ) {
         sawNavigationSignal = true;
       }
       maybeComplete(info);
@@ -417,9 +427,7 @@ async function readBodyText(tabId: number): Promise<string> {
       func: (maxChars: number) => {
         // Runs in page context — no closure over outer scope.
         const t = document.body?.innerText ?? '';
-        return t.length > maxChars
-          ? `${t.slice(0, maxChars)}\n…(已截断，原文 ${t.length} 字)`
-          : t;
+        return t.length > maxChars ? `${t.slice(0, maxChars)}\n…(已截断，原文 ${t.length} 字)` : t;
       },
       args: [BODY_TEXT_CHAR_CAP],
     }),
@@ -589,14 +597,11 @@ async function captureVisibleTabWithTransientRetry(
 
 function captureVisibleTabOnce(windowId: number | undefined, quality: number): Promise<string> {
   const options: chrome.tabs.CaptureVisibleTabOptions = { format: 'jpeg', quality };
-  const capture = typeof windowId === 'number'
-    ? chrome.tabs.captureVisibleTab(windowId, options)
-    : chrome.tabs.captureVisibleTab(options);
-  return withDeadline(
-    capture,
-    SCREENSHOT_CAPTURE_TIMEOUT_MS,
-    'extension_tool_timeout',
-  );
+  const capture =
+    typeof windowId === 'number'
+      ? chrome.tabs.captureVisibleTab(windowId, options)
+      : chrome.tabs.captureVisibleTab(options);
+  return withDeadline(capture, SCREENSHOT_CAPTURE_TIMEOUT_MS, 'extension_tool_timeout');
 }
 
 function sleep(ms: number): Promise<void> {
@@ -662,10 +667,15 @@ function isTransientScreenshotCaptureError(err: unknown): boolean {
   );
 }
 
-export function extensionToolErrorPayload(
-  err: unknown,
-): { message: string; code: string } {
+export function extensionToolErrorPayload(err: unknown): { message: string; code: string } {
   const msg = err instanceof Error ? err.message : String(err);
+  if (
+    /^session_import_failed:(transport|owner|scope|selection|cookie_store|selected_storage|revalidation|upload|acknowledgement)$/.test(
+      msg,
+    )
+  ) {
+    return { message: '登录状态导入失败，请重新选择站点后重试', code: msg };
+  }
   const selectedTabErrors: Record<string, string> = {
     target_required: '请先选择要读取的 Chrome 标签页',
     target_changed: '所选标签页已跳转，请重新选择后继续',
@@ -785,9 +795,9 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
   }
   const cached = recentToolCallResults.get(dedupeKey);
   if (
-    cached
-    && cached.generation === controlGeneration
-    && Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS
+    cached &&
+    cached.generation === controlGeneration &&
+    Date.now() - cached.at <= RECENT_TOOL_RESULT_TTL_MS
   ) {
     if (isControlledTaskResultStale(taskId, controlGeneration)) {
       logDroppedControlledToolResult(taskId, requestId);
@@ -828,7 +838,6 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
     Math.min(NAVIGATE_LOAD_TIMEOUT_MS, operationBudgetMs - waitMs - 250),
   );
 
-  let trackedPromise: Promise<ExtensionToolResultPayload>;
   const promise = computeExtensionToolResult(
     taskId,
     kind,
@@ -841,7 +850,7 @@ export async function handleExtensionToolCall(call: ExtensionToolCall): Promise<
       inFlightToolCallResults.delete(dedupeKey);
     }
   });
-  trackedPromise = promise;
+  const trackedPromise = promise;
   inFlightToolCallResults.set(dedupeKey, { generation: controlGeneration, ownerToken, promise });
   const payload = await promise;
   if (isControlledTaskResultStale(taskId, controlGeneration)) {
@@ -861,6 +870,10 @@ async function computeExtensionToolResult(
   operationBudgetMs: number,
 ): Promise<ExtensionToolResultPayload> {
   try {
+    if (kind === 'session_import') {
+      if (!args?.sessionImport) throw new Error('session_import_failed');
+      return { ok: true, result: await importSelectedSession(args.sessionImport) };
+    }
     if (kind === 'session') {
       const command = args?.session;
       const transport = extensionToolRuntime.transport;
@@ -876,8 +889,38 @@ async function computeExtensionToolResult(
         error: { message: sanitized.message, code: reply.error },
       };
     }
+    if (kind === 'task_tab') {
+      if (!extensionToolRuntime.transport) throw new Error('capability_missing');
+      const result = await withDeadline(
+        extensionToolRuntime.runLegacy(() =>
+          prepareIndependentTaskTab(
+            args?.target,
+            args?.preparationId,
+            args?.recoverable,
+            args?.resumeOnly,
+            args?.taskTabMode,
+            args?.launchBrowserSessionId,
+          ),
+        ),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return { ok: true, result: { ...result, selectedSessionVersion: 1 } };
+    }
+    if (kind === 'task_tab_release') {
+      if (!extensionToolRuntime.transport) throw new Error('capability_missing');
+      await withDeadline(
+        releasePreparedTaskTab(args?.preparationId, args?.launchBrowserSessionId),
+        operationBudgetMs,
+        'extension_tool_timeout',
+      );
+      return { ok: true, result: { released: true } };
+    }
     if (args?.target && kind !== 'read') throw new Error('target_unsupported');
     if (kind === 'tabs' || kind === 'read') {
+      const launchBrowserSessionId = extensionToolRuntime.transport
+        ? await browserLaunchSessionId().catch(() => null)
+        : null;
       const result = await withDeadline<unknown>(
         kind === 'tabs' ? listReadableTabs() : readSelectedTab(args?.target),
         operationBudgetMs,
@@ -888,15 +931,28 @@ async function computeExtensionToolResult(
         result: {
           ...(typeof result === 'object' && result !== null ? result : {}),
           selectedSessionVersion: extensionToolRuntime.transport ? 1 : 0,
+          ...(launchBrowserSessionId ? { launchBrowserSessionId } : {}),
+          ...(extensionToolRuntime.transport
+            ? {
+                userBrowserProtocol: {
+                  ...USER_BROWSER_PROTOCOL,
+                  capabilities: [
+                    ...USER_BROWSER_PROTOCOL.capabilities,
+                    'task_tab_start',
+                    USER_BROWSER_ACTIVITY_CAPABILITY,
+                    'task_tab_recovery_v1',
+                    ...(launchBrowserSessionId ? ['task_launch_recovery_v1'] : []),
+                  ],
+                },
+              }
+            : {}),
         },
       };
     }
     if (kind === 'navigate') {
       const url = normalizeNavigateUrl(args?.url);
       const result = await withDeadline(
-        extensionToolRuntime.runLegacy(() =>
-          executeNavigate(url, waitMs, navigateLoadTimeoutMs),
-        ),
+        extensionToolRuntime.runLegacy(() => executeNavigate(url, waitMs, navigateLoadTimeoutMs)),
         operationBudgetMs,
         'extension_tool_timeout',
       );
@@ -910,7 +966,10 @@ async function computeExtensionToolResult(
       );
       return { ok: true, result };
     }
-    return { ok: false, error: { message: '浏览器工具类型无效，请重新生成操作', code: 'bad_kind' } };
+    return {
+      ok: false,
+      error: { message: '浏览器工具类型无效，请重新生成操作', code: 'bad_kind' },
+    };
   } catch (err) {
     return {
       ok: false,

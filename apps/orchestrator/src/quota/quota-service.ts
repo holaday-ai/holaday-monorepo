@@ -32,15 +32,15 @@
 
 import {
   ADDON_PACK_CATALOGUE,
-  PLAN_CATALOGUE,
   type AddonPackId,
+  PLAN_CATALOGUE,
   type PlanId,
 } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import { taskQuotas, type TaskQuota } from '../db/schema/task-quotas.js';
+import { type TaskQuota, taskQuotas } from '../db/schema/task-quotas.js';
 import { tasks } from '../db/schema/tasks.js';
 import { TASK_ACTIVE_STATUSES } from '../task-status.js';
 
@@ -66,11 +66,7 @@ export interface QuotaSnapshot {
   readonly opusRemaining: number | null;
 }
 
-export type ConsumeReason =
-  | 'daily_limit'
-  | 'monthly_limit'
-  | 'opus_limit'
-  | 'opus_not_available';
+export type ConsumeReason = 'daily_limit' | 'monthly_limit' | 'opus_limit' | 'opus_not_available';
 
 /**
  * Half-open interval [start, end) covering the given moment for the
@@ -105,10 +101,7 @@ export class QuotaService {
    * zero counters; first-month bonus / add-on top-ups are handled
    * separately by `addBonus`.
    */
-  async getOrCreateActiveQuota(
-    userId: number,
-    plan: PlanId,
-  ): Promise<TaskQuota> {
+  async getOrCreateActiveQuota(userId: number, plan: PlanId): Promise<TaskQuota> {
     const period: QuotaPeriod = PLAN_CATALOGUE[plan].tasks.period;
     const { start, end } = computePeriodBounds(period);
 
@@ -146,10 +139,7 @@ export class QuotaService {
     const row = await this.getOrCreateActiveQuota(userId, plan);
     const tasksLimit = def.tasks.count;
     const opusLimit = def.tasks.opus ?? null;
-    const tasksRemaining = Math.max(
-      0,
-      tasksLimit + row.bonusTasks - row.tasksUsed,
-    );
+    const tasksRemaining = Math.max(0, tasksLimit + row.bonusTasks - row.tasksUsed);
     const opusRemaining =
       opusLimit == null ? null : Math.max(0, opusLimit + row.bonusOpus - row.opusUsed);
     return {
@@ -204,9 +194,7 @@ export class QuotaService {
       const bonusBurn = await this.db
         .update(taskQuotas)
         .set({ bonusOpus: sql`${taskQuotas.bonusOpus} - 1` })
-        .where(
-          and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusOpus} > 0`),
-        );
+        .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusOpus} > 0`));
       if (readAffectedRows(bonusBurn) === 1) {
         return { ok: true };
       }
@@ -214,12 +202,7 @@ export class QuotaService {
       const regBurn = await this.db
         .update(taskQuotas)
         .set({ opusUsed: sql`${taskQuotas.opusUsed} + 1` })
-        .where(
-          and(
-            eq(taskQuotas.id, row.id),
-            sql`${taskQuotas.opusUsed} < ${opusLimit}`,
-          ),
-        );
+        .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.opusUsed} < ${opusLimit}`));
       if (readAffectedRows(regBurn) === 1) {
         return { ok: true };
       }
@@ -230,21 +213,14 @@ export class QuotaService {
     const bonusBurn = await this.db
       .update(taskQuotas)
       .set({ bonusTasks: sql`${taskQuotas.bonusTasks} - 1` })
-      .where(
-        and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusTasks} > 0`),
-      );
+      .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.bonusTasks} > 0`));
     if (readAffectedRows(bonusBurn) === 1) {
       return { ok: true };
     }
     const regBurn = await this.db
       .update(taskQuotas)
       .set({ tasksUsed: sql`${taskQuotas.tasksUsed} + 1` })
-      .where(
-        and(
-          eq(taskQuotas.id, row.id),
-          sql`${taskQuotas.tasksUsed} < ${tasksLimit}`,
-        ),
-      );
+      .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.tasksUsed} < ${tasksLimit}`));
     if (readAffectedRows(regBurn) === 1) {
       return { ok: true };
     }
@@ -260,7 +236,11 @@ export class QuotaService {
    * burned the slot). Best-effort: a failed rollback never throws,
    * since it's already a degraded path.
    */
-  async refund(userId: number, plan: PlanId, isOpus: boolean): Promise<void> {
+  async refundInTransaction(db: DB, userId: number, plan: PlanId, isOpus: boolean): Promise<void> {
+    await new QuotaService(db).refund(userId, plan, isOpus, true);
+  }
+
+  async refund(userId: number, plan: PlanId, isOpus: boolean, strict = false): Promise<void> {
     try {
       const row = await this.getOrCreateActiveQuota(userId, plan);
       if (isOpus) {
@@ -268,9 +248,7 @@ export class QuotaService {
           await this.db
             .update(taskQuotas)
             .set({ opusUsed: sql`${taskQuotas.opusUsed} - 1` })
-            .where(
-              and(eq(taskQuotas.id, row.id), sql`${taskQuotas.opusUsed} > 0`),
-            );
+            .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.opusUsed} > 0`));
         } else {
           await this.db
             .update(taskQuotas)
@@ -282,9 +260,7 @@ export class QuotaService {
           await this.db
             .update(taskQuotas)
             .set({ tasksUsed: sql`${taskQuotas.tasksUsed} - 1` })
-            .where(
-              and(eq(taskQuotas.id, row.id), sql`${taskQuotas.tasksUsed} > 0`),
-            );
+            .where(and(eq(taskQuotas.id, row.id), sql`${taskQuotas.tasksUsed} > 0`));
         } else {
           await this.db
             .update(taskQuotas)
@@ -292,8 +268,9 @@ export class QuotaService {
             .where(eq(taskQuotas.id, row.id));
         }
       }
-    } catch {
-      // refund is best-effort.
+    } catch (error) {
+      if (strict) throw error;
+      // Other rollback callers retain their existing best-effort behavior.
     }
   }
 
@@ -341,11 +318,7 @@ export class QuotaService {
    * order creation, not here — this method assumes the caller has
    * already validated.
    */
-  async applyAddonPack(
-    userId: number,
-    plan: PlanId,
-    packId: AddonPackId,
-  ): Promise<void> {
+  async applyAddonPack(userId: number, plan: PlanId, packId: AddonPackId): Promise<void> {
     const pack = ADDON_PACK_CATALOGUE[packId];
     if (!pack) return;
     const row = await this.getOrCreateActiveQuota(userId, plan);

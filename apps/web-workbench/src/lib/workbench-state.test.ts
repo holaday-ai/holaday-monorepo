@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
 import type { UiTask } from '@/types/task';
+import { describe, expect, it } from 'vitest';
 import {
   followUpTargetForTask,
   hasBrowserRecordForWorkbench,
   isLiveBrowserTaskForWorkbench,
+  mobileBrowserSheetAutoOpenState,
   networkTransitionToast,
   normalizeTaskActionCount,
-  mobileBrowserSheetAutoOpenState,
   preserveBrowserRecordAfterLive,
   realtimeConnectionTransition,
   shouldConnectTaskBrowserForWorkbench,
@@ -28,18 +28,10 @@ function task(overrides: Partial<UiTask> = {}): UiTask {
 
 describe('workbench state helpers', () => {
   it('does not treat partial-success browser tasks as live browser sessions', () => {
-    expect(isLiveBrowserTaskForWorkbench(task({ status: 'executing' }))).toBe(
-      true,
-    );
-    expect(isLiveBrowserTaskForWorkbench(task({ status: 'awaiting_user' }))).toBe(
-      true,
-    );
-    expect(
-      isLiveBrowserTaskForWorkbench(task({ status: 'partial_success' })),
-    ).toBe(false);
-    expect(isLiveBrowserTaskForWorkbench(task({ status: 'completed' }))).toBe(
-      false,
-    );
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'executing' }))).toBe(true);
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'awaiting_user' }))).toBe(true);
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'partial_success' }))).toBe(false);
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'completed' }))).toBe(false);
   });
 
   it('keeps legacy browser-like tasks attached to their browser record', () => {
@@ -47,9 +39,7 @@ describe('workbench state helpers', () => {
     expect(hasBrowserRecordForWorkbench(legacyTask)).toBe(true);
     expect(isLiveBrowserTaskForWorkbench(legacyTask)).toBe(true);
     expect(
-      hasBrowserRecordForWorkbench(
-        task({ executionMode: undefined, intent: '总结这段文字' }),
-      ),
+      hasBrowserRecordForWorkbench(task({ executionMode: undefined, intent: '总结这段文字' })),
     ).toBe(false);
   });
 
@@ -145,9 +135,7 @@ describe('workbench state helpers', () => {
   });
 
   it('keeps paused browser tasks live even when a pause frame carries a result', () => {
-    expect(isLiveBrowserTaskForWorkbench(task({ status: 'paused' }))).toBe(
-      true,
-    );
+    expect(isLiveBrowserTaskForWorkbench(task({ status: 'paused' }))).toBe(true);
     expect(
       isLiveBrowserTaskForWorkbench(
         task({ status: 'paused', resultText: '已完成到可跟进的阶段。' }),

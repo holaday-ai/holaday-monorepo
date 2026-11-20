@@ -24,6 +24,7 @@ const ACCOUNT_CLOSURE_RECOVERY_TTL_SECONDS = 10 * 60;
 const key = new TextEncoder().encode(env.JWT_SECRET);
 
 export interface AccessTokenClaims {
+  sid?: string;
   sub: string; // user external_id (usr_...)
   plan: string;
   authVersion: number;
@@ -32,6 +33,7 @@ export interface AccessTokenClaims {
 }
 
 export interface StreamTokenClaims {
+  sid?: string;
   sub: string;
   authVersion: number;
 }
@@ -101,6 +103,7 @@ export async function signAccessToken(
 ): Promise<string> {
   return new SignJWT({
     plan: claims.plan,
+    ...(claims.sid ? { sid: claims.sid } : {}),
     authVersion: claims.authVersion ?? 0,
     ...(claims.taskOrigin ? { taskOrigin: claims.taskOrigin } : {}),
   })
@@ -130,6 +133,11 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
           ? payload.authVersion
           : null;
     if (authVersion === null) return null;
+    if (
+      payload.sid !== undefined &&
+      (typeof payload.sid !== 'string' || !payload.sid || payload.sid.length > 36)
+    )
+      return null;
     const taskOrigin =
       payload.taskOrigin === undefined
         ? undefined
@@ -141,6 +149,7 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
     return {
       sub: payload.sub,
       plan: payload.plan,
+      ...(typeof payload.sid === 'string' ? { sid: payload.sid } : {}),
       authVersion,
       ...(taskOrigin ? { taskOrigin } : {}),
     };
@@ -190,8 +199,9 @@ export async function verifyMfaChallengeToken(token: string): Promise<MfaChallen
 export async function signStreamToken(
   sub: string,
   authVersion = 0,
+  sid?: string,
 ): Promise<{ token: string; expiresIn: number }> {
-  const token = await new SignJWT({ purpose: 'stream', authVersion })
+  const token = await new SignJWT({ purpose: 'stream', authVersion, ...(sid ? { sid } : {}) })
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(sub)
     .setIssuer(ISSUER)
@@ -222,7 +232,16 @@ export async function verifyStreamToken(token: string): Promise<StreamTokenClaim
     ) {
       return null;
     }
-    return { sub: payload.sub, authVersion: payload.authVersion };
+    if (
+      payload.sid !== undefined &&
+      (typeof payload.sid !== 'string' || !payload.sid || payload.sid.length > 36)
+    )
+      return null;
+    return {
+      sub: payload.sub,
+      authVersion: payload.authVersion,
+      ...(typeof payload.sid === 'string' ? { sid: payload.sid } : {}),
+    };
   } catch {
     return null;
   }

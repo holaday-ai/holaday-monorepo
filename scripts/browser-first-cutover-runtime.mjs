@@ -3137,8 +3137,8 @@ export async function reobserveFirstCutoverCloudRecovery(input, origin, override
   ])
     if (current[key] !== origin[key]) fail();
   if (!isDeepStrictEqual(current.display, origin.display)) fail();
-  const oldRoot = origin.processes.find((p) => p.pid === origin.pid),
-    newRoot = current.processes.find((p) => p.pid === origin.pid);
+  const oldRoot = origin.processes.find((p) => p.pid === origin.pid);
+  const newRoot = current.processes.find((p) => p.pid === origin.pid);
   if (!isDeepStrictEqual(oldRoot, newRoot)) fail();
   return current;
 }

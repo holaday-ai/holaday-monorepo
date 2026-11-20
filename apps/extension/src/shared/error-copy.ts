@@ -8,11 +8,13 @@ const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
     message: '登录状态已失效，请到 holaday.ai 重新登录后再试。',
   },
   {
-    match: /extension.*not connected|receiving end does not exist|could not establish connection|扩展.*未连接/i,
+    match:
+      /extension.*not connected|receiving end does not exist|could not establish connection|扩展.*未连接/i,
     message: '浏览器扩展未连接，请重新加载 HOLA DAY 扩展后重试。',
   },
   {
-    match: /service worker.*restart|extension context invalidated|extension.*reload|worker.*restarting/i,
+    match:
+      /service worker.*restart|extension context invalidated|extension.*reload|worker.*restarting/i,
     message: '浏览器扩展后台正在重启，请稍等几秒后重试。',
   },
   {
@@ -58,16 +60,8 @@ const RULES: ReadonlyArray<{ match: RegExp; message: string }> = [
   },
 ];
 
-export function humanizeExtensionError(
-  error: unknown,
-  fallback = GENERIC_EXTENSION_ERROR,
-): string {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : '';
+export function humanizeExtensionError(error: unknown, fallback = GENERIC_EXTENSION_ERROR): string {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
   const text = raw.trim();
   if (!text) return fallback;
   for (const rule of RULES) {

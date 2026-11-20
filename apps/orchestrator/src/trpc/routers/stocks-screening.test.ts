@@ -5,10 +5,10 @@ import {
   StockScreeningFreshnessError,
 } from '../../stocks/stock-screening-service.js';
 import {
+  type RunStockScreeningInput,
   previewStockScreening,
   runStockScreeningInputSchema,
   runTrustedStockScreening,
-  type RunStockScreeningInput,
 } from './stocks-screening.js';
 import { stocksRouter } from './stocks.js';
 
@@ -91,11 +91,13 @@ describe('stock screening procedures', () => {
       ]),
       unparsedClauses: [],
     });
-    await expect(caller.runScreening({
-      snapshotId: SNAPSHOT_ID,
-      dataAsOf: DATA_AS_OF,
-      criteria: [],
-    })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.runScreening({
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: [],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('previews editable criteria and keeps unsupported clauses visible', () => {
@@ -112,60 +114,72 @@ describe('stock screening procedures', () => {
     'rejects a %s snapshot before screening fetches',
     async (mode) => {
       const execute = vi.fn();
-      await expect(runTrustedStockScreening({
-        db: snapshotDb([snapshot(mode)]) as never,
-        userId: 7,
-        logger: { info: vi.fn(), warn: vi.fn() },
-        client: {} as never,
-        input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
-        execute,
-      })).rejects.toBeInstanceOf(TRPCError);
+      await expect(
+        runTrustedStockScreening({
+          db: snapshotDb([snapshot(mode)]) as never,
+          userId: 7,
+          logger: { info: vi.fn(), warn: vi.fn() },
+          client: {} as never,
+          input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+          execute,
+        }),
+      ).rejects.toBeInstanceOf(TRPCError);
       expect(execute).not.toHaveBeenCalled();
     },
   );
 
   it('rejects an unowned snapshot before screening fetches', async () => {
     const execute = vi.fn();
-    await expect(runTrustedStockScreening({
-      db: snapshotDb([]) as never,
-      userId: 7,
-      logger: { info: vi.fn(), warn: vi.fn() },
-      client: {} as never,
-      input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
-      execute,
-    })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      runTrustedStockScreening({
+        db: snapshotDb([]) as never,
+        userId: 7,
+        logger: { info: vi.fn(), warn: vi.fn() },
+        client: {} as never,
+        input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+        execute,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(execute).not.toHaveBeenCalled();
   });
 
   it('rejects a mismatched snapshot date before screening fetches', async () => {
     const execute = vi.fn();
-    await expect(runTrustedStockScreening({
-      db: snapshotDb([snapshot()]) as never,
-      userId: 7,
-      logger: { info: vi.fn(), warn: vi.fn() },
-      client: {} as never,
-      input: { snapshotId: SNAPSHOT_ID, dataAsOf: '2026-08-16', criteria: [criterion()] },
-      execute,
-    })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      runTrustedStockScreening({
+        db: snapshotDb([snapshot()]) as never,
+        userId: 7,
+        logger: { info: vi.fn(), warn: vi.fn() },
+        client: {} as never,
+        input: { snapshotId: SNAPSHOT_ID, dataAsOf: '2026-08-16', criteria: [criterion()] },
+        execute,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(execute).not.toHaveBeenCalled();
   });
 
   it('rejects empty, oversized, and incomplete criterion sets', () => {
-    expect(runStockScreeningInputSchema.safeParse({
-      snapshotId: SNAPSHOT_ID,
-      dataAsOf: DATA_AS_OF,
-      criteria: [],
-    }).success).toBe(false);
-    expect(runStockScreeningInputSchema.safeParse({
-      snapshotId: SNAPSHOT_ID,
-      dataAsOf: DATA_AS_OF,
-      criteria: Array.from({ length: 21 }, (_, index) => criterion({ id: `pe-${index}` })),
-    }).success).toBe(false);
-    expect(runStockScreeningInputSchema.safeParse({
-      snapshotId: SNAPSHOT_ID,
-      dataAsOf: DATA_AS_OF,
-      criteria: [{ ...criterion(), status: 'needs_input', value: null }],
-    }).success).toBe(false);
+    expect(
+      runStockScreeningInputSchema.safeParse({
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      runStockScreeningInputSchema.safeParse({
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: Array.from({ length: 21 }, (_, index) => criterion({ id: `pe-${index}` })),
+      }).success,
+    ).toBe(false);
+    expect(
+      runStockScreeningInputSchema.safeParse({
+        snapshotId: SNAPSHOT_ID,
+        dataAsOf: DATA_AS_OF,
+        criteria: [{ ...criterion(), status: 'needs_input', value: null }],
+      }).success,
+    ).toBe(false);
   });
 
   it('runs a valid current snapshot and logs only bounded screening metadata', async () => {
@@ -209,12 +223,16 @@ describe('stock screening procedures', () => {
       execute,
     });
 
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      criteria: [expect.objectContaining({
-        label: '市盈率不超过 30',
-        sourceField: '市盈率TTM',
-      })],
-    }));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        criteria: [
+          expect.objectContaining({
+            label: '市盈率不超过 30',
+            sourceField: '市盈率TTM',
+          }),
+        ],
+      }),
+    );
   });
 
   it('reissues unique server-owned criterion ids before evaluation', async () => {
@@ -235,43 +253,42 @@ describe('stock screening procedures', () => {
       execute,
     });
 
-    const executeCalls = execute.mock.calls as unknown as Array<[
-      { criteria: ReadyCriterion[] },
-    ]>;
+    const executeCalls = execute.mock.calls as unknown as Array<[{ criteria: ReadyCriterion[] }]>;
     const evaluatedCriteria = executeCalls[0]?.[0].criteria ?? [];
-    expect(evaluatedCriteria.map((item: ReadyCriterion) => item.id)).toEqual([
-      'pe_ttm-1',
-      'pb-2',
-    ]);
+    expect(evaluatedCriteria.map((item: ReadyCriterion) => item.id)).toEqual(['pe_ttm-1', 'pb-2']);
   });
 
   it('returns a refreshable client error when the current trading date changes', async () => {
-    await expect(runTrustedStockScreening({
-      db: snapshotDb([snapshot()]) as never,
-      userId: 7,
-      logger: { info: vi.fn(), warn: vi.fn() },
-      client: {} as never,
-      input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
-      execute: vi.fn(async () => {
-        throw new StockScreeningFreshnessError('股票快照已不是最新交易日，请刷新页面后重试。');
+    await expect(
+      runTrustedStockScreening({
+        db: snapshotDb([snapshot()]) as never,
+        userId: 7,
+        logger: { info: vi.fn(), warn: vi.fn() },
+        client: {} as never,
+        input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+        execute: vi.fn(async () => {
+          throw new StockScreeningFreshnessError('股票快照已不是最新交易日，请刷新页面后重试。');
+        }),
       }),
-    })).rejects.toMatchObject({
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '股票快照已不是最新交易日，请刷新页面后重试。',
     });
   });
 
   it('returns a safe server error when the full-market source is unavailable', async () => {
-    await expect(runTrustedStockScreening({
-      db: snapshotDb([snapshot()]) as never,
-      userId: 7,
-      logger: { info: vi.fn(), warn: vi.fn() },
-      client: {} as never,
-      input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
-      execute: vi.fn(async () => {
-        throw new StockScreeningDataError('全市场筛选数据暂不可用，请稍后重试。');
+    await expect(
+      runTrustedStockScreening({
+        db: snapshotDb([snapshot()]) as never,
+        userId: 7,
+        logger: { info: vi.fn(), warn: vi.fn() },
+        client: {} as never,
+        input: { snapshotId: SNAPSHOT_ID, dataAsOf: DATA_AS_OF, criteria: [criterion()] },
+        execute: vi.fn(async () => {
+          throw new StockScreeningDataError('全市场筛选数据暂不可用，请稍后重试。');
+        }),
       }),
-    })).rejects.toMatchObject({
+    ).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
       message: '全市场筛选数据暂不可用，请稍后重试。',
     });

@@ -55,7 +55,9 @@ describe('buildSrt', () => {
   it('emits 1-based cues timecoded to each segment', () => {
     const tl = buildTimeline(SEGS, [4000, 2500, 3200]);
     const srt = buildSrt(tl);
-    expect(srt).toContain('1\n00:00:00,000 --> 00:00:04,000\n姐妹们夏天到了千万别让紫外线毁了你的皮肤');
+    expect(srt).toContain(
+      '1\n00:00:00,000 --> 00:00:04,000\n姐妹们夏天到了千万别让紫外线毁了你的皮肤',
+    );
     expect(srt).toContain('2\n00:00:04,000 --> 00:00:06,500\n防晒霜特写');
     expect(srt).toContain('3\n00:00:06,500 --> 00:00:09,700\n记得每两小时补涂一次哦');
     // SRT timecodes must match the timeline exactly (audio→subtitle sync).
@@ -66,7 +68,9 @@ describe('buildSrt', () => {
 describe('wrapCjk', () => {
   it('wraps long lines at maxPerLine with the ASS hard break', () => {
     expect(wrapCjk('短句')).toBe('短句');
-    expect(wrapCjk('一二三四五六七八九十一二三四五六', 8)).toBe('一二三四五六七八\\N九十一二三四五六');
+    expect(wrapCjk('一二三四五六七八九十一二三四五六', 8)).toBe(
+      '一二三四五六七八\\N九十一二三四五六',
+    );
   });
 });
 

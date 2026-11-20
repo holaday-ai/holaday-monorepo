@@ -13,11 +13,10 @@ describe('classifyTaskType', () => {
     expect(classifyTaskType(intent)).toBe('fill_form');
   });
 
-  it.each([
-    '今天上海天气',
-    '找一下东京明天温度',
-    'search current Tesla stock price',
-  ])('keeps pure information lookups as search: %s', (intent) => {
-    expect(classifyTaskType(intent)).toBe('search');
-  });
+  it.each(['今天上海天气', '找一下东京明天温度', 'search current Tesla stock price'])(
+    'keeps pure information lookups as search: %s',
+    (intent) => {
+      expect(classifyTaskType(intent)).toBe('search');
+    },
+  );
 });

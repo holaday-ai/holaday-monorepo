@@ -18,20 +18,17 @@
  * touched (the IP-person generate branch lands in 阶段3).
  */
 
-import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { TRPCError } from '@trpc/server';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  inspectMediaIntegrity,
-  type MediaIntegrityReport,
-} from '../../agent/video/ffmpeg-exec.js';
+import { type MediaIntegrityReport, inspectMediaIntegrity } from '../../agent/video/ffmpeg-exec.js';
 import { deleteVoice, enrollVoice } from '../../agent/video/qwen-voice-clone-client.js';
 import { env as appEnv } from '../../config/env.js';
-import { FileService } from '../../files/file-service.js';
 import { users } from '../../db/schema/users.js';
+import { FileService } from '../../files/file-service.js';
 import { protectedProcedure, router } from '../trpc.js';
 
 const MAX_VOICE_SAMPLE_BYTES = 10 * 1024 * 1024; // Qwen enroll 上限 ≈10MB
@@ -127,7 +124,11 @@ export const videoOnboardingRouter = router({
   authorize: protectedProcedure.mutation(async ({ ctx }) => {
     const u = await requireOnboardingUser(ctx);
     if (u.videoSelfUseAuthorizedAt) {
-      return { ok: true as const, alreadyAuthorized: true, authorizedAt: u.videoSelfUseAuthorizedAt };
+      return {
+        ok: true as const,
+        alreadyAuthorized: true,
+        authorizedAt: u.videoSelfUseAuthorizedAt,
+      };
     }
     const now = new Date();
     await ctx.db.update(users).set({ videoSelfUseAuthorizedAt: now }).where(eq(users.id, u.id));
@@ -142,7 +143,10 @@ export const videoOnboardingRouter = router({
     .input(z.object({ audioFileId: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
       if (!appEnv.DASHSCOPE_API_KEY) {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '语音克隆未配置（DASHSCOPE_API_KEY）' });
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '语音克隆未配置（DASHSCOPE_API_KEY）',
+        });
       }
       const u = await requireOnboardingUser(ctx);
       const fileService = new FileService(ctx.db, ctx.logger);
@@ -168,7 +172,10 @@ export const videoOnboardingRouter = router({
         voiceId = res.voiceId;
       } catch (err) {
         ctx.logger.error({ err, userId: ctx.userId }, 'video onboarding: enrollVoice failed');
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '声音克隆失败，请换一段更清晰的录音重试' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '声音克隆失败，请换一段更清晰的录音重试',
+        });
       }
       // 成功 → 存 voice_id;若已有旧 voice,先清云端旧声纹(避免泄漏积累)。
       if (u.qwenVoiceId && u.qwenVoiceId !== voiceId) {
@@ -177,13 +184,23 @@ export const videoOnboardingRouter = router({
           baseUrl: appEnv.DASHSCOPE_BASE_URL,
           ...(appEnv.DASHSCOPE_WORKSPACE_ID ? { workspaceId: appEnv.DASHSCOPE_WORKSPACE_ID } : {}),
           voiceId: u.qwenVoiceId,
-        }).catch((err) => ctx.logger.warn({ err, userId: ctx.userId }, 'video onboarding: old voice delete failed (non-fatal)'));
+        }).catch((err) =>
+          ctx.logger.warn(
+            { err, userId: ctx.userId },
+            'video onboarding: old voice delete failed (non-fatal)',
+          ),
+        );
       }
       await ctx.db.update(users).set({ qwenVoiceId: voiceId }).where(eq(users.id, u.id));
       // 样本即弃 — voice_id 已是耐久产物,原始声纹样本不再保留。
       await fileService
         .deleteForUser(input.audioFileId, u.id)
-        .catch((err) => ctx.logger.warn({ err, userId: ctx.userId }, 'video onboarding: sample cleanup failed (non-fatal)'));
+        .catch((err) =>
+          ctx.logger.warn(
+            { err, userId: ctx.userId },
+            'video onboarding: sample cleanup failed (non-fatal)',
+          ),
+        );
       return { ok: true as const, hasVoice: true };
     }),
 
@@ -223,11 +240,19 @@ export const videoOnboardingRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: '出镜底版上传未完成，请重新上传' });
       }
       const oldId = u.baseVideoFileId;
-      await ctx.db.update(users).set({ baseVideoFileId: input.videoFileId }).where(eq(users.id, u.id));
+      await ctx.db
+        .update(users)
+        .set({ baseVideoFileId: input.videoFileId })
+        .where(eq(users.id, u.id));
       if (oldId && oldId !== input.videoFileId) {
         await fileService
           .deleteForUser(oldId, u.id)
-          .catch((err) => ctx.logger.warn({ err, userId: ctx.userId }, 'video onboarding: old base video cleanup failed (non-fatal)'));
+          .catch((err) =>
+            ctx.logger.warn(
+              { err, userId: ctx.userId },
+              'video onboarding: old base video cleanup failed (non-fatal)',
+            ),
+          );
       }
       return { ok: true as const, hasBaseVideo: true };
     }),
@@ -245,12 +270,22 @@ export const videoOnboardingRouter = router({
         baseUrl: appEnv.DASHSCOPE_BASE_URL,
         ...(appEnv.DASHSCOPE_WORKSPACE_ID ? { workspaceId: appEnv.DASHSCOPE_WORKSPACE_ID } : {}),
         voiceId: u.qwenVoiceId,
-      }).catch((err) => ctx.logger.warn({ err, userId: ctx.userId }, 'video onboarding: cloud voice delete failed (non-fatal)'));
+      }).catch((err) =>
+        ctx.logger.warn(
+          { err, userId: ctx.userId },
+          'video onboarding: cloud voice delete failed (non-fatal)',
+        ),
+      );
     }
     if (u.baseVideoFileId) {
       await fileService
         .deleteForUser(u.baseVideoFileId, u.id)
-        .catch((err) => ctx.logger.warn({ err, userId: ctx.userId }, 'video onboarding: base video delete failed (non-fatal)'));
+        .catch((err) =>
+          ctx.logger.warn(
+            { err, userId: ctx.userId },
+            'video onboarding: base video delete failed (non-fatal)',
+          ),
+        );
     }
     await ctx.db
       .update(users)

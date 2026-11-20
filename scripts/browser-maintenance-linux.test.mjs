@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  observeMaintenanceRuntime,
   createMaintenanceStopEffects,
+  observeMaintenanceRuntime,
 } from './browser-maintenance-linux.mjs';
 import { retireMaintenanceRuntime } from './browser-maintenance-runtime.mjs';
 

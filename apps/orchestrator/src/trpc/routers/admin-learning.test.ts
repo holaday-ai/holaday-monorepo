@@ -169,7 +169,7 @@ describe('aggregateByDomain', () => {
     });
   });
 
-  it("picks the most-frequent failure category per domain", () => {
+  it('picks the most-frequent failure category per domain', () => {
     const rows = [
       makeScanRow({
         id: 1,
@@ -279,7 +279,10 @@ describe('learning scan coverage', () => {
   it('marks a bounded scan as truncated instead of presenting it as complete', () => {
     const capLearningScanRows = (
       __learningInternals as unknown as {
-        capLearningScanRows?: <T>(rows: T[], limit: number) => {
+        capLearningScanRows?: <T>(
+          rows: T[],
+          limit: number,
+        ) => {
           rows: T[];
           truncated: boolean;
         };

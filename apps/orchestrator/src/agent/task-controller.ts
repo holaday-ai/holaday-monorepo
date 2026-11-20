@@ -54,12 +54,12 @@ export interface PlannedStep {
   requiresConfirm?: boolean;
 }
 
-  /**
-   * Single-step confirm — the W1 flow (one prompt, one Confirm/Reject).
-   * This is a review gate after the runner reaches a high-risk boundary,
-   * not permission for the runner to click a final submit/pay/delete
-   * control. Single approve advances past the gated step.
-   */
+/**
+ * Single-step confirm — the W1 flow (one prompt, one Confirm/Reject).
+ * This is a review gate after the runner reaches a high-risk boundary,
+ * not permission for the runner to click a final submit/pay/delete
+ * control. Single approve advances past the gated step.
+ */
 export interface PendingSingleConfirm {
   kind: 'single';
   stepId: string;

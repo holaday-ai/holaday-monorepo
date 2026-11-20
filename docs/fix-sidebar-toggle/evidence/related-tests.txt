@@ -1,0 +1,188 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/fix-sidebar-toggle/holaday-monorepo/apps/web-workbench
+
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/pages/ProjectsPage.test.tsx (103 tests) 6325ms
+ ✓ src/pages/TeamProjectPage.test.tsx (25 tests) 790ms
+   ✓ TeamProjectPage normalized detail states > runs create, publish, planning, and assignment mutations in version order 338ms
+ ✓ src/components/AppShell.projects.test.tsx (8 tests) 627ms
+   ✓ AppShell personal project collection isolation > keeps the Sidebar filter and move menu personal after ProjectsPage refreshes a team workspace 387ms
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > filters memories by category with visible counts
+Error: socket hang up
+    at Socket.socketCloseListener (node:_http_client:548:27)
+    at Socket.emit (node:events:531:35)
+    at TCP.<anonymous> (node:net:347:12) {
+  code: 'ECONNRESET'
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > filters memories by category with visible counts
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > searches memory titles and details locally
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps long memories compact until the user expands them
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps a selected category when deleting one of several matching memories
+Error: socket hang up
+    at Socket.socketCloseListener (node:_http_client:548:27)
+    at Socket.emit (node:events:531:35)
+    at TCP.<anonymous> (node:net:347:12) {
+  code: 'ECONNRESET'
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps a selected category when deleting one of several matching memories
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > does not let a slow delete overwrite a newer category selection
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+ ✓ src/pages/SettingsPage.memory.test.tsx (7 tests) 278ms
+ ✓ src/pages/OrganizationInvitationAcceptPage.test.tsx (8 tests) 55ms
+ ✓ src/pages/PlanPage.renewal.test.tsx (7 tests) 167ms
+ ✓ src/components/ui/sidebar-toggle.test.tsx (8 tests) 217ms
+ ✓ src/App.closure.test.tsx (2 tests) 34ms
+ ✓ src/pages/SettingsPage.account.test.tsx (2 tests) 57ms
+stderr | src/pages/SettingsPage.account.test.tsx
+Error: socket hang up
+    at _destroy (node:_http_client:963:15)
+    at onSocketNT (node:_http_client:987:5)
+    at processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'ECONNRESET'
+}
+Error: socket hang up
+    at _destroy (node:_http_client:963:15)
+    at onSocketNT (node:_http_client:987:5)
+    at processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'ECONNRESET'
+}
+
+ ✓ src/components/ui/sidebar-accessibility.test.tsx (3 tests) 16ms
+
+ Test Files  10 passed (10)
+      Tests  173 passed (173)
+   Start at  03:34:30
+   Duration  18.10s (transform 943ms, setup 0ms, collect 3.51s, tests 8.57s, environment 1.22s, prepare 332ms)

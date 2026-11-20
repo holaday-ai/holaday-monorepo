@@ -115,7 +115,7 @@ function InvitationResult({
       className="rounded-[12px] border border-[#E4E4E7] bg-white p-6 shadow-[0_8px_28px_rgba(24,24,27,0.06)] sm:p-8"
     >
       <div className="flex items-start gap-4">
-        <div className="rounded-full bg-[#FFF0F4] p-3 text-[#EA1F59]">
+        <div className="rounded-full bg-[#FFF0F4] p-3 text-[#FF0061]">
           <Icon className={state.status === 'pending' ? 'h-6 w-6 animate-spin' : 'h-6 w-6'} />
         </div>
         <div className="min-w-0 flex-1">

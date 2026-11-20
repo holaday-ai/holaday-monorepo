@@ -275,7 +275,9 @@ describe('StockRiskRadar', () => {
     expect(await screen.findByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '刷新风险雷达' }));
 
-    expect(await screen.findByText('本次刷新未完成，继续展示数据日期 08/17 的已核验结果。')).toBeTruthy();
+    expect(
+      await screen.findByText('本次刷新未完成，继续展示数据日期 08/17 的已核验结果。'),
+    ).toBeTruthy();
     expect(screen.getByText('整体质押比例较高，要留意可能触发的平仓压力。')).toBeTruthy();
     expect(screen.queryByText('本次风险检查未完成')).toBeNull();
   });
@@ -549,11 +551,13 @@ describe('StockRiskRadar', () => {
       errorCode: null,
     };
     const api: StockRiskRadarApi = {
-      load: vi.fn(async () => result({
-        requestedStockCount: 3,
-        checkedStockCount: 3,
-        checks: [...result().checks, quietCheck],
-      })),
+      load: vi.fn(async () =>
+        result({
+          requestedStockCount: 3,
+          checkedStockCount: 3,
+          checks: [...result().checks, quietCheck],
+        }),
+      ),
       loadMonitors: vi.fn(async () => []),
       createMonitor: vi.fn(async () => ({
         created: true,
@@ -602,12 +606,14 @@ describe('StockRiskRadar', () => {
       errorCode: 'UPSTREAM_UNAVAILABLE',
     };
     const api: StockRiskRadarApi = {
-      load: vi.fn(async () => result({
-        requestedStockCount: 1,
-        checkedStockCount: 1,
-        signals: [],
-        checks: [unavailableCheck],
-      })),
+      load: vi.fn(async () =>
+        result({
+          requestedStockCount: 1,
+          checkedStockCount: 1,
+          signals: [],
+          checks: [unavailableCheck],
+        }),
+      ),
       loadMonitors: vi.fn(async () => []),
     };
     render(
@@ -633,7 +639,9 @@ describe('StockRiskRadar', () => {
   it('keeps verified risk facts visible when monitor status loading fails', async () => {
     const api: StockRiskRadarApi = {
       load: vi.fn(async () => result()),
-      loadMonitors: vi.fn(async () => { throw new Error('monitor offline'); }),
+      loadMonitors: vi.fn(async () => {
+        throw new Error('monitor offline');
+      }),
     };
     render(
       <StockRiskRadar
@@ -688,9 +696,11 @@ describe('StockRiskRadar', () => {
 
     expect(await screen.findByText('已暂停')).toBeTruthy();
     expect(screen.getByText('需要处理')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '恢复测试股份监控' }).getAttribute('title'))
-      .toBe('恢复测试股份监控');
-    expect(screen.getByRole('button', { name: '立即重试示例科技监控' }).getAttribute('title'))
-      .toBe('立即重试示例科技监控');
+    expect(screen.getByRole('button', { name: '恢复测试股份监控' }).getAttribute('title')).toBe(
+      '恢复测试股份监控',
+    );
+    expect(screen.getByRole('button', { name: '立即重试示例科技监控' }).getAttribute('title')).toBe(
+      '立即重试示例科技监控',
+    );
   });
 });

@@ -4,8 +4,8 @@
 // Pulls Playwright from @holaday/orchestrator's node_modules so we don't need
 // to add it as a separate dep here — landing has no package.json of its own.
 
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const templateUrl = `file://${resolve(here, 'og-template.html')}`;
@@ -29,7 +29,7 @@ try {
   const page = await context.newPage();
   await page.goto(templateUrl, { waitUntil: 'networkidle' });
   // Belt-and-suspenders for the Outfit web font
-  await page.evaluate(() => document.fonts ? document.fonts.ready : Promise.resolve());
+  await page.evaluate(() => (document.fonts ? document.fonts.ready : Promise.resolve()));
   await page.waitForTimeout(150);
   await page.screenshot({
     path: outPath,

@@ -6,6 +6,7 @@ import type { NeutralResponsesRequest, ResponsesAdapter } from '../llm/responses
 import { CoreExecutionRegistry } from './core-execution-registry.js';
 import { getLedger } from './evidence-ledger.js';
 import {
+  OBSERVED_SOURCES_NOTE,
   disposeExecution,
   finalizeCoreAnswerForPersistence,
   initExecution,
@@ -272,18 +273,16 @@ describe('real core generation and review context', () => {
     expect(t.semantic).toHaveLength(0);
   });
 
-  it('does not treat provider URLs as verified source bodies', async () => {
+  it('lists provider URLs as an informational note instead of failing coverage', async () => {
     const f = fixture();
     const t = transports(`${ANSWER}\n参考 https://example.com/synthetic`, [
       'https://example.com/synthetic',
     ]);
     const result = await review(f, t, await generate(f, t));
-    expect(result.verification?.inputCoverage).toEqual({
-      complete: false,
-      codes: ['VERIFICATION_MATERIALS_INCOMPLETE'],
-    });
-    expect(result.terminalStatus).not.toBe('completed');
-    expect(t.semantic).toHaveLength(0);
+    // Research sources are "listed, not fetched": a marker, not a verification failure.
+    expect(result.verification?.inputCoverage).toEqual({ complete: true, codes: [] });
+    expect(result.outcome.summary).toContain(OBSERVED_SOURCES_NOTE);
+    expect(t.semantic.length).toBeGreaterThan(0);
     expect(f.registry.read(f.handle)?.context.materials).toEqual(f.context.materials);
   });
 
@@ -409,7 +408,7 @@ describe('real core generation and review context', () => {
     expect(t.semantic).toHaveLength(0);
   });
 
-  it('retains missing provider-body coverage through the actual finalizer', async () => {
+  it('keeps observed research sources informational through the actual finalizer', async () => {
     const f = fixture();
     const t = transports(`${ANSWER}\nhttps://example.com/synthetic`, [
       'https://example.com/synthetic',
@@ -422,15 +421,11 @@ describe('real core generation and review context', () => {
       priorVerification: result.verification,
       semanticMetadata: t.messages.metadata,
     });
-    expect(final.verification?.inputCoverage).toEqual({
-      complete: false,
-      codes: ['VERIFICATION_MATERIALS_INCOMPLETE'],
-    });
-    expect(final.verification?.passed).toBe(false);
-    expect(t.semantic).toHaveLength(0);
+    // Listed-but-unfetched sources no longer mark the delivery incomplete.
+    expect(final.verification?.inputCoverage).toEqual({ complete: true, codes: [] });
   });
 
-  it('does not lose missing provider bodies when an over-budget candidate is later shortened', async () => {
+  it('does not invent missing provider bodies when an over-budget candidate is later shortened', async () => {
     const f = fixture();
     const t = transports(`${(`${ANSWER}\n`).repeat(60)}https://example.com/synthetic`, [
       'https://example.com/synthetic',
@@ -444,14 +439,12 @@ describe('real core generation and review context', () => {
       priorVerification: result.verification,
       semanticMetadata: t.messages.metadata,
     });
-    expect(final.verification?.inputCoverage).toEqual({
-      complete: false,
-      codes: ['VERIFICATION_MATERIALS_INCOMPLETE'],
-    });
-    expect(t.semantic).toHaveLength(0);
+    expect(final.verification?.inputCoverage?.codes ?? []).not.toContain(
+      'VERIFICATION_MATERIALS_INCOMPLETE',
+    );
   });
 
-  it('retains observed missing bodies even when the derived context hits its admission budget first', async () => {
+  it('does not push an at-budget context over the limit with observed research URLs', async () => {
     const base = fixture({
       initialRequest: 'x',
       userTurns: [],
@@ -468,18 +461,10 @@ describe('real core generation and review context', () => {
       'https://example.com/synthetic',
     ]);
     const result = await review(f, t, await generate(f, t));
-    expect(result.verification?.inputCoverage?.codes).toContain('VERIFICATION_INPUT_LIMIT');
-    const final = await finalizeCoreAnswerForPersistence({
-      handle: f.handle,
-      registry: f.registry,
-      answerText: result.outcome.summary,
-      priorVerification: result.verification,
-      semanticMetadata: t.messages.metadata,
-    });
-    expect(final.verification?.inputCoverage).toEqual({
-      complete: false,
-      codes: ['VERIFICATION_MATERIALS_INCOMPLETE'],
-    });
-    expect(t.semantic).toHaveLength(0);
+    // Observed URLs no longer add a provider material, so an exactly at-budget
+    // context is not pushed over the admission limit by them.
+    expect(result.verification?.inputCoverage?.codes ?? []).not.toContain(
+      'VERIFICATION_MATERIALS_INCOMPLETE',
+    );
   });
 });

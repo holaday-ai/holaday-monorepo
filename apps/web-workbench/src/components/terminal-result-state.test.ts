@@ -12,8 +12,7 @@ describe('terminalResultContentInsufficient', () => {
         status: 'completed',
         displayText: '**Example Domain**',
         revealedText: '**Example Domain**',
-        intent:
-          '请打开 https://example.com，读取页面标题，并只回复标题是什么。',
+        intent: '请打开 https://example.com，读取页面标题，并只回复标题是什么。',
         attachmentCount: 0,
       }),
     ).toBe(false);
@@ -64,9 +63,7 @@ describe('terminalResultContentInsufficient', () => {
 
   it('hides raw task states in cancel failure copy', () => {
     expect(taskCancelStateChangedMessage('completed')).toBe('任务已经结束，当前详情已保留。');
-    expect(taskCancelStateChangedMessage('partial_success')).toBe(
-      '任务已经结束，当前详情已保留。',
-    );
+    expect(taskCancelStateChangedMessage('partial_success')).toBe('任务已经结束，当前详情已保留。');
     expect(taskCancelStateChangedMessage('awaiting_user')).toBe(
       '任务状态刚刚变化，请刷新后再确认是否需要取消。',
     );

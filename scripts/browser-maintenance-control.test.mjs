@@ -1,5 +1,5 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { runMaintenanceCommand } from './browser-maintenance-control.mjs';
 const identity = { candidate: 'a'.repeat(40), bootId: 'b'.repeat(32) };
 test('discovery only sends read-only status to the freshly read instance', async () => {

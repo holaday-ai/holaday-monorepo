@@ -1,4 +1,4 @@
-import { HOLADAY_SKILLS, skillById, type HoladaySkill } from '@holaday/shared-types';
+import { HOLADAY_SKILLS, type HoladaySkill, skillById } from '@holaday/shared-types';
 
 export type SkillMeta = HoladaySkill;
 export type SkillCategory = HoladaySkill['category'];

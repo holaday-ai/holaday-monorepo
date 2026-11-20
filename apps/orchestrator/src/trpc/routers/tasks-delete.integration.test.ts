@@ -62,7 +62,10 @@ describe('tRPC tasks.delete', () => {
     return externalId;
   }
 
-  async function seedAuditEvidence(userInternalId: number, taskExternalId: string): Promise<string> {
+  async function seedAuditEvidence(
+    userInternalId: number,
+    taskExternalId: string,
+  ): Promise<string> {
     const { newExternalId } = await import('@holaday/shared-types');
     const { db } = await import('../../db/client.js');
     const { eq } = await import('drizzle-orm');
@@ -156,7 +159,7 @@ describe('tRPC tasks.delete', () => {
     });
   }
 
-  it('deletes the caller\'s own terminal task', async () => {
+  it("deletes the caller's own terminal task", async () => {
     const user = await seedUser();
     const taskId = await seedTask(user.internalId, 'completed');
     const { port, signAccessToken, close } = await bootTrpcServer();
@@ -238,15 +241,7 @@ describe('tRPC tasks.delete', () => {
       const rows = await db
         .select({ externalId: tasks.externalId, status: tasks.status })
         .from(tasks)
-        .where(
-          inArray(tasks.externalId, [
-            failedA,
-            failedB,
-            completed,
-            partial,
-            otherFailed,
-          ]),
-        );
+        .where(inArray(tasks.externalId, [failedA, failedB, completed, partial, otherFailed]));
       const byId = new Map(rows.map((row) => [row.externalId, row.status]));
       expect(byId.has(failedA)).toBe(false);
       expect(byId.has(failedB)).toBe(false);

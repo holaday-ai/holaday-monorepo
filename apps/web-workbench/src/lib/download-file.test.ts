@@ -25,12 +25,8 @@ describe('safeDownloadFilename', () => {
   });
 
   it('removes path separators and unsafe characters', () => {
-    expect(safeDownloadFilename('../secret/report:final?.csv')).toBe(
-      'secret-report-final-.csv',
-    );
-    expect(safeDownloadFilename('folder\\report<>.pdf')).toBe(
-      'folder-report-.pdf',
-    );
+    expect(safeDownloadFilename('../secret/report:final?.csv')).toBe('secret-report-final-.csv');
+    expect(safeDownloadFilename('folder\\report<>.pdf')).toBe('folder-report-.pdf');
   });
 
   it('falls back when no safe filename remains', () => {
@@ -43,8 +39,8 @@ describe('downloadFailureMessage', () => {
   it('keeps auth and unavailable-file failures specific', () => {
     expect(downloadFailureMessage(401)).toContain('刷新页面后重试');
     expect(downloadFailureMessage(403)).toContain('刷新页面后重试');
-    expect(downloadFailureMessage(404)).toBe('文件已失效，无法下载。');
-    expect(downloadFailureMessage(410)).toBe('文件已失效，无法下载。');
+    expect(downloadFailureMessage(404)).toBe('文件已不可用');
+    expect(downloadFailureMessage(410)).toBe('文件已不可用');
   });
 });
 
@@ -126,6 +122,39 @@ describe('fetchFileBlobAuthed', () => {
 });
 
 describe('downloadFileAuthed', () => {
+  it.each(['before', 'headers', 'body'])(
+    'does not deliver a file after actor changes at %s',
+    async (stage) => {
+      let changed = stage === 'before';
+      const click = vi.fn();
+      vi.stubGlobal('document', {
+        createElement: () => ({ click, remove() {} }),
+        body: { appendChild() {} },
+      });
+      const fetchMock = vi.fn(async () => {
+        if (stage === 'headers') changed = true;
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => {
+            if (stage === 'body') changed = true;
+            return new Blob(['original-owner-bytes']);
+          },
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const result = await downloadFileAuthed({
+        url: '/api/files/owned/download',
+        filename: 'owned.csv',
+        current: () => {
+          if (changed) throw new Error('actor changed');
+        },
+      });
+      expect(result).toMatchObject({ ok: false, message: 'actor changed' });
+      expect(click).not.toHaveBeenCalled();
+      if (stage === 'before') expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
   it('does not fetch a file already known to be unavailable', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

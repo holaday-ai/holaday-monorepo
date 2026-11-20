@@ -65,6 +65,16 @@ export const taskActionCaptures = mysqlTable(
     targetSelectorJson: json('target_selector_json'),
     /** Coordinate fallback (~1% of real targets). */
     coordinateJson: json('coordinate_json'),
+    /**
+     * Batch 06 (0062) — replay descriptor `{op, locator:{role,name,textContains?,nth?},
+     * wait?, submit?}`: the role+name locator and wait condition the self-evolution
+     * loop needs to template and deterministically replay this step.
+     */
+    replayJson: json('replay_json'),
+    /** Batch 06 (0062) — result evidence `{finalUrl, evidenceTexts[]}`; last row of a successful task only. */
+    outcomeJson: json('outcome_json'),
+    /** Batch 06 (0062) — 'cloud' | 'extension': which executor produced the row. */
+    executorSource: varchar('executor_source', { length: 16 }),
     /** Frame-routing path for in-iframe captures — reserved for B3. */
     framePath: varchar('frame_path', { length: 255 }),
     /** navigate landed URL. */

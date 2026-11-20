@@ -17,7 +17,24 @@ export const VERIFICATION_INPUT_LIMITS = Object.freeze({
   materialsBytes: 64 * 1024,
   answerBytes: 96 * 1024,
   requestBytes: 256 * 1024,
+  /** Base64 image materials, budgeted separately from text (≤ 5 images in total). */
+  imageBytes: 8 * 1024 * 1024,
+  imageCount: 5,
 });
+
+export function checkVerificationImages(images: readonly string[]): VerificationBudgetResult {
+  if (images.length > VERIFICATION_INPUT_LIMITS.imageCount) {
+    return { ok: false, code: 'VERIFICATION_INPUT_LIMIT' };
+  }
+  let total = 0;
+  for (const data of images) {
+    total += Buffer.byteLength(data, 'utf8');
+    if (total > VERIFICATION_INPUT_LIMITS.imageBytes) {
+      return { ok: false, code: 'VERIFICATION_INPUT_LIMIT' };
+    }
+  }
+  return { ok: true };
+}
 
 export function checkVerificationAdmission(
   contextJson: string,

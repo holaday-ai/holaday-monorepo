@@ -58,7 +58,7 @@ try {
   }
 
   process.stdout.write(
-    JSON.stringify({ publicNavigation: 'ok', privateNetwork: 'blocked' }) + '\n',
+    `${JSON.stringify({ publicNavigation: 'ok', privateNetwork: 'blocked' })}\n`,
   );
 } finally {
   process.stderr.write('[browser-egress-smoke] closing browser\n');

@@ -1,7 +1,7 @@
+import type { UiTask } from '@/types/task';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UiTask } from '@/types/task';
 
 const jsxProbe = vi.hoisted(() => ({
   taskButtonProps: [] as Array<Record<string, unknown>>,

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  type PageContext,
   composeContextTail,
   getActivePageContext,
-  sanitizePageContextUrl,
   sanitizePageContextSnippet,
-  type PageContext,
+  sanitizePageContextUrl,
 } from './page-context.js';
 
 afterEach(() => {
@@ -15,6 +15,21 @@ afterEach(() => {
 });
 
 describe('sanitizePageContextSnippet', () => {
+  it('can preview tab metadata without reading the original page DOM', async () => {
+    const executeScript = vi.fn();
+    vi.stubGlobal('chrome', {
+      tabs: {
+        query: vi.fn(async () => [{ id: 42, url: 'https://work.example/path', title: 'Work' }]),
+      },
+      scripting: { executeScript },
+    });
+    expect(await getActivePageContext({ metadataOnly: true })).toMatchObject({
+      tabId: 42,
+      selectedText: '',
+      metaDescription: '',
+    });
+    expect(executeScript).not.toHaveBeenCalled();
+  });
   it('bounds page metadata before it reaches the side panel', () => {
     const snippet = sanitizePageContextSnippet({
       title: 't'.repeat(800),
@@ -63,9 +78,9 @@ describe('sanitizePageContextUrl', () => {
   });
 
   it('redacts sensitive key-value pairs from malformed page URLs', () => {
-    expect(
-      sanitizePageContextUrl('not a url token=secret state=keep sessionId=sid'),
-    ).toBe('not a url token=redacted state=keep sessionId=redacted');
+    expect(sanitizePageContextUrl('not a url token=secret state=keep sessionId=sid')).toBe(
+      'not a url token=redacted state=keep sessionId=redacted',
+    );
   });
 });
 
@@ -299,18 +314,48 @@ describe('getActivePageContext', () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce([
-        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+        {
+          id: 9,
+          title: 'Extensions',
+          url: 'chrome://extensions/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
-        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+        {
+          id: 9,
+          title: 'Extensions',
+          url: 'chrome://extensions/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
-        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
+        {
+          id: 9,
+          title: 'Extensions',
+          url: 'chrome://extensions/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
-        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
-        { id: 10, title: 'Older', url: 'https://older.example/', lastAccessed: 1000 } as chrome.tabs.Tab,
-        { id: 11, title: 'Newer', url: 'https://newer.example/', lastAccessed: 4000 } as chrome.tabs.Tab,
+        {
+          id: 9,
+          title: 'Extensions',
+          url: 'chrome://extensions/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
+        {
+          id: 10,
+          title: 'Older',
+          url: 'https://older.example/',
+          lastAccessed: 1000,
+        } as chrome.tabs.Tab,
+        {
+          id: 11,
+          title: 'Newer',
+          url: 'https://newer.example/',
+          lastAccessed: 4000,
+        } as chrome.tabs.Tab,
       ]);
     globalThis.chrome = {
       tabs: { query },
@@ -445,7 +490,12 @@ describe('getActivePageContext', () => {
         } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
-        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app', lastAccessed: 4000 } as chrome.tabs.Tab,
+        {
+          id: 10,
+          title: 'Holaday',
+          url: 'https://holaday.ai/app',
+          lastAccessed: 4000,
+        } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([]);
     globalThis.chrome = {
@@ -482,8 +532,18 @@ describe('getActivePageContext', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { id: 9, title: 'Extensions', url: 'chrome://extensions/', lastAccessed: 5000 } as chrome.tabs.Tab,
-        { id: 10, title: 'Holaday', url: 'https://holaday.ai/app', lastAccessed: 1000 } as chrome.tabs.Tab,
+        {
+          id: 9,
+          title: 'Extensions',
+          url: 'chrome://extensions/',
+          lastAccessed: 5000,
+        } as chrome.tabs.Tab,
+        {
+          id: 10,
+          title: 'Holaday',
+          url: 'https://holaday.ai/app',
+          lastAccessed: 1000,
+        } as chrome.tabs.Tab,
       ]);
     globalThis.chrome = {
       tabs: { query },

@@ -56,10 +56,11 @@ export function fencedFileIds(answerText: string | null | undefined): Set<string
  * Whether the answer prose OFFERS the user a generated downloadable
  * file. Conservative: keyed on explicit generation / download phrasing
  * so a source link ending in `.pdf` or a passing filename mention does
- * not trip it.
+ * not trip it. FIX-37 (Deploy-37 b-d04): 「下载链接：https://…」 points at a page's own file
+ * (python.org's .pkg), not one we generated.
  */
 const FILE_CLAIM_RE =
-  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载文件卡片|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：]|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
+  /文件已生成|已生成(?:好|了)?(?:一个|这个)?(?:可下载)?文件|点击下载|从上方卡片下载|可从.{0,6}卡片下载|可下载文件卡片|可下载的?\s*(?:Markdown|markdown|PDF|pdf|文档|表格|文件|CSV|csv)|PDF\s*已(?:生成|创建)|下载链接\s*[:：](?!\s*[[(<（「]?\s*https?:\/\/)|供你下载|文件供下载|为你生成(?:了|好)?(?:一个|这个)?文件|生成(?:了|好)(?:一个|这个)?(?:可下载)?(?:的)?(?:Markdown|PDF|文档|表格|文件)/;
 
 /**
  * A document FILENAME immediately followed by a generation / download
@@ -89,9 +90,7 @@ const FILE_CLAIM_FILENAME_RE =
 const FILE_CLAIM_VERB_FIRST_RE =
   /(?:已(?:生成|创建|完成|备好)了?|(?:生成|创建|备好|准备好)了|为你(?:生成|创建|准备)(?:好|了)?|下载文件)\s*[:：]?\s*[`'"「『（(\[]?\s*[\w\-]+\.(?:pdf|md|markdown|csv|json|xlsx|docx|txt|pptx)\b/i;
 
-export function answerClaimsDownloadableFile(
-  answerText: string | null | undefined,
-): boolean {
+export function answerClaimsDownloadableFile(answerText: string | null | undefined): boolean {
   if (!answerText) return false;
   return (
     FILE_CLAIM_RE.test(answerText) ||
@@ -133,9 +132,7 @@ export function fileFamily(file: OutputFileDescriptor): string {
  * a `name.ext` filename in the prose). Empty when only a generic
  * "可下载文件" is claimed — any document then satisfies it.
  */
-export function claimedDownloadFamilies(
-  answerText: string | null | undefined,
-): Set<string> {
+export function claimedDownloadFamilies(answerText: string | null | undefined): Set<string> {
   const fams = new Set<string>();
   if (!answerText) return fams;
   // The stem before the extension may be CJK (e.g. "会议纪要模板.md"); a

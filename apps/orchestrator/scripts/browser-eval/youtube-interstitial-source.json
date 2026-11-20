@@ -1,0 +1,64 @@
+{
+  "source": "https://www.youtube.com/watch",
+  "capture": "2026-10-13",
+  "playerHtml": "captured real DOM, attributes allowlisted; no simplified replacement",
+  "surroundings": "layout CSS and public metadata shell reconstructed for deterministic offline rendering",
+  "ancestors": [
+    {
+      "tag": "SPAN",
+      "id": "",
+      "role": "text",
+      "modal": null,
+      "classes": "ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap"
+    },
+    {
+      "tag": "DIV",
+      "id": "",
+      "role": null,
+      "modal": null,
+      "classes": "interstitialViewModelTextTitle interstitialViewModelFlexItem"
+    },
+    {
+      "tag": "DIV",
+      "id": "",
+      "role": null,
+      "modal": null,
+      "classes": "interstitialViewModelModelContainer"
+    },
+    {
+      "tag": "YT-INTERSTITIAL-VIEW-MODEL",
+      "id": "",
+      "role": null,
+      "modal": null,
+      "classes": "interstitialViewModelHost interstitialViewModelErrorScreenRedesignEnabled interstitialViewModelLayoutFullWidth"
+    },
+    {
+      "tag": "DIV",
+      "id": "",
+      "role": null,
+      "modal": null,
+      "classes": "playerInterstitialRendererScrim"
+    },
+    {
+      "tag": "YT-PLAYER-INTERSTITIAL-RENDERER",
+      "id": "",
+      "role": "dialog",
+      "modal": null,
+      "classes": "playerInterstitialRendererHost"
+    },
+    {
+      "tag": "DIV",
+      "id": "container",
+      "role": null,
+      "modal": null,
+      "classes": "style-scope yt-playability-error-supported-renderers"
+    },
+    {
+      "tag": "YT-PLAYABILITY-ERROR-SUPPORTED-RENDERERS",
+      "id": "error-screen",
+      "role": null,
+      "modal": null,
+      "classes": "style-scope ytd-watch-flexy"
+    }
+  ]
+}

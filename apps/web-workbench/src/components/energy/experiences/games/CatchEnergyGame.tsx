@@ -23,7 +23,9 @@ export function CatchEnergyGame({ onComplete }: CatchEnergyGameProps): JSX.Eleme
           <p className="energy-kicker">接住能量</p>
           <h3>跟着光点换换注意力</h3>
         </div>
-        <strong aria-live="polite">{hits} / {TOTAL_ROUNDS}</strong>
+        <strong aria-live="polite">
+          {hits} / {TOTAL_ROUNDS}
+        </strong>
       </div>
       <p>点击光点，或聚焦后按 Enter / Space。没有倒计时，也没有排名。</p>
       <div className="energy-game-board" data-lane={lane}>

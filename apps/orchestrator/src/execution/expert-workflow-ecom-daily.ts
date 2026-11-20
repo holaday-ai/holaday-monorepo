@@ -96,8 +96,7 @@ const OPTIONAL_INPUTS: readonly WorkflowInput[] = [
     label: '客单价',
     type: 'number',
     unit: '元',
-    extractPattern:
-      /客单价[\s:：]*(?:是|为|约|大约|等于)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern: /客单价[\s:：]*(?:是|为|约|大约|等于)?\s*[¥￥]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'ad_spend',
@@ -118,16 +117,14 @@ const OPTIONAL_INPUTS: readonly WorkflowInput[] = [
     label: '退款率',
     type: 'number',
     unit: '%',
-    extractPattern:
-      /(?:退款率|售后率|售后退款率)\s*[：:]?\s*([\d.,]+)\s*[%％]?/i,
+    extractPattern: /(?:退款率|售后率|售后退款率)\s*[：:]?\s*([\d.,]+)\s*[%％]?/i,
   },
   {
     name: 'new_users',
     label: '新客数',
     type: 'number',
     unit: '人',
-    extractPattern:
-      /(?:新客数|新增客户|新增用户|首单用户)\s*[：:]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
+    extractPattern: /(?:新客数|新增客户|新增用户|首单用户)\s*[：:]?\s*([\d.,]+(?:\s*[万亿千百])?)/i,
   },
   {
     name: 'top_skus',
@@ -234,14 +231,14 @@ const DATA_VALIDATORS: readonly DataValidator[] = [
       const colonMatch = roiRaw.match(/([\d.]+)\s*[:：]\s*([\d.]+)/);
       let declaredRoi: number;
       if (colonMatch) {
-        const left = parseFloat(colonMatch[1]!);
-        const right = parseFloat(colonMatch[2]!);
+        const left = Number.parseFloat(colonMatch[1]!);
+        const right = Number.parseFloat(colonMatch[2]!);
         if (!Number.isFinite(left) || !Number.isFinite(right) || left === 0) {
           return { passed: true };
         }
         declaredRoi = right / left;
       } else {
-        const single = parseFloat(roiRaw);
+        const single = Number.parseFloat(roiRaw);
         if (!Number.isFinite(single)) return { passed: true };
         declaredRoi = single;
       }
@@ -327,8 +324,7 @@ const FOLLOW_UP_ACTIONS: readonly FollowUpAction[] = [
   },
   {
     label: '对比上周同期',
-    prompt:
-      '帮我对比这日的数据和上周同一日的数据，找出关键改善项和恶化项，按重要性排序。',
+    prompt: '帮我对比这日的数据和上周同一日的数据，找出关键改善项和恶化项，按重要性排序。',
   },
   {
     label: '深挖 ROI 不达预期原因',
@@ -365,13 +361,7 @@ export const ECOM_DAILY_WORKFLOW: ExpertWorkflowContract = {
     maxTokens: 4096,
     targetChars: { min: 1800, max: 2800 },
   },
-  roleIds: [
-    'ecom-operator',
-    'shop-manager',
-    'taobao-operator',
-    'douyin-shop',
-    'data-analyst',
-  ],
+  roleIds: ['ecom-operator', 'shop-manager', 'taobao-operator', 'douyin-shop', 'data-analyst'],
   requiredInputs: REQUIRED_INPUTS,
   optionalInputs: OPTIONAL_INPUTS,
   dataValidators: DATA_VALIDATORS,
@@ -384,18 +374,12 @@ export const ECOM_DAILY_WORKFLOW: ExpertWorkflowContract = {
 // Validator helpers (mirror the douyin file's pattern)
 // ---------------------------------------------------------------------------
 
-function numFrom(
-  extracted: Readonly<Record<string, unknown>>,
-  key: string,
-): number | null {
+function numFrom(extracted: Readonly<Record<string, unknown>>, key: string): number | null {
   const v = extracted[key];
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-function textFrom(
-  extracted: Readonly<Record<string, unknown>>,
-  key: string,
-): string | null {
+function textFrom(extracted: Readonly<Record<string, unknown>>, key: string): string | null {
   const v = extracted[key];
   return typeof v === 'string' && v.length > 0 ? v : null;
 }

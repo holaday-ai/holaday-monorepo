@@ -21,6 +21,7 @@ function fixture(fetchImpl: typeof fetch) {
     region: 'cn',
     purpose: 'vision',
     fetchImpl,
+    retryBaseDelayMs: 0,
   });
 }
 function request(): Anthropic.Beta.MessageCreateParamsNonStreaming {
@@ -103,6 +104,15 @@ describe('Qwen browser wire compatibility', () => {
       },
     ]);
     expect(input).toEqual(original);
+  });
+  it('retries one 429 within a browser model turn instead of failing the task', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(success());
+    const result = await createBrowserMessage(fixture(fetchImpl), request(), { maxRetries: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(result)).toContain('完成');
   });
   it('sends ordinary computer tools and base64 images through the real adapter and transport', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => success());

@@ -46,7 +46,10 @@ type Handle = {
   boundingBox: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
   getAttribute: (name: string) => Promise<string | null>;
 };
-type Page = { goto: (u: string, o?: unknown) => Promise<unknown>; $: (s: string) => Promise<Handle | null> };
+type Page = {
+  goto: (u: string, o?: unknown) => Promise<unknown>;
+  $: (s: string) => Promise<Handle | null>;
+};
 type Desc = {
   visibleText: string | null;
   ariaLabel: string | null;
@@ -101,7 +104,9 @@ try {
   // 读真 DOM 完整描述符（所有 accessible-name 信号）。
   const descAt = async (sel: string): Promise<Desc> => {
     const c = await center(sel);
-    return c ? ((await ex.captureTargetDescriptor(page as never, c.x, c.y)) as unknown as Desc) : null;
+    return c
+      ? ((await ex.captureTargetDescriptor(page as never, c.x, c.y)) as unknown as Desc)
+      : null;
   };
   // 把所有 click 信号喂修复后的多信号分类器（镜像 agent-loop veto）。
   const classifyClick = (d: Desc) =>
@@ -152,7 +157,8 @@ try {
   // ── 向量 3：链接点击导航（href 敏感 → 落地 URL 复检拦）─────────────────────
   const hrefH = await page.$('#sensitive-href');
   const href3 = hrefH ? await hrefH.getAttribute('href') : null; // 真 DOM 链接目标
-  const v3nav = href3 != null ? classifyExplorerAction({ kind: 'navigate', url: href3 }) : { allowed: true };
+  const v3nav =
+    href3 != null ? classifyExplorerAction({ kind: 'navigate', url: href3 }) : { allowed: true };
   const v3click = classifyClick(await descAt('#sensitive-href'));
   rec(
     '3 链接导航拦（post-nav URL 复检）',
@@ -165,7 +171,10 @@ try {
   const v4submit = classifyClick(dSubmit);
   const formH = await page.$('form');
   const formAction = formH ? await formH.getAttribute('action') : null; // 真 DOM 表单导航目标
-  const v4nav = formAction != null ? classifyExplorerAction({ kind: 'navigate', url: formAction }) : { allowed: true };
+  const v4nav =
+    formAction != null
+      ? classifyExplorerAction({ kind: 'navigate', url: formAction })
+      : { allowed: true };
   const pwd = (await ex.captureTargetDescriptor(page as never)) as unknown as Desc; // activeElement = autofocus #pwd
   const v4type = classifyExplorerAction({
     kind: 'type',
@@ -190,7 +199,11 @@ try {
       innerClick += 1;
     }
   }
-  rec('5 安全链接放行+执行', v5.allowed && innerClick === 1, `真DOM visibleText="${dSafe?.visibleText}" allowed=${v5.allowed}; innerClick=${innerClick}`);
+  rec(
+    '5 安全链接放行+执行',
+    v5.allowed && innerClick === 1,
+    `真DOM visibleText="${dSafe?.visibleText}" allowed=${v5.allowed}; innerClick=${innerClick}`,
+  );
 
   // ── 向量 7：A3 LOGIN-MODE 加厚（EXTRA_RE）——同一真 DOM 控件，免登录放行 / 登录态拦 ──
   // 证明条件加厚：base RE 不动（免登录 allowed=不拦），login mode 并上 EXTRA_RE（vetoed）。这些
@@ -228,8 +241,16 @@ try {
   const dCont = await descAt('#neutral-continue'); // ③ 中性提交钮 (层B)
   const dSearch = await descAt('#safe-search'); // ④ benign
   const dView = await descAt('#safe-view-detail'); // ④ benign + 白名单
-  rec('8① 交易词拦「立即预订」', !classifyLogin(dBook).allowed, `真DOM text="${dBook?.visibleText}" → sensitive=${!classifyLogin(dBook).allowed}`);
-  rec('8② 出行人拦「添加出行人」', !classifyLogin(dTrav).allowed, `真DOM text="${dTrav?.visibleText}" → sensitive=${!classifyLogin(dTrav).allowed}`);
+  rec(
+    '8① 交易词拦「立即预订」',
+    !classifyLogin(dBook).allowed,
+    `真DOM text="${dBook?.visibleText}" → sensitive=${!classifyLogin(dBook).allowed}`,
+  );
+  rec(
+    '8② 出行人拦「添加出行人」',
+    !classifyLogin(dTrav).allowed,
+    `真DOM text="${dTrav?.visibleText}" → sensitive=${!classifyLogin(dTrav).allowed}`,
+  );
   rec(
     '8③ 层B 提交型钮+中性「继续」拦',
     dCont?.tagName === 'button' && !classifyLogin(dCont).allowed,
@@ -273,7 +294,11 @@ try {
     triggerType: 'manual_batch',
     runnerType: 'explorer.browse',
     status: 'halted_sensitive',
-    metadataJson: { note: 'veto acceptance fixture', costUsd: 0, assertions: results.map((r) => ({ n: r.n, ok: r.ok })) },
+    metadataJson: {
+      note: 'veto acceptance fixture',
+      costUsd: 0,
+      assertions: results.map((r) => ({ n: r.n, ok: r.ok })),
+    },
   });
   rec('6 exploration_runs 写入', true, 'veto-fixture.local 一条 halted_sensitive（端到端验通）');
 

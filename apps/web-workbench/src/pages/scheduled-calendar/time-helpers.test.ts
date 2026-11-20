@@ -34,25 +34,17 @@ describe('nextQuickCreateDate', () => {
 describe('formatRollForward', () => {
   it('uses today / tomorrow labels near the current day', () => {
     const now = new Date('2026-05-22T14:00:00');
-    expect(formatRollForward(new Date('2026-05-22T15:30:00'), now)).toContain(
-      '今天',
-    );
-    expect(formatRollForward(new Date('2026-05-23T09:00:00'), now)).toContain(
-      '明天',
-    );
+    expect(formatRollForward(new Date('2026-05-22T15:30:00'), now)).toContain('今天');
+    expect(formatRollForward(new Date('2026-05-23T09:00:00'), now)).toContain('明天');
   });
 });
 
 describe('datetime-local helpers', () => {
   it('formats a local datetime without seconds or timezone', () => {
-    expect(formatDateTimeLocalInput(new Date(2026, 4, 22, 9, 5, 30))).toBe(
-      '2026-05-22T09:05',
-    );
+    expect(formatDateTimeLocalInput(new Date(2026, 4, 22, 9, 5, 30))).toBe('2026-05-22T09:05');
   });
 
   it('defaults full-dialog schedules to tomorrow at 09:00', () => {
-    expect(defaultScheduledAtLocalInput(new Date(2026, 4, 22, 14, 10))).toBe(
-      '2026-05-23T09:00',
-    );
+    expect(defaultScheduledAtLocalInput(new Date(2026, 4, 22, 14, 10))).toBe('2026-05-23T09:00');
   });
 });

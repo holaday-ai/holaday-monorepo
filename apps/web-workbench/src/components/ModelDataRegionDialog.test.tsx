@@ -61,13 +61,7 @@ describe('ModelDataRegionDialog', () => {
 
   it('explains the disabled state while assignment is running', () => {
     render(
-      <ModelDataRegionDialog
-        open
-        assigning
-        error={null}
-        onClose={vi.fn()}
-        onConfirm={vi.fn()}
-      />,
+      <ModelDataRegionDialog open assigning error={null} onClose={vi.fn()} onConfirm={vi.fn()} />,
     );
 
     expect(screen.getByRole('button', { name: '正在保存区域…' }).hasAttribute('disabled')).toBe(

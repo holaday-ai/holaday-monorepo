@@ -1,3 +1,8 @@
+import type {
+  ExpertWorkflowContract,
+  ParseInputsResult,
+  ValidationResult,
+} from './expert-workflow-contract.js';
 /**
  * Phase 2 Day 2 — Expert Workflow intake gate.
  *
@@ -11,15 +16,7 @@
  * Pure function. No I/O, no LLM. Runs in <1ms — cheap to invoke
  * on every reply turn so incremental data fill-in works.
  */
-import {
-  buildClarificationQuestion,
-  parseInputs,
-} from './expert-workflow-parser.js';
-import type {
-  ExpertWorkflowContract,
-  ParseInputsResult,
-  ValidationResult,
-} from './expert-workflow-contract.js';
+import { buildClarificationQuestion, parseInputs } from './expert-workflow-parser.js';
 
 export interface IntakeMissing {
   kind: 'missing';
@@ -78,27 +75,22 @@ export interface NamedValidatorResult extends ValidationResult {
  * vs. the user filling in the missing field, then being told
  * the rest is wrong.
  */
-export function runIntake(
-  workflow: ExpertWorkflowContract,
-  text: string,
-): IntakeResult {
+export function runIntake(workflow: ExpertWorkflowContract, text: string): IntakeResult {
   const parseResult = parseInputs(text, workflow);
 
   // Always run validators — vacuous-pass on missing inputs is a
   // contract on the validator side, so we get useful early signal
   // on validator failures even when the "missing" path will park.
-  const validatorResults: NamedValidatorResult[] = workflow.dataValidators.map(
-    (v) => {
-      const result = v.check(parseResult.extracted);
-      return {
-        validatorId: v.id,
-        description: v.description,
-        passed: result.passed,
-        ...(result.message ? { message: result.message } : {}),
-        ...(result.suggestedFix ? { suggestedFix: result.suggestedFix } : {}),
-      };
-    },
-  );
+  const validatorResults: NamedValidatorResult[] = workflow.dataValidators.map((v) => {
+    const result = v.check(parseResult.extracted);
+    return {
+      validatorId: v.id,
+      description: v.description,
+      passed: result.passed,
+      ...(result.message ? { message: result.message } : {}),
+      ...(result.suggestedFix ? { suggestedFix: result.suggestedFix } : {}),
+    };
+  });
   const failed = validatorResults.filter((r) => !r.passed);
 
   // 1. Required inputs missing → park. If validators ALSO caught
@@ -107,9 +99,7 @@ export function runIntake(
   if (parseResult.missingRequired.length > 0 || parseResult.malformed.length > 0) {
     const baseQuestion = buildClarificationQuestion(workflow, parseResult);
     const question =
-      failed.length > 0
-        ? combineQuestions(workflow, failed, baseQuestion)
-        : baseQuestion;
+      failed.length > 0 ? combineQuestions(workflow, failed, baseQuestion) : baseQuestion;
     return {
       kind: 'missing',
       question,

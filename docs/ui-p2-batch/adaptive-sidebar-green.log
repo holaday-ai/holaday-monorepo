@@ -1,0 +1,14 @@
+
+> @holaday/web-workbench@0.0.0 test /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+> vitest run src/components/ui/sidebar-accessibility.test.tsx --maxWorkers=1 --minWorkers=1
+
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-p2-batch/holaday-monorepo/apps/web-workbench
+
+ ✓ src/components/ui/sidebar-accessibility.test.tsx (3 tests) 15ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  22:29:31
+   Duration  805ms (transform 101ms, setup 0ms, collect 328ms, tests 15ms, environment 0ms, prepare 49ms)
+

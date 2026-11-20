@@ -1,0 +1,46 @@
+{
+  "brand": "rgb(255, 0, 97)",
+  "elements": [
+    {
+      "animation": "none",
+      "selector": "hd-sidebar-spacer duration-[620ms] relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]",
+      "transition": "width 0.62s cubic-bezier(0.4, 0, 0.2, 1)"
+    },
+    {
+      "animation": "none",
+      "selector": "duration-[620ms] fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-[cubic-bezier(.4,0,.2,1)] motion-reduce:transition-none md:flex left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)] holaday-sidebar",
+      "transition": "left 0.62s cubic-bezier(0.4, 0, 0.2, 1), right 0.62s cubic-bezier(0.4, 0, 0.2, 1), width 0.62s cubic-bezier(0.4, 0, 0.2, 1)"
+    },
+    {
+      "animation": "none",
+      "selector": "block h-3.5 w-auto object-contain dark:hidden hd-sidebar-wordmark",
+      "transition": "opacity 0.38s 0.12s, transform 0.46s cubic-bezier(0.4, 0, 0.2, 1) 0.09s, visibility"
+    },
+    {
+      "animation": "none",
+      "selector": "hidden h-3.5 w-auto object-contain dark:block hd-sidebar-wordmark",
+      "transition": "opacity 0.38s 0.12s, transform 0.46s cubic-bezier(0.4, 0, 0.2, 1) 0.09s, visibility"
+    },
+    {
+      "animation": "none",
+      "selector": "hd-history-fold",
+      "transition": "grid-template-rows 0.62s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.38s"
+    },
+    {
+      "animation": "none",
+      "selector": "holaday-status-dot inline-block shrink-0 rounded-full h-2 w-2 bg-[#FFC910] ring-2 ring-[#FFC910]/35",
+      "transition": "all"
+    },
+    {
+      "animation": "2.8s ease-in-out infinite hd-task-breathe",
+      "selector": "holaday-status-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full animate-pulse-dot bg-[#42C0EF]",
+      "transition": "all"
+    },
+    {
+      "animation": "none",
+      "selector": "holaday-status-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35",
+      "transition": "all"
+    }
+  ],
+  "route": "/files"
+}

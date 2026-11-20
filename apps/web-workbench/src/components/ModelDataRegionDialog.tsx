@@ -1,8 +1,5 @@
 import { Button } from '@/components/ui/button';
-import {
-  MODEL_DATA_REGION_COPY,
-  type ModelDataRegion,
-} from '@/lib/model-data-region-state';
+import { MODEL_DATA_REGION_COPY, type ModelDataRegion } from '@/lib/model-data-region-state';
 import { cn } from '@/lib/utils';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as React from 'react';

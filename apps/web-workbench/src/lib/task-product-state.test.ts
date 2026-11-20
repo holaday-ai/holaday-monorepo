@@ -14,9 +14,7 @@ describe('deriveTaskProductState', () => {
     expect(deriveTaskProductState({ status: 'paused' })).toEqual({
       lifecycle: 'paused',
     });
-    expect(
-      deriveTaskProductState({ status: 'paused', terminal: true }),
-    ).toEqual({
+    expect(deriveTaskProductState({ status: 'paused', terminal: true })).toEqual({
       lifecycle: 'paused',
     });
   });
@@ -74,9 +72,7 @@ describe('deriveTaskProductState', () => {
       lifecycle: 'running',
       phase: 'planning',
     });
-    expect(
-      deriveTaskProductState({ status: 'executing', subStatus: 'verifying' }),
-    ).toEqual({
+    expect(deriveTaskProductState({ status: 'executing', subStatus: 'verifying' })).toEqual({
       lifecycle: 'running',
       phase: 'verifying',
     });

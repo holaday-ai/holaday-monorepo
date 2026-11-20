@@ -1,5 +1,5 @@
 import type { AwaitingKind } from '@/lib/awaiting-user-copy';
-import { verificationCheckLabel, type VerificationCheck } from '@/lib/verification-banner-copy';
+import { type VerificationCheck, verificationCheckLabel } from '@/lib/verification-banner-copy';
 import type { UiTask } from '@/types/task';
 import { isResearchOrRetrievalIntent } from '@holaday/shared-types';
 
@@ -84,8 +84,7 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
       tone: 'warning',
       title: '结果需复核',
       verdict: '缺少可核验来源',
-      boundary:
-        '结果包含研究或检索结论，但没有可点击来源；关键事实未验证。请补充来源后再采用。',
+      boundary: '结果包含研究或检索结论，但没有可点击来源；关键事实未验证。请补充来源后再采用。',
       rows: [],
       ledger: [],
       checks: [],
@@ -126,24 +125,25 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
     title: awaitingUser
       ? '等待你处理'
       : compactMissingEvidence
-      ? input.status === 'cancelled' || input.status === 'failed'
-        ? '任务状态'
-        : '复核提示'
-      : '结果复核',
+        ? input.status === 'cancelled' || input.status === 'failed'
+          ? '任务状态'
+          : '复核提示'
+        : '结果复核',
     verdict,
     boundary: awaitingUser
       ? '任务还没有进入结果复核；先完成下方操作或补充信息，HOLA DAY 会沿用当前进度继续。'
       : compactMissingEvidence
-      ? '本次没有拿到可复核的链接、截图或产物；HOLA DAY 只保留已生成内容和步骤线索，不会把空指标包装成证据。'
-      : 'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
-    rows: awaitingUser || compactMissingEvidence
-      ? []
-      : buildEvidenceRows({
-          sourceCount,
-          hasFinalUrl,
-          hasScreenshot,
-          attachmentCount,
-        }),
+        ? '本次没有拿到可复核的链接、截图或产物；HOLA DAY 只保留已生成内容和步骤线索，不会把空指标包装成证据。'
+        : 'HOLA DAY 只展示已经拿到的线索；没有截图、链接或终态页的部分，不会被当作已验证事实。',
+    rows:
+      awaitingUser || compactMissingEvidence
+        ? []
+        : buildEvidenceRows({
+            sourceCount,
+            hasFinalUrl,
+            hasScreenshot,
+            attachmentCount,
+          }),
     ledger: awaitingUser
       ? [
           {
@@ -160,72 +160,70 @@ export function buildTrustSummary(input: TrustSummaryInput): TrustSummaryModel {
           },
         ]
       : compactMissingEvidence
-      ? [
-          {
-            stage: 'observed',
-            label: '页面状态',
-            value: '未形成终态证据',
-            detail: '任务结束前没有保存截图或终态页，无法从本卡复核页面事实。',
-          },
-          ...(input.verificationPassed === false || failedChecks.length > 0
-            ? [
-                {
-                  stage: 'inferred' as const,
-                  label: '自动审核',
-                  value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
-                  detail: '这是系统检查信号，不等同于人工或事实级验证通过。',
-                },
-              ]
-            : []),
-          {
-            stage: 'boundary',
-            label: '使用边界',
-            value: '只能参考过程',
-            detail:
-              '请只把已完成步骤当作线索；涉及事实、价格、排序或链接的结论需要重新执行或补充来源。',
-          },
-        ]
-      : [
-          {
-            stage: 'observed',
-            label: '页面状态',
-            value: hasScreenshot ? '已观察' : '未观察',
-            detail: hasScreenshot
-              ? '保存了终态截图，可复核任务结束时页面长什么样。'
-              : '没有终态截图，无法从本卡观察任务结束时页面状态。',
-          },
-          {
-            stage: 'extracted',
-            label: '来源链接',
-            value: `${sourceCount} 个`,
-            detail:
-              sourceCount > 0
-                ? '从结果文本和最终页面 URL 中提取到链接，但未逐条证明每个事实都来自这些链接。'
-                : '没有提取到可点击来源，事实型任务需要补来源。',
-          },
-          {
-            stage: 'extracted',
-            label: '最终 URL',
-            value: hasFinalUrl ? '已记录' : '未记录',
-            detail: hasFinalUrl
-              ? '记录了任务结束时所在地址，可作为浏览路径线索。'
-              : '没有记录终态地址，不能据此确认到达了目标页面。',
-          },
-          {
-            stage: 'inferred',
-            label: '自动审核',
-            value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
-            detail:
-              '这是系统检查信号，不等同于人工或事实级验证通过。',
-          },
-          {
-            stage: 'boundary',
-            label: '未验证边界',
-            value: '结论推断',
-            detail:
-              '结果中的判断、建议和归因仍需结合来源、截图和业务上下文复核。',
-          },
-        ],
+        ? [
+            {
+              stage: 'observed',
+              label: '页面状态',
+              value: '未形成终态证据',
+              detail: '任务结束前没有保存截图或终态页，无法从本卡复核页面事实。',
+            },
+            ...(input.verificationPassed === false || failedChecks.length > 0
+              ? [
+                  {
+                    stage: 'inferred' as const,
+                    label: '自动审核',
+                    value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
+                    detail: '这是系统检查信号，不等同于人工或事实级验证通过。',
+                  },
+                ]
+              : []),
+            {
+              stage: 'boundary',
+              label: '使用边界',
+              value: '只能参考过程',
+              detail:
+                '请只把已完成步骤当作线索；涉及事实、价格、排序或链接的结论需要重新执行或补充来源。',
+            },
+          ]
+        : [
+            {
+              stage: 'observed',
+              label: '页面状态',
+              value: hasScreenshot ? '已观察' : '未观察',
+              detail: hasScreenshot
+                ? '保存了终态截图，可复核任务结束时页面长什么样。'
+                : '没有终态截图，无法从本卡观察任务结束时页面状态。',
+            },
+            {
+              stage: 'extracted',
+              label: '来源链接',
+              value: `${sourceCount} 个`,
+              detail:
+                sourceCount > 0
+                  ? '从结果文本和最终页面 URL 中提取到链接，但未逐条证明每个事实都来自这些链接。'
+                  : '没有提取到可点击来源，事实型任务需要补来源。',
+            },
+            {
+              stage: 'extracted',
+              label: '最终 URL',
+              value: hasFinalUrl ? '已记录' : '未记录',
+              detail: hasFinalUrl
+                ? '记录了任务结束时所在地址，可作为浏览路径线索。'
+                : '没有记录终态地址，不能据此确认到达了目标页面。',
+            },
+            {
+              stage: 'inferred',
+              label: '自动审核',
+              value: verificationLedgerValue(input.verificationPassed, failedChecks.length),
+              detail: '这是系统检查信号，不等同于人工或事实级验证通过。',
+            },
+            {
+              stage: 'boundary',
+              label: '未验证边界',
+              value: '结论推断',
+              detail: '结果中的判断、建议和归因仍需结合来源、截图和业务上下文复核。',
+            },
+          ],
     checks,
     hiddenCheckCount,
   };
@@ -251,7 +249,7 @@ export function shouldShowTrustSummary(input: TrustSummaryInput): boolean {
   if (input.verificationPassed === false) return true;
   if (failedCheckCount > 0) return true;
   if (input.failureLevel) return true;
-  return hasEvidence;
+  return input.verificationPassed === true && hasEvidence;
 }
 
 export function hasTrustEvidence(input: TrustEvidenceInput): boolean {
@@ -263,14 +261,8 @@ export function hasTrustEvidence(input: TrustEvidenceInput): boolean {
   );
 }
 
-function countUsableAttachments(
-  attachments: UiTask['attachments'] | undefined,
-): number {
-  return (
-    attachments?.filter(
-      (attachment) => attachment.availability !== 'unavailable',
-    ).length ?? 0
-  );
+function countUsableAttachments(attachments: UiTask['attachments'] | undefined): number {
+  return attachments?.filter((attachment) => attachment.availability !== 'unavailable').length ?? 0;
 }
 
 function buildEvidenceRows(input: {
@@ -379,6 +371,18 @@ export function buildRecoveryActions(input: RecoveryInput): RecoveryAction[] {
     });
   }
 
+  if (checkTypes.has('list_item_sources')) {
+    actions.push({
+      kind: 'prefill',
+      label: '逐条补齐来源',
+      detail: '要求每条结果附自己的详情页链接，并写明缺失的字段。',
+      prompt: withIntent(
+        intent,
+        '请逐条列出，每条附该条自己的详情页链接（不要用首页或搜索页），拿不到的写明未获取到：',
+      ),
+    });
+  }
+
   if (
     checkTypes.has('ecommerce_rows') ||
     checkTypes.has('result_count') ||
@@ -430,12 +434,13 @@ function trustVerdict(input: {
   if (input.status === 'failed') return '任务未完成，结果不能当作完成产物使用。';
   if (input.status === 'cancelled') return '任务已取消，只能参考已保留的中间信息。';
   if (input.status === 'partial_success') return '任务产出了结果，但自动审核发现不完整或需复核。';
-  if (input.verificationPassed === true) return '自动审核未发现结构性问题，但仍需按来源复核关键事实。';
+  if (input.verificationPassed === true)
+    return '自动审核未发现结构性问题，但仍需按来源复核关键事实。';
   if (input.verificationPassed === false || input.failedCheckCount > 0) {
     return '自动审核发现问题，请优先查看检查项和恢复建议。';
   }
   if (input.failureLevel) return '任务带有审核结论，请结合下方证据边界使用。';
-  return '未收到自动审核结论；本卡只展示已知证据，不给额外确定性。';
+  return '以下仅展示已保留的证据，关键事实请结合来源核对。';
 }
 
 function countVisibleSourceUrls(text?: string, currentUrl?: string | null): number {
@@ -459,11 +464,7 @@ function hasMissingResearchSources(input: {
 }
 
 function isSourceEvidenceCheck(type: string): boolean {
-  return (
-    type === 'url_count' ||
-    type === 'source_count' ||
-    type === 'generic.url_grounding'
-  );
+  return type === 'url_count' || type === 'source_count' || type === 'generic.url_grounding';
 }
 
 function hasHttpUrl(url?: string | null): boolean {
@@ -485,7 +486,8 @@ function withIntent(intent: string | undefined, suffix: string): string {
 
 function partialRetryPrompt(intent: string, resultText?: string): string {
   const summary = compactText(resultText);
-  const instruction = '请基于上次任务已完成的信息重试，只补齐缺失来源、字段或数量；未验证的内容请明确标注。';
+  const instruction =
+    '请基于上次任务已完成的信息重试，只补齐缺失来源、字段或数量；未验证的内容请明确标注。';
   if (!summary) return `${intent}\n${instruction}`;
   return `${intent}\n${instruction}\n\n上次已完成信息：\n${summary}`;
 }

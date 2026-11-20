@@ -7,8 +7,8 @@
  * USD/CNY rate or the Vultr/Aliyun bill is caught at build time.
  */
 
-import { describe, expect, it } from 'vitest';
 import { drizzle } from 'drizzle-orm/mysql2';
+import { describe, expect, it } from 'vitest';
 import * as schema from '../../db/schema/index.js';
 import { payments } from '../../db/schema/payments.js';
 import { __financeInternals } from './admin-finance.js';
@@ -40,7 +40,7 @@ describe('usdToCnyCents', () => {
   });
 
   it('returns 0 for non-finite or NaN', () => {
-    expect(usdToCnyCents(NaN)).toBe(0);
+    expect(usdToCnyCents(Number.NaN)).toBe(0);
     expect(usdToCnyCents('not-a-number')).toBe(0);
   });
 
@@ -75,12 +75,12 @@ describe('finance month boundaries', () => {
     ).beijingMonthStartUtc;
 
     expect(beijingMonthStartUtc).toBeTypeOf('function');
-    expect(
-      beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z')).toISOString(),
-    ).toBe('2026-08-31T16:00:00.000Z');
-    expect(
-      beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z'), 1).toISOString(),
-    ).toBe('2026-07-31T16:00:00.000Z');
+    expect(beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z')).toISOString()).toBe(
+      '2026-08-31T16:00:00.000Z',
+    );
+    expect(beijingMonthStartUtc?.(new Date('2026-08-31T16:30:00.000Z'), 1).toISOString()).toBe(
+      '2026-07-31T16:00:00.000Z',
+    );
   });
 
   it('recognizes completed revenue by immutable completion time', () => {
@@ -97,11 +97,7 @@ describe('finance month boundaries', () => {
     const generated = mockDb
       .select()
       .from(payments)
-      .where(
-        completedPaymentPeriodCondition(
-          new Date('2026-07-31T16:00:00.000Z'),
-        ) as never,
-      )
+      .where(completedPaymentPeriodCondition(new Date('2026-07-31T16:00:00.000Z')) as never)
       .toSQL();
 
     expect(generated.sql).toContain('`payments`.`completed_at` >=');

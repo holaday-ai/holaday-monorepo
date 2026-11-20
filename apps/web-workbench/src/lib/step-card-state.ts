@@ -27,9 +27,7 @@ export function stepStatusText(status: StepExecutionStatus): string {
   return '执行中';
 }
 
-export function stepRecordStatusText(
-  step: Pick<UiStep, 'actionKind' | 'status'>,
-): string | null {
+export function stepRecordStatusText(step: Pick<UiStep, 'actionKind' | 'status'>): string | null {
   switch (step.actionKind) {
     case 'selected_chrome_action':
       return executionStatusText(step.status, {
@@ -61,10 +59,10 @@ export function stepRecordStatusText(
       });
     case 'selected_chrome_handoff':
       return executionStatusText(step.status, {
-        done: '人工已交还',
-        failed: '交还失败',
-        running: '等待人工交还',
-        cancelled: '交还未确认',
+        done: '你已操作完',
+        failed: '你的操作未完成',
+        running: '等你操作',
+        cancelled: '你的操作未确认',
       });
     case 'browser_act':
     case 'browser_observe':
@@ -96,9 +94,7 @@ export function stepDoneIsCompletion(actionKind: string | undefined): boolean {
   return !INFORMATIONAL_EXECUTION_RECORDS.has(actionKind ?? '');
 }
 
-export function stepDisplayStepsForTask<
-  T extends Pick<UiStep, 'actionKind' | 'status'>,
->(
+export function stepDisplayStepsForTask<T extends Pick<UiStep, 'actionKind' | 'status'>>(
   steps: readonly T[],
   taskStatus: string | null | undefined,
 ): readonly T[] {
@@ -121,8 +117,7 @@ export function stepDisplayStepsForTask<
       ? {
           ...step,
           status:
-            staleRunningStatus === 'done' &&
-            SELECTED_CHROME_RECORDS.has(step.actionKind ?? '')
+            staleRunningStatus === 'done' && SELECTED_CHROME_RECORDS.has(step.actionKind ?? '')
               ? ('cancelled' as const)
               : staleRunningStatus,
         }
@@ -139,9 +134,7 @@ export function stepDurationLabel(durationMs: number | null | undefined): string
   return `${minutes}分${String(seconds).padStart(2, '0')}秒`;
 }
 
-export function stepDisplayTitle(
-  step: Pick<UiStep, 'actionKind' | 'tickIndex'>,
-): string {
+export function stepDisplayTitle(step: Pick<UiStep, 'actionKind' | 'tickIndex'>): string {
   if (!step.actionKind) return `步骤 ${Math.max(0, step.tickIndex) + 1}`;
   switch (step.actionKind) {
     case 'click':
@@ -188,7 +181,7 @@ export function stepDisplayTitle(
     case 'selected_chrome_plan_discarded':
       return '未执行计划';
     case 'selected_chrome_handoff':
-      return '人工交还记录';
+      return '你在页面上的操作';
     case 'browser_act':
       return '历史浏览器轮次（未验证）';
     case 'browser_observe':
@@ -216,9 +209,7 @@ export function stepDisplaySummary(
   return summary;
 }
 
-export function shouldShowStepCard(
-  step: Pick<UiStep, 'actionKind' | 'actionSummary'>,
-): boolean {
+export function shouldShowStepCard(step: Pick<UiStep, 'actionKind' | 'actionSummary'>): boolean {
   if (stepDisplaySummary(step)) return true;
   return step.actionKind !== 'computer' && step.actionKind !== 'text';
 }
@@ -307,11 +298,7 @@ const SELECTED_CHROME_RECORDS = new Set([
   'selected_chrome_handoff',
 ]);
 
-const HISTORICAL_BROWSER_RECORDS = new Set([
-  'browser_act',
-  'browser_observe',
-  'browser_finish',
-]);
+const HISTORICAL_BROWSER_RECORDS = new Set(['browser_act', 'browser_observe', 'browser_finish']);
 
 const INFORMATIONAL_EXECUTION_RECORDS = new Set([
   'selected_chrome_observe',
@@ -328,18 +315,14 @@ export function stepDetailSummary(
   const failed = steps.filter((step) => step.status === 'failed').length;
   const running = steps.filter((step) => step.status === 'running').length;
   const cancelled = steps.filter((step) => step.status === 'cancelled').length;
-  const hasExecutionRecords = steps.some((step) =>
-    isExecutionRecord(step.actionKind),
-  );
+  const hasExecutionRecords = steps.some((step) => isExecutionRecord(step.actionKind));
   if (!hasExecutionRecords) {
     return genericStepDetailSummary({ total, done, failed, running, cancelled });
   }
 
   const recordCount = (actionKind: string, status?: StepExecutionStatus) =>
-    steps.filter(
-      (step) =>
-        step.actionKind === actionKind && (!status || step.status === status),
-    ).length;
+    steps.filter((step) => step.actionKind === actionKind && (!status || step.status === status))
+      .length;
   const selectedActions = {
     applied: recordCount('selected_chrome_action', 'done'),
     failed: recordCount('selected_chrome_action', 'failed'),
@@ -359,8 +342,7 @@ export function stepDetailSummary(
   if (selectedActions.running > 0) {
     parts.push(`${selectedActions.running} 项操作执行中`);
   }
-  const unconfirmedActions =
-    selectedActions.failed + selectedActions.cancelled;
+  const unconfirmedActions = selectedActions.failed + selectedActions.cancelled;
   if (unconfirmedActions > 0) {
     parts.push(`${unconfirmedActions} 项操作未确认完成`);
   }
@@ -376,7 +358,7 @@ export function stepDetailSummary(
     if (count > 0) parts.push(`${count} ${suffix}`);
   }
   if (discardedPlans > 0) parts.push(`${discardedPlans} 项计划未执行`);
-  if (handoffs > 0) parts.push(`${handoffs} 次人工交还`);
+  if (handoffs > 0) parts.push(`${handoffs} 次由你操作`);
   if (historicalUnverified > 0) {
     parts.push(`${historicalUnverified} 条历史轮次（未验证）`);
   }
@@ -424,8 +406,7 @@ function executionDetailTone(
   if (steps.some((step) => step.status === 'running')) return 'running';
   if (steps.some((step) => step.status === 'cancelled')) return 'cancelled';
   const passedValidation = steps.some(
-    (step) =>
-      step.actionKind === 'selected_chrome_finish' && step.status === 'done',
+    (step) => step.actionKind === 'selected_chrome_finish' && step.status === 'done',
   );
   return appliedActions > 0 || passedValidation ? 'done' : 'idle';
 }

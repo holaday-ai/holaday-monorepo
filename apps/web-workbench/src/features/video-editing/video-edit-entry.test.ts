@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type VideoEditingEntryArtifact,
   canCombineVideoRows,
   canContinueEditing,
   createVideoEditingProject,
-  type VideoEditingEntryArtifact,
 } from './video-edit-entry';
 
 const ACTIVE_VIDEO: VideoEditingEntryArtifact = {
@@ -18,19 +18,39 @@ describe('canContinueEditing', () => {
 
   it('shows only for enabled, active, downloadable terminal videos', () => {
     expect(
-      canContinueEditing({ capabilityEnabled: true, artifact: ACTIVE_VIDEO, taskStatus: 'completed', now }),
+      canContinueEditing({
+        capabilityEnabled: true,
+        artifact: ACTIVE_VIDEO,
+        taskStatus: 'completed',
+        now,
+      }),
     ).toBe(true);
     expect(
-      canContinueEditing({ capabilityEnabled: true, artifact: ACTIVE_VIDEO, taskStatus: 'partial_success', now }),
+      canContinueEditing({
+        capabilityEnabled: true,
+        artifact: ACTIVE_VIDEO,
+        taskStatus: 'partial_success',
+        now,
+      }),
     ).toBe(true);
   });
 
   it('hides failed, expired, unavailable, non-video, and gated artifacts', () => {
     expect(
-      canContinueEditing({ capabilityEnabled: false, artifact: ACTIVE_VIDEO, taskStatus: 'completed', now }),
+      canContinueEditing({
+        capabilityEnabled: false,
+        artifact: ACTIVE_VIDEO,
+        taskStatus: 'completed',
+        now,
+      }),
     ).toBe(false);
     expect(
-      canContinueEditing({ capabilityEnabled: true, artifact: ACTIVE_VIDEO, taskStatus: 'failed', now }),
+      canContinueEditing({
+        capabilityEnabled: true,
+        artifact: ACTIVE_VIDEO,
+        taskStatus: 'failed',
+        now,
+      }),
     ).toBe(false);
     expect(
       canContinueEditing({
@@ -83,7 +103,10 @@ describe('canCombineVideoRows', () => {
       reason: '不能重复选择同一段视频',
     });
     expect(
-      canCombineVideoRows([ACTIVE_VIDEO, { ...ACTIVE_VIDEO, fileId: 'file_mov', codec: 'unsupported' }]),
+      canCombineVideoRows([
+        ACTIVE_VIDEO,
+        { ...ACTIVE_VIDEO, fileId: 'file_mov', codec: 'unsupported' },
+      ]),
     ).toMatchObject({ compatible: false, reason: '所选视频包含暂不支持的编码' });
   });
 });

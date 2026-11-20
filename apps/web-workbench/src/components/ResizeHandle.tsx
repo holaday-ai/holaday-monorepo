@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { cn } from '@/lib/utils';
+import * as React from 'react';
 
 interface Props {
   /** Called on drag. `deltaX` is cumulative from the pointer-down
@@ -82,9 +82,7 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
         aria-hidden
         className={cn(
           'absolute inset-y-0 left-1/2 -translate-x-1/2 transition-all',
-          dragging
-            ? 'w-1 bg-primary'
-            : 'w-0.5 bg-border group-hover:w-1 group-hover:bg-primary/80',
+          dragging ? 'w-1 bg-primary' : 'w-0.5 bg-border group-hover:w-1 group-hover:bg-primary/80',
         )}
       />
       {/* Grip dots in the middle — ALWAYS visible so the handle
@@ -98,9 +96,7 @@ export function ResizeHandle({ onDrag, onDragEnd, className }: Props): JSX.Eleme
             key={i}
             className={cn(
               'h-1 w-1 rounded-full transition-colors',
-              dragging
-                ? 'bg-primary'
-                : 'bg-muted-foreground/60 group-hover:bg-primary/80',
+              dragging ? 'bg-primary' : 'bg-muted-foreground/60 group-hover:bg-primary/80',
             )}
           />
         ))}

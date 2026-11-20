@@ -1,0 +1,7 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason
+be-01,ecommerce,legacy,qwen,qwen3.7-plus,failed,false,model_layer,1,57696,0,0,1,false,"任务执行中遇到了问题，正在尝试其他方式完成。如果持续失败，请尝试换一种方式描述您的需求。"
+be-01,ecommerce,unified,qwen,qwen3.7-plus,failed,false,model_layer,0,13431,0,0,1,true,"模型服务暂时不可用，请稍后重试。"
+be-02,ecommerce,legacy,qwen,qwen3.6-plus,failed,false,model_layer,4,195277,18313,973,4,false,"模型响应超时，本次执行已停止；已完成动作不会自动重放。"
+be-02,ecommerce,unified,qwen,qwen3.6-plus,cancelled,false,model_layer,21,243795,916374,616,22,false,""
+be-03,ecommerce,legacy,qwen,qwen3-vl-235b-a22b-instruct,completed,false,browser,6,41626,43363,191,6,false,""
+be-03,ecommerce,unified,qwen,qwen3-vl-235b-a22b-instruct,completed,false,browser,6,113514,76103,373,6,false,""

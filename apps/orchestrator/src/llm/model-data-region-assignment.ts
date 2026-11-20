@@ -87,6 +87,30 @@ export async function assignOrganizationModelDataRegion(
   });
 }
 
+/**
+ * FIX-60 BOSS 决定: give an account that has no region the one its entry decided, once. Only an
+ * empty region is written (the same `IS NULL` guard as a manual choice); an account that already
+ * has one — chosen, or written by a concurrent first task — keeps it, and that one is returned.
+ */
+export async function ensurePersonalModelDataRegion(
+  input: AssignPersonalModelDataRegionInput,
+): Promise<{ region: ModelDataRegion; assigned: boolean }> {
+  return await input.db.transaction(async (tx) => {
+    const updateResult = await buildPersonalRegionUpdate(tx, input.actorExternalId, input.region);
+    if (readAffectedRows(updateResult) === 1) return { region: input.region, assigned: true };
+    const [current] = await tx
+      .select({ modelDataRegion: users.modelDataRegion })
+      .from(users)
+      .where(and(eq(users.externalId, input.actorExternalId), eq(users.status, 'active')))
+      .limit(1);
+    if (!current) throw new ModelDataRegionAssignmentError('UNKNOWN_ACTOR');
+    if (current.modelDataRegion === 'cn' || current.modelDataRegion === 'intl') {
+      return { region: current.modelDataRegion, assigned: false };
+    }
+    throw new ModelDataRegionAssignmentError('UNKNOWN_ACTOR');
+  });
+}
+
 function resolveExistingAssignment(
   current: ModelDataRegion | null,
   requested: ModelDataRegion,

@@ -1,8 +1,8 @@
-import type { UiScreencast, UiTask } from '@/types/task';
+import { taskDisplayTitle } from '@/lib/task-display-copy';
+import { deriveTaskProductState } from '@/lib/task-product-state';
 import type { ConnStatus } from '@/lib/ws';
 import type { SidePanelMode, SidePanelOverride } from '@/types/side-panel';
-import { deriveTaskProductState } from '@/lib/task-product-state';
-import { taskDisplayTitle } from '@/lib/task-display-copy';
+import type { UiScreencast, UiTask } from '@/types/task';
 
 export interface WorkbenchToastCopy {
   message: string;
@@ -47,7 +47,7 @@ export function realtimeConnectionTransition(input: {
   return { hadDisconnect: input.hadDisconnect, toast: null };
 }
 
-const BROWSER_TASK_VERBS = ['打开', '登录', '访问', '点击', '下载', '搜索'];
+const BROWSER_TASK_REQUEST = /^(?:请)?(?:帮我)?(?:用浏览器|打开|访问|登录|点击网页|在网页上)/;
 
 /**
  * Legacy task rows may predate executionMode while still owning browser
@@ -60,8 +60,7 @@ export function hasBrowserRecordForWorkbench(task: UiTask | null): boolean {
   if (task.executionMode) return false;
   if (task.finalUrl?.trim() || task.finalScreenshot) return true;
   const intent = task.intent ?? '';
-  if (/https?:\/\//i.test(intent)) return true;
-  return BROWSER_TASK_VERBS.some((verb) => intent.includes(verb));
+  return BROWSER_TASK_REQUEST.test(intent.trim());
 }
 
 export function shouldConnectTaskBrowserForWorkbench(input: {
@@ -71,7 +70,7 @@ export function shouldConnectTaskBrowserForWorkbench(input: {
   if (!input.task) return false;
   if (hasBrowserRecordForWorkbench(input.task)) return true;
   if (input.task.executionMode) return false;
-  return !input.hasRuntimeTextSignal;
+  return false;
 }
 
 export function taskFrameForWorkbench(
@@ -82,20 +81,18 @@ export function taskFrameForWorkbench(
 }
 
 export function isLiveBrowserTaskForWorkbench(task: UiTask | null): boolean {
-  return Boolean(
-    task &&
-      hasBrowserRecordForWorkbench(task) &&
-      !isWorkbenchTerminalTask(task),
-  );
+  return Boolean(task && hasBrowserRecordForWorkbench(task) && !isWorkbenchTerminalTask(task));
 }
 
 export function isWorkbenchTerminalTask(task: UiTask): boolean {
-  return deriveTaskProductState({
-    status: task.status,
-    queuePosition: task.queuePosition,
-    tickCount: task.tickCount,
-    awaitingKind: task.awaitingKind ?? null,
-  }).lifecycle === 'terminal';
+  return (
+    deriveTaskProductState({
+      status: task.status,
+      queuePosition: task.queuePosition,
+      tickCount: task.tickCount,
+      awaitingKind: task.awaitingKind ?? null,
+    }).lifecycle === 'terminal'
+  );
 }
 
 export function terminalTaskHasFollowUpContext(task: UiTask): boolean {
@@ -151,10 +148,17 @@ export function mobileBrowserSheetAutoOpenState(input: {
   mode: SidePanelMode;
   isMobile: boolean;
   autoOpenedKey: string | null;
+  /**
+   * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen the browser sheet covered the
+   * conversation for the whole run. It opens by itself only when the person must act
+   * (a verification or login handover); otherwise they open it when they want to watch.
+   */
+  needsUser?: boolean;
 }): { shouldOpen: boolean; autoOpenedKey: string | null } {
   if (
     !input.isMobile ||
     !input.taskId ||
+    input.needsUser === false ||
     (input.mode !== 'browser-live' && input.mode !== 'browser-record')
   ) {
     return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
@@ -164,6 +168,19 @@ export function mobileBrowserSheetAutoOpenState(input: {
     return { shouldOpen: false, autoOpenedKey: input.autoOpenedKey };
   }
   return { shouldOpen: true, autoOpenedKey: nextKey };
+}
+
+/**
+ * FIX-57 复审 #3 (BOSS run, ~630px): on a narrow screen a running browser task does not open
+ * the browser workbench (a full-screen sheet there) by itself — the conversation stays in
+ * front until the person taps the browser button or has to act.
+ */
+export function mobileStaysInChat(input: {
+  isMobile: boolean;
+  override: 'open' | 'close' | null;
+  needsUser: boolean;
+}): boolean {
+  return input.isMobile && input.override !== 'open' && !input.needsUser;
 }
 
 export function normalizeTaskActionCount(value: unknown): number {

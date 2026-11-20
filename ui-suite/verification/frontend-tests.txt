@@ -1,0 +1,736 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo/apps/web-workbench
+
+stderr | src/stores/task-store.test.ts > refreshTaskList > does not apply a same-round list snapshot fetched before a new stream: refreshTaskList
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_same',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '更新的流',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > refreshTaskList > does not apply a same-round list snapshot fetched before a new stream: loadMoreTasks
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_same',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '更新的流',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > selectTask detail hydration > does not let stale active detail overwrite a live terminal frame
+[HD-DEBUG] terminal {
+  taskId: 'tsk_detail_race',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > clears prior-round runtime when refresh restores a newer executing identity before WS
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_restore',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '新草稿',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > clears prior-round runtime when page restores a newer executing identity before WS
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_restore',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '新草稿',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > clears prior-round runtime when detail restores a newer executing identity before WS
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_restore',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '新草稿',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > preserves an early create terminal when the late ACK is creationUnconfirmed
+[HD-DEBUG] terminal {
+  taskId: 'tsk_observed_create',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > preserves an early create terminal when the late ACK is acceptedUnconfirmed
+[HD-DEBUG] terminal {
+  taskId: 'tsk_observed_create',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > accepts a newer persisted round after observing an old terminal
+[HD-DEBUG] terminal {
+  taskId: 'tsk_newdetail',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > does not replace an early core create terminal with its optimistic ACK row
+[HD-DEBUG] terminal {
+  taskId: 'tsk_early',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > keeps new stream that arrived before its core reply ACK
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_order',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '新内容',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > keeps new terminal that arrived before its core reply ACK
+[HD-DEBUG] terminal {
+  taskId: 'tsk_order',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > ignores an older terminal after a newer core stream
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_order',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '正在生成',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > replyToTask > keeps live content when a detail requested earlier returns after it
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_order',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '新内容',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > abortTask > marks optimistic cancellation as runtime-terminal so stale live frames cannot revive it
+[HD-DEBUG] progress {
+  taskId: 'tsk_abort',
+  isTerminal: true,
+  message: '迟到进度',
+  subStatus: 'browsing',
+  gated: true
+}
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_abort',
+  isTerminal: true,
+  bufferLen: 14,
+  delta: ' stale text',
+  gated: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage awaiting_user > allows a paused runtime marker to become a recoverable awaiting-user state
+[HD-DEBUG] progress {
+  taskId: 'tsk_paused_wait',
+  isTerminal: false,
+  message: '继续执行中',
+  subStatus: 'browsing',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage task.control > does not let stale live frames revive a control-paused task
+[HD-DEBUG] progress {
+  taskId: 'tsk_control_pause_stale',
+  isTerminal: true,
+  message: '迟到的执行进度',
+  subStatus: 'browsing',
+  gated: true
+}
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_control_pause_stale',
+  isTerminal: true,
+  bufferLen: 0,
+  delta: ' stale answer',
+  gated: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage task.control > resumes a paused terminal task instead of treating pause as final
+[HD-DEBUG] progress {
+  taskId: 'tsk_paused_then_resume',
+  isTerminal: false,
+  message: '继续执行中',
+  subStatus: 'browsing',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage task.control > cancels a task immediately and gates stale stream/progress frames
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_cancel',
+  isTerminal: true,
+  bufferLen: 14,
+  delta: ' stale',
+  gated: true
+}
+[HD-DEBUG] progress {
+  taskId: 'tsk_cancel',
+  isTerminal: true,
+  message: 'stale progress',
+  subStatus: 'generating',
+  gated: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage stale live frames after terminal > keeps partial_success terminal when late stream and progress arrive
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_partial_final',
+  isTerminal: true,
+  bufferLen: 0,
+  delta: ' stale stream',
+  gated: true
+}
+[HD-DEBUG] progress {
+  taskId: 'tsk_partial_final',
+  isTerminal: true,
+  message: 'stale progress',
+  subStatus: 'generating',
+  gated: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage terminal and pause cleanup > clears live-only blockers when a terminal frame arrives
+[HD-DEBUG] terminal {
+  taskId: 'tsk_terminal_cleanup',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage terminal and pause cleanup > applies a live terminal verification verdict without waiting for detail hydration
+[HD-DEBUG] terminal {
+  taskId: 'tsk_video_verified',
+  status: 'completed',
+  prevBufferLen: 0,
+  hadProgress: false,
+  hasSummary: true
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage queued lifecycle > flips queued tasks to executing on first progress frame
+[HD-DEBUG] progress {
+  taskId: 'tsk_progress_queue',
+  isTerminal: false,
+  message: '正在准备执行',
+  subStatus: 'planning',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage queued lifecycle > does not reclassify a browser task when its first progress phase is planning
+[HD-DEBUG] progress {
+  taskId: 'tsk_browser_planning',
+  isTerminal: false,
+  message: '正在规划任务…',
+  subStatus: 'planning',
+  gated: false
+}
+[HD-DEBUG] progress {
+  taskId: 'tsk_browser_planning',
+  isTerminal: false,
+  message: '正在验证结果…',
+  subStatus: 'verifying',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage queued lifecycle > recognizes a legacy task as browser-owned when browsing progress arrives
+[HD-DEBUG] progress {
+  taskId: 'tsk_legacy_browsing',
+  isTerminal: false,
+  message: '正在操作浏览器…',
+  subStatus: 'browsing',
+  gated: false
+}
+
+stderr | src/stores/task-store.test.ts > applyServerMessage queued lifecycle > flips queued tasks to executing on first stream frame
+[HD-DEBUG] stream delta {
+  taskId: 'tsk_stream_queue',
+  isTerminal: false,
+  bufferLen: 0,
+  delta: '开始生成',
+  gated: false
+}
+
+ ✓ src/stores/task-store.test.ts (158 tests) 142ms
+ ✓ src/lib/skills-page-state.test.ts (508 tests) 282ms
+ ✓ src/components/browser-panel-state.test.ts (48 tests) 9ms
+ ✓ src/lib/video-history-row.test.ts (51 tests) 9ms
+ ✓ src/pages/admin/admin-partner-state.test.ts (25 tests) 39ms
+ ✓ src/lib/partner-page-state.test.ts (17 tests) 20ms
+ ✓ src/lib/workbench-state.test.ts (23 tests) 4ms
+ ✓ src/pages/stock-tasks-layout.test.ts (21 tests) 10ms
+ ✓ src/pages/scheduled-calendar/event-mapping.test.ts (29 tests) 6ms
+ ✓ src/lib/step-card-state.test.ts (25 tests) 9ms
+ ✓ src/lib/failure-copy.test.ts (27 tests) 9ms
+ ✓ src/lib/batch-page-state.test.ts (17 tests) 6ms
+ ✓ src/lib/billing-page-state.test.ts (18 tests) 21ms
+ ✓ src/lib/task-hub-state.test.ts (18 tests) 7ms
+ ✓ src/lib/trust-summary.test.ts (20 tests) 9ms
+ ✓ src/lib/stock-discovery.test.ts (16 tests) 5ms
+ ✓ src/lib/organization-page-state.test.ts (10 tests) 4ms
+ ✓ src/pages/video-page-style-state.test.ts (20 tests) 7ms
+ ✓ src/pages/planned/planned-task-state.test.ts (18 tests) 4ms
+ ✓ src/lib/team-task-workbench-state.test.ts (14 tests) 4ms
+ ✓ src/lib/stock-news.test.ts (8 tests) 3ms
+ ✓ src/lib/screencast-fit.test.ts (22 tests) 4ms
+ ✓ src/lib/plan-payment-state.test.ts (16 tests) 4ms
+ ✓ src/lib/image-history-row.test.ts (11 tests) 4ms
+ ✓ src/components/energy/energy-css.test.ts (13 tests) 8ms
+ ✓ src/features/video-editing/video-editor-adapter.test.ts (4 tests) 6ms
+ ✓ src/lib/batch-progress.test.ts (9 tests) 3ms
+ ✓ src/lib/video-task-selectors.test.ts (14 tests) 4ms
+ ✓ src/lib/project-task-filter-state.test.ts (13 tests) 3ms
+ ✓ src/lib/verification-banner-copy.test.ts (17 tests) 4ms
+ ✓ src/lib/search-overlay-state.test.ts (15 tests) 6ms
+ ✓ src/lib/error-copy.test.ts (17 tests) 5ms
+ ✓ src/components/TaskListItem.test.ts (18 tests) 4ms
+ ✓ src/lib/project-page-state.test.ts (10 tests) 3ms
+ ✓ src/lib/connection-page-state.test.ts (9 tests) 3ms
+ ✓ src/lib/notification-bell-state.test.ts (9 tests) 5ms
+ ✓ src/lib/roles-page-state.test.ts (9 tests) 3ms
+ ✓ src/lib/download-file.test.ts (11 tests) 7ms
+ ✓ src/lib/files-page-state.test.ts (14 tests) 4ms
+ ✓ src/lib/usage-page-state.test.ts (8 tests) 5ms
+ ✓ src/components/energy/energy-event-reporter.test.ts (8 tests) 4ms
+ ✓ src/lib/browser-nav-copy.test.ts (8 tests) 4ms
+ ✓ src/components/energy/energy-shelf.test.ts (3 tests) 3ms
+ ✓ src/pages/scheduled-calendar/event-detail-state.test.ts (6 tests) 4ms
+ ✓ src/components/image/image-studio-state.test.ts (5 tests) 3ms
+ ✓ src/components/image/image-studio-options.test.ts (7 tests) 3ms
+ ✓ src/components/energy/explore-content.test.ts (5 tests) 4ms
+ ✓ src/lib/quota-indicator-state.test.ts (5 tests) 5ms
+ ✓ src/lib/browser-viewport-profile.test.ts (13 tests) 4ms
+ ✓ src/lib/auth-me-state.test.ts (21 tests) 4ms
+ ✓ src/components/scheduled-dialog-state.test.ts (8 tests) 3ms
+ ✓ src/components/terminal-result-state.test.ts (8 tests) 3ms
+ ✓ src/components/stocks/stock-screening-state.test.ts (5 tests) 16ms
+ ✓ src/lib/browser-viewport-v2.test.ts (5 tests) 3ms
+ ✓ src/components/cdp-screencast-state.test.ts (6 tests) 3ms
+ ✓ src/lib/notification-channel-state.test.ts (8 tests) 7ms
+ ✓ src/components/TaskStream.markdown-sanitize.test.ts (12 tests) 14ms
+ ✓ src/lib/batch-task-draft.test.ts (8 tests) 4ms
+ ✓ src/lib/stock-page-preload.test.ts (4 tests) 319ms
+   ✓ stock page initial request preload > warms only the stock route module, then reuses it when navigation starts data 314ms
+ ✓ src/lib/awaiting-user-copy.test.ts (5 tests) 2ms
+ ✓ src/lib/api-key-settings-state.test.ts (8 tests) 5ms
+ ✓ src/pages/planned/planned-editor-state.test.ts (7 tests) 15ms
+ ✓ src/pages/planned/planned-layout.test.ts (3 tests) 17ms
+ ✓ src/types/video.test.ts (9 tests) 5ms
+ ✓ src/pages/scheduled-calendar/quick-create-state.test.ts (7 tests) 2ms
+ ✓ src/components/notifications/NotificationBell.test.ts (17 tests) 15ms
+ ✓ src/types/side-panel.test.ts (10 tests) 2ms
+ ✓ src/lib/memory-settings-state.test.ts (7 tests) 17ms
+ ✓ src/components/FileDownloadCard.test.ts (6 tests) 2ms
+ ✓ src/features/video-editing/video-edit-entry.test.ts (5 tests) 3ms
+ ✓ src/lib/profile-page-state.test.ts (7 tests) 7ms
+ ✓ src/lib/stock-temporal-copy.test.ts (5 tests) 3ms
+ ✓ src/features/video-editing/video-editing-state.test.ts (12 tests) 3ms
+ ✓ src/lib/notification-channel-draft.test.ts (10 tests) 3ms
+ ✓ src/lib/task-status-copy.test.ts (8 tests) 3ms
+ ✓ src/lib/file-download-card-copy.test.ts (7 tests) 3ms
+ ✓ src/components/scheduled-notify-prefs.test.ts (5 tests) 3ms
+ ✓ src/lib/version-check.test.ts (10 tests) 3ms
+ ✓ src/components/image/image-task-meta.test.ts (8 tests) 2ms
+ ✓ src/components/TaskToolbar.test.ts (5 tests) 3ms
+ ✓ src/components/batch-dialog-state.test.ts (7 tests) 3ms
+ ✓ src/pages/scheduled-calendar/scheduled-calendar-state.test.ts (4 tests) 4ms
+ ✓ src/lib/browser-error-kind.test.ts (2 tests) 2ms
+ ✓ src/lib/astrology.test.ts (14 tests) 17ms
+ ✓ src/lib/unavailable-file-registry.test.ts (5 tests) 4ms
+ ✓ src/lib/stock-dashboard-trust.test.ts (4 tests) 14ms
+ ✓ src/components/video/video-creation-scenarios.test.ts (6 tests) 3ms
+ ✓ src/lib/copy-text.test.ts (4 tests) 4ms
+ ✓ src/lib/task-product-state.test.ts (5 tests) 2ms
+ ✓ src/components/TaskListItem.native-button.test.ts (1 test) 7ms
+ ✓ src/lib/external-link-copy.test.ts (6 tests) 2ms
+ ✓ src/components/energy/experiences/energy-card-selection.test.ts (3 tests) 4ms
+ ✓ src/stores/task-execution-order.test.ts (4 tests) 3ms
+ ✓ src/pages/admin/admin-shared.test.ts (7 tests) 2ms
+ ✓ src/lib/batch-confirm-copy.test.ts (4 tests) 2ms
+ ✓ src/components/energy/experience-registry.test.ts (4 tests) 87ms
+ ✓ src/lib/stock-risk-presentation.test.ts (2 tests) 3ms
+ ✓ src/lib/terminal-empty-copy.test.ts (6 tests) 2ms
+ ✓ src/lib/sidebar-feature-nav.test.ts (5 tests) 3ms
+ ✓ src/lib/markdown-code-block-state.test.ts (5 tests) 3ms
+ ✓ src/components/notifications/NotificationsSection.test.tsx (3 tests) 9ms
+ ✓ src/components/energy/energy-continuation.test.ts (6 tests) 2ms
+ ✓ src/components/energy/energy-content-target.test.ts (2 tests) 2ms
+ ✓ src/lib/markdown-download.test.ts (4 tests) 3ms
+ ✓ src/pages/StockTasksPage.test.ts (5 tests) 2ms
+ ✓ src/components/composer-submit.test.ts (6 tests) 3ms
+ ✓ src/pages/stock-discovery-layout.test.ts (4 tests) 3ms
+ ✓ src/lib/browser-fullscreen.test.ts (4 tests) 3ms
+ ✓ src/components/energy/energy-magazine-visuals.test.ts (2 tests) 3ms
+ ✓ src/pages/scheduled-calendar/time-helpers.test.ts (6 tests) 15ms
+ ✓ src/lib/login-gate-validation.test.ts (4 tests) 6ms
+ ✓ src/components/energy/content-target-controller.test.ts (4 tests) 4ms
+ ✓ src/lib/media-models.test.ts (3 tests) 4ms
+ ✓ src/lib/workbench-breakpoints.test.ts (4 tests) 2ms
+ ✓ src/lib/video-ip-estimate.test.ts (8 tests) 3ms
+ ✓ src/lib/lazy-load-error.test.ts (4 tests) 2ms
+ ✓ src/components/composer-reset.test.ts (6 tests) 2ms
+ ✓ src/lib/app-shell-projects.test.ts (1 test) 2ms
+ ✓ src/lib/usage-copy.test.ts (6 tests) 2ms
+ ✓ src/components/energy/astrology-content.test.ts (2 tests) 3ms
+ ✓ src/lib/notification-channel-copy.test.ts (4 tests) 2ms
+ ✓ src/lib/live-substatus.test.ts (4 tests) 2ms
+ ✓ src/lib/skill-mention.test.ts (4 tests) 2ms
+ ✓ src/lib/feedback-dialog-state.test.ts (4 tests) 6ms
+ ✓ src/components/energy/running-task-dock-state.test.ts (4 tests) 2ms
+ ✓ src/lib/attachment-chip-copy.test.ts (3 tests) 2ms
+ ✓ src/lib/search-source-link.test.ts (5 tests) 4ms
+ ✓ src/utils/time-buckets.test.ts (3 tests) 2ms
+ ✓ src/lib/result-source-badges.test.ts (4 tests) 2ms
+ ✓ src/lib/toast-state.test.ts (4 tests) 2ms
+ ✓ src/lib/upload-file.test.ts (3 tests) 5ms
+ ✓ src/types/task.test.ts (3 tests) 2ms
+ ✓ src/lib/page-error-copy.test.ts (5 tests) 5ms
+ ✓ src/lib/file-preview-kind.test.ts (5 tests) 2ms
+ ✓ src/lib/auth-session.test.ts (5 tests) 4ms
+ ✓ src/pages/admin/admin-learning-evolution-model.test.ts (3 tests) 3ms
+ ✓ src/lib/batch-prompts.test.ts (3 tests) 2ms
+ ✓ src/components/energy/experiences/test-content.test.ts (2 tests) 6ms
+ ✓ src/lib/browser-workspace-viewport.test.ts (3 tests) 2ms
+ ✓ src/lib/media-action-guard.test.ts (2 tests) 2ms
+ ✓ src/lib/sidebar-batch-selection.test.ts (2 tests) 3ms
+ ✓ src/lib/control-tooltip.test.ts (1 test) 44ms
+ ✓ src/lib/quota-exhausted-copy.test.ts (3 tests) 2ms
+ ✓ src/lib/cn-payment-copy.test.ts (3 tests) 2ms
+ ✓ src/lib/files-empty-copy.test.ts (2 tests) 2ms
+ ✓ src/lib/plan-card-state.test.ts (3 tests) 2ms
+ ✓ src/lib/expert-result-usage.test.ts (4 tests) 1ms
+ ✓ src/lib/task-selection-url-state.test.ts (3 tests) 1ms
+ ✓ src/lib/terminal-artifact-copy.test.ts (3 tests) 1ms
+ ✓ src/components/energy/experiences/light-test-engine.test.ts (2 tests) 2ms
+ ✓ src/lib/use-quota-status.test.ts (6 tests) 3ms
+ ✓ src/components/SkillLogo.test.tsx (2 tests) 8ms
+ ✓ src/components/energy/energy-recommendation.test.ts (5 tests) 2ms
+ ✓ src/components/energy/experiences/practice-content.test.ts (1 test) 2ms
+ ✓ src/lib/screencast-input-focus.test.ts (1 test) 2ms
+ ✓ src/lib/screenshot-thumbnail-state.test.ts (3 tests) 1ms
+ ✓ src/lib/attachment-download-url.test.ts (3 tests) 1ms
+ ✓ src/lib/file-size.test.ts (2 tests) 2ms
+ ✓ src/lib/model-data-region-state.test.ts (6 tests) 2ms
+ ✓ src/lib/batch-copy.test.ts (4 tests) 1ms
+ ✓ src/lib/settings-sections.test.ts (3 tests) 2ms
+ ✓ src/components/MainPanel.static-fallback.test.ts (2 tests) 2ms
+ ✓ src/lib/auth-redirect.test.ts (3 tests) 1ms
+ ✓ src/pages/admin/admin-learning-copy.test.ts (3 tests) 1ms
+ ✓ src/lib/support-links.test.ts (2 tests) 1ms
+ ✓ src/lib/external-favicon-privacy.test.ts (2 tests) 1ms
+ ✓ src/components/energy/experiences/poll-content.test.ts (1 test) 3ms
+ ✓ src/components/energy/experiences/horoscope-content.test.ts (1 test) 2ms
+ ✓ src/lib/creative-preview-urls.test.ts (1 test) 2ms
+ ✓ src/lib/vite-browser-proxy.test.ts (2 tests) 3ms
+ ✓ src/lib/webhook-docs-copy.test.ts (1 test) 2ms
+ ✓ src/pages/PageShell.test.tsx (2 tests) 6ms
+ ✓ src/components/energy/experiences/game-content.test.ts (1 test) 2ms
+ ✓ src/lib/stock-discovery-route.test.ts (2 tests) 2ms
+ ✓ src/pages/stock-performance-budget.test.ts (2 tests) 1ms
+ ✓ src/components/FileTypeBadge.test.ts (8 tests) 2ms
+ ✓ src/lib/browser-stream-url.test.ts (2 tests) 2ms
+ ✓ src/lib/plan-page-hash.test.ts (1 test) 1ms
+ ✓ src/components/energy/energy-visuals.test.ts (1 test) 2ms
+ ✓ src/qa-skills-data.test.ts (1 test) 1ms
+ ✓ src/pages/ProjectsPage.test.tsx (103 tests) 6795ms
+ ✓ src/components/skills/CapabilityCenterContent.test.tsx (25 tests) 874ms
+ ✓ src/pages/TeamProjectPage.test.tsx (25 tests) 878ms
+   ✓ TeamProjectPage normalized detail states > runs create, publish, planning, and assignment mutations in version order 365ms
+ ✓ src/components/energy/useEnergyAstrology.test.tsx (23 tests) 667ms
+ ✓ src/components/stocks/StockRiskRadar.test.tsx (15 tests) 348ms
+ ✓ src/pages/ImagePage.test.tsx (16 tests) 601ms
+ ✓ src/components/energy/energy-progress.test.ts (20 tests) 20ms
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/energy/EnergyHome.test.tsx (15 tests) 1503ms
+ ✓ src/components/stocks/StockPreferenceProfile.test.tsx (11 tests) 1781ms
+   ✓ StockPreferenceProfile > rechecks once after an explicit behavior so eventual database visibility reaches the card 1317ms
+ ✓ src/features/video-editing/VideoEditingPanel.test.tsx (12 tests) 283ms
+ ✓ src/components/stocks/StockScreeningWorkbench.test.tsx (5 tests) 377ms
+ ✓ src/components/AppShell.projects.test.tsx (8 tests) 641ms
+   ✓ AppShell personal project collection isolation > keeps the Sidebar filter and move menu personal after ProjectsPage refreshes a team workspace 355ms
+ ✓ src/components/energy/AstrologyWorld.test.tsx (11 tests) 229ms
+ ✓ src/components/projects/TeamTaskWorkbench.test.tsx (9 tests) 758ms
+   ✓ TeamTaskWorkbench interaction boundaries > requires an explicit contract review and flags vague criteria before task creation 383ms
+ ✓ src/components/stocks/StockWorkbenchLayout.test.tsx (10 tests) 198ms
+ ✓ src/components/settings/AccountClosureSection.test.tsx (6 tests) 441ms
+ ✓ src/pages/ProfilePage.security.test.tsx (9 tests) 713ms
+ ✓ src/pages/AccountClosureRecoveryPage.test.tsx (10 tests) 469ms
+ ✓ src/components/energy/EnergyExploreFeed.test.tsx (10 tests) 524ms
+ ✓ src/features/video-editing/video-editing-e2e.test.tsx (4 tests) 192ms
+ ✓ src/pages/planned/PlannedTasksPage.test.tsx (5 tests) 374ms
+ ✓ src/components/image/ImageStudioForm.test.tsx (8 tests) 136ms
+ ✓ src/pages/PrivacyPage.truth.test.tsx (13 tests) 295ms
+ ✓ src/pages/VideoPage.test.tsx (10 tests) 708ms
+ ✓ src/components/energy/experiences/HoroscopeExperience.test.tsx (6 tests) 70ms
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > filters memories by category with visible counts
+Error: socket hang up
+    at Socket.socketCloseListener (node:_http_client:548:27)
+    at Socket.emit (node:events:531:35)
+    at TCP.<anonymous> (node:net:347:12) {
+  code: 'ECONNRESET'
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > filters memories by category with visible counts
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > searches memory titles and details locally
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps long memories compact until the user expands them
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps a selected category when deleting one of several matching memories
+Error: socket hang up
+    at Socket.socketCloseListener (node:_http_client:548:27)
+    at Socket.emit (node:events:531:35)
+    at TCP.<anonymous> (node:net:347:12) {
+  code: 'ECONNRESET'
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > keeps a selected category when deleting one of several matching memories
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+stderr | src/pages/SettingsPage.memory.test.tsx > SettingsPage AI memory library > does not let a slow delete overwrite a newer category selection
+AggregateError:
+    at internalConnectMultiple (node:net:1135:18)
+    at afterConnectMultiple (node:net:1716:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1679:14)
+        at afterConnectMultiple (node:net:1709:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    }
+  ]
+}
+
+ ✓ src/pages/SettingsPage.memory.test.tsx (7 tests) 301ms
+ ✓ src/components/billing/PaymentLedgerSection.test.tsx (6 tests) 158ms
+ ✓ src/components/BrowserPanel.control.test.tsx (6 tests) 139ms
+ ✓ src/components/FailureHeaderCard.test.tsx (11 tests) 111ms
+ ✓ src/pages/FilesPage.presentation.test.tsx (7 tests) 464ms
+ ✓ src/components/image/ImageResults.test.tsx (9 tests) 59ms
+ ✓ src/pages/OrganizationInvitationAcceptPage.test.tsx (8 tests) 56ms
+ ✓ src/pages/PlanPage.renewal.test.tsx (7 tests) 180ms
+stderr | src/lib/ws.test.ts > web workbench WebSocket connection identity > drops every callback from a disconnected socket without affecting its replacement
+[HD-DEBUG] WS msg { type: 'server.task.progress', taskId: 'tsk_current' }
+
+ ✓ src/lib/ws.test.ts (2 tests) 76ms
+ ✓ src/lib/account-closure-state.test.ts (9 tests) 4ms
+ ✓ src/components/FileDownloadCard.lazy.test.tsx (8 tests) 71ms
+ ✓ src/components/energy/ExperiencePlayer.test.tsx (5 tests) 129ms
+ ✓ src/components/energy/experiences/TarotExperience.test.tsx (7 tests) 228ms
+ ✓ src/components/BrowserPanel.dock-inset.test.tsx (6 tests) 57ms
+ ✓ src/components/energy/EnergyShelf.test.tsx (3 tests) 114ms
+ ✓ src/components/CreativeReferenceLibrary.test.tsx (4 tests) 46ms
+ ✓ src/hooks/useBrowserOwnership.test.tsx (5 tests) 232ms
+ ✓ src/hooks/useRegionGatedTaskSubmit.test.tsx (5 tests) 15ms
+ ✓ src/components/energy/zodiac-art.test.tsx (14 tests) 57ms
+ ✓ src/components/energy/experiences/TestExperience.test.tsx (5 tests) 296ms
+ ✓ src/components/energy/EnergyProfileDrawer.test.tsx (2 tests) 181ms
+ ✓ src/components/notifications/NotificationBell.interaction.test.tsx (4 tests) 109ms
+ ✓ src/components/LocalChromePicker.test.tsx (5 tests) 136ms
+ ✓ src/components/stocks/StockAiCommandComposer.test.tsx (3 tests) 80ms
+ ✓ src/components/LoginGate.closure.test.tsx (3 tests) 222ms
+ ✓ src/components/energy/experiences/GameExperience.test.tsx (3 tests) 337ms
+ ✓ src/pages/BillingPage.ledger.test.tsx (3 tests) 95ms
+ ✓ src/pages/admin/AdminFinancePage.accounting.test.tsx (2 tests) 79ms
+ ✓ src/components/energy/EnergyMagazineCard.test.tsx (3 tests) 49ms
+ ✓ src/pages/AstrologyPage.test.tsx (3 tests) 245ms
+ ✓ src/lib/auth.closure.test.ts (7 tests) 12ms
+ ✓ src/components/InputArea.permissions.test.tsx (4 tests) 248ms
+ ✓ src/stores/theme-store.test.tsx (3 tests) 26ms
+ ✓ src/pages/SkillsPage.test.tsx (1 test) 71ms
+ ✓ src/components/image/ImageHistory.isolation.test.tsx (2 tests) 30ms
+ ✓ src/components/energy/AstrologyMagazineCover.test.tsx (4 tests) 30ms
+ ✓ src/App.closure.test.tsx (2 tests) 39ms
+ ✓ src/components/settings/BrowserDataSection.test.tsx (2 tests) 48ms
+ ✓ src/components/ModelDataRegionDialog.test.tsx (3 tests) 98ms
+ ✓ src/components/energy/RunningTaskDock.test.tsx (4 tests) 49ms
+ ✓ src/components/FilePreviewModal.approved.test.tsx (3 tests) 105ms
+ ✓ src/components/stocks/ApprovedStockComposer.test.tsx (2 tests) 213ms
+ ✓ src/pages/SettingsPage.account.test.tsx (2 tests) 60ms
+stderr | src/pages/SettingsPage.account.test.tsx
+Error: socket hang up
+    at _destroy (node:_http_client:963:15)
+    at onSocketNT (node:_http_client:987:5)
+    at processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'ECONNRESET'
+}
+Error: socket hang up
+    at _destroy (node:_http_client:963:15)
+    at onSocketNT (node:_http_client:987:5)
+    at processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'ECONNRESET'
+}
+
+ ✓ src/components/StepCard.test.tsx (4 tests) 37ms
+ ✓ src/components/LoginGate.mfa.test.tsx (2 tests) 159ms
+ ✓ src/components/energy/EnergyHero.test.tsx (2 tests) 76ms
+ ✓ src/components/energy/experiences/PollExperience.test.tsx (5 tests) 105ms
+ ✓ src/pages/admin/AdminSelfCheckPage.test.tsx (2 tests) 54ms
+ ✓ src/components/energy/experiences/PracticeExperience.test.tsx (7 tests) 113ms
+ ✓ src/components/energy/AstrologyDimensionGrid.test.tsx (1 test) 55ms
+ ✓ src/features/video-editing/SceneStrip.test.tsx (2 tests) 34ms
+ ✓ src/pages/planned/PlannedScopeDialog.test.tsx (2 tests) 89ms
+ ✓ src/components/energy/experiences/MiniGameExperience.test.tsx (2 tests) 141ms
+ ✓ src/components/CreativeProjectPicker.test.tsx (1 test) 60ms
+ ✓ src/components/BrowserReplay.test.tsx (2 tests) 55ms
+ ✓ src/components/video/PetMotionForm.test.tsx (1 test) 65ms
+ ✓ src/components/TaskStream.cancel.test.tsx (1 test) 51ms
+ ✓ src/components/energy/EnergySectionNav.test.tsx (2 tests) 39ms
+ ✓ src/components/DiscoveryNewsCard.test.tsx (2 tests) 37ms
+ ✓ src/pages/UsagePage.quota-mode.test.tsx (1 test) 31ms
+ ✓ src/components/energy/EnergyContinueCard.test.tsx (2 tests) 50ms
+ ✓ src/components/video/VideoCreationScenarioPicker.test.tsx (2 tests) 48ms
+ ✓ src/pages/StockMarketContextPanels.test.tsx (2 tests) 18ms
+ ✓ src/components/energy/AstrologyPortalRow.test.tsx (1 test) 58ms
+stderr | src/components/CdpScreencastViewport.control.test.tsx > requires and transmits the current lease on actual viewport keyboard input
+[HD-DEBUG] CDP screencast viewport mounted { wsUrl: 'ws://localhost/screencast-ws/tsk_test' }
+
+ ✓ src/components/CdpScreencastViewport.control.test.tsx (1 test) 22ms
+ ✓ src/features/video-editing/VersionHistory.test.tsx (1 test) 37ms
+ ✓ src/pages/TermsPage.billing.test.tsx (2 tests) 30ms
+ ✓ src/components/stocks/StockRiskMonitorSheet.test.tsx (1 test) 54ms
+ ✓ src/components/PlanCard.test.tsx (3 tests) 38ms
+ ✓ src/components/QuotaIndicator.quota-mode.test.tsx (1 test) 21ms
+ ✓ src/components/energy/experiences/RechargeExperience.test.tsx (1 test) 35ms
+ ✓ src/components/settings/ModelDataRegionSection.test.tsx (2 tests) 59ms
+ ✓ src/components/video/VideoCreationStoryboard.test.tsx (1 test) 25ms
+ ✓ src/lib/vnc-pointer-precision.test.ts (1 test) 2ms
+ ✓ src/components/CharacterAvatar.test.tsx (1 test) 17ms
+
+ Test Files  280 passed (280)
+      Tests  2645 passed (2645)
+   Start at  15:36:30
+   Duration  110.17s (transform 4.65s, setup 0ms, collect 22.72s, tests 28.59s, environment 14.11s, prepare 9.87s)

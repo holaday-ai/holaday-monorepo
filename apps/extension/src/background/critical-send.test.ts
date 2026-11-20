@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  _resetCriticalSendStateForTests,
-  sendCriticalClientMessage,
-} from './critical-send.js';
+import { _resetCriticalSendStateForTests, sendCriticalClientMessage } from './critical-send.js';
 import { send } from './ws-client.js';
 
 const wsMock = vi.hoisted(() => ({
@@ -39,10 +36,7 @@ describe('sendCriticalClientMessage', () => {
   it('retries critical messages across a websocket reconnect', async () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.mocked(send)
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
+    vi.mocked(send).mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(true);
 
     const message = {
       type: 'client.vision.acted',
@@ -62,10 +56,7 @@ describe('sendCriticalClientMessage', () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     wsMock.currentToken = 'token-a';
-    vi.mocked(send)
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
+    vi.mocked(send).mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(true);
 
     const message = {
       type: 'client.step.result',
@@ -149,12 +140,16 @@ describe('sendCriticalClientMessage', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.mocked(send).mockReturnValue(false);
 
-    const messages = Array.from({ length: 101 }, (_, index) => ({
-      type: 'client.step.result',
-      taskId: 'tsk_bounded_retry',
-      stepId: `step_${index}`,
-      status: 'ok',
-    }) as const);
+    const messages = Array.from(
+      { length: 101 },
+      (_, index) =>
+        ({
+          type: 'client.step.result',
+          taskId: 'tsk_bounded_retry',
+          stepId: `step_${index}`,
+          status: 'ok',
+        }) as const,
+    );
 
     for (const message of messages) {
       expect(sendCriticalClientMessage(message, 'step result')).toBe(false);
@@ -162,9 +157,12 @@ describe('sendCriticalClientMessage', () => {
     await vi.advanceTimersByTimeAsync(250);
 
     expect(send).toHaveBeenCalledTimes(201);
-    expect(vi.mocked(send).mock.calls.slice(101).map(([message]) => message)).toEqual(
-      messages.slice(1),
-    );
+    expect(
+      vi
+        .mocked(send)
+        .mock.calls.slice(101)
+        .map(([message]) => message),
+    ).toEqual(messages.slice(1));
   });
 
   it('stops retrying critical messages after the websocket token changes', async () => {
@@ -209,9 +207,9 @@ describe('sendCriticalClientMessage', () => {
       ok: true,
     } as const;
 
-    expect(
-      sendCriticalClientMessage(message, 'vision action', { ownerToken: 'token-a' }),
-    ).toBe(false);
+    expect(sendCriticalClientMessage(message, 'vision action', { ownerToken: 'token-a' })).toBe(
+      false,
+    );
 
     expect(send).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(

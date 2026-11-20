@@ -23,13 +23,13 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ffprobeDurationMs, renderImageClip, runFfmpeg } from './ffmpeg-exec.js';
 import { runLipSync } from './fal-lipsync-client.js';
+import { ffprobeDurationMs, renderImageClip, runFfmpeg } from './ffmpeg-exec.js';
 import { synthesizeSpeech } from './qwen-voice-clone-client.js';
 import { buildComposeCommand } from './video-compose.js';
-import { runVideoPipeline, type PipelineLogger, type VideoPipelineDeps } from './video-pipeline.js';
-import { generateVideoScript, type LlmComplete } from './video-script.js';
 import { downloadToBuffer } from './video-http.js';
+import { type PipelineLogger, type VideoPipelineDeps, runVideoPipeline } from './video-pipeline.js';
+import { type LlmComplete, generateVideoScript } from './video-script.js';
 import { generateBrollImage } from './wanxiang-client.js';
 
 export type VideoLaneErrorKind = 'onboarding' | 'compliance' | 'compose' | 'config';
@@ -128,7 +128,10 @@ export function createVideoPipelineDeps(
   const baseVideoUrl = (): Promise<string> => {
     baseVideoUrlPromise ??= svc.presignGet(ctx.baseVideoStoragePath, 3600).then((u) => {
       if (!u) {
-        throw new VideoLaneError('base video presign returned null (need STORAGE_PROVIDER=r2)', 'config');
+        throw new VideoLaneError(
+          'base video presign returned null (need STORAGE_PROVIDER=r2)',
+          'config',
+        );
       }
       return u;
     });
@@ -175,7 +178,11 @@ export function createVideoPipelineDeps(
       const url = r.imageUrls[0];
       if (!url) throw new VideoLaneError(`broll segment ${index} produced no image`, 'compose');
       const dl = await fns.downloadToBuffer(url); // OSS 24h TTL → download now
-      await svc.storeOutput({ filename: `seg${index}-broll.png`, mimetype: 'image/png', buffer: dl.buffer });
+      await svc.storeOutput({
+        filename: `seg${index}-broll.png`,
+        mimetype: 'image/png',
+        buffer: dl.buffer,
+      });
       const localPath = path.join(svc.workdir, `seg${index}-broll.png`);
       await fns.writeFile(localPath, dl.buffer);
       return { visualRef: localPath };
@@ -194,7 +201,8 @@ export function createVideoPipelineDeps(
       const audio = audioMap.get(index);
       if (!audio) throw new VideoLaneError(`lipSync: no audio for segment ${index}`, 'compose');
       const audioUrl = await svc.presignGet(audio.storagePath, 3600);
-      if (!audioUrl) throw new VideoLaneError('lipSync audio presign null (need STORAGE_PROVIDER=r2)', 'config');
+      if (!audioUrl)
+        throw new VideoLaneError('lipSync audio presign null (need STORAGE_PROVIDER=r2)', 'config');
       const result = await fns.runLipSync({
         apiKey: cfg.falApiKey,
         baseUrl: cfg.falBaseUrl,
@@ -203,7 +211,11 @@ export function createVideoPipelineDeps(
         audioUrl,
       });
       const dl = await fns.downloadToBuffer(result.videoUrl);
-      await svc.storeOutput({ filename: `seg${index}-lipsync.mp4`, mimetype: 'video/mp4', buffer: dl.buffer });
+      await svc.storeOutput({
+        filename: `seg${index}-lipsync.mp4`,
+        mimetype: 'video/mp4',
+        buffer: dl.buffer,
+      });
       const localPath = path.join(svc.workdir, `seg${index}-clip.mp4`);
       await fns.writeFile(localPath, dl.buffer);
       return { clipRef: localPath };
@@ -236,7 +248,10 @@ export async function runVideoCreation(
   svc: VideoLaneServices,
 ): Promise<VideoCreationResult> {
   if (!ctx.authorizedSelfUse) {
-    throw new VideoLaneError('未签署本人授权声明，拒绝生成（合规：仅用本人声音/肖像）', 'compliance');
+    throw new VideoLaneError(
+      '未签署本人授权声明，拒绝生成（合规：仅用本人声音/肖像）',
+      'compliance',
+    );
   }
   if (!ctx.voiceId || !ctx.baseVideoStoragePath) {
     throw new VideoLaneError('请先完成视频 onboarding（克隆声音 + 出镜底版视频）', 'onboarding');
@@ -268,9 +283,17 @@ export async function runVideoCreation(
   await fns.runFfmpeg(cmd, ffOpts);
   // persist final
   const finalBuffer = await fns.readFile(outPath);
-  const stored = await svc.storeOutput({ filename: 'video.mp4', mimetype: 'video/mp4', buffer: finalBuffer });
+  const stored = await svc.storeOutput({
+    filename: 'video.mp4',
+    mimetype: 'video/mp4',
+    buffer: finalBuffer,
+  });
   svc.logger.info(
-    { fileId: stored.fileId, segments: result.segments.length, totalDurationMs: result.timeline.totalDurationMs },
+    {
+      fileId: stored.fileId,
+      segments: result.segments.length,
+      totalDurationMs: result.timeline.totalDurationMs,
+    },
     'video: creation complete',
   );
   return {

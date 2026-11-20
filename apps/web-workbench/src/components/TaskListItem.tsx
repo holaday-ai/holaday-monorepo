@@ -1,13 +1,11 @@
-import { Check, MoreHorizontal } from 'lucide-react';
-import * as React from 'react';
+import { useToast } from '@/components/ui/toast';
 import { awaitingUserCopy } from '@/lib/awaiting-user-copy';
-import {
-  taskDisplaySource,
-  taskDisplayTitle,
-} from '@/lib/task-display-copy';
+import { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 import { deriveTaskProductState } from '@/lib/task-product-state';
 import { cn } from '@/lib/utils';
 import { type UiTask, isActive } from '@/types/task';
+import { Check, MoreHorizontal } from 'lucide-react';
+import * as React from 'react';
 
 export { taskDisplaySource, taskDisplayTitle } from '@/lib/task-display-copy';
 
@@ -36,7 +34,7 @@ interface Props {
   /**
    * Active / executing tasks can't be batch-deleted — backend will
    * reject. With this flag set, the row dims its checkbox and
-   * swallows clicks so users can't accumulate undeletable rows in
+   * explains blocked clicks so users can't accumulate undeletable rows in
    * the selection set and then hit a wall on confirm.
    */
   batchDisabled?: boolean;
@@ -49,9 +47,7 @@ type TaskLiveSubStatus =
   | 'verifying'
   | 'generating'
   | 'generating_image';
-type TaskLiveSubStatusEntry =
-  | TaskLiveSubStatus
-  | { subStatus: TaskLiveSubStatus; since: number };
+type TaskLiveSubStatusEntry = TaskLiveSubStatus | { subStatus: TaskLiveSubStatus; since: number };
 
 const LIVE_SUB_STATUS_LABELS: Record<TaskLiveSubStatus, string> = {
   planning: '正在规划任务',
@@ -93,17 +89,19 @@ export function TaskListItem({
   onBatchToggle,
   batchDisabled,
 }: Props): JSX.Element {
+  const toast = useToast();
+  const batchUnavailable = Boolean(batchMode && batchDisabled);
+  const batchDisabledReason = '进行中的任务不能批量操作';
   const active = isActive(task.status);
   const elapsedNow = useTaskListElapsedNow(active && Boolean(liveSubStatus));
-  const elapsedLabel = active
-    ? taskListElapsedLabel(liveSubStatus, elapsedNow)
-    : null;
-  const handleRowClick = (
-    e: React.MouseEvent | React.KeyboardEvent,
-  ): void => {
+  const elapsedLabel = active ? taskListElapsedLabel(liveSubStatus, elapsedNow) : null;
+  const handleRowClick = (e: React.MouseEvent | React.KeyboardEvent): void => {
     if (renaming) return;
     if (batchMode) {
-      if (batchDisabled) return;
+      if (batchDisabled) {
+        toast.show(batchDisabledReason, 'info');
+        return;
+      }
       onBatchToggle?.(task.taskId);
       return;
     }
@@ -113,13 +111,13 @@ export function TaskListItem({
   const rowTitle = renaming
     ? undefined
     : batchMode && batchDisabled
-      ? '进行中的任务无法批量删除'
+      ? batchDisabledReason
       : `${taskDisplaySource(task)}\n${taskListItemSubtitle(task, liveSubStatus, elapsedNow)}`;
   return (
     <div
-      onContextMenu={
-        onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined
-      }
+      data-task-status={task.status}
+      data-selected={selected && !batchMode}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(task.taskId, e) : undefined}
       /* BOSS bug fix — in batch mode the entire row is the click
          target (was: only the inner title button, leaving the
          leading checkbox `<span>` dead because it sits OUTSIDE
@@ -127,21 +125,21 @@ export function TaskListItem({
          stopPropagation so the toggle doesn't fire twice. */
       onClick={batchMode ? handleRowClick : undefined}
       role={batchMode ? 'button' : undefined}
+      aria-disabled={batchUnavailable || undefined}
       title={rowTitle}
       className={cn(
-        'group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
-        'hover:border-[#EA1F59]/14 hover:bg-[#EA1F59]/[0.035] dark:hover:border-[#EA1F59]/30 dark:hover:bg-[#EA1F59]/10',
-        selected && !batchMode && 'border-[#EA1F59]/22 bg-white/70 shadow-[0_8px_22px_rgba(234,31,89,0.06)] dark:bg-white/[0.05]',
+        'holaday-task-row group relative flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 py-0.5 text-left transition-colors',
+        'hover:border-[#FF0061]/14 hover:bg-[#FF0061]/[0.035] dark:hover:border-[#FF0061]/30 dark:hover:bg-[#FF0061]/10',
+        selected &&
+          !batchMode &&
+          'border-[#FF0061]/22 bg-white/70 shadow-[0_8px_22px_rgba(255,0,97,0.06)] dark:bg-white/[0.05]',
         batchMode && batchChecked && 'border-[#57479C]/22 bg-[#57479C]/10 dark:bg-[#57479C]/20',
-        batchMode && batchDisabled && 'opacity-50',
+        batchUnavailable && 'cursor-not-allowed opacity-50',
         batchMode && !batchDisabled && 'cursor-pointer',
       )}
     >
       {selected && !batchMode && (
-        <span
-          aria-hidden
-          className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#EA1F59]"
-        />
+        <span aria-hidden className="absolute inset-y-1.5 left-0 w-[2px] rounded-r bg-[#FF0061]" />
       )}
       {batchMode && (
         <span
@@ -177,10 +175,13 @@ export function TaskListItem({
             if (batchMode) e.stopPropagation();
           }}
           aria-pressed={selected && !batchMode ? true : undefined}
+          aria-disabled={batchUnavailable || undefined}
+          title={batchUnavailable ? batchDisabledReason : undefined}
           className={cn(
-            'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#EA1F59]/45',
+            'flex h-8 min-w-0 flex-1 items-center truncate bg-transparent text-left text-[13px] leading-5 outline-none focus-visible:ring-1 focus-visible:ring-[#FF0061]/45',
+            batchUnavailable && 'cursor-not-allowed',
             task.status === 'failed' ? 'text-[#ADADAD]' : 'text-[#595757] dark:text-foreground/85',
-            selected && 'font-medium text-[#EA1F59] dark:text-[#EA1F59]',
+            selected && 'font-medium text-[#FF0061] dark:text-[#FF0061]',
           )}
         >
           {taskDisplayTitle(task)}
@@ -196,22 +197,24 @@ export function TaskListItem({
               {elapsedLabel}
             </span>
           )}
-        <button
-          type="button"
-          aria-label="任务菜单"
-          title="更多"
-          onClick={(e) => {
-          e.stopPropagation();
-          onContextMenu(task.taskId, e);
-        }}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#EA1F59] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
+          <button
+            type="button"
+            aria-label="任务菜单"
+            title="更多"
+            onClick={(e) => {
+              e.stopPropagation();
+              onContextMenu(task.taskId, e);
+            }}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[#ADADAD] opacity-100 transition-opacity hover:bg-white hover:text-[#FF0061] focus-visible:opacity-100 dark:hover:bg-white/10 lg:opacity-0 lg:group-hover:opacity-100"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
         </>
       )}
       {active && !renaming && (
-        <span className="sr-only">进行中 · {taskListItemSubtitle(task, liveSubStatus, elapsedNow)}</span>
+        <span className="sr-only">
+          进行中 · {taskListItemSubtitle(task, liveSubStatus, elapsedNow)}
+        </span>
       )}
     </div>
   );
@@ -259,7 +262,7 @@ function RenameInput({
         }
       }}
       onBlur={() => onCommit(value)}
-      className="min-w-0 flex-1 rounded border border-[#EA1F59]/40 bg-white px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none dark:bg-card"
+      className="min-w-0 flex-1 rounded border border-[#FF0061]/40 bg-white px-1.5 py-0 text-[13px] leading-5 shadow-sm focus-visible:outline-none dark:bg-card"
     />
   );
 }
@@ -268,7 +271,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
+        'holaday-status-dot inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35',
         status === 'queued' && 'animate-pulse-dot bg-[#FFC910]',
         status === 'executing' && 'animate-pulse-dot bg-[#42C0EF]',
         // Awaiting-user + failed stand out — these are the rows the
@@ -281,7 +284,7 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
         // Codex Pack A4 — partial_success uses the brand yellow to
         // signal "look again" without reading as destructive.
         status === 'partial_success' && 'h-2 w-2 bg-[#FFC910]',
-        status === 'failed' && 'h-2 w-2 bg-[#EA1F59]',
+        status === 'failed' && 'h-2 w-2 bg-[#FF0061]',
         status === 'cancelled' && 'bg-muted-foreground/25',
       )}
       aria-hidden
@@ -290,7 +293,10 @@ function StatusDot({ status }: { status: UiTask['status'] }): JSX.Element {
 }
 
 export function taskListItemSubtitle(
-  task: Pick<UiTask, 'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource'>,
+  task: Pick<
+    UiTask,
+    'awaitingKind' | 'queuePosition' | 'status' | 'tickCount' | 'browserSource' | 'resultText'
+  >,
   liveSubStatus?: TaskLiveSubStatusEntry | null,
   now = Date.now(),
 ): string {
@@ -315,16 +321,18 @@ export function taskListItemSubtitle(
           ? `${LIVE_SUB_STATUS_LABELS[subStatus]} · 已运行 ${elapsed}`
           : LIVE_SUB_STATUS_LABELS[subStatus];
       }
-      return task.tickCount === 0 ? '正在启动…' : task.browserSource === 'local-chrome'
-        ? `执行中 · ${recordCount}` : `执行中 · 第 ${task.tickCount} 步`;
+      return task.tickCount === 0
+        ? '正在启动…'
+        : task.browserSource === 'local-chrome'
+          ? `执行中 · ${recordCount}`
+          : `执行中 · 第 ${task.tickCount} 步`;
     case 'waiting_user':
       // F3 — explicit awaiting-user copy. Previously this fell through
       // to the default branch and rendered `undefined` in the row's
       // tooltip / aria-label, both visually wrong and a screen-reader
       // hole.
       return awaitingUserCopy(
-        productState.blocker === 'max_steps' ||
-          productState.blocker === 'retries_exhausted'
+        productState.blocker === 'max_steps' || productState.blocker === 'retries_exhausted'
           ? undefined
           : productState.blocker,
       ).toolbarLabel;
@@ -334,10 +342,11 @@ export function taskListItemSubtitle(
       switch (productState.outcome) {
         case 'completed':
           return task.tickCount === 0 ? '已完成' : `已完成 · ${recordCount}`;
-        case 'partial_success':
-          return task.tickCount === 0
-            ? '需复核'
-            : `需复核 · ${recordCount}`;
+        case 'partial_success': {
+          // BROWSER-AUTOPILOT-3: fewer items than asked for reads 部分完成.
+          const label = task.resultText?.startsWith('部分完成') ? '部分完成' : '需复核';
+          return task.tickCount === 0 ? label : `${label} · ${recordCount}`;
+        }
         case 'failed':
           return task.tickCount === 0 ? '失败' : `失败 · ${recordCount}`;
         case 'cancelled':

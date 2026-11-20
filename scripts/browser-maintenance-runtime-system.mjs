@@ -18,9 +18,9 @@ export async function captureMaintenanceProcesses({ identity, root, rows, proces
     const observed = processes.filter((p) => p?.command === command);
     if (optional && matches.length === 0 && observed.length === 0) return null;
     if (matches.length !== 1 || observed.length !== 1) fail();
-    const row = matches[0],
-      p = observed[0],
-      env = row.pm2_env;
+    const row = matches[0];
+    const p = observed[0];
+    const env = row.pm2_env;
     if (
       !env ||
       env.status !== 'online' ||

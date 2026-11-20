@@ -249,8 +249,7 @@ describe('extractEcommerceProductLinks', () => {
           title: 'JD search',
           url: 'https://search.jd.com/Search?keyword=iPhone16',
           markdown:
-            '[iPhone 16](https://item.jd.com/100123.html) ' +
-            'https://item.jd.com/100456.html。',
+            '[iPhone 16](https://item.jd.com/100123.html) ' + 'https://item.jd.com/100456.html。',
         },
         {
           title: 'iPhone 16 Plus',

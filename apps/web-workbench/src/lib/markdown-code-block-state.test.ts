@@ -36,9 +36,9 @@ describe('markdown code block state', () => {
       codeLike: true,
       variant: 'diagram',
     });
-    expect(markdownCodeBlockMeta(undefined, '访客流量\n    ↓\n价值传递\n    ↓\n转化用户').label).toBe(
-      '图示',
-    );
+    expect(
+      markdownCodeBlockMeta(undefined, '访客流量\n    ↓\n价值传递\n    ↓\n转化用户').label,
+    ).toBe('图示');
   });
 
   it('treats explicit diagram languages as diagrams instead of code', () => {

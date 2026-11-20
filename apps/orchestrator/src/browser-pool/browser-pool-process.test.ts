@@ -183,7 +183,7 @@ it('adoption preserves the private process identity despite mutable public PIDs'
   const f = fixture();
   const instance = await f.allocation.result;
   expect(f.pool.retain('task', 10000)).toBe(true);
-  expect(f.pool.adoptRetained('task', 'followup', 'synthetic')).toBe(instance);
+  expect(f.pool.adoptRetained('task', 'followup', 'synthetic', 'anonymous')).toBe(instance);
   instance.bravePid = 123;
   const stopping = observe(f.pool.release('followup'));
   await flush();
@@ -195,14 +195,14 @@ it('adoption preserves the private process identity despite mutable public PIDs'
   instance.status = 'ready';
   await expect(f.pool.allocate('followup', 'synthetic')).rejects.toThrow();
   expect(f.pool.retain('followup', 10000)).toBe(false);
-  expect(f.pool.adoptRetained('followup', 'third', 'synthetic')).toBeNull();
+  expect(f.pool.adoptRetained('followup', 'third', 'synthetic', 'anonymous')).toBeNull();
 });
 
 it('retained adoption cannot allow a new allocation to overwrite the original profile', async () => {
   const f = fixture(false, 2);
   const instance = await f.allocation.result;
   expect(f.pool.retain('task', 10000)).toBe(true);
-  expect(f.pool.adoptRetained('task', 'followup', 'synthetic')).toBe(instance);
+  expect(f.pool.adoptRetained('task', 'followup', 'synthetic', 'anonymous')).toBe(instance);
   await expect(f.pool.allocate('task', 'synthetic')).rejects.toThrow(
     'POOL_PROCESS_CLEANUP_PENDING',
   );
@@ -319,7 +319,7 @@ it('native child death after adoption reaps the bound record under its current t
   const f = fixture();
   const instance = await f.allocation.result;
   f.pool.retain('task', 10000);
-  f.pool.adoptRetained('task', 'followup', 'synthetic');
+  f.pool.adoptRetained('task', 'followup', 'synthetic', 'anonymous');
   processAt(0).emit('exit', 1, null);
   await flush();
   expect(instance.status).toBe('draining');

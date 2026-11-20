@@ -10,8 +10,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DB } from '../db/client.js';
 import {
-  browsingHistorySchema,
   MAX_HOSTS_PER_SYNC,
+  browsingHistorySchema,
   normaliseDomain,
   replaceUserSiteStats,
 } from './service.js';

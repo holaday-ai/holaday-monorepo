@@ -1,5 +1,5 @@
 import { getTableColumns } from 'drizzle-orm';
-import { getTableConfig, type MySqlTable } from 'drizzle-orm/mysql-core';
+import { type MySqlTable, getTableConfig } from 'drizzle-orm/mysql-core';
 import { describe, expect, it } from 'vitest';
 import * as schema from './index.js';
 import { organizationInvitations } from './organization-invitations.js';
@@ -93,7 +93,9 @@ describe('team project workspace schema', () => {
         'ix_organization_members_manager_status',
       ]),
     );
-    expect(getTableConfig(organizationInvitations).indexes.map((index) => index.config.name)).toEqual(
+    expect(
+      getTableConfig(organizationInvitations).indexes.map((index) => index.config.name),
+    ).toEqual(
       expect.arrayContaining([
         'uk_organization_invitations_external_id',
         'uk_organization_invitations_token_hash',
@@ -109,8 +111,12 @@ describe('team project workspace schema', () => {
       ]),
     );
     expect(indexConfig(organizations, 'uk_organizations_external_id')?.unique).toBe(true);
-    expect(indexConfig(organizationMembers, 'uk_organization_members_organization_user')?.unique).toBe(true);
-    expect(indexConfig(organizationInvitations, 'uk_organization_invitations_token_hash')?.unique).toBe(true);
+    expect(
+      indexConfig(organizationMembers, 'uk_organization_members_organization_user')?.unique,
+    ).toBe(true);
+    expect(
+      indexConfig(organizationInvitations, 'uk_organization_invitations_token_hash')?.unique,
+    ).toBe(true);
     expect(indexConfig(projectMembers, 'uk_project_members_project_user')?.unique).toBe(true);
     expect(indexConfig(projects, 'ix_projects_organization_id')).toBeDefined();
 

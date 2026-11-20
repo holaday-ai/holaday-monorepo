@@ -1,28 +1,14 @@
-/**
- * Phase 17 — extension cookie sync.
- *
- * Reads chrome.cookies for a curated list of high-frequency sites
- * the agent commonly drives, then POSTs the values to
- * `${ORCHESTRATOR_HTTP}/cookies/sync`. The orchestrator either
- * injects them into the user's live Brave instance immediately or
- * parks them in `pending_cookies` for the next allocate.
- *
- * Sister module of `cookie-bridge.ts`: that one ships a domain →
- * boolean login-state map (no values) so the orchestrator's
- * playbook router can hint "user has Chrome login for X". This
- * module ships the actual cookie VALUES so the user's logged-in
- * sessions transfer to the agent's browser.
+/** Retired legacy cookie transport helpers. runCookieSync is a no-op.
+ * New runtime imports use one-use selected-site grants in session-import.ts.
+ * These helpers remain only for compatibility validation; the server rejects ingress.
  */
 
-import { getAccessToken } from '../shared/storage.js';
 import { LOCAL_CHROME_QA, ORCHESTRATOR_HTTP } from '../shared/config.js';
 import { withDeadline } from '../shared/deadline.js';
-import {
-  fetchWithDeadline,
-  responseJsonWithDeadline,
-} from '../shared/http.js';
+import { fetchWithDeadline, responseJsonWithDeadline } from '../shared/http.js';
 import { compactLogErrorReason } from '../shared/log-error.js';
 import { isPublicDomain, normalizePublicDomain } from '../shared/public-domain.js';
+import { getAccessToken } from '../shared/storage.js';
 
 /**
  * Curated list of domains we care about. Leading dot matches both
@@ -137,10 +123,7 @@ async function readCookiesForDomain(domain: string): Promise<chrome.cookies.Cook
       `cookie_domain_timeout:${domain}`,
     );
   } catch (err) {
-    console.warn(
-      `[holaday] cookie-sync: getAll failed for ${domain}`,
-      compactLogErrorReason(err),
-    );
+    console.warn(`[holaday] cookie-sync: getAll failed for ${domain}`, compactLogErrorReason(err));
     return [];
   }
 }
@@ -190,13 +173,9 @@ export async function syncCookiesToServer(
   return normalized;
 }
 
-/**
- * One-shot collect + ship. Returns the server response (or null when
- * no token). Caller swallows errors — sync is best-effort.
- */
+/** Retired: site consent is required even when the new feature is disabled. */
 export async function runCookieSync(): Promise<SyncResponse | null> {
-  const cookies = await collectCookies();
-  return syncCookiesToServer(cookies);
+  return null;
 }
 
 function normalizeSyncResponse(raw: unknown): SyncResponse | null {
@@ -217,9 +196,7 @@ function normalizeSyncResponse(raw: unknown): SyncResponse | null {
   const domains = Array.isArray(value.domains)
     ? value.domains
         .filter((domain): domain is string => typeof domain === 'string')
-        .map((domain) =>
-          normalizePublicDomain(domain.slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS)),
-        )
+        .map((domain) => normalizePublicDomain(domain.slice(0, MAX_SYNC_RESPONSE_DOMAIN_CHARS)))
         .filter(isPublicDomain)
         .slice(0, MAX_SYNC_RESPONSE_DOMAINS)
     : [];

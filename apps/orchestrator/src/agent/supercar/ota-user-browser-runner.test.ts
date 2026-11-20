@@ -1,11 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
-import { runOtaUserBrowserReadonly, type ExtensionNavigateResult } from './ota-user-browser-runner.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  type ExtensionNavigateResult,
+  runOtaUserBrowserReadonly,
+} from './ota-user-browser-runner.js';
 
 const silentLogger = { info: () => {}, warn: () => {} };
 const NOW = new Date('2026-08-10T00:00:00Z');
 
-function makeClient(textReplies: string[]): { client: Anthropic; create: ReturnType<typeof vi.fn> } {
+function makeClient(textReplies: string[]): {
+  client: Anthropic;
+  create: ReturnType<typeof vi.fn>;
+} {
   let i = 0;
   const create = vi.fn(async () => ({ content: [{ type: 'text', text: textReplies[i++] ?? '' }] }));
   return { client: { messages: { create } } as unknown as Anthropic, create };
@@ -14,11 +20,13 @@ function navOk(result: ExtensionNavigateResult) {
   return vi.fn(async () => ({ ok: true, result }));
 }
 
-
 describe('runOtaUserBrowserReadonly — Step 7 subtype gate (hotels only)', () => {
   it('REJECTS a flight intent (no navigate) — flights belong on server Brave', async () => {
     const { client } = makeClient(['https://flights.ctrip.com/online/list/oneway-bjs-sha']);
-    const dispatchNavigate = vi.fn(async () => ({ ok: true, result: { finalUrl: '', title: '', bodyText: '' } }));
+    const dispatchNavigate = vi.fn(async () => ({
+      ok: true,
+      result: { finalUrl: '', title: '', bodyText: '' },
+    }));
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_flt',
       intent: '打开携程查北京到上海的机票，不要下单，筛选直飞给最便宜的3个',
@@ -32,7 +40,10 @@ describe('runOtaUserBrowserReadonly — Step 7 subtype gate (hotels only)', () =
 
   it('REJECTS a train intent (no navigate)', async () => {
     const { client } = makeClient([]);
-    const dispatchNavigate = vi.fn(async () => ({ ok: true, result: { finalUrl: '', title: '', bodyText: '' } }));
+    const dispatchNavigate = vi.fn(async () => ({
+      ok: true,
+      result: { finalUrl: '', title: '', bodyText: '' },
+    }));
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_trn',
       intent: '携程查上海到北京的高铁车次',
@@ -53,9 +64,27 @@ const SH_PROMO_BODY = [
   '上海虹桥全季酒店 经济型 4.5分 虹桥火车站 比收藏时降价 ¥420 起',
 ].join('\n');
 const GOOD_JSON = JSON.stringify([
-  { hotelName: '上海五角场希尔顿花园酒店', rating: '4.7', price: 587, location: '复旦大学', starOrTier: '高档型' },
-  { hotelName: '上海外滩亚朵酒店', rating: '4.7', price: 678, location: '南京路步行街', starOrTier: '舒适型' },
-  { hotelName: '上海虹桥全季酒店', rating: '4.5', price: 420, location: '虹桥火车站', starOrTier: '经济型' },
+  {
+    hotelName: '上海五角场希尔顿花园酒店',
+    rating: '4.7',
+    price: 587,
+    location: '复旦大学',
+    starOrTier: '高档型',
+  },
+  {
+    hotelName: '上海外滩亚朵酒店',
+    rating: '4.7',
+    price: 678,
+    location: '南京路步行街',
+    starOrTier: '舒适型',
+  },
+  {
+    hotelName: '上海虹桥全季酒店',
+    rating: '4.5',
+    price: 420,
+    location: '虹桥火车站',
+    starOrTier: '经济型',
+  },
 ]);
 
 describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator)', () => {
@@ -64,7 +93,16 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_h',
       intent: '打开携程查上海酒店，不要下单。筛选 4 星级、价格 800 元以内，给 5 个选项',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: SH_PROMO_BODY }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: SH_PROMO_BODY,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('completed');
@@ -88,7 +126,16 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_junk',
       intent: '打开携程查上海酒店，价格 800 元以内，给 5 个',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: SH_PROMO_BODY }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: SH_PROMO_BODY,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('failed');
@@ -107,7 +154,16 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_mix',
       intent: '打开携程查上海酒店，价格 800 元以内，给 5 个',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: SH_PROMO_BODY }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: SH_PROMO_BODY,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('completed');
@@ -118,12 +174,22 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
   });
 
   it('0 valid + deterministic lowest over cap → honest lowest-price failure', async () => {
-    const expensiveBody = '上海王府酒店 豪华型 4.8分 静安商圈 ¥1,500 起\n上海国贸酒店 豪华型 4.7分 陆家嘴商圈 ¥1,800 起';
+    const expensiveBody =
+      '上海王府酒店 豪华型 4.8分 静安商圈 ¥1,500 起\n上海国贸酒店 豪华型 4.7分 陆家嘴商圈 ¥1,800 起';
     const { client } = makeClient(['[]']); // model finds no real hotel
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_cap',
       intent: '打开携程查上海酒店，价格 800 元以内，给 5 个',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: expensiveBody }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: expensiveBody,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('failed');
@@ -132,7 +198,11 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
 
   it('STALE TAB: Beijing query reading a Shanghai page → fails before any model call', async () => {
     const { client, create } = makeClient([GOOD_JSON]);
-    const dispatchNavigate = navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=1', title: '酒店', bodyText: SH_PROMO_BODY });
+    const dispatchNavigate = navOk({
+      finalUrl: 'https://hotels.ctrip.com/hotels/list?city=1',
+      title: '酒店',
+      bodyText: SH_PROMO_BODY,
+    });
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_stale',
       intent: '打开携程查北京酒店，价格 800 元以内，给 5 个',
@@ -147,7 +217,10 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
 
   it('大阪 (unknown schema) → fails, never navigates', async () => {
     const { client } = makeClient([]);
-    const dispatchNavigate = vi.fn(async () => ({ ok: true, result: { finalUrl: '', title: '', bodyText: '' } }));
+    const dispatchNavigate = vi.fn(async () => ({
+      ok: true,
+      result: { finalUrl: '', title: '', bodyText: '' },
+    }));
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_osaka',
       intent: '打开携程查大阪酒店，给 5 个',
@@ -164,7 +237,16 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_hlogin',
       intent: '打开携程查上海酒店，给 5 个',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '登录', bodyText: '请登录后查看' }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '登录',
+          bodyText: '请登录后查看',
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('awaiting_user');
@@ -177,7 +259,17 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_tools',
       intent: '打开携程查上海酒店，价格 800 元以内，给 5 个',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2', title: '酒店', bodyText: SH_PROMO_BODY }), dispatchScreenshot, audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: SH_PROMO_BODY,
+        }),
+        dispatchScreenshot,
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('completed');
@@ -202,7 +294,16 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     const out = await runOtaUserBrowserReadonly({
       taskId: 'tsk_gz800',
       intent: '我想在广州住一晚，帮我看看携程上 800 以内有哪些靠谱酒店，不要预订。',
-      deps: { client, dispatchNavigate: navOk({ finalUrl: 'https://hotels.ctrip.com/hotels/list?city=32', title: '酒店', bodyText: GZ_BODY }), audit: () => {}, logger: silentLogger },
+      deps: {
+        client,
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=32',
+          title: '酒店',
+          bodyText: GZ_BODY,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
       now: NOW,
     });
     expect(out.status).toBe('completed');
@@ -210,5 +311,49 @@ describe('runOtaUserBrowserReadonly — hotels (Step 9 model-primary + validator
     expect(out.summary).toContain('广州德安丽舍凯宾斯基酒店');
     expect(out.summary).not.toContain('广州花园酒店'); // ¥838 > 800 → dropped
     expect(out.summary).not.toContain('圣丰索菲特'); // ¥892 > 800 → dropped
+  });
+});
+
+describe('runOtaUserBrowserReadonly — model-catalog adapter (batch 04)', () => {
+  it('extracts hotels through the selected brain instead of a raw Anthropic client', async () => {
+    const create = vi.fn(async (_request: unknown, _options?: unknown) => ({
+      id: 'r1',
+      metadata: {
+        provider: 'alibaba-model-studio' as const,
+        model: 'qwen3.8-max',
+        region: 'cn' as const,
+        deploymentScope: 'china_mainland' as const,
+        endpointKind: 'public' as const,
+        protocol: 'messages' as const,
+      },
+      content: [{ type: 'text' as const, text: GOOD_JSON }],
+      stopReason: 'end_turn' as const,
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: null,
+        cacheCreationInputTokens: null,
+        complete: true,
+      },
+    }));
+    const out = await runOtaUserBrowserReadonly({
+      taskId: 'tsk_adapter',
+      intent: '打开携程查上海酒店，不要下单。筛选 4 星级、价格 800 元以内，给 5 个选项',
+      deps: {
+        messagesAdapter: { metadata: { provider: 'anthropic', model: 'unused' }, create },
+        dispatchNavigate: navOk({
+          finalUrl: 'https://hotels.ctrip.com/hotels/list?city=2',
+          title: '酒店',
+          bodyText: SH_PROMO_BODY,
+        }),
+        audit: () => {},
+        logger: silentLogger,
+      },
+      now: NOW,
+    });
+    expect(out.status).toBe('completed');
+    expect(out.summary).toContain('希尔顿花园');
+    expect(create).toHaveBeenCalled();
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ maxRetries: 2 });
   });
 });

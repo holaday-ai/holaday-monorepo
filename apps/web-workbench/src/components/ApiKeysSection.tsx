@@ -1,21 +1,21 @@
-import { AlertCircle, Copy, Eye, EyeOff, Key, Plus, Trash2 } from 'lucide-react';
-import * as React from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import {
+  type ApiKeyRowView,
+  type FreshApiKeyView,
   apiKeySettingsActionError,
   apiKeySettingsErrorMessage,
   apiKeySettingsLoadErrorCopy,
   normalizeApiKeyRows,
   normalizeFreshApiKey,
-  type ApiKeyRowView,
-  type FreshApiKeyView,
 } from '@/lib/api-key-settings-state';
 import { copyTextToClipboard } from '@/lib/copy-text';
 import { trpc } from '@/lib/trpc';
 import { webhookCurlExample } from '@/lib/webhook-docs-copy';
 import { Section } from '@/pages/PageShell';
+import { AlertCircle, Copy, Eye, EyeOff, Key, Plus, Trash2 } from 'lucide-react';
+import * as React from 'react';
 
 /**
  * Phase 5d — API keys management section on the settings page.
@@ -49,24 +49,24 @@ export function ApiKeysSection(): JSX.Element {
   // ConfirmDialog so the user can verify what they're killing.
   const [pendingRevoke, setPendingRevoke] = React.useState<ApiKeyRowView | null>(null);
 
-  const reload = React.useCallback(async (options: { silent?: boolean } = {}): Promise<void> => {
-    const requestId = ++requestIdRef.current;
-    try {
-      const list = await trpc.apiKeys.list.query();
-      if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setRows(normalizeApiKeyRows(list));
-      setLoadError(null);
-    } catch (err) {
-      if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      const message = apiKeySettingsErrorMessage(
-        err,
-        'API Key 暂时无法加载，请稍后重试。',
-      );
-      setLoadError(message);
-      if (!options.silent) toast.show('API Key 暂时无法加载', 'error');
-      setRows((current) => current ?? []);
-    }
-  }, [toast]);
+  const reload = React.useCallback(
+    async (options: { silent?: boolean } = {}): Promise<void> => {
+      const requestId = ++requestIdRef.current;
+      try {
+        const list = await trpc.apiKeys.list.query();
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
+        setRows(normalizeApiKeyRows(list));
+        setLoadError(null);
+      } catch (err) {
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
+        const message = apiKeySettingsErrorMessage(err, 'API Key 暂时无法加载，请稍后重试。');
+        setLoadError(message);
+        if (!options.silent) toast.show('API Key 暂时无法加载', 'error');
+        setRows((current) => current ?? []);
+      }
+    },
+    [toast],
+  );
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -310,9 +310,7 @@ function ApiKeyLoadError({
     <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
       <AlertCircle className="h-6 w-6 text-primary" aria-hidden />
       <div className="text-sm font-medium text-foreground/85">{copy.title}</div>
-      <div className="max-w-md text-xs leading-5 text-muted-foreground">
-        {copy.body}
-      </div>
+      <div className="max-w-md text-xs leading-5 text-muted-foreground">{copy.body}</div>
       <Button type="button" size="sm" className="mt-1" onClick={onRetry}>
         重试
       </Button>
@@ -379,19 +377,22 @@ function WebhookDocs(): JSX.Element {
         </summary>
         <ol className="mt-2 list-decimal space-y-1 pl-4">
           <li>新建 Zap，选触发器（Email / Slack / RSS / 任意）</li>
-          <li>添加动作：搜索 <span className="font-mono">Webhooks by Zapier</span>，选择 POST</li>
+          <li>
+            添加动作：搜索 <span className="font-mono">Webhooks by Zapier</span>，选择 POST
+          </li>
           <li>通知地址填上方 Webhook 地址；请求方式选 POST；关闭 Data Pass-Through</li>
           <li>
             请求头加两条：
             <div className="mt-1 rounded bg-background p-2 font-mono">
-              Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx<br />
+              Authorization: Bearer hd_live_xxxxxxxxxxxxxxxxxxxxxxxx
+              <br />
               Idempotency-Key: &#123;&#123;zap_meta_id&#125;&#125;
             </div>
             <p className="mt-1 leading-relaxed">
               <span className="font-medium text-foreground/80">用稳定标识</span>：
-              <span className="font-mono">zap_meta_id</span>{' '}
-              是 Zapier 自动重试同一动作时保持不变的标识；也可用触发数据自身的稳定字段（邮件
-              Message-ID、RSS GUID、Slack message ts 等）。
+              <span className="font-mono">zap_meta_id</span> 是 Zapier
+              自动重试同一动作时保持不变的标识；也可用触发数据自身的稳定字段（邮件 Message-ID、RSS
+              GUID、Slack message ts 等）。
               <span className="font-medium text-foreground/80">避免</span>使用时间戳变量（如
               <span className="font-mono"> zap_meta_human_now</span>）—— 重试时时间会变，
               会被当成新标识重复建任务。
@@ -424,8 +425,9 @@ function WebhookDocs(): JSX.Element {
           {curlExample}
         </pre>
         <p className="mt-2">
-          带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24 小时内会复用同一个任务；
-          如果同一个 key 对应了不同内容，HOLA DAY 会返回冲突提示，避免重复创建。
+          带 <span className="font-mono">Idempotency-Key</span> 的重复请求 24
+          小时内会复用同一个任务； 如果同一个 key 对应了不同内容，HOLA DAY
+          会返回冲突提示，避免重复创建。
         </p>
       </div>
     </div>
@@ -442,9 +444,7 @@ function ApiKeyRow({
   muted?: boolean;
 }): JSX.Element {
   return (
-    <li
-      className={`flex items-start gap-3 px-4 py-3 ${muted ? 'opacity-60' : ''}`}
-    >
+    <li className={`flex items-start gap-3 px-4 py-3 ${muted ? 'opacity-60' : ''}`}>
       <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
         <Key className="h-3.5 w-3.5" />
       </div>
@@ -454,9 +454,7 @@ function ApiKeyRow({
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
           <span className="font-mono">{row.keyPrefix}…</span>
-          <span>
-            上次使用 {row.lastUsedAt ? fmtDate(row.lastUsedAt) : '从未'}
-          </span>
+          <span>上次使用 {row.lastUsedAt ? fmtDate(row.lastUsedAt) : '从未'}</span>
           <span>创建 {fmtDate(row.createdAt)}</span>
           {row.expiresAt && <span>过期 {fmtDate(row.expiresAt)}</span>}
           {row.revokedAt && <span>已撤销 {fmtDate(row.revokedAt)}</span>}

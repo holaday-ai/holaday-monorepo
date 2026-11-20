@@ -5,10 +5,7 @@ export interface ParsedBatchPrompts {
   overLimit: boolean;
 }
 
-export function parseBatchPrompts(
-  text: string,
-  maxItems: number,
-): ParsedBatchPrompts {
+export function parseBatchPrompts(text: string, maxItems: number): ParsedBatchPrompts {
   return parseBatchPromptItems(text.split('\n'), maxItems);
 }
 

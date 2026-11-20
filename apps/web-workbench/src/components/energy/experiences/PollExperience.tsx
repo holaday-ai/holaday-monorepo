@@ -21,7 +21,8 @@ export function PollExperience({
 }: PollExperienceProps): JSX.Element {
   const poll = pollById(initialPollId);
   const [selectedId, setSelectedId] = React.useState<string | null>(
-    () => readEnergyProgress(profileStorageScope).continuation.pollSelections[initialPollId] ?? null,
+    () =>
+      readEnergyProgress(profileStorageScope).continuation.pollSelections[initialPollId] ?? null,
   );
   const [showResult, setShowResult] = React.useState(false);
   const resultRef = React.useRef<HTMLHeadingElement>(null);

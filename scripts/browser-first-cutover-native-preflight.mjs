@@ -6,9 +6,9 @@ import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
 import {
+  readFirstCutoverCloudManagers,
   readFirstCutoverCloudRecoveryContext,
   readFirstCutoverCloudRecoverySources,
-  readFirstCutoverCloudManagers,
 } from './browser-first-cutover-runtime.mjs';
 
 const fail = () => {

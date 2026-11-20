@@ -3,24 +3,17 @@ import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows, readInsertId } from '../db/mysql-result.js';
-import {
-  plannedTaskItems,
-  plannedTaskRuns,
-  plannedTasks,
-} from '../db/schema/planned-tasks.js';
+import { plannedTaskItems, plannedTaskRuns, plannedTasks } from '../db/schema/planned-tasks.js';
 import { stockRiskMonitors } from '../db/schema/stock-risk-monitors.js';
-import type {
-  StockTaskContextInput,
-  ValidatedStockTaskContext,
-} from './stock-task-context.js';
-import type { StockRiskRadarResult } from './stock-risk-radar-service.js';
 import {
+  type CanonicalStockRiskMonitorSignal,
   STOCK_RISK_CHECK_KEYS,
+  type StockRiskMonitorRunResultV1,
   canonicalStockRiskMonitorSignals,
   nextShanghaiPostmarketRun,
-  type CanonicalStockRiskMonitorSignal,
-  type StockRiskMonitorRunResultV1,
 } from './stock-risk-monitor-state.js';
+import type { StockRiskRadarResult } from './stock-risk-radar-service.js';
+import type { StockTaskContextInput, ValidatedStockTaskContext } from './stock-task-context.js';
 
 export interface StockRiskMonitorView {
   monitorId: string;
@@ -88,11 +81,13 @@ function stockIdentity(context: ValidatedStockTaskContext, symbol: string) {
   };
 }
 
-export async function createStockRiskMonitor(args: StockRiskMonitorServiceDeps & {
-  input: CreateStockRiskMonitorInput;
-  loadRadar(context: ValidatedStockTaskContext): Promise<StockRiskRadarResult>;
-  now?: Date;
-}): Promise<{ created: boolean; monitor: StockRiskMonitorView }> {
+export async function createStockRiskMonitor(
+  args: StockRiskMonitorServiceDeps & {
+    input: CreateStockRiskMonitorInput;
+    loadRadar(context: ValidatedStockTaskContext): Promise<StockRiskRadarResult>;
+    now?: Date;
+  },
+): Promise<{ created: boolean; monitor: StockRiskMonitorView }> {
   if (args.input.trustMode !== 'current') {
     throw new TRPCError({
       code: 'BAD_REQUEST',
@@ -110,8 +105,10 @@ export async function createStockRiskMonitor(args: StockRiskMonitorServiceDeps &
     radar.signals.filter((signal) => signal.symbol === identity.symbol),
   );
   const baselineUnavailableChecks = STOCK_RISK_CHECK_KEYS.filter((key) =>
-    radar.checks.some((check) =>
-      check.symbol === identity.symbol && check.key === key && check.status === 'unavailable'),
+    radar.checks.some(
+      (check) =>
+        check.symbol === identity.symbol && check.key === key && check.status === 'unavailable',
+    ),
   );
   return args.repository.createOrGet({
     userId: args.userId,
@@ -123,9 +120,11 @@ export async function createStockRiskMonitor(args: StockRiskMonitorServiceDeps &
   });
 }
 
-export async function listStockRiskMonitors(args: StockRiskMonitorServiceDeps & {
-  input: StockRiskMonitorContextInput;
-}): Promise<StockRiskMonitorView[]> {
+export async function listStockRiskMonitors(
+  args: StockRiskMonitorServiceDeps & {
+    input: StockRiskMonitorContextInput;
+  },
+): Promise<StockRiskMonitorView[]> {
   const context = await args.validateContext({
     userId: args.userId,
     input: { ...args.input, evidenceIds: [] },
@@ -145,7 +144,11 @@ function resultView(value: unknown): Pick<StockRiskMonitorView, 'lastOutcome' | 
   if (!value || typeof value !== 'object') return { lastOutcome: null, lastSummary: null };
   const row = value as Partial<StockRiskMonitorRunResultV1>;
   const outcomes = new Set(['changed', 'unavailable', 'unchanged', 'skipped', 'failed']);
-  if (row.kind !== 'stock-risk-monitor' || row.version !== 1 || !outcomes.has(String(row.outcome))) {
+  if (
+    row.kind !== 'stock-risk-monitor' ||
+    row.version !== 1 ||
+    !outcomes.has(String(row.outcome))
+  ) {
     return { lastOutcome: null, lastSummary: null };
   }
   return {
@@ -173,11 +176,13 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
       })
       .from(stockRiskMonitors)
       .innerJoin(plannedTasks, eq(plannedTasks.id, stockRiskMonitors.plannedTaskId))
-      .where(and(
-        eq(stockRiskMonitors.userId, userId),
-        inArray(stockRiskMonitors.symbol, [...symbols]),
-        ne(plannedTasks.status, 'archived'),
-      ));
+      .where(
+        and(
+          eq(stockRiskMonitors.userId, userId),
+          inArray(stockRiskMonitors.symbol, [...symbols]),
+          ne(plannedTasks.status, 'archived'),
+        ),
+      );
     if (rows.length === 0) return [];
     const runs = await db
       .select({
@@ -185,7 +190,12 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
         resultJson: plannedTaskRuns.resultJson,
       })
       .from(plannedTaskRuns)
-      .where(inArray(plannedTaskRuns.plannedTaskId, rows.map((row) => row.plannedTaskInternalId)))
+      .where(
+        inArray(
+          plannedTaskRuns.plannedTaskId,
+          rows.map((row) => row.plannedTaskInternalId),
+        ),
+      )
       .orderBy(desc(plannedTaskRuns.createdAt));
     const latestResult = new Map<number, unknown>();
     for (const run of runs) {
@@ -195,11 +205,12 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
       const latest = row.lastRunAt
         ? resultView(latestResult.get(row.plannedTaskInternalId))
         : { lastOutcome: null, lastSummary: null };
-      const status: StockRiskMonitorView['status'] = row.planStatus === 'paused'
-        ? 'paused'
-        : row.lastRunStatus === 'failed' || latest.lastOutcome === 'failed'
-          ? 'failed'
-          : 'active';
+      const status: StockRiskMonitorView['status'] =
+        row.planStatus === 'paused'
+          ? 'paused'
+          : row.lastRunStatus === 'failed' || latest.lastOutcome === 'failed'
+            ? 'failed'
+            : 'active';
       return {
         monitorId: row.monitorId,
         plannedTaskId: row.plannedTaskId,
@@ -216,7 +227,10 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
     return (await listByUserSymbols(userId, [symbol]))[0] ?? null;
   }
 
-  async function findArchived(userId: number, symbol: string): Promise<{
+  async function findArchived(
+    userId: number,
+    symbol: string,
+  ): Promise<{
     monitorInternalId: number;
     plannedTaskInternalId: number;
   } | null> {
@@ -227,11 +241,13 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
       })
       .from(stockRiskMonitors)
       .innerJoin(plannedTasks, eq(plannedTasks.id, stockRiskMonitors.plannedTaskId))
-      .where(and(
-        eq(stockRiskMonitors.userId, userId),
-        eq(stockRiskMonitors.symbol, symbol),
-        eq(plannedTasks.status, 'archived'),
-      ));
+      .where(
+        and(
+          eq(stockRiskMonitors.userId, userId),
+          eq(stockRiskMonitors.symbol, symbol),
+          eq(plannedTasks.status, 'archived'),
+        ),
+      );
     return row ?? null;
   }
 
@@ -247,10 +263,12 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
           const [lockedPlan] = await tx
             .select({ id: plannedTasks.id, status: plannedTasks.status })
             .from(plannedTasks)
-            .where(and(
-              eq(plannedTasks.id, archived.plannedTaskInternalId),
-              eq(plannedTasks.status, 'archived'),
-            ))
+            .where(
+              and(
+                eq(plannedTasks.id, archived.plannedTaskInternalId),
+                eq(plannedTasks.status, 'archived'),
+              ),
+            )
             .limit(1)
             .for('update');
           if (!lockedPlan) return false;
@@ -258,12 +276,14 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
           const [lockedMonitor] = await tx
             .select({ id: stockRiskMonitors.id, plannedTaskId: stockRiskMonitors.plannedTaskId })
             .from(stockRiskMonitors)
-            .where(and(
-              eq(stockRiskMonitors.id, archived.monitorInternalId),
-              eq(stockRiskMonitors.userId, input.userId),
-              eq(stockRiskMonitors.symbol, input.symbol),
-              eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
-            ))
+            .where(
+              and(
+                eq(stockRiskMonitors.id, archived.monitorInternalId),
+                eq(stockRiskMonitors.userId, input.userId),
+                eq(stockRiskMonitors.symbol, input.symbol),
+                eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
+              ),
+            )
             .limit(1)
             .for('update');
           if (!lockedMonitor) return false;
@@ -271,10 +291,12 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
           const [nonterminalRun] = await tx
             .select({ id: plannedTaskRuns.id })
             .from(plannedTaskRuns)
-            .where(and(
-              eq(plannedTaskRuns.plannedTaskId, lockedPlan.id),
-              inArray(plannedTaskRuns.status, ['pending', 'dispatching', 'running']),
-            ))
+            .where(
+              and(
+                eq(plannedTaskRuns.plannedTaskId, lockedPlan.id),
+                inArray(plannedTaskRuns.status, ['pending', 'dispatching', 'running']),
+              ),
+            )
             .limit(1);
           if (nonterminalRun) {
             throw new TRPCError({
@@ -321,10 +343,12 @@ export function databaseStockRiskMonitorRepository(db: DB): StockRiskMonitorRepo
               lastUnavailableChecksJson: input.baselineUnavailableChecks,
               lastNotificationFingerprint: null,
             })
-            .where(and(
-              eq(stockRiskMonitors.id, lockedMonitor.id),
-              eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
-            ));
+            .where(
+              and(
+                eq(stockRiskMonitors.id, lockedMonitor.id),
+                eq(stockRiskMonitors.plannedTaskId, archived.plannedTaskInternalId),
+              ),
+            );
           if (readAffectedRows(monitorUpdate) === 0) {
             throw new Error('归档风险监控替换时记录已发生变化');
           }

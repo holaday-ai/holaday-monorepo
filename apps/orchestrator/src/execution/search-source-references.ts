@@ -22,7 +22,10 @@ function normaliseHttpUrl(value: string): string | null {
 }
 
 function sourceTitle(title: string, url: string): string {
-  const cleaned = title.replace(/[\r\n]+/g, ' ').replace(/[\[\]]/g, '').trim();
+  const cleaned = title
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\[\]]/g, '')
+    .trim();
   if (cleaned) return cleaned.slice(0, 180);
   return new URL(url).hostname;
 }
@@ -64,7 +67,9 @@ export function appendSearchSourceReferences(
   if (!summary || sources.length === 0) return summary;
 
   const seen = urlsAlreadyIn(summary);
-  const references = collectSearchSourceReferences(sources).filter((source) => !seen.has(source.url));
+  const references = collectSearchSourceReferences(sources).filter(
+    (source) => !seen.has(source.url),
+  );
 
   if (references.length === 0) return summary;
   return [

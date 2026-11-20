@@ -1,6 +1,3 @@
-import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
-import * as React from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DiscoveryNewsCard } from '@/components/DiscoveryNewsCard';
 import { NewsDetailModal } from '@/components/NewsDetailModal';
 import { pageErrorMessage } from '@/lib/page-error-copy';
@@ -9,23 +6,33 @@ import {
   prioritizeAndDiversifyDiscoveryItems,
   shouldPrefetchDiscoveryPage,
 } from '@/lib/stock-discovery';
+import { parseDiscoveryFeed } from '@/lib/stock-discovery-route';
 import {
+  type DiscoveryFeed,
+  type StockNewsRow,
   discoveryStoryAliases,
   discoveryStoryClusterKey,
   mergeDiscoveryNews,
   newsFeed,
-  type DiscoveryFeed,
-  type StockNewsRow,
 } from '@/lib/stock-news';
-import { parseDiscoveryFeed } from '@/lib/stock-discovery-route';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 type DashboardSnapshot = Awaited<ReturnType<typeof trpc.stocks.dashboardSnapshot.query>>;
 type MarketDiscoveryFeed = Extract<DiscoveryFeed, 'A股要闻' | '美股要闻' | '港股要闻'>;
 
 const MARKET_DISCOVERY_FEEDS: MarketDiscoveryFeed[] = ['A股要闻', '美股要闻', '港股要闻'];
-const FEEDS: Array<DiscoveryFeed | '全部'> = ['全部', '自选股新闻', '重要公告', 'A股要闻', '美股要闻', '港股要闻'];
+const FEEDS: Array<DiscoveryFeed | '全部'> = [
+  '全部',
+  '自选股新闻',
+  '重要公告',
+  'A股要闻',
+  '美股要闻',
+  '港股要闻',
+];
 const INITIAL_VISIBLE_COUNT = 12;
 
 function discoveryReadingPriority(item: StockNewsRow): number {
@@ -45,9 +52,9 @@ export function StockDiscoveryPage(): JSX.Element {
   const [dashboard, setDashboard] = React.useState<DashboardSnapshot | null>(null);
   const [extensions, setExtensions] = React.useState<StockNewsRow[]>([]);
   const [moreAvailable, setMoreAvailable] = React.useState<Record<MarketDiscoveryFeed, boolean>>({
-    'A股要闻': true,
-    '美股要闻': true,
-    '港股要闻': true,
+    A股要闻: true,
+    美股要闻: true,
+    港股要闻: true,
   });
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -55,12 +62,14 @@ export function StockDiscoveryPage(): JSX.Element {
   const [error, setError] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(INITIAL_VISIBLE_COUNT);
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
-  const [failedSourceCoverUrls, setFailedSourceCoverUrls] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [failedSourceCoverUrls, setFailedSourceCoverUrls] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const alive = React.useRef(true);
   const nextPage = React.useRef<Record<MarketDiscoveryFeed, number>>({
-    'A股要闻': 2,
-    '美股要闻': 2,
-    '港股要闻': 2,
+    A股要闻: 2,
+    美股要闻: 2,
+    港股要闻: 2,
   });
   const rotatingFeed = React.useRef(0);
 
@@ -85,9 +94,10 @@ export function StockDiscoveryPage(): JSX.Element {
     } catch (err) {
       if (alive.current) setError(pageErrorMessage(err));
     } finally {
-      if (!alive.current) return;
-      setLoading(false);
-      setRefreshing(false);
+      if (alive.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
@@ -99,24 +109,19 @@ export function StockDiscoveryPage(): JSX.Element {
     () => mergeDiscoveryNews((dashboard?.news ?? []) as StockNewsRow[], extensions),
     [dashboard?.news, extensions],
   );
-  const indexedNews = React.useMemo(
-    () => news.map((item, index) => ({ item, index })),
-    [news],
-  );
+  const indexedNews = React.useMemo(() => news.map((item, index) => ({ item, index })), [news]);
   const storyAliases = React.useMemo(() => discoveryStoryAliases(news), [news]);
   const readingPrioritizedNews = React.useMemo(
-    () => prioritizeAndDiversifyDiscoveryItems(
-      indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
-      discoveryReadingPriority,
-      (item) => discoveryStoryClusterKey(item, storyAliases),
-    ),
+    () =>
+      prioritizeAndDiversifyDiscoveryItems(
+        indexedNews.filter(({ item }) => activeFeed === '全部' || newsFeed(item) === activeFeed),
+        discoveryReadingPriority,
+        (item) => discoveryStoryClusterKey(item, storyAliases),
+      ),
     [activeFeed, indexedNews, storyAliases],
   );
   const prioritizedNews = React.useMemo(
-    () => diversifyDiscoveryEditorialArt(
-      readingPrioritizedNews,
-      failedSourceCoverUrls,
-    ),
+    () => diversifyDiscoveryEditorialArt(readingPrioritizedNews, failedSourceCoverUrls),
     [failedSourceCoverUrls, readingPrioritizedNews],
   );
   const filteredRows = React.useMemo(
@@ -127,15 +132,21 @@ export function StockDiscoveryPage(): JSX.Element {
   const leadNews = displayedNews[0] ?? null;
   const supportingNews = displayedNews.slice(1, 4);
   const remainingNews = displayedNews.slice(4);
-  const feedCounts = React.useMemo(() => new Map(
-    FEEDS.map((feed) => [
-      feed,
-      feed === '全部' ? news.length : news.filter((item) => newsFeed(item) === feed).length,
-    ]),
-  ), [news]);
-  const hasMoreForActiveFeed = activeFeed === '全部'
-    ? MARKET_DISCOVERY_FEEDS.some((feed) => moreAvailable[feed])
-    : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed) && moreAvailable[activeFeed as MarketDiscoveryFeed];
+  const feedCounts = React.useMemo(
+    () =>
+      new Map(
+        FEEDS.map((feed) => [
+          feed,
+          feed === '全部' ? news.length : news.filter((item) => newsFeed(item) === feed).length,
+        ]),
+      ),
+    [news],
+  );
+  const hasMoreForActiveFeed =
+    activeFeed === '全部'
+      ? MARKET_DISCOVERY_FEEDS.some((feed) => moreAvailable[feed])
+      : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed) &&
+        moreAvailable[activeFeed as MarketDiscoveryFeed];
   const canRevealLoadedNews = displayedNews.length < prioritizedNews.length;
 
   React.useEffect(() => {
@@ -162,18 +173,23 @@ export function StockDiscoveryPage(): JSX.Element {
 
   const loadMoreSourceRows = React.useCallback(async (): Promise<boolean> => {
     if (loadingMore || !hasMoreForActiveFeed) return false;
-    const target = activeFeed === '全部'
-      ? MARKET_DISCOVERY_FEEDS.find((_, index) => {
-        const feed = MARKET_DISCOVERY_FEEDS[(rotatingFeed.current + index) % MARKET_DISCOVERY_FEEDS.length]!;
-        return moreAvailable[feed];
-      })
-      : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed)
-        ? activeFeed as MarketDiscoveryFeed
-        : null;
+    const target =
+      activeFeed === '全部'
+        ? MARKET_DISCOVERY_FEEDS.find((_, index) => {
+            const feed =
+              MARKET_DISCOVERY_FEEDS[
+                (rotatingFeed.current + index) % MARKET_DISCOVERY_FEEDS.length
+              ]!;
+            return moreAvailable[feed];
+          })
+        : MARKET_DISCOVERY_FEEDS.includes(activeFeed as MarketDiscoveryFeed)
+          ? (activeFeed as MarketDiscoveryFeed)
+          : null;
     if (!target) return false;
 
     if (activeFeed === '全部') {
-      rotatingFeed.current = (MARKET_DISCOVERY_FEEDS.indexOf(target) + 1) % MARKET_DISCOVERY_FEEDS.length;
+      rotatingFeed.current =
+        (MARKET_DISCOVERY_FEEDS.indexOf(target) + 1) % MARKET_DISCOVERY_FEEDS.length;
     }
     const page = nextPage.current[target];
     setLoadingMore(true);
@@ -203,15 +219,26 @@ export function StockDiscoveryPage(): JSX.Element {
   };
 
   React.useEffect(() => {
-    if (!shouldPrefetchDiscoveryPage({
-      currentPage: Math.max(0, Math.ceil(displayedNews.length / INITIAL_VISIBLE_COUNT) - 1),
-      pageCount: Math.max(1, Math.ceil(prioritizedNews.length / INITIAL_VISIBLE_COUNT)),
-      hasMore: hasMoreForActiveFeed,
-      isLoading: loadingMore,
-      hasExhaustedLoadedItems: !loading && prioritizedNews.length > 0 && displayedNews.length >= prioritizedNews.length,
-    })) return;
+    if (
+      !shouldPrefetchDiscoveryPage({
+        currentPage: Math.max(0, Math.ceil(displayedNews.length / INITIAL_VISIBLE_COUNT) - 1),
+        pageCount: Math.max(1, Math.ceil(prioritizedNews.length / INITIAL_VISIBLE_COUNT)),
+        hasMore: hasMoreForActiveFeed,
+        isLoading: loadingMore,
+        hasExhaustedLoadedItems:
+          !loading && prioritizedNews.length > 0 && displayedNews.length >= prioritizedNews.length,
+      })
+    )
+      return;
     void loadMoreSourceRows();
-  }, [displayedNews.length, hasMoreForActiveFeed, loadMoreSourceRows, loading, loadingMore, prioritizedNews.length]);
+  }, [
+    displayedNews.length,
+    hasMoreForActiveFeed,
+    loadMoreSourceRows,
+    loading,
+    loadingMore,
+    prioritizedNews.length,
+  ]);
 
   return (
     <main className="mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8">
@@ -220,15 +247,17 @@ export function StockDiscoveryPage(): JSX.Element {
           <button
             type="button"
             onClick={() => navigate('/stocks')}
-            className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59]"
+            className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#E1E3E8] bg-white text-[#667085] transition hover:border-[#FF0061]/25 hover:text-[#FF0061]"
             aria-label="返回股市任务"
             title="返回股市任务"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
           </button>
           <div className="min-w-0">
-            <p className="text-[12px] font-medium text-[#EA1F59]">市场发现</p>
-            <h1 className="mt-1 text-[24px] font-semibold text-[#121826] sm:text-[28px]">新闻与公告</h1>
+            <p className="text-[12px] font-medium text-[#FF0061]">市场发现</p>
+            <h1 className="mt-1 text-[24px] font-semibold text-[#121826] sm:text-[28px]">
+              新闻与公告
+            </h1>
             <p className="mt-1 max-w-2xl text-[13px] leading-6 text-[#667085]">
               先看按关联标的、来源可读性与发布时间排序的优先阅读，再浏览完整来源流。详情在站内阅读，只展示来源返回或已验证提取的内容。
             </p>
@@ -238,7 +267,7 @@ export function StockDiscoveryPage(): JSX.Element {
           type="button"
           onClick={() => void loadSnapshot('refresh')}
           disabled={refreshing}
-          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-3 text-[13px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} aria-hidden />
           刷新来源
@@ -256,7 +285,7 @@ export function StockDiscoveryPage(): JSX.Element {
               className={cn(
                 'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition',
                 activeFeed === feed
-                  ? 'border-[#EA1F59]/30 bg-[#EA1F59]/10 text-[#EA1F59]'
+                  ? 'border-[#FF0061]/30 bg-[#FF0061]/10 text-[#FF0061]'
                   : 'border-[#E1E3E8] bg-white text-[#667085] hover:border-[#C9CDD6] hover:text-[#121826]',
               )}
             >
@@ -276,7 +305,10 @@ export function StockDiscoveryPage(): JSX.Element {
       {loading ? (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }, (_, index) => (
-            <div key={index} className="h-[286px] animate-pulse rounded-[8px] border border-[#E7E7EB] bg-[#F8F9FB]" />
+            <div
+              key={index}
+              className="h-[286px] animate-pulse rounded-[8px] border border-[#E7E7EB] bg-[#F8F9FB]"
+            />
           ))}
         </div>
       ) : displayedNews.length > 0 ? (
@@ -284,9 +316,11 @@ export function StockDiscoveryPage(): JSX.Element {
           {leadNews ? (
             <section className="mt-6" aria-label="优先阅读">
               <div className="mb-3 flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#EA1F59]" aria-hidden />
+                <span className="h-2 w-2 rounded-full bg-[#FF0061]" aria-hidden />
                 <h2 className="text-[15px] font-semibold text-[#242424]">优先阅读</h2>
-                <span className="text-[12px] text-[#8B92A1]">按关联标的、来源可读性与发布时间排序</span>
+                <span className="text-[12px] text-[#8B92A1]">
+                  按关联标的、来源可读性与发布时间排序
+                </span>
               </div>
               <div className="space-y-4">
                 <DiscoveryNewsCard
@@ -339,7 +373,7 @@ export function StockDiscoveryPage(): JSX.Element {
                 type="button"
                 onClick={showMore}
                 disabled={loadingMore}
-                className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-4 text-[13px] font-medium text-[#4F5868] transition hover:border-[#EA1F59]/25 hover:text-[#EA1F59] disabled:cursor-not-allowed disabled:opacity-55"
+                className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[#E1E3E8] bg-white px-4 text-[13px] font-medium text-[#4F5868] transition hover:border-[#FF0061]/25 hover:text-[#FF0061] disabled:cursor-not-allowed disabled:opacity-55"
               >
                 {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                 {loadingMore ? '正在加载来源内容' : '加载更多'}
@@ -350,7 +384,9 @@ export function StockDiscoveryPage(): JSX.Element {
       ) : (
         <div className="mt-6 rounded-[8px] border border-dashed border-[#D7DCE5] bg-[#FCFCFD] px-5 py-16 text-center">
           <p className="text-[15px] font-medium text-[#344054]">当前栏目暂无可展示的真实来源内容</p>
-          <p className="mt-2 text-[13px] leading-6 text-[#8B92A1]">切换栏目或稍后刷新，Holaday 不会以模拟新闻填充这里。</p>
+          <p className="mt-2 text-[13px] leading-6 text-[#8B92A1]">
+            切换栏目或稍后刷新，Holaday 不会以模拟新闻填充这里。
+          </p>
         </div>
       )}
 

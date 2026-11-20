@@ -1,0 +1,6 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts
+be-02,ecommerce,unified,qwen,qwen3.8-max,awaiting_user,true,none,6,29856,24341,230,6,false,"handoff:captcha",1
+be-12,table,unified,qwen,qwen3.8-max,completed,true,none,3,25830,15665,311,3,false,"",1
+be-18,multipage,unified,qwen,qwen3.8-max,completed,true,none,20,190263,110454,585,20,false,"",1
+be-19,multipage,unified,qwen,qwen3.8-max,completed,true,none,3,18169,12495,422,3,false,"",1
+be-22,login_wall,unified,qwen,qwen3.8-max,cancelled,false,browser,15,254304,30691,500,15,false,"",1

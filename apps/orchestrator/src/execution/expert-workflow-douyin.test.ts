@@ -77,16 +77,12 @@ describe('validator: gmv_order_price', () => {
   const v = W.dataValidators.find((d) => d.id === 'gmv_order_price')!;
 
   it('passes when triple is consistent (within 20% tolerance)', () => {
-    expect(
-      v.check({ gmv: 100000, orders: 1250, avg_price: 80 }).passed,
-    ).toBe(true);
+    expect(v.check({ gmv: 100000, orders: 1250, avg_price: 80 }).passed).toBe(true);
   });
 
   it('passes within tolerance (calculated 100, declared 85 → 17.6% drift)', () => {
     // 100000 / 1000 = 100; |100-85|/85 = 17.6% < 20%
-    expect(
-      v.check({ gmv: 100000, orders: 1000, avg_price: 85 }).passed,
-    ).toBe(true);
+    expect(v.check({ gmv: 100000, orders: 1000, avg_price: 85 }).passed).toBe(true);
   });
 
   it('FAILS outside tolerance (calculated 100, declared 75 → 33% drift)', () => {
@@ -153,9 +149,7 @@ describe('validator: roi_ad_spend_check', () => {
 
   it('parses bare number ROI (no colon)', () => {
     // GMV 100000 / spend 40000 = 2.5; declared 2.5 → match
-    expect(
-      v.check({ gmv: 100000, ad_spend: 40000, roi: '2.5' }).passed,
-    ).toBe(true);
+    expect(v.check({ gmv: 100000, ad_spend: 40000, roi: '2.5' }).passed).toBe(true);
   });
 
   it('FAILS on 5x discrepancy', () => {
@@ -179,8 +173,6 @@ describe('validator: roi_ad_spend_check', () => {
   });
 
   it('skips unparseable ROI text', () => {
-    expect(
-      v.check({ gmv: 100, ad_spend: 50, roi: 'unknown' }).passed,
-    ).toBe(true);
+    expect(v.check({ gmv: 100, ad_spend: 50, roi: 'unknown' }).passed).toBe(true);
   });
 });

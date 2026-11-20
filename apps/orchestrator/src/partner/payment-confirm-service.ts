@@ -2,10 +2,7 @@ import { HOLA_CREDIT_CNY_CENTS } from '@holaday/shared-types';
 import { and, eq } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
-import {
-  partnerRechargeOrders,
-  type PartnerRechargeOrder,
-} from '../db/schema/partner.js';
+import { type PartnerRechargeOrder, partnerRechargeOrders } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { KycService, canRechargeWithKycStatus } from './kyc-service.js';
 import { PartnerMembershipService } from './membership-service.js';
@@ -169,7 +166,9 @@ function normalizePositiveSafeInteger(value: unknown, fieldName: string): number
   return value;
 }
 
-function normalizeConfirmInput(input: PartnerPaymentConfirmInput): NormalizedPartnerPaymentConfirmInput {
+function normalizeConfirmInput(
+  input: PartnerPaymentConfirmInput,
+): NormalizedPartnerPaymentConfirmInput {
   return {
     orderExternalId: normalizeBoundedString(
       input.orderExternalId,
@@ -350,7 +349,10 @@ function annualCapReviewMetadata(input: {
   };
 }
 
-function kycReviewMetadata(input: { existing: unknown; kycStatus: string }): Record<string, unknown> {
+function kycReviewMetadata(input: { existing: unknown; kycStatus: string }): Record<
+  string,
+  unknown
+> {
   const base =
     input.existing !== null && typeof input.existing === 'object' && !Array.isArray(input.existing)
       ? (input.existing as Record<string, unknown>)
@@ -406,14 +408,19 @@ export class PartnerPaymentConfirmService {
   private readonly referralService: (db: DB) => ReferralRewardSettler;
   private readonly kycService: (db: DB) => KycStatusReader;
 
-  constructor(private readonly db: DB, deps: PartnerPaymentConfirmServiceDeps = {}) {
+  constructor(
+    private readonly db: DB,
+    deps: PartnerPaymentConfirmServiceDeps = {},
+  ) {
     this.membershipService = deps.membershipService ?? ((db) => new PartnerMembershipService(db));
     this.rechargeService = deps.rechargeService ?? ((db) => new RechargeService(db));
     this.referralService = deps.referralService ?? ((db) => new ReferralService(db));
     this.kycService = deps.kycService ?? ((db) => new KycService(db));
   }
 
-  async confirmCapturedOrder(input: PartnerPaymentConfirmInput): Promise<PartnerPaymentConfirmResult> {
+  async confirmCapturedOrder(
+    input: PartnerPaymentConfirmInput,
+  ): Promise<PartnerPaymentConfirmResult> {
     const confirm = normalizeConfirmInput(input);
     const order = await this.readOrderByExternalId(this.db, confirm.orderExternalId);
 
@@ -649,7 +656,12 @@ export class PartnerPaymentConfirmService {
         if (!isRechargeLotCreationBusinessError(error)) {
           throw error;
         }
-        await this.markOrderReviewRequired(tx, completedOrder, confirm, reviewMetadata(completedOrder.metadata, error));
+        await this.markOrderReviewRequired(
+          tx,
+          completedOrder,
+          confirm,
+          reviewMetadata(completedOrder.metadata, error),
+        );
         return new PartnerPaymentConfirmReviewRequiredError(
           order.externalId,
           orderKind,
@@ -745,7 +757,10 @@ export class PartnerPaymentConfirmService {
     }
   }
 
-  private async readOrderByExternalId(db: DB, externalId: string): Promise<PartnerRechargeOrder | null> {
+  private async readOrderByExternalId(
+    db: DB,
+    externalId: string,
+  ): Promise<PartnerRechargeOrder | null> {
     const [row] = await db
       .select()
       .from(partnerRechargeOrders)
@@ -793,5 +808,4 @@ export class PartnerPaymentConfirmService {
       );
     }
   }
-
 }

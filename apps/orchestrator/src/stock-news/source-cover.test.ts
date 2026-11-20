@@ -28,9 +28,7 @@ describe('trusted stock news source covers', () => {
       ),
     ).toBeUndefined();
     expect(
-      sourceCoverProxyUrl(
-        '/api/stock-news/source-cover?url=https%3A%2F%2Fexample.com%2Fcover.jpg',
-      ),
+      sourceCoverProxyUrl('/api/stock-news/source-cover?url=https%3A%2F%2Fexample.com%2Fcover.jpg'),
     ).toBeUndefined();
     expect(
       sourceCoverProxyUrl(

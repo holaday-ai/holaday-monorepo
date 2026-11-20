@@ -2,9 +2,9 @@ import { Button } from '@/components/ui/button';
 import type { AstroProfile } from '@/lib/astrology';
 import { Check, Palette, RefreshCw, Sparkles, Timer } from 'lucide-react';
 import * as React from 'react';
+import { LuckyColorValue } from '../LuckyColorValue';
 import { PROVIDER_REFRESH_PENDING_COPY } from '../astrology-content';
 import type { ExperiencePhase } from '../energy-types';
-import { LuckyColorValue } from '../LuckyColorValue';
 import type { EnergyAstrologyState } from '../useEnergyAstrology';
 import { weeklyHoroscopeSections } from './horoscope-content';
 

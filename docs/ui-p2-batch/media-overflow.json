@@ -1,0 +1,242 @@
+[
+  {
+    "route": "/video",
+    "width": 1440,
+    "label": "产品短片",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "label": "生活方式",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "label": "光影氛围",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1440,
+    "label": "细节特写",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "label": "空间氛围",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "label": "人物肖像",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "label": "商品棚拍",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1440,
+    "label": "自然光影",
+    "clientWidth": 254,
+    "scrollWidth": 259,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1280,
+    "label": "产品短片",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1280,
+    "label": "生活方式",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1280,
+    "label": "光影氛围",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1280,
+    "label": "细节特写",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1280,
+    "label": "空间氛围",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1280,
+    "label": "人物肖像",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1280,
+    "label": "商品棚拍",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1280,
+    "label": "自然光影",
+    "clientWidth": 214,
+    "scrollWidth": 218,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1024,
+    "label": "产品短片",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1024,
+    "label": "生活方式",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1024,
+    "label": "光影氛围",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/video",
+    "width": 1024,
+    "label": "细节特写",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1024,
+    "label": "空间氛围",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1024,
+    "label": "人物肖像",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1024,
+    "label": "商品棚拍",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  },
+  {
+    "route": "/image",
+    "width": 1024,
+    "label": "自然光影",
+    "clientWidth": 150,
+    "scrollWidth": 153,
+    "overflow": "hidden",
+    "imageTransform": "matrix(1.04, 0, 0, 1.04, 0, 0)",
+    "textInside": true
+  }
+]

@@ -142,7 +142,8 @@ export function extractTxFieldSignal(fieldSignals: string): string {
 // transaction SPA may advance an order (trip.com "Continue" slipped A/B because the SPA URL never
 // hit a /checkout stage). When A/B/reversal all PASS but a click carries one of these (OR the page
 // shows transaction fields), the model fallback (Layer C) gets the final say.
-const PROCEED_WEAK_RE = /继续|下一步|下一页|确定|完成|提交|去填写|continue|next|proceed|confirm|submit|done/i;
+const PROCEED_WEAK_RE =
+  /继续|下一步|下一页|确定|完成|提交|去填写|continue|next|proceed|confirm|submit|done/i;
 
 /** 提交型控件 = button / input[submit|button|image]. (role 未捕获 → 是已知盲点、层 C 兜底。) */
 function isSubmitTypeControl(tagName?: string, inputType?: string): boolean {

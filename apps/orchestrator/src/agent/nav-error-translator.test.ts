@@ -4,7 +4,9 @@ import { translateNavError } from './nav-error-translator.js';
 
 describe('translateNavError', () => {
   it('DNS — ERR_NAME_NOT_RESOLVED', () => {
-    const r = translateNavError(new Error('net::ERR_NAME_NOT_RESOLVED at https://does-not-exist.example/'));
+    const r = translateNavError(
+      new Error('net::ERR_NAME_NOT_RESOLVED at https://does-not-exist.example/'),
+    );
     expect(r.kind).toBe('dns');
     expect(r.friendly).toContain('无法访问');
     expect(r.friendly).toContain('拼写');
@@ -21,7 +23,9 @@ describe('translateNavError', () => {
   });
 
   it('SSL — ERR_CERT_AUTHORITY_INVALID', () => {
-    const r = translateNavError(new Error('net::ERR_CERT_AUTHORITY_INVALID at https://expired.badssl.com/'));
+    const r = translateNavError(
+      new Error('net::ERR_CERT_AUTHORITY_INVALID at https://expired.badssl.com/'),
+    );
     expect(r.kind).toBe('ssl');
     expect(r.friendly).toContain('证书');
     expect(r.friendly).toContain('安全');

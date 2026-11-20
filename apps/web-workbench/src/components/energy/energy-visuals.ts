@@ -27,8 +27,6 @@ const DIMENSION_VISUALS: Record<string, Omit<EnergyVisualDefinition, 'imageSrc'>
   luck: { tone: 'sun', icon: 'sparkles' },
 };
 
-export function dimensionVisualFor(
-  key: string,
-): Omit<EnergyVisualDefinition, 'imageSrc'> {
+export function dimensionVisualFor(key: string): Omit<EnergyVisualDefinition, 'imageSrc'> {
   return DIMENSION_VISUALS[key] ?? { tone: 'lavender', icon: 'sparkles' };
 }

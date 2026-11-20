@@ -1,5 +1,5 @@
 import { computeNextRunFromInputs } from '../agent/scheduled-runner.js';
-import { normalizePlannedItems, type PlannedRepeatType } from './planned-task-rules.js';
+import { type PlannedRepeatType, normalizePlannedItems } from './planned-task-rules.js';
 
 const OCCURRENCE_CONTENT_PREFIX = 'planned-content:v1:';
 
@@ -88,11 +88,15 @@ export function advancePlannedSchedule(input: {
   repeatType: PlannedRepeatType;
   rrule: string | null;
   dispatchSucceeded: boolean;
+  /** Batch 10.3 — plan timezone; BYDAY/BYHOUR are local wall-clock values. */
+  timezone?: string | null;
 }): { status: 'active' | 'completed' | 'failed'; nextRunAt: Date | null } {
   const nextRunAt = computeNextRunFromInputs({
     from: input.firedAt,
     rrule: input.rrule,
     repeatType: input.repeatType,
+    anchor: input.firedAt,
+    timezone: input.timezone ?? null,
   });
   if (nextRunAt) return { status: 'active', nextRunAt };
   return {
@@ -101,9 +105,8 @@ export function advancePlannedSchedule(input: {
   };
 }
 
-export function derivePlannedRunOutcome(input:
-  | { kind: 'task'; status: string }
-  | { kind: 'batch'; status: string },
+export function derivePlannedRunOutcome(
+  input: { kind: 'task'; status: string } | { kind: 'batch'; status: string },
 ):
   | { terminal: false; status: 'running' }
   | {

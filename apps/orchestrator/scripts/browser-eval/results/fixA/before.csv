@@ -1,0 +1,7 @@
+id,category,executor,brain,model,status,success,failureClass,steps,durationMs,inputTokens,outputTokens,modelCalls,quota403,reason,attempts
+be-31,list_sources,unified,qwen,qwen3.8-max,failed,false,browser,17,369553,15775,530,17,false,"timeout: timeout",1
+be-32,list_sources,unified,qwen,qwen3.8-max,completed,false,browser,4,17724,19578,538,4,false,"",1
+be-33,list_sources,unified,qwen,qwen3.8-max,completed,true,none,3,20822,13287,469,3,false,"",1
+be-34,list_sources,unified,qwen,qwen3.8-max,completed,false,browser,3,24544,10972,321,3,false,"",1
+be-35,list_sources,unified,qwen,qwen3.8-max,completed,false,browser,4,31840,28995,532,4,false,"",1
+be-36,list_sources,unified,qwen,qwen3.8-max,failed,false,browser,19,328270,80080,617,19,false,"timeout: timeout",1

@@ -1,0 +1,15 @@
+
+> holaday-monorepo@0.0.0 ui:audit /Users/yaleiqi/.codex/worktrees/ui-regression-suite/holaday-monorepo
+> node ui-suite/run.mjs --screens-only --skip-build
+
+{"route":"/schedule","width":1440,"controls":0,"findings":0}
+{"route":"/skills","width":1440,"controls":0,"findings":0}
+{"route":"/stocks","width":1440,"controls":0,"findings":4}
+{"route":"/schedule","width":1280,"controls":0,"findings":0}
+{"route":"/skills","width":1280,"controls":0,"findings":0}
+{"route":"/stocks","width":1280,"controls":0,"findings":7}
+{"route":"/schedule","width":1024,"controls":0,"findings":0}
+{"route":"/skills","width":1024,"controls":0,"findings":0}
+{"route":"/stocks","width":1024,"controls":0,"findings":5}
+{"status":"failed","pages":9,"findings":16,"gaps":2}
+ ELIFECYCLE  Command failed with exit code 1.

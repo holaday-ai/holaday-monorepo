@@ -76,6 +76,12 @@ export const operationPaths = mysqlTable(
     // Phase 1 ① crystallization (0037) — source task raw intent text + crystallize
     // metadata (v2 clustering material). Mirrors sites / evidence_artifacts metadata_json.
     metadataJson: json('metadata_json'),
+    // Batch 06 (0062) — parameterised, deterministically validated replay template
+    // (see playbook/evolution/path-template.ts), who produced it, and the
+    // consecutive canary pass streak that promotes a path to `verified`.
+    templateJson: json('template_json'),
+    generalizer: varchar('generalizer', { length: 32 }),
+    canaryPassStreak: int('canary_pass_streak', { unsigned: true }).notNull().default(0),
     createdAt: datetime('created_at', { mode: 'date', fsp: 3 })
       .notNull()
       .default(sql`CURRENT_TIMESTAMP(3)`),

@@ -3,10 +3,10 @@ import { and, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import type { DB } from '../db/client.js';
 import { readAffectedRows } from '../db/mysql-result.js';
 import {
-  partnerLots,
-  partnerWithdrawalRequests,
   type PartnerKycProfile,
   type PartnerWithdrawalRequest,
+  partnerLots,
+  partnerWithdrawalRequests,
 } from '../db/schema/partner.js';
 import { users } from '../db/schema/users.js';
 import { CreditLedgerService } from './credit-ledger-service.js';
@@ -150,7 +150,10 @@ export function validateWithdrawalRequest(input: {
   withdrawableCreditCents: number;
   minCreditCents?: number;
 }): WithdrawalValidationResult {
-  const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
+  const amountCreditCents = assertNonNegativeSafeInteger(
+    input.amountCreditCents,
+    'amountCreditCents',
+  );
   const withdrawableCreditCents = assertNonNegativeSafeInteger(
     input.withdrawableCreditCents,
     'withdrawableCreditCents',
@@ -176,7 +179,10 @@ export function validateWithdrawalLimits(input: {
   monthlyUserWithdrawalCreditCents: number;
   monthlyUserCapCreditCents: number;
 }): WithdrawalValidationResult {
-  const amountCreditCents = assertNonNegativeSafeInteger(input.amountCreditCents, 'amountCreditCents');
+  const amountCreditCents = assertNonNegativeSafeInteger(
+    input.amountCreditCents,
+    'amountCreditCents',
+  );
   const dailyPlatformWithdrawalCreditCents = assertNonNegativeSafeInteger(
     input.dailyPlatformWithdrawalCreditCents,
     'dailyPlatformWithdrawalCreditCents',
@@ -292,7 +298,9 @@ function normalizeRequestInput(input: WithdrawalRequestInput): NormalizedWithdra
   };
 }
 
-function normalizeApproveInput(input: WithdrawalAdminInputBase & { note?: string }): NormalizedApproveWithdrawalInput {
+function normalizeApproveInput(
+  input: WithdrawalAdminInputBase & { note?: string },
+): NormalizedApproveWithdrawalInput {
   return {
     withdrawalExternalId: assertBoundedNonEmptyString(
       input.withdrawalExternalId,
@@ -305,7 +313,9 @@ function normalizeApproveInput(input: WithdrawalAdminInputBase & { note?: string
   };
 }
 
-function normalizeRejectInput(input: WithdrawalAdminInputBase & { reason: string }): NormalizedRejectWithdrawalInput {
+function normalizeRejectInput(
+  input: WithdrawalAdminInputBase & { reason: string },
+): NormalizedRejectWithdrawalInput {
   return {
     withdrawalExternalId: assertBoundedNonEmptyString(
       input.withdrawalExternalId,
@@ -361,7 +371,9 @@ function metadataText(value: unknown, key: string): string | undefined {
 
 function verifiedBankCardHash(profile: PartnerKycProfile): string | null {
   const bankCardHash = profile.bankCardHash;
-  return typeof bankCardHash === 'string' && bankCardHash.trim().length > 0 ? bankCardHash.trim() : null;
+  return typeof bankCardHash === 'string' && bankCardHash.trim().length > 0
+    ? bankCardHash.trim()
+    : null;
 }
 
 function metadataDate(value: unknown, key: string): Date | null {
@@ -409,7 +421,11 @@ export class WithdrawalService {
 
   constructor(
     private readonly db: DB,
-    deps: { ledger?: WithdrawalLedger; kyc?: WithdrawalKyc; membership?: WithdrawalMembership } = {},
+    deps: {
+      ledger?: WithdrawalLedger;
+      kyc?: WithdrawalKyc;
+      membership?: WithdrawalMembership;
+    } = {},
   ) {
     this.ledger = deps.ledger;
     this.kyc = deps.kyc;
@@ -452,7 +468,10 @@ export class WithdrawalService {
     return row;
   }
 
-  private async readByExternalId(db: DB, externalId: string): Promise<PartnerWithdrawalRequest | undefined> {
+  private async readByExternalId(
+    db: DB,
+    externalId: string,
+  ): Promise<PartnerWithdrawalRequest | undefined> {
     const [row] = await db
       .select()
       .from(partnerWithdrawalRequests)
@@ -479,7 +498,11 @@ export class WithdrawalService {
     return aggregateCreditCents(row?.totalCreditCents);
   }
 
-  private async readMonthlyUserWithdrawalCreditCents(db: DB, userId: number, now: Date): Promise<number> {
+  private async readMonthlyUserWithdrawalCreditCents(
+    db: DB,
+    userId: number,
+    now: Date,
+  ): Promise<number> {
     const { start, end } = utcMonthBounds(now);
     const [row] = await db
       .select({
@@ -637,7 +660,10 @@ export class WithdrawalService {
       return existing;
     }
 
-    const membership = await this.membershipFor(db).getActiveMembership(request.userId, request.now);
+    const membership = await this.membershipFor(db).getActiveMembership(
+      request.userId,
+      request.now,
+    );
     if (!membership) {
       throw new WithdrawalGateError('membership_required');
     }
@@ -658,7 +684,11 @@ export class WithdrawalService {
     const bankCardHashUpdatedAt = metadataDate(kycProfile.metadata, 'bankCardHashUpdatedAt');
     if (
       bankCardHashUpdatedAt &&
-      isWithinBankCardCooldown(bankCardHashUpdatedAt, request.now, config.withdrawalBankCardCooldownDays)
+      isWithinBankCardCooldown(
+        bankCardHashUpdatedAt,
+        request.now,
+        config.withdrawalBankCardCooldownDays,
+      )
     ) {
       throw new WithdrawalGateError('bank_card_cooling_down');
     }
@@ -720,10 +750,14 @@ export class WithdrawalService {
 
   async requestWithdrawal(input: WithdrawalRequestInput): Promise<PartnerWithdrawalRequest> {
     const request = normalizeRequestInput(input);
-    return this.db.transaction((tx) => this.requestWithdrawalInTransaction(tx as unknown as DB, request));
+    return this.db.transaction((tx) =>
+      this.requestWithdrawalInTransaction(tx as unknown as DB, request),
+    );
   }
 
-  async approveWithdrawal(input: WithdrawalAdminInputBase & { note?: string }): Promise<PartnerWithdrawalRequest> {
+  async approveWithdrawal(
+    input: WithdrawalAdminInputBase & { note?: string },
+  ): Promise<PartnerWithdrawalRequest> {
     const request = normalizeApproveInput(input);
     return this.db.transaction(async (tx) => {
       const db = tx as unknown as DB;
@@ -762,7 +796,9 @@ export class WithdrawalService {
     });
   }
 
-  async rejectWithdrawal(input: WithdrawalAdminInputBase & { reason: string }): Promise<PartnerWithdrawalRequest> {
+  async rejectWithdrawal(
+    input: WithdrawalAdminInputBase & { reason: string },
+  ): Promise<PartnerWithdrawalRequest> {
     const request = normalizeRejectInput(input);
     return this.db.transaction(async (tx) => {
       const db = tx as unknown as DB;

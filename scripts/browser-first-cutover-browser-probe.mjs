@@ -1,5 +1,5 @@
-import * as fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 
 /** Fixed foundational browser probe. Creates one about:blank target, executes a
  * literal expression only on that target, and closes only that returned target.
@@ -87,10 +87,10 @@ export async function probeFirstCutoverRecoveredBrowser(native, deadline, overri
     }
     return Buffer.concat(parts).toString('utf8');
   };
-  let target,
-    socket,
-    completed = false,
-    closeAttempted = false;
+  let target;
+  let socket;
+  let completed = false;
+  let closeAttempted = false;
   try {
     await ownership();
     const created = JSON.parse(await request('/json/new?about%3Ablank', 'PUT'));

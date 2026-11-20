@@ -191,13 +191,15 @@ function createArchiveDb() {
   };
 }
 
-function createFutureRescheduleDb(options: {
-  nextRunAt?: Date;
-  hasMonitor?: boolean;
-  hasNonterminalRun?: boolean;
-  status?: 'active' | 'running' | 'archived';
-  lockedStatus?: 'active' | 'running' | 'archived';
-} = {}) {
+function createFutureRescheduleDb(
+  options: {
+    nextRunAt?: Date;
+    hasMonitor?: boolean;
+    hasNonterminalRun?: boolean;
+    status?: 'active' | 'running' | 'archived';
+    lockedStatus?: 'active' | 'running' | 'archived';
+  } = {},
+) {
   let selectCount = 0;
   let movedMonitorTo: number | null = null;
   let transactionCalls = 0;
@@ -373,12 +375,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
     });
@@ -395,17 +399,19 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.update({
-      plannedTaskId: 'pln_daily',
-      title: '监控多伦科技风险变化',
-      instruction: '系统专用：检查多伦科技（603528）风险变化',
-      items: ['检查多伦科技（603528）风险变化'],
-      repeatType: 'daily',
-      scheduledAt: '2026-08-12T10:00:00.000Z',
-      timezone: 'Asia/Shanghai',
-      editScope: 'future',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.update({
+        plannedTaskId: 'pln_daily',
+        title: '监控多伦科技风险变化',
+        instruction: '系统专用：检查多伦科技（603528）风险变化',
+        items: ['检查多伦科技（603528）风险变化'],
+        repeatType: 'daily',
+        scheduledAt: '2026-08-12T10:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        editScope: 'future',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
     });
@@ -419,12 +425,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     const fixture = createFutureRescheduleDb({ hasMonitor: true });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
     });
@@ -441,12 +449,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
     });
@@ -463,12 +473,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message: '系统风险监控不支持拆分未来轮次，请改为调整整个系列',
     });
@@ -481,12 +493,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     const fixture = createFutureRescheduleDb({ lockedStatus: 'archived' });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'CONFLICT',
       message: '任务状态刚刚发生变化，请刷新后重试',
     });
@@ -499,17 +513,19 @@ describe('plannedTasks mutation schedule feedback', () => {
     const fixture = createFutureRescheduleDb({ lockedStatus: 'archived' });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.update({
-      plannedTaskId: 'pln_daily',
-      title: '每日巡检',
-      instruction: '检查一次',
-      items: ['检查一次'],
-      repeatType: 'daily',
-      scheduledAt: '2026-08-12T10:00:00.000Z',
-      timezone: 'Asia/Shanghai',
-      editScope: 'future',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.update({
+        plannedTaskId: 'pln_daily',
+        title: '每日巡检',
+        instruction: '检查一次',
+        items: ['检查一次'],
+        repeatType: 'daily',
+        scheduledAt: '2026-08-12T10:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        editScope: 'future',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({
       code: 'CONFLICT',
       message: '任务状态刚刚发生变化，请刷新后重试',
     });
@@ -525,12 +541,14 @@ describe('plannedTasks mutation schedule feedback', () => {
     });
     const caller = createCaller(fixture.db);
 
-    await expect(caller.rescheduleOccurrence({
-      plannedTaskId: 'pln_daily',
-      originalScheduledFor: '2026-08-12T09:00:00.000Z',
-      scheduledFor: '2026-08-12T10:00:00.000Z',
-      scope: 'future',
-    })).rejects.toMatchObject({
+    await expect(
+      caller.rescheduleOccurrence({
+        plannedTaskId: 'pln_daily',
+        originalScheduledFor: '2026-08-12T09:00:00.000Z',
+        scheduledFor: '2026-08-12T10:00:00.000Z',
+        scope: 'future',
+      }),
+    ).rejects.toMatchObject({
       code: 'CONFLICT',
       message: '任务状态刚刚发生变化，请刷新后重试',
     });
@@ -606,9 +624,9 @@ describe('plannedTasks load telemetry', () => {
       slow: false,
     };
 
-    await expect(
-      caller.reportLoadMetric({ ...valid, totalMs: 60_001 }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller.reportLoadMetric({ ...valid, totalMs: 60_001 })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
     await expect(
       caller.reportLoadMetric({ ...valid, instruction: '不应进入日志' } as never),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });

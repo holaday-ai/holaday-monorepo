@@ -11,11 +11,13 @@ function tableName(table: unknown): string {
   return (table as Record<symbol, string>)[Symbol.for('drizzle:Name')] ?? '';
 }
 
-function fakeDb(seed: {
-  profile?: Record<string, unknown> | null;
-  signals?: Array<Record<string, unknown>>;
-  watchlist?: Array<Record<string, unknown>>;
-} = {}) {
+function fakeDb(
+  seed: {
+    profile?: Record<string, unknown> | null;
+    signals?: Array<Record<string, unknown>>;
+    watchlist?: Array<Record<string, unknown>>;
+  } = {},
+) {
   let profile = seed.profile ?? null;
   const signals = [...(seed.signals ?? [])];
   const watchlist = [...(seed.watchlist ?? [])];
@@ -29,13 +31,16 @@ function fakeDb(seed: {
           const name = tableName(table);
           return {
             where() {
-              const rows = name === 'stock_preference_profiles'
-                ? (profile ? [profile] : [])
-                : name === 'stock_preference_signals'
-                  ? [...signals]
-                  : name === 'watchlists'
-                    ? [...watchlist]
-                    : [];
+              const rows =
+                name === 'stock_preference_profiles'
+                  ? profile
+                    ? [profile]
+                    : []
+                  : name === 'stock_preference_signals'
+                    ? [...signals]
+                    : name === 'watchlists'
+                      ? [...watchlist]
+                      : [];
               return {
                 limit: async () => rows.slice(0, 1),
                 orderBy: async () => rows,
@@ -91,8 +96,12 @@ function fakeDb(seed: {
     signals,
     watchlist,
     inserts,
-    get profile() { return profile; },
-    get deletedSignals() { return deletedSignals; },
+    get profile() {
+      return profile;
+    },
+    get deletedSignals() {
+      return deletedSignals;
+    },
   };
 }
 
@@ -102,15 +111,17 @@ describe('stock preference repository', () => {
     manual.industries = ['半导体'];
     const store = fakeDb({
       profile: { enabled: true, manualPreferencesJson: manual, clearedAt: null },
-      signals: [{
-        kind: 'screening_run',
-        dataAsOf: '2026-08-17',
-        occurredAt: new Date('2026-08-17T00:00:00Z'),
-        payloadJson: {
-          snapshotId: 'stkshot_0123456789abcdef01234567',
-          criteria: [{ field: 'pe_ttm', operator: 'lte', value: 30 }],
+      signals: [
+        {
+          kind: 'screening_run',
+          dataAsOf: '2026-08-17',
+          occurredAt: new Date('2026-08-17T00:00:00Z'),
+          payloadJson: {
+            snapshotId: 'stkshot_0123456789abcdef01234567',
+            criteria: [{ field: 'pe_ttm', operator: 'lte', value: 30 }],
+          },
         },
-      }],
+      ],
       watchlist: [{ symbol: '600519', market: 'A', createdAt: new Date('2026-08-10T00:00:00Z') }],
     });
 
@@ -133,16 +144,18 @@ describe('stock preference repository', () => {
       snapshotId: 'stkshot_0123456789abcdef01234567',
       dataAsOf: '2026-08-17',
       occurredAt: new Date('2026-08-18T00:00:00Z'),
-      criteria: [{
-        id: 'client-id',
-        field: 'pe_ttm' as const,
-        operator: 'lte' as const,
-        value: 30,
-        unit: null,
-        label: '立即买入',
-        sourceField: 'raw prompt must not persist',
-        status: 'ready' as const,
-      }],
+      criteria: [
+        {
+          id: 'client-id',
+          field: 'pe_ttm' as const,
+          operator: 'lte' as const,
+          value: 30,
+          unit: null,
+          label: '立即买入',
+          sourceField: 'raw prompt must not persist',
+          status: 'ready' as const,
+        },
+      ],
     };
 
     await expect(recordStockScreeningPreference(input)).resolves.toEqual({ recorded: true });

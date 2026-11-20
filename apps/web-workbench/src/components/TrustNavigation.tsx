@@ -39,7 +39,7 @@ export function TrustNavigation({
   return (
     <section className="rounded-[8px] border border-[#DCDDDD] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)] sm:p-5">
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#EA1F59]/20 bg-[#FFF7F9] text-[#EA1F59]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[#FF0061]/20 bg-[#FFF7F9] text-[#FF0061]">
           <ShieldCheck className="h-4 w-4" aria-hidden />
         </span>
         <div className="min-w-0">
@@ -56,7 +56,7 @@ export function TrustNavigation({
             <Link
               key={id}
               to={destination.href}
-              className="group flex min-h-14 items-center justify-between gap-3 rounded-[8px] border border-[#E7E7E7] bg-[#FAFAFA]/70 px-3 py-2.5 transition-colors hover:border-[#EA1F59]/25 hover:bg-[#FFF7F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EA1F59]/25"
+              className="group flex min-h-14 items-center justify-between gap-3 rounded-[8px] border border-[#E7E7E7] bg-[#FAFAFA]/70 px-3 py-2.5 transition-colors hover:border-[#FF0061]/25 hover:bg-[#FFF7F9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF0061]/25"
             >
               <span className="min-w-0">
                 <span className="block text-xs font-medium text-[#3F3A3C]">
@@ -67,7 +67,7 @@ export function TrustNavigation({
                 </span>
               </span>
               <ChevronRight
-                className="h-3.5 w-3.5 shrink-0 text-[#999999] transition-transform group-hover:translate-x-0.5 group-hover:text-[#EA1F59] motion-reduce:transition-none"
+                className="h-3.5 w-3.5 shrink-0 text-[#999999] transition-transform group-hover:translate-x-0.5 group-hover:text-[#FF0061] motion-reduce:transition-none"
                 aria-hidden
               />
             </Link>

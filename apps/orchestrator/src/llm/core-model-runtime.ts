@@ -1,4 +1,8 @@
+import type { LlmCallRecord } from '../agent/llm-call-recorder.js';
+import { recordScopedModelCall } from '../agent/media-call-recorder.js';
 import { recordCoreModelObservation } from './core-model-observation.js';
+import { totalInputTokens } from './gateway/normalize.js';
+import { MessagesAdapterError } from './messages-adapter.js';
 import {
   type MessagesAdapter,
   type QwenMessagesEnvironment,
@@ -13,9 +17,9 @@ import {
   type CoreModelLane,
   type CoreRolloutMode,
   type ModelRuntimePolicy,
-  assertProductionModelRuntimePolicy,
   resolveCoreModelLaneAccess,
 } from './model-runtime-policy.js';
+import { safeProviderDiagnostics } from './provider-error-diagnostics.js';
 import { type QwenPurpose, QwenRouteError, resolveQwenRoute } from './qwen-route.js';
 import { type ResponsesAdapter, createQwenResponsesAdapter } from './responses-adapter.js';
 
@@ -26,6 +30,26 @@ export interface CoreModelRuntimeEnvironment extends QwenMessagesEnvironment {
   QWEN_CORE_ENABLED_LANES: string;
   QWEN_CORE_ALLOWLIST: string;
   QWEN_RESPONSES_ADAPTER_ENABLED: boolean;
+  /**
+   * FIX-60 BOSS 决定 (2026-11-09): the 「选择任务处理区域」 step is off unless this is true. Off, an
+   * account's first task writes the region of its entry (llm/model-data-region-first-task.ts);
+   * until then — and for anything run before a first task — an account (or organization) without
+   * a region runs in MODEL_DATA_REGION_DEFAULT. One that chose keeps its choice.
+   */
+  MODEL_DATA_REGION_SELECTION_ENABLED?: boolean;
+  /** The region an unassigned account runs in while the selection step is off (default cn). */
+  MODEL_DATA_REGION_DEFAULT?: 'cn' | 'intl';
+}
+
+/** The region an account that never chose one runs in, or null when it must choose first. */
+export function unassignedModelDataRegion(
+  environment: Pick<
+    CoreModelRuntimeEnvironment,
+    'MODEL_DATA_REGION_SELECTION_ENABLED' | 'MODEL_DATA_REGION_DEFAULT'
+  >,
+): 'cn' | 'intl' | null {
+  if (environment.MODEL_DATA_REGION_SELECTION_ENABLED === true) return null;
+  return environment.MODEL_DATA_REGION_DEFAULT ?? 'cn';
 }
 
 export interface CoreModelObservation {
@@ -46,12 +70,26 @@ export type CoreModelRuntimeUnavailableReason =
   | 'LANE_DISABLED'
   | 'ROLLOUT_NOT_ALLOWED'
   | 'MODEL_DATA_REGION_UNASSIGNED'
-  | 'REGION_SERVICE_NOT_CONFIGURED';
+  | 'REGION_SERVICE_NOT_CONFIGURED'
+  | 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED';
+
+/**
+ * BROWSER-HOME-1 (BOSS 2026-11-14「我们不是还有国际千问嘛」): a narrowly-scoped endpoint override.
+ * `'intl'` sends a `cn` account's Qwen calls to the DashScope INTERNATIONAL endpoint with the
+ * INTERNATIONAL credentials only (DASHSCOPE_INTL_API_KEY / DASHSCOPE_INTL_WORKSPACE_ID /
+ * DASHSCOPE_INTL_*_BASE_URL — never the legacy alias, never the domestic ones), same model names.
+ * The account's data region is not changed. An `intl` account is untouched (already there).
+ * Set only by tasks.create for an admitted `browserHomeSession` task — never from client input.
+ */
+export type QwenEndpointOverride = 'intl';
 
 export type CoreModelRuntimeResolution =
   | {
       kind: 'ready';
+      /** The account's (or organization's) model data region — never changed by an override. */
       region: 'cn' | 'intl';
+      /** The DashScope endpoint these adapters call. */
+      qwenEndpoint: 'cn' | 'intl';
       messages(purpose: QwenPurpose): MessagesAdapter;
       responses(purpose: QwenPurpose): ResponsesAdapter;
     }
@@ -67,25 +105,34 @@ type ResponsesFactory = (input: {
   route: ReturnType<typeof resolveQwenRoute>;
 }) => ResponsesAdapter;
 
+/**
+ * REBUILD-2 (LLM_GATEWAY_V2 on only): the model gateway's per-role choices, applied once the
+ * region is known. Absent, the runtime behaves exactly as before.
+ */
+export interface CoreModelGatewayHook {
+  /** The model for this purpose in this region; null keeps the environment's route model. */
+  modelFor(region: 'cn' | 'intl', purpose: QwenPurpose): string | null;
+  /** The `llm_calls.purpose` written for calls made with this purpose. */
+  callPurposeFor(purpose: QwenPurpose): LlmCallRecord['purpose'];
+}
+
 export interface CoreModelRuntimeInput {
   environment: CoreModelRuntimeEnvironment;
   actorExternalId: string;
   lane: CoreModelLane;
   ownership: ModelDataRegionOwnershipInput;
+  /** See QwenEndpointOverride. Server-set only; absent everywhere but cloud-browser tasks. */
+  qwenEndpoint?: QwenEndpointOverride;
   createMessages?: MessagesFactory;
   createResponses?: ResponsesFactory;
   observe?: (observation: CoreModelObservation) => void;
   now?: () => number;
+  gateway?: CoreModelGatewayHook;
 }
 
 const RESPONSES_LANES: ReadonlySet<CoreModelLane> = new Set(['generate', 'scrape']);
 
 export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModelRuntimeResolution {
-  assertProductionModelRuntimePolicy(
-    input.environment.NODE_ENV,
-    input.environment.MODEL_RUNTIME_POLICY,
-  );
-
   const access = resolveCoreModelLaneAccess({
     mode: input.environment.QWEN_CORE_ROLLOUT_MODE,
     enabledLanes: input.environment.QWEN_CORE_ENABLED_LANES,
@@ -106,52 +153,127 @@ export function resolveCoreModelRuntime(input: CoreModelRuntimeInput): CoreModel
   try {
     region = resolveModelDataRegionOwnership(input.ownership).region;
   } catch (error) {
-    if (error instanceof ModelDataRegionError) {
-      return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
-    }
-    throw error;
+    if (!(error instanceof ModelDataRegionError)) throw error;
+    const fallback =
+      error.code === 'INVALID_MODEL_DATA_REGION'
+        ? null
+        : unassignedModelDataRegion(input.environment);
+    if (!fallback) return { kind: 'unavailable', reason: 'MODEL_DATA_REGION_UNASSIGNED' };
+    region = fallback;
   }
+
+  // The override applies to a `cn` account only; an `intl` account keeps its route as it is.
+  const overridden = input.qwenEndpoint === 'intl' && region === 'cn';
+  const endpoint: 'cn' | 'intl' = overridden ? 'intl' : region;
+  const environment = overridden
+    ? internationalOnlyEnvironment(input.environment)
+    : input.environment;
 
   try {
     if (input.lane === 'browser') {
-      resolveQwenRoute(input.environment, region, 'vision', 'messages');
+      resolveQwenRoute(environment, endpoint, 'vision', 'messages');
     } else {
-      resolveQwenRoute(input.environment, region, 'standard', 'messages');
-      resolveQwenRoute(input.environment, region, 'standard', 'responses');
+      resolveQwenRoute(environment, endpoint, 'standard', 'messages');
+      resolveQwenRoute(environment, endpoint, 'standard', 'responses');
     }
   } catch (error) {
     if (error instanceof QwenRouteError && error.code === 'MISSING_REGION_CREDENTIALS') {
-      return { kind: 'unavailable', reason: 'REGION_SERVICE_NOT_CONFIGURED' };
+      // No fallback to the domestic endpoint: the override fails like a missing provider.
+      return {
+        kind: 'unavailable',
+        reason: overridden ? 'QWEN_INTL_ENDPOINT_NOT_CONFIGURED' : 'REGION_SERVICE_NOT_CONFIGURED',
+      };
     }
     throw error;
   }
 
-  return createReadyRuntime(input, region);
+  return createReadyRuntime({ ...input, environment }, region, endpoint);
+}
+
+/**
+ * The environment the override routes with: the legacy `DASHSCOPE_API_KEY` /
+ * `DASHSCOPE_WORKSPACE_ID` aliases are cleared so only the DASHSCOPE_INTL_* credentials count
+ * (a missing DASHSCOPE_INTL_API_KEY fails clearly). Model names are left exactly as they are.
+ */
+function internationalOnlyEnvironment(
+  environment: CoreModelRuntimeEnvironment,
+): CoreModelRuntimeEnvironment {
+  return { ...environment, DASHSCOPE_API_KEY: '', DASHSCOPE_WORKSPACE_ID: '' };
 }
 
 function createReadyRuntime(
   input: CoreModelRuntimeInput,
   region: 'cn' | 'intl',
+  endpoint: 'cn' | 'intl',
 ): Extract<CoreModelRuntimeResolution, { kind: 'ready' }> {
   const createMessages = input.createMessages ?? createQwenMessagesAdapter;
   const createResponses = input.createResponses ?? createQwenResponsesAdapter;
   const observe = input.observe ?? recordCoreModelObservation;
   const now = input.now ?? Date.now;
 
+  const gateway = input.gateway;
+  const environmentFor = (purpose: QwenPurpose): CoreModelRuntimeEnvironment => {
+    const model = gateway?.modelFor(region, purpose);
+    return model ? withQwenModel(input.environment, model) : input.environment;
+  };
+  const recording = (purpose: QwenPurpose): CallRecording =>
+    gateway
+      ? { callPurpose: gateway.callPurposeFor(purpose), observeTotalInput: true }
+      : LEGACY_RECORDING;
+
   return {
     kind: 'ready',
     region,
+    qwenEndpoint: endpoint,
     messages(purpose) {
-      const adapter = createMessages({ environment: input.environment, region, purpose });
-      assertQwenAdapterMetadata(adapter.metadata, region, 'messages');
-      return observeMessagesAdapter(adapter, input.lane, purpose, observe, now);
+      // Gateway (REBUILD-2): the model per role, chosen by the user's region; BROWSER-HOME-1: the
+      // endpoint (cn / intl override) the call is routed to.
+      const adapter = createMessages({
+        environment: environmentFor(purpose),
+        region: endpoint,
+        purpose,
+      });
+      assertQwenAdapterMetadata(adapter.metadata, endpoint, 'messages');
+      return observeMessagesAdapter(adapter, input.lane, purpose, observe, now, recording(purpose));
     },
     responses(purpose) {
-      const route = resolveQwenRoute(input.environment, region, purpose, 'responses');
+      const route = resolveQwenRoute(environmentFor(purpose), endpoint, purpose, 'responses');
       const adapter = createResponses({ route });
-      assertQwenAdapterMetadata(adapter.metadata, region, 'responses');
-      return observeResponsesAdapter(adapter, input.lane, purpose, observe, now);
+      assertQwenAdapterMetadata(adapter.metadata, endpoint, 'responses');
+      return observeResponsesAdapter(
+        adapter,
+        input.lane,
+        purpose,
+        observe,
+        now,
+        recording(purpose),
+      );
     },
+  };
+}
+
+interface CallRecording {
+  callPurpose: LlmCallRecord['purpose'];
+  /** Observation input = input + cache (the Responses figure); the ledger keeps the split. */
+  observeTotalInput: boolean;
+}
+const LEGACY_RECORDING: CallRecording = { callPurpose: 'supercar.turn', observeTotalInput: false };
+
+/** Every route purpose resolves to the gateway's model (the same rule as a catalog lane). */
+function withQwenModel(
+  environment: CoreModelRuntimeEnvironment,
+  model: string,
+): CoreModelRuntimeEnvironment {
+  return {
+    ...environment,
+    QWEN_REASONING_MODEL: model,
+    QWEN_STANDARD_MODEL: model,
+    QWEN_FAST_MODEL: model,
+    QWEN_CODING_MODEL: model,
+    QWEN_VERIFIER_MODEL: model,
+    QWEN_VERIFY_FAST_MODEL: model,
+    QWEN_VERIFY_STRICT_MODEL: model,
+    QWEN_VISION_MODEL: model,
   };
 }
 
@@ -161,6 +283,7 @@ function observeMessagesAdapter(
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
+  recording: CallRecording = LEGACY_RECORDING,
 ): MessagesAdapter {
   return {
     metadata: adapter.metadata,
@@ -168,17 +291,64 @@ function observeMessagesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.create(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: recording.callPurpose,
+            ...result.usage,
+            cacheMode:
+              Array.isArray(request.system) &&
+              request.system.some((block) => block.cacheControl === 'ephemeral')
+                ? 'explicit'
+                : 'implicit',
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'messages' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
           protocol: 'messages',
           outcome: 'success',
-          inputTokens: result.usage.inputTokens,
+          inputTokens: recording.observeTotalInput
+            ? totalInputTokens(result.usage)
+            : result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: recording.callPurpose,
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            errorMessage: error instanceof MessagesAdapterError ? error.code : 'PROVIDER_ERROR',
+            providerRequestId:
+              error instanceof MessagesAdapterError
+                ? (error.diagnostics.requestId ?? undefined)
+                : undefined,
+            requestMeta: {
+              lane,
+              ...(error instanceof MessagesAdapterError
+                ? {
+                    providerError: safeProviderDiagnostics(error.diagnostics),
+                    // FIX-47: which check failed and what came back (masked, ≤ 4 KB).
+                    ...(error.forensics ? { invalidResponse: error.forensics } : {}),
+                  }
+                : {}),
+            },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -186,7 +356,7 @@ function observeMessagesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }
@@ -200,6 +370,7 @@ function observeResponsesAdapter(
   purpose: QwenPurpose,
   observe: (observation: CoreModelObservation) => void,
   now: () => number,
+  recording: CallRecording = LEGACY_RECORDING,
 ): ResponsesAdapter {
   return {
     metadata: adapter.metadata,
@@ -207,6 +378,24 @@ function observeResponsesAdapter(
       const startedAt = now();
       try {
         const result = await adapter.stream(request, options);
+        const latencyMs = elapsedMs(startedAt, now());
+        const cached = result.usage.cachedInputTokens ?? null;
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: recording.callPurpose,
+            inputTokens:
+              cached === null ? result.usage.inputTokens : result.usage.inputTokens - cached,
+            outputTokens: result.usage.outputTokens,
+            cacheReadInputTokens: cached,
+            cacheCreationInputTokens: 0,
+            providerRequestId: result.id,
+            latencyMs,
+            status: 'ok',
+            requestMeta: { lane, protocol: 'responses' },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -214,10 +403,23 @@ function observeResponsesAdapter(
           outcome: result.status === 'incomplete' ? 'incomplete' : 'success',
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         return result;
       } catch (error) {
+        const latencyMs = elapsedMs(startedAt, now());
+        if (lane !== 'browser')
+          await recordScopedModelCall({
+            provider: adapter.metadata.provider,
+            model: adapter.metadata.model,
+            region: 'region' in adapter.metadata ? adapter.metadata.region : undefined,
+            purpose: recording.callPurpose,
+            inputTokens: null,
+            outputTokens: null,
+            latencyMs,
+            status: 'error',
+            requestMeta: { lane },
+          });
         emitObservation(observe, {
           ...observationIdentity(adapter, purpose),
           lane,
@@ -225,7 +427,7 @@ function observeResponsesAdapter(
           outcome: 'error',
           inputTokens: null,
           outputTokens: null,
-          latencyMs: elapsedMs(startedAt, now()),
+          latencyMs,
         });
         throw error;
       }

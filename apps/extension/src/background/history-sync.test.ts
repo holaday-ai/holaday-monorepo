@@ -30,7 +30,10 @@ describe('extractHost', () => {
 
   it('times out a stuck history sync post', async () => {
     vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => undefined)),
+    );
     globalThis.chrome = {
       storage: {
         local: {

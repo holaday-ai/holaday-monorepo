@@ -14,9 +14,12 @@ describe('auth.me state helpers', () => {
         selectedRoles: [' researcher ', null, { unsafe: true }, 'operator'],
         role: 'admin',
         videoEnabled: true,
+        browserHomeEnabled: true,
+        browserHomeProfilesEnabled: false,
         teamProjectsEnabled: true,
         teamTaskLifecycleEnabled: true,
         modelDataRegion: 'intl',
+        modelDataRegionSelection: true,
       }),
     ).toEqual({
       userId: 'u1',
@@ -28,9 +31,12 @@ describe('auth.me state helpers', () => {
       selectedRoles: ['researcher', 'operator'],
       role: 'admin',
       videoEnabled: true,
+      browserHomeEnabled: true,
+      browserHomeProfilesEnabled: false,
       teamProjectsEnabled: true,
       teamTaskLifecycleEnabled: true,
       modelDataRegion: 'intl',
+      modelDataRegionSelection: true,
     });
   });
 
@@ -45,9 +51,12 @@ describe('auth.me state helpers', () => {
       selectedRoles: [],
       role: 'user',
       videoEnabled: false,
+      browserHomeEnabled: false,
+      browserHomeProfilesEnabled: false,
       teamProjectsEnabled: false,
       teamTaskLifecycleEnabled: false,
       modelDataRegion: null,
+      modelDataRegionSelection: false,
     });
     expect(
       normalizeAuthMeProfile({
@@ -121,3 +130,22 @@ describe('auth.me state helpers', () => {
     ).toBe('用户');
   });
 });
+
+it('preserves a supplied avatar without changing malformed profile defaults', () => {
+  expect(normalizeAuthMeProfile({ avatarUrl: ' https://example.test/avatar.png ' }).avatarUrl).toBe(
+    'https://example.test/avatar.png',
+  );
+  expect(normalizeAuthMeProfile({ avatarUrl: { bad: true } }).avatarUrl).toBeUndefined();
+});
+
+it.each([
+  [{ browserHomeEnabled: true, browserHomeProfilesEnabled: true }, true],
+  [{ browserHomeEnabled: true, browserHomeProfilesEnabled: 'true' }, false],
+  [{ browserHomeEnabled: false, browserHomeProfilesEnabled: true }, false],
+  [{ browserHomeEnabled: true }, false],
+])(
+  'personal saved-site controls require an explicit enabled Home capability (%j)',
+  (payload, expected) => {
+    expect(normalizeAuthMeProfile(payload).browserHomeProfilesEnabled).toBe(expected);
+  },
+);

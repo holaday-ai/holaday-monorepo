@@ -38,6 +38,8 @@ import {
   withOperationDispatchScope,
 } from '../../execution/owned-operation.js';
 import type { BrowserNetworkPolicy } from '../browser-network-policy.js';
+import { SENSITIVE_SCREENSHOT_STYLE } from '../browser-tools/full-page-read.js';
+import { REDACTION_FAILED_COPY, redactPageText } from '../browser-tools/page-redaction.js';
 import { runBrowserOperation } from './browser-operation.js';
 import type { BrowserRequestControl } from './browser-request-guard.js';
 import { humanClick, humanScroll, humanTypeText, isHumanizeEnabled } from './humanize.js';
@@ -114,6 +116,7 @@ export interface PageLike {
     quality?: number;
     fullPage?: boolean;
     timeout?: number;
+    style?: string;
   }): Promise<Buffer>;
   mouse: {
     click(x: number, y: number, opts?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
@@ -244,6 +247,11 @@ export class PlaywrightExecutor {
   private cleanMode = false;
   private cleanContext: BrowserContext | null = null;
   private cleanContextLease: OwnedCleanContext | null = null;
+  private readonly identityContexts = new Map<BrowserContext, OwnedCleanContext>();
+  private readonly identityContextLeases = new Set<OwnedCleanContext>();
+  private identityVerifier: (() => Promise<string | null>) | null = null;
+  private identityEpoch = 0;
+  private identityCheck: { epoch: number; promise: Promise<string | null> } | null = null;
   private managedBrowserLease: OwnedManagedBrowser | null = null;
   private cdpConnectionLease: OwnedCdpConnection | null = null;
   private cleanContextGeneration = 0;
@@ -449,7 +457,10 @@ export class PlaywrightExecutor {
         context.setDefaultNavigationTimeout(45_000);
         const isActive = () => generation === this.cleanContextGeneration;
         await this.applyNetworkPolicyToContexts(browser, isActive, browserLease);
-        await this.applyStealthToContexts(browser, isActive);
+        // FIX-31 review #2: launchManaged (dev / browser-eval) is gated like connect.
+        if (isStealthEnabled()) {
+          await this.applyStealthToContexts(browser, isActive);
+        }
         this.assertContextGeneration(generation);
         return { ok: true };
       } catch (err) {
@@ -587,12 +598,14 @@ export class PlaywrightExecutor {
     const authenticated = this.#authenticatedCdp;
     try {
       this.assertOutsideRequest();
+      this.setSessionIdentityVerifier(null);
       const stopped = this.stopBrowserRequests();
       this.cleanContextGeneration++;
       this.sealConnectionSetup?.();
       this.cleanContext = null;
       this.activePage = null;
       await stopped;
+      await this.disposeIdentityContexts();
       await this.cleanContextLease?.dispose();
     } catch (error) {
       if (authenticated) throw new Error('CDP_AUTHENTICATED_CONNECTION_FAILED');
@@ -621,9 +634,125 @@ export class PlaywrightExecutor {
    * stops clean mode from leaking into the shared context (adversarial review
    * CAMERA-3/6 blocker: resetPageForTask/reopenActivePage used contexts()[0] directly).
    */
+  private vaultInterruption: string | null = null;
+  /** The session vault stopped this task's logged-in context (reason code only). */
+  markSessionInterrupted(reason: string): void {
+    this.vaultInterruption ??= reason;
+  }
+  get sessionInterruption(): string | null {
+    return this.vaultInterruption;
+  }
+  setSessionIdentityVerifier(check: (() => Promise<string | null>) | null): void {
+    this.identityEpoch++;
+    this.identityVerifier = check;
+    this.identityCheck = null;
+  }
+  async verifySessionIdentity(): Promise<string | null> {
+    const check = this.identityVerifier;
+    if (!check) return this.vaultInterruption;
+    const epoch = this.identityEpoch;
+    if (!this.identityCheck || this.identityCheck.epoch !== epoch) {
+      const promise = Promise.resolve()
+        .then(check)
+        .catch(() => 'identity_unverified');
+      this.identityCheck = { epoch, promise };
+    }
+    const pending = this.identityCheck;
+    try {
+      const reason = await pending.promise;
+      // Report to this caller; never poison a replacement context's verifier.
+      if (epoch !== this.identityEpoch || check !== this.identityVerifier)
+        return 'identity_context_changed';
+      if (reason) this.markSessionInterrupted(reason);
+      return reason;
+    } finally {
+      if (this.identityCheck === pending) this.identityCheck = null;
+    }
+  }
+  async createSessionVerificationContext(
+    options: Parameters<Browser['newContext']>[0],
+  ): Promise<BrowserContext> {
+    if (
+      !this.browser ||
+      (this.cleanMode && !this.cleanContext) ||
+      this.connectionSetup ||
+      this.disconnection
+    )
+      throw new Error('identity_context_unavailable');
+    const generation = this.cleanContextGeneration;
+    const lease = createOwnedCleanContext(this.browser, options);
+    this.identityContextLeases.add(lease);
+    try {
+      const context = await lease.ready;
+      this.assertContextGeneration(generation);
+      this.identityContexts.set(context, lease);
+      return context;
+    } catch {
+      await lease.dispose();
+      this.identityContextLeases.delete(lease);
+      throw new Error('identity_context_unavailable');
+    }
+  }
+  async closeSessionVerificationContext(context: BrowserContext): Promise<void> {
+    const lease = this.identityContexts.get(context);
+    if (!lease) return;
+    await lease.dispose();
+    this.identityContexts.delete(context);
+    this.identityContextLeases.delete(lease);
+  }
+  private async disposeIdentityContexts(): Promise<void> {
+    const leases = [...this.identityContextLeases];
+    const outcomes = await Promise.allSettled(leases.map((lease) => lease.dispose()));
+    for (let index = 0; index < outcomes.length; index++) {
+      const result = outcomes[index]!;
+      if (result.status === 'fulfilled') {
+        const lease = leases[index]!;
+        this.identityContextLeases.delete(lease);
+        for (const [context, owner] of this.identityContexts)
+          if (owner === lease) this.identityContexts.delete(context);
+      }
+    }
+    const failed = outcomes.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+  }
+  /** Default-off vault: create an incognito context, never reuse userDataDir/default cookies. */
+  async createSessionVaultContext(
+    options: Parameters<Browser['newContext']>[0],
+  ): Promise<BrowserContext> {
+    if (!this.browser || this.cleanMode || this.connectionSetup || this.disconnection)
+      throw new Error('vault_context_unavailable');
+    const generation = this.cleanContextGeneration;
+    this.cleanMode = true;
+    this.activePage = null;
+    const lease = createOwnedCleanContext(this.browser, options);
+    this.cleanContextLease = lease;
+    try {
+      const context = await lease.ready;
+      this.assertContextGeneration(generation);
+      this.cleanContext = context;
+      context.on('close', () => {
+        if (this.cleanContext === context) {
+          this.cleanContext = null;
+          this.activePage = null;
+        }
+      });
+      return context;
+    } catch {
+      await lease.dispose();
+      throw new Error('vault_context_unavailable');
+    }
+  }
+
   private browseContext(browser: Browser): BrowserContext | undefined {
     if (this.cleanMode) return this.cleanContext ?? undefined;
     return browser.contexts()[0];
+  }
+
+  /** The unified task may select only a live page inside its current owned context. */
+  selectTaskPage(page: Page): void {
+    if (!this.browser || page.isClosed() || page.context() !== this.browseContext(this.browser))
+      throw new Error('browser_page_not_owned');
+    this.activePage = page;
   }
 
   setViewportSize(size: { width: number; height: number } | null): void {
@@ -737,6 +866,8 @@ export class PlaywrightExecutor {
    * just falls back to un-stealthed behaviour.
    */
   private async applyStealthToContexts(browser: Browser, isActive?: () => boolean): Promise<void> {
+    // Checked again here so no caller can inject the spoofing script with the switch off.
+    if (!isStealthEnabled()) return;
     if (isActive?.() === false) throw new Error('CLEAN_CONTEXT_DISPOSED');
     const contexts = browser.contexts();
     for (const ctx of contexts) {
@@ -779,6 +910,7 @@ export class PlaywrightExecutor {
   async disconnect(): Promise<void> {
     this.assertOutsideRequest();
     if (this.disconnection) return this.disconnection;
+    this.setSessionIdentityVerifier(null);
     const authenticated = this.#authenticatedCdp;
     const stopped = this.stopBrowserRequests();
     this.cleanContextGeneration++;
@@ -1078,7 +1210,15 @@ export class PlaywrightExecutor {
     const timeout = opts.timeoutMs ?? SCREENSHOT_TIMEOUT_MS;
     try {
       const buf = await runBrowserOperation(() =>
-        page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout }),
+        // 协调方判定 (复审 #1): the assistant's screenshots (the rollback loop's observations) never
+        // show what the person typed — boxes they filled, passwords, codes — as the unified loop's.
+        page.screenshot({
+          type: 'jpeg',
+          quality: 80,
+          fullPage: false,
+          timeout,
+          style: SENSITIVE_SCREENSHOT_STYLE,
+        }),
       );
       // `page.viewportSize()` returns null when Playwright is attached
       // via `connectOverCDP` to an externally-launched Chrome (the
@@ -1133,6 +1273,19 @@ export class PlaywrightExecutor {
         url: safeUrl(page),
         title: '',
         error: `ariaSnapshot failed: ${errMsg(err)}`,
+      };
+    }
+    // Batch 10 fixes: mask password / OTP values before the snapshot reaches
+    // the model; if they cannot be read, return no snapshot at all.
+    try {
+      yaml = await redactPageText(page, yaml);
+    } catch {
+      return {
+        text: '',
+        refs: [],
+        url: safeUrl(page),
+        title: '',
+        error: REDACTION_FAILED_COPY,
       };
     }
     const { text, refs } = annotateAriaSnapshot(yaml);

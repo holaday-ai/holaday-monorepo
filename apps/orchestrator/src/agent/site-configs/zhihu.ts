@@ -12,8 +12,7 @@ export const ZHIHU_SITE_CONFIG: SiteConfig = {
   siteId: 'zhihu',
   domains: ['zhihu.com'],
   requiresAuth: false,
-  authNote:
-    '知乎的部分回答 / 完整讨论 / 用户主页需要登录。浏览首页和单题部分内容通常不需要。',
+  authNote: '知乎的部分回答 / 完整讨论 / 用户主页需要登录。浏览首页和单题部分内容通常不需要。',
   auth: {
     loginBodyPhrases: [
       '继续阅读',
@@ -28,13 +27,6 @@ export const ZHIHU_SITE_CONFIG: SiteConfig = {
   },
   dismiss: {
     cookieBannerTexts: ['同意', 'Accept', '我同意'],
-    popupDismissTexts: [
-      '关闭',
-      '稍后再说',
-      '继续在网页中查看',
-      '在网页打开',
-      '暂不下载',
-      '取消',
-    ],
+    popupDismissTexts: ['关闭', '稍后再说', '继续在网页中查看', '在网页打开', '暂不下载', '取消'],
   },
 };

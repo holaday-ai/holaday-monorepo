@@ -129,7 +129,7 @@ export function OrganizationMembersPanel({
       ) : (
         <div className="mt-4 space-y-3">
           {error ? (
-            <output className="block rounded-[8px] bg-[#EA1F59]/[0.045] px-3 py-2 text-xs text-[#9A3B55]">
+            <output className="block rounded-[8px] bg-[#FF0061]/[0.045] px-3 py-2 text-xs text-[#9A3B55]">
               成员列表更新失败，当前保留上次结果
             </output>
           ) : null}
@@ -177,7 +177,7 @@ export function OrganizationMembersPanel({
                             onUpdateReportingLine(member.memberId, managerMemberId),
                           );
                         }}
-                        className="h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
+                        className="h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] outline-none focus-visible:border-[#FF0061]/45 focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-1"
                       >
                         <option value="">设置直属上级</option>
                         {managerCandidates.map((candidate) => (
@@ -198,7 +198,7 @@ export function OrganizationMembersPanel({
                           changeSelection(roleActionKey, role);
                           void runAction(roleActionKey, () => onUpdateRole(member.memberId, role));
                         }}
-                        className="h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] outline-none focus-visible:border-[#EA1F59]/45 focus-visible:ring-2 focus-visible:ring-[#EA1F59]/30 focus-visible:ring-offset-1"
+                        className="h-11 w-full rounded-[8px] border border-[#DCDDDD] bg-white px-2.5 text-xs text-[#595757] outline-none focus-visible:border-[#FF0061]/45 focus-visible:ring-2 focus-visible:ring-[#FF0061]/30 focus-visible:ring-offset-1"
                       >
                         <option value="">更改角色</option>
                         {visibility.roleOptions.map((role) => (
@@ -217,7 +217,7 @@ export function OrganizationMembersPanel({
                         onClick={() =>
                           void runAction(deactivateActionKey, () => onDeactivate(member))
                         }
-                        className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[8px] border border-[#EA1F59]/20 bg-white px-2.5 text-xs font-medium text-[#EA1F59] hover:bg-[#EA1F59]/[0.045] disabled:opacity-50"
+                        className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[8px] border border-[#FF0061]/20 bg-white px-2.5 text-xs font-medium text-[#FF0061] hover:bg-[#FF0061]/[0.045] disabled:opacity-50"
                       >
                         <UserMinus className="h-3.5 w-3.5" />
                         移除 {member.displayName}
@@ -251,7 +251,7 @@ function CollectionMessage({
         <button
           type="button"
           onClick={onAction}
-          className="mt-2 inline-flex h-11 items-center justify-center px-3 text-xs font-medium text-[#EA1F59]"
+          className="mt-2 inline-flex h-11 items-center justify-center px-3 text-xs font-medium text-[#FF0061]"
         >
           {actionLabel}
         </button>

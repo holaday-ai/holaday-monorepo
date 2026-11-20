@@ -1,17 +1,18 @@
 import { ApiKeysSection } from '@/components/ApiKeysSection';
+import { useAppShellContext } from '@/components/AppShell';
 import { NotificationsSection } from '@/components/notifications/NotificationsSection';
 import { AccountClosureSection } from '@/components/settings/AccountClosureSection';
+import { BrowserDataSection } from '@/components/settings/BrowserDataSection';
 import { MemorySection } from '@/components/settings/MemorySection';
 import { ModelDataRegionSection } from '@/components/settings/ModelDataRegionSection';
-import { useAppShellContext } from '@/components/AppShell';
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionId,
   normaliseSettingsHash,
   settingsSectionHref,
 } from '@/lib/settings-sections';
-import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, Row, Section } from '@/pages/PageShell';
 import { type ThemeMode, useTheme } from '@/stores/theme-store';
 import { ChevronRight, Monitor, Moon, Sun } from 'lucide-react';
@@ -60,9 +61,12 @@ export function SettingsPage(): JSX.Element {
   // Memory drops to the bottom (above 账号) since it's read-only
   // curation; users don't need it on every visit.
   return (
-    <PageContainer width="form">
+    <PageContainer width="form" className="hd-settings-page">
       <PageHeader title="设置" description="外观、角色、数据区域、开发者、记忆与账号" />
-      <SettingsSectionNav active={activeSection} />
+      <SettingsSectionNav
+        active={activeSection}
+        regionSelection={appShell?.me?.modelDataRegionSelection === true}
+      />
       <div className="space-y-6">
         <Section id="appearance" title="外观">
           <Row label="主题" description="跟随系统、浅色或深色。立即生效，记到本地。">
@@ -85,21 +89,26 @@ export function SettingsPage(): JSX.Element {
           </Link>
         </Section>
 
-        <ModelDataRegionSection
-          region={appShell?.me?.modelDataRegion ?? null}
-          onAssign={async (region) => {
-            if (!appShell) throw new Error('app shell unavailable');
-            await trpc.auth.assignModelDataRegion.mutate({ region });
-            const refreshed = await appShell.refreshMe();
-            if (refreshed?.modelDataRegion !== region) {
-              throw new Error('model data region refresh failed');
-            }
-          }}
-        />
+        {/* FIX-60 BOSS 决定: the region choice is shown only while the server turns it on. */}
+        {appShell?.me?.modelDataRegionSelection === true && (
+          <ModelDataRegionSection
+            region={appShell?.me?.modelDataRegion ?? null}
+            onAssign={async (region) => {
+              if (!appShell) throw new Error('app shell unavailable');
+              await trpc.auth.assignModelDataRegion.mutate({ region });
+              const refreshed = await appShell.refreshMe();
+              if (refreshed?.modelDataRegion !== region) {
+                throw new Error('model data region refresh failed');
+              }
+            }}
+          />
+        )}
 
         <div id="api-keys" className="scroll-mt-24">
           <ApiKeysSection />
         </div>
+
+        <BrowserDataSection />
 
         <MemorySection />
 
@@ -156,14 +165,22 @@ function AccountDestinationLink({
   );
 }
 
-function SettingsSectionNav({ active }: { active: SettingsSectionId }): JSX.Element {
+function SettingsSectionNav({
+  active,
+  regionSelection,
+}: {
+  active: SettingsSectionId;
+  regionSelection: boolean;
+}): JSX.Element {
   return (
     <nav
       aria-label="设置分区"
-      className="sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
+      className="hd-settings-nav sticky top-3 z-10 mb-5 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur"
     >
-      <div className="grid grid-cols-3 gap-1 sm:grid-cols-7">
-        {SETTINGS_SECTIONS.map((section) => (
+      <div className="grid grid-cols-3 gap-1 sm:grid-cols-8">
+        {SETTINGS_SECTIONS.filter(
+          (section) => regionSelection || section.id !== 'model-region',
+        ).map((section) => (
           <Link
             key={section.id}
             to={settingsSectionHref(section.id)}

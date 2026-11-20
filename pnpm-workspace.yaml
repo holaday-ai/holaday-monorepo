@@ -3,3 +3,4 @@ packages:
   - "packages/*"
 patchedDependencies:
   '@novnc/novnc': patches/@novnc__novnc.patch
+  'playwright-crx@0.15.0': patches/playwright-crx@0.15.0.patch

@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { DB } from '../db/client.js';
 import { failStaleTasksWithEvents, failTaskWithEventIfStatus } from './task-maintenance.js';
 
-function fakeDbForMaintenance(candidates: Array<{ id: number; externalId: string; status: string }>, affectedRows: number[]) {
+function fakeDbForMaintenance(
+  candidates: Array<{ id: number; externalId: string; status: string }>,
+  affectedRows: number[],
+) {
   const captured = {
     eventPayloads: [] as Record<string, unknown>[],
     updatePayloads: [] as Record<string, unknown>[],

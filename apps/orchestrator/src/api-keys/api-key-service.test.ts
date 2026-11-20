@@ -80,18 +80,18 @@ describe('isValidApiKeyShape', () => {
   });
 
   it('rejects wrong prefix', () => {
-    expect(isValidApiKeyShape('hd_test_' + '0'.repeat(24))).toBe(false);
-    expect(isValidApiKeyShape('sk_live_' + '0'.repeat(24))).toBe(false);
+    expect(isValidApiKeyShape(`hd_test_${'0'.repeat(24)}`)).toBe(false);
+    expect(isValidApiKeyShape(`sk_live_${'0'.repeat(24)}`)).toBe(false);
   });
 
   it('rejects wrong length', () => {
     expect(isValidApiKeyShape('hd_live_short')).toBe(false);
-    expect(isValidApiKeyShape('hd_live_' + '0'.repeat(40))).toBe(false);
+    expect(isValidApiKeyShape(`hd_live_${'0'.repeat(40)}`)).toBe(false);
   });
 
   it('rejects non-hex tail (uppercase / non-hex chars)', () => {
-    expect(isValidApiKeyShape('hd_live_' + 'g'.repeat(24))).toBe(false);
-    expect(isValidApiKeyShape('hd_live_' + 'A'.repeat(24))).toBe(false);
+    expect(isValidApiKeyShape(`hd_live_${'g'.repeat(24)}`)).toBe(false);
+    expect(isValidApiKeyShape(`hd_live_${'A'.repeat(24)}`)).toBe(false);
   });
 });
 
