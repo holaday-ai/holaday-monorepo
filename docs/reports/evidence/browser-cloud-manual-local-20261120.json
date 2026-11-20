@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "kind": "local_manual_cloud_browser_acceptance",
+  "recordedAtUTC": "2026-11-20T14:32:28.405613+00:00",
+  "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+  "candidateManifestSHA256": "6109a34fbcf2b8311f4ad90160bfd8155c51fea8d2d3f6b005344abd88fdcc58",
+  "runtimeInputCount": 1833,
+  "changedRuntimeInputs": [
+    "apps/orchestrator/src/streaming/captcha-viewport-action.ts"
+  ],
+  "candidate": {
+    "schemaVersion": 1,
+    "kind": "local_review_build_only",
+    "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+    "createdAtUTC": "2026-11-20T14:30:55.936222+00:00",
+    "node": "22.23.3",
+    "sourceGitTree": "b0778292ea76fd67075e90f2a6a6915a901a45b0",
+    "artifacts": {
+      "backend": {
+        "archive": "backend-f2ccd2cb.zip",
+        "bytes": 4213759,
+        "sha256": "7cad081f929995ae1b8ac961c82b8923977d27604011234b8fe1e5f1fcd52a24",
+        "files": 1616,
+        "fileManifest": "backend-files.json",
+        "fileManifestSHA256": "f5389eddbe48be2022865cec9a8d359d77b850519bcab83cb7f723e7387f9351",
+        "builtFromSourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+        "reusedUnchanged": false
+      },
+      "workbench": {
+        "archive": "workbench-4639355e.zip",
+        "bytes": 33109508,
+        "sha256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
+        "files": 332,
+        "fileManifest": "workbench-files.json",
+        "fileManifestSHA256": "59637f6a6588d8bcb9533ac69e442a64d875d9f973ddd40b1873cf29259c25f9",
+        "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+        "reusedUnchanged": true
+      },
+      "extension": {
+        "archive": "extension-b4c4b3a1.zip",
+        "bytes": 1001382,
+        "sha256": "c8bfb32416a3536c3a78f6337a441973f088179226e4b77e0e211761b9ef3294",
+        "files": 18,
+        "fileManifest": "extension-files.json",
+        "fileManifestSHA256": "a72dfa6f80bb02694fac4e8664679396a6ab3bf7ddf23c0febfc32f467c5577d",
+        "builtFromSourceCommit": "b4c4b3a1a020e130cf7e4eb68ae9b04d01642620",
+        "reusedUnchanged": true
+      }
+    },
+    "buildReceipts": {
+      "backend": {
+        "mode": "build",
+        "exit": 0,
+        "seconds": 20.53,
+        "heapMB": 2048,
+        "sourceSHA256": {
+          "apps/orchestrator/src/streaming/captcha-viewport-action.ts": "072800e945ba1060ef41f12ac5bb7e663e978bed7a69f367b6cb969cff0ab491",
+          "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts": "5454c65abefcd1cc231ffd21dd3ea50b3927b38f6cbe390b1714d2e14c76b917",
+          "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts": "25b112b7f56e4f68d349a41ff9c4cdfbf071664eee069bb9bf2581d84a9c1715"
+        },
+        "command": [
+          "pnpm",
+          "build"
+        ]
+      },
+      "workbench": {
+        "mode": "build-web",
+        "exitCode": 0,
+        "seconds": 40.42,
+        "heapMB": 2048,
+        "passed": null,
+        "failed": null
+      },
+      "extension": {
+        "originalCandidateSourceCommit": "f3a2c73d81e7bcfa7bf203a51160fe529b5e0d3c",
+        "originalBuildReceipt": {
+          "originalCandidateSourceCommit": "b00bec89be7625039be118c84324dc6b206d0f62",
+          "originalBuildReceipt": {
+            "originalSourceCommit": "b4c4b3a1a020e130cf7e4eb68ae9b04d01642620",
+            "originalBuildReceipt": {
+              "stage": "extension",
+              "exitCode": 0,
+              "seconds": 4.47,
+              "heapMB": 512,
+              "node": "22.23.3",
+              "sourceCommit": "b4c4b3a1a020e130cf7e4eb68ae9b04d01642620",
+              "memoryFreePointPercent": 41,
+              "formalMode": true,
+              "QAFlagsPassed": false,
+              "networkModelCalls": 0,
+              "createdAtUTC": "2026-11-19T14:23:54.239821+00:00"
+            },
+            "equivalentAtSourceCommit": "b00bec89be7625039be118c84324dc6b206d0f62",
+            "proof": "All 1830 prior runtime inputs unchanged except two workbench-only page adapters; no other component imports those source modules."
+          },
+          "equivalentAtSourceCommit": "f3a2c73d81e7bcfa7bf203a51160fe529b5e0d3c",
+          "proof": "Only the server task-background module changed among 1830 runtime inputs; no workbench, extension or shared module imports it. Lock file unchanged."
+        },
+        "equivalentAtSourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
+        "proof": "Nine backend runtime inputs changed or were added among 1832 inputs; workbench, extension and shared source hashes are unchanged and do not import the new backend modules. Lock file unchanged."
+      }
+    },
+    "runtimeInputs": "runtime-inputs.json",
+    "runtimeInputsSHA256": "313a5c5b575a31d338dbf1c4e6dc4b1d27229d3d054fbe37cfcdf459140f9117",
+    "runtimeInputCount": 1833,
+    "runtimeInputScope": "tracked app/package/build inputs, excluding tests, testing, docs, e2e and build outputs",
+    "dependencyInstall": "not bundled; use exact monorepo pnpm lock, workspace sources and existing approved TS loader; backend zip is not standalone installer",
+    "lockSHA256": "19a88d73693074cd35660c381680806eb4bfc89b506800bdf297a41da51f7aad",
+    "formalExtension": {
+      "version": "0.0.6",
+      "name": "HOLA DAY",
+      "permissions": [
+        "storage",
+        "tabs",
+        "scripting",
+        "activeTab",
+        "cookies",
+        "webNavigation",
+        "alarms",
+        "sidePanel",
+        "debugger",
+        "history"
+      ],
+      "hostPermissions": [
+        "<all_urls>"
+      ],
+      "packageCheckExitCode": 0,
+      "oldZIPUnchanged": true,
+      "oldZIP_SHA256": "63c6b23fba58cc333ec68be52e3c581c189557dfe18d26660583f489b23e01f7",
+      "comparedToOldContentChangedPaths": [
+        "assets/index.html-ClY-zvLL.js",
+        "assets/index.html-DIkpt1-x.js",
+        "assets/index.ts-9D7zeQqM.js",
+        "assets/index.ts-DoUQxLzm.js",
+        "assets/page-context-BwOyWSRG.js",
+        "assets/page-context-rM1VjKPR.js",
+        "service-worker-loader.js",
+        "src/sidepanel/index.html"
+      ],
+      "installed": false,
+      "uploaded": false,
+      "QAApprovalDoesNotAuthorizeFormalInstall": true
+    },
+    "frozenWorkbenchReadOnlyAcceptance": "332 exact files served by current-source local HTTP App; default native manual Home UI passed. Prior file-history App acceptance remains bound to a5ed894a",
+    "compiledBackendStartupAcceptance": "not claimed; no new production-entry or Linux startup on this candidate",
+    "fullRealSiteAccountPhysicalKMSAcceptance": false,
+    "releaseApprovalBound": false,
+    "executionAllowed": false,
+    "deploymentAuthorized": false,
+    "productionChanged": false,
+    "pr361Merged": false,
+    "componentReuseProof": "component-reuse.json",
+    "componentReuseProofSHA256": "7e93e95ea4cb096e3e226af01038a0947f099cdeb9a33594a12558d0c2e5a19f",
+    "actualEntrypointAcceptance": "local Darwin HTTP App/pool only; actual application-main/production boot not claimed",
+    "realModelMeasurementSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+    "currentCandidateRealModelAcceptance": false,
+    "homeManualUiAcceptance": {
+      "admissionMode": "default",
+      "passed": true,
+      "syntheticAccount": true,
+      "loopbackOwnedSite": true,
+      "modelCalls": 0,
+      "kmsCalls": 0,
+      "controlledModeExitProofAccepted": false
+    }
+  },
+  "testMode": "default; real HTTP/JWT/isolated MySQL/native BrowserPool/CDP; synthetic owner and loopback site",
+  "uiPassed": true,
+  "uiReceipt": "cloud-browser-manual-20261120/ui-receipt.json",
+  "manualWindowSeconds": 345.52,
+  "manualWindowIsModelOrFirstFrameLatency": false,
+  "regression": {
+    "red": {
+      "exit": 1,
+      "seconds": 3.15,
+      "passed": 0,
+      "failed": 2,
+      "heapMB": 1024
+    },
+    "final": {
+      "exit": 0,
+      "seconds": 8.78,
+      "passed": 78,
+      "failed": 0,
+      "heapMB": 1024
+    },
+    "realChromiumDpr": [
+      1,
+      2
+    ],
+    "horizontalAndVerticalScroll": true,
+    "targetFingerprintIndependentlyChecked": true
+  },
+  "checks": {
+    "static": {
+      "mode": "static",
+      "exit": 0,
+      "seconds": 0.43,
+      "heapMB": 2048,
+      "sourceSHA256": {
+        "apps/orchestrator/src/streaming/captcha-viewport-action.ts": "072800e945ba1060ef41f12ac5bb7e663e978bed7a69f367b6cb969cff0ab491",
+        "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts": "5454c65abefcd1cc231ffd21dd3ea50b3927b38f6cbe390b1714d2e14c76b917",
+        "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts": "25b112b7f56e4f68d349a41ff9c4cdfbf071664eee069bb9bf2581d84a9c1715"
+      },
+      "command": [
+        "pnpm",
+        "exec",
+        "biome",
+        "check",
+        "apps/orchestrator/src/streaming/captcha-viewport-action.ts",
+        "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts",
+        "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts"
+      ]
+    },
+    "types": {
+      "mode": "types",
+      "exit": 0,
+      "seconds": 15.72,
+      "heapMB": 2048,
+      "sourceSHA256": {
+        "apps/orchestrator/src/streaming/captcha-viewport-action.ts": "072800e945ba1060ef41f12ac5bb7e663e978bed7a69f367b6cb969cff0ab491",
+        "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts": "5454c65abefcd1cc231ffd21dd3ea50b3927b38f6cbe390b1714d2e14c76b917",
+        "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts": "25b112b7f56e4f68d349a41ff9c4cdfbf071664eee069bb9bf2581d84a9c1715"
+      },
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "-p",
+        ".cloud-home-types.json"
+      ]
+    },
+    "build": {
+      "mode": "build",
+      "exit": 0,
+      "seconds": 20.53,
+      "heapMB": 2048,
+      "sourceSHA256": {
+        "apps/orchestrator/src/streaming/captcha-viewport-action.ts": "072800e945ba1060ef41f12ac5bb7e663e978bed7a69f367b6cb969cff0ab491",
+        "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts": "5454c65abefcd1cc231ffd21dd3ea50b3927b38f6cbe390b1714d2e14c76b917",
+        "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts": "25b112b7f56e4f68d349a41ff9c4cdfbf071664eee069bb9bf2581d84a9c1715"
+      },
+      "command": [
+        "pnpm",
+        "build"
+      ]
+    }
+  },
+  "cleanup": {
+    "httpPortsClosed": {
+      "55601": true,
+      "55599": true
+    },
+    "nativeProcessGroup": 97662,
+    "nativeProcessGroupMembers": [],
+    "ownedContainerRemoved": true,
+    "owner": "135abd3eeccb4130938ddac95b847236",
+    "privateEnvDeleted": true,
+    "schemaCleaned": true,
+    "otherServicesChanged": false
+  },
+  "controlledMode": {
+    "passed": false,
+    "originalRun": "cloud-home-ui-20261120-v1",
+    "error": "POOL_PROCESS_GROUP_EXIT_UNPROVEN",
+    "guardUnchanged": true,
+    "resourcesExternallyVerifiedClosed": true,
+    "defaultModeDoesNotReplaceControlledProof": true
+  },
+  "modelCallsThisWork": 0,
+  "modelAttemptsCumulative": 64,
+  "modelAttemptCeilingHistorical": 65,
+  "currentPermissionAllowsNewModelCalls": false,
+  "modelLedgerSHA256": "006f7ed9eee490a34075aa7775e49ac9180daf580451fdd66ebd0803b848106f",
+  "kmsCallsThisWork": 0,
+  "websiteExports": 0,
+  "oldTaskReplayed": false,
+  "fileHistoryPriorEvidenceSource": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+  "realModelPriorFailureSource": "4639355e3b76fd9a224f93522738f495d8f67577",
+  "newCandidateRealModelAccepted": false,
+  "actualProductionEntryAccepted": false,
+  "realAccountAccepted": false,
+  "physicalInputAccepted": false,
+  "pr361Merged": false,
+  "deployed": false,
+  "productionChanged": false,
+  "releaseReady": false,
+  "goalComplete": false,
+  "executionAllowed": false,
+  "evidenceFiles": [
+    {
+      "path": "cloud-browser-manual-20261120/build-exit.json",
+      "bytes": 562,
+      "sha256": "8d7d825b160668a77bd04933f9745dd693e006d153aad72d453df10bfb973d27"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/cleanup-proof.json",
+      "bytes": 301,
+      "sha256": "65c62d9b1e8333c56eb1605bdefa2477f1d513226b4dfd061348cba09f7ccaeb"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/console-logs.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/control-receipts.json",
+      "bytes": 282,
+      "sha256": "abfaf8728e8a890f0ad7571790eb3d7a6ad6531f5a1818b916322f0fc4d5a3ac"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/disconnect.dom.txt",
+      "bytes": 1749,
+      "sha256": "becb6a02f01a26df383338397cbc4c7f70f69258d40ace15506e8aba5c7558fe"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/disconnect.jpg",
+      "bytes": 46207,
+      "sha256": "a2d166b7829d812c1afc08cd2a21a2eb77c071f246f06fbdfe5f0a37f77cc5b6"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/manual-input.jpg",
+      "bytes": 51741,
+      "sha256": "654ccbda0766dfa0940f5128c71d6c2426e61ed5f89cd1ba0dacdd32fc179947"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/reconnect.dom.txt",
+      "bytes": 1717,
+      "sha256": "06f9228c5d81ab6f229ddfc922ea46a89a75fe0c7799dde49d8b5653268306fa"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/reconnect.jpg",
+      "bytes": 45379,
+      "sha256": "b64698c32836806a2e28d0c49de162661fd405a83bfecd535e0513e979c587f1"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/red-exit.json",
+      "bytes": 71,
+      "sha256": "0cc0b2032c31db929f79da81d0cc4a7b82581c3b851e2d35155ec4fd7a37dee6"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/related-exit.json",
+      "bytes": 72,
+      "sha256": "a6d1524ee67485a39b90818309735e034581c99221e4334ba3d37ed3fee70997"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/scroll-click-fixed.jpg",
+      "bytes": 36842,
+      "sha256": "d259e60f7ed3517d150f669295cee00624f4d16d6d4ce70d06d4248deed4ccf0"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/static-exit.json",
+      "bytes": 804,
+      "sha256": "9a48ccf44b646454adbbcddc1251b0af9d2f07c9a24490993436e04c3b65154d"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/types-exit.json",
+      "bytes": 612,
+      "sha256": "a93e3349ed945dc1962652d714910f09646a6ed25648324d458529aee2bea589"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/ui-receipt.json",
+      "bytes": 4140,
+      "sha256": "8a6ab66f34bc04172d40e5db46ddb704bdfd7ea94f6054d135f6ace96c770ce6"
+    },
+    {
+      "path": "cloud-browser-manual-20261120/ui-steps.json",
+      "bytes": 819,
+      "sha256": "f5b358cb3bdf7be69fddf062711e08a5b4d7e29586f0bd3d661ef56d1d19cdbf"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "httpPortsClosed": {
+    "55601": true,
+    "55599": true
+  },
+  "nativeProcessGroup": 97662,
+  "nativeProcessGroupMembers": [],
+  "ownedContainerRemoved": true,
+  "owner": "135abd3eeccb4130938ddac95b847236",
+  "privateEnvDeleted": true,
+  "schemaCleaned": true,
+  "otherServicesChanged": false
+}

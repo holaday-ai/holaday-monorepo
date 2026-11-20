@@ -1,0 +1,247 @@
+{
+  "passed": true,
+  "uiPassed": true,
+  "admissionMode": "default",
+  "cleanupErrors": [],
+  "modelCalls": 0,
+  "externalFetches": [],
+  "state": {
+    "clicks": 1,
+    "text": "Hola 2026 中文输入",
+    "bottomClicks": 1,
+    "observations": 18
+  },
+  "observedInputs": [
+    {
+      "clicks": 1,
+      "text": "",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "H",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Ho",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hol",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola ",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 20",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 202",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 ",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文输",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文输入",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文输",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文输入",
+      "bottomClicks": 0
+    },
+    {
+      "clicks": 1,
+      "text": "Hola 2026 中文输入",
+      "bottomClicks": 1
+    }
+  ],
+  "requests": [
+    {
+      "path": "/",
+      "method": "GET"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/observe",
+      "method": "POST"
+    },
+    {
+      "path": "/second",
+      "method": "GET"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET"
+    },
+    {
+      "path": "/",
+      "method": "GET"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET"
+    },
+    {
+      "path": "/second",
+      "method": "GET"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET"
+    },
+    {
+      "path": "/second",
+      "method": "GET"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET"
+    }
+  ],
+  "controls": [
+    {
+      "action": "disconnect",
+      "atUTC": "2026-11-20T14:26:05.297Z",
+      "pid": 97662
+    },
+    {
+      "action": "reconnect",
+      "atUTC": "2026-11-20T14:26:18.400Z",
+      "pid": 97662
+    },
+    {
+      "action": "finish",
+      "atUTC": "2026-11-20T14:26:38.545Z",
+      "pid": 97662
+    }
+  ],
+  "nativePid": 97662,
+  "ledgerUnchanged": true,
+  "sqlSchemaCleaned": true,
+  "httpClosed": true,
+  "nativePoolClosed": true,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "oldTaskReplayed": false,
+  "productionChanged": false,
+  "realAccountAcceptance": false
+}

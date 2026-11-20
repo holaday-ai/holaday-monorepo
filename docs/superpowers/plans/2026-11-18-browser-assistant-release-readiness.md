@@ -1,5 +1,8 @@
 # Browser Assistant Release Readiness Implementation Plan
 
+当前云浏览器基本操作更新：源码f2ccd2cb、1833项输入；真实本地HTTP/JWT/SQL/原生浏览器完成入口、画面、点击/中文输入/滚动、导航和断线恢复，修复滚动后目标命中坐标，78项相关回归/类型/静态/后端构建通过。default模式通过，controlled模式退出证明仍未通过且未放宽守卫；真实账号/KMS/物理/生产范围未完成。模型0、账本64/65不变，不合并不上线。见[本轮报告](../../reports/2026-11-20-cloud-browser-manual-local.md)。下文历史结果按各自来源保留。
+
+
 当前本地修复更新：按用户要求禁止新增模型调用；保存JSON的新合成任务已验证证据绑定纠错、独立SQL和桌面/移动实际双文件下载，成功与严格失败两场景均通过；356项相关回归/类型/静态/后端构建通过。旧真实任务仍failed、模型64/65不变，整体Goal未完成，不合并不上线。见[本地修复报告](../../reports/2026-11-19-browser-binding-history-local.md)。下文历史结果保留。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans, inline and serial. 用户已确认当前对话、一次性完成、低内存串行；不再派代理。

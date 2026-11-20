@@ -1,0 +1,20 @@
+{
+  "mode": "static",
+  "exit": 0,
+  "seconds": 0.43,
+  "heapMB": 2048,
+  "sourceSHA256": {
+    "apps/orchestrator/src/streaming/captcha-viewport-action.ts": "072800e945ba1060ef41f12ac5bb7e663e978bed7a69f367b6cb969cff0ab491",
+    "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts": "5454c65abefcd1cc231ffd21dd3ea50b3927b38f6cbe390b1714d2e14c76b917",
+    "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts": "25b112b7f56e4f68d349a41ff9c4cdfbf071664eee069bb9bf2581d84a9c1715"
+  },
+  "command": [
+    "pnpm",
+    "exec",
+    "biome",
+    "check",
+    "apps/orchestrator/src/streaming/captcha-viewport-action.ts",
+    "apps/orchestrator/src/streaming/captcha-viewport-action.test.ts",
+    "apps/orchestrator/src/trpc/routers/browser-home.local-app.manual.test.ts"
+  ]
+}

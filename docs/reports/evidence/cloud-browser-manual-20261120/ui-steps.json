@@ -1,0 +1,43 @@
+[
+  {
+    "step": "entry and target loaded",
+    "identity": {
+      "title": "HOLA DAY",
+      "url": "http://127.0.0.1:55601/browser"
+    }
+  },
+  {
+    "step": "counter and mixed input",
+    "clicks": 1,
+    "text": "Hola 2026 中文输入"
+  },
+  {
+    "step": "scroll-bottom click after fix",
+    "bottomClicks": 1
+  },
+  {
+    "step": "next page via streamed frame"
+  },
+  {
+    "step": "back",
+    "address": "http://127.0.0.1:55599/"
+  },
+  {
+    "step": "forward",
+    "address": "http://127.0.0.1:55599/second"
+  },
+  {
+    "step": "refresh",
+    "address": "http://127.0.0.1:55599/second"
+  },
+  {
+    "step": "disconnect",
+    "screenshot": "disconnect.jpg"
+  },
+  {
+    "step": "reconnect",
+    "address": "http://127.0.0.1:55599/second",
+    "sameNativePid": 97662,
+    "connectionOverlayGone": true
+  }
+]
