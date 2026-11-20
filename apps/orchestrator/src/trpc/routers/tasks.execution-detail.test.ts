@@ -5,6 +5,74 @@ import type { Context } from '../context.js';
 import { tasksRouter } from './tasks.js';
 
 describe('owned task detail execution identity', () => {
+  it('restores the owned original input and generated output after a file-only task fails', async () => {
+    const row = {
+      id: 7,
+      externalId: 'tsk_files',
+      status: 'failed',
+      origin: 'user',
+      projectId: null,
+      intent: '仅处理我提供的JSON附件，生成summary.csv，交付原始JSON与新CSV。',
+      result: {},
+    };
+    const files = [
+      {
+        externalId: 'file_original',
+        filename: 'source.json',
+        kind: 'input',
+        mimetype: 'application/json',
+        sizeBytes: 2,
+        expiresAt: null,
+      },
+      {
+        externalId: 'file_generated',
+        filename: 'summary.csv',
+        kind: 'output',
+        mimetype: 'text/csv',
+        sizeBytes: 8,
+        expiresAt: null,
+      },
+    ];
+    const queries: unknown[][] = [];
+    const db = {
+      select(projection?: Record<string, unknown>) {
+        return {
+          from(table: Parameters<typeof getTableName>[0]) {
+            return {
+              where(query: SQL) {
+                const name = getTableName(table);
+                const params = new MySqlDialect().sqlToQuery(query).params;
+                if (name === 'task_files') queries.push(params);
+                const rows =
+                  name === 'users'
+                    ? [{ id: 9 }]
+                    : name === 'tasks' && !projection
+                      ? [row]
+                      : name === 'task_files'
+                        ? files.filter((f) => params.includes(f.kind))
+                        : [];
+                return Object.assign(Promise.resolve(rows), {
+                  limit: async () => rows,
+                  orderBy: async () => rows,
+                });
+              },
+            };
+          },
+        };
+      },
+    };
+    const logger = { child: () => logger, info() {}, warn() {}, error() {}, debug() {} };
+    const result = await tasksRouter
+      .createCaller({ db, logger, userId: 'usr_owner', taskOrigin: 'user' } as unknown as Context)
+      .detail({ taskId: 'tsk_files' });
+    expect(result.status).toBe('failed');
+    expect(
+      (
+        result.result as { metadata: { attachments: { fileId: string }[] } }
+      ).metadata.attachments.map((f) => f.fileId),
+    ).toEqual(['file_original', 'file_generated']);
+    expect(queries[0]?.slice(0, 2)).toEqual([9, 7]);
+  });
   it.each(['executing', 'completed', 'awaiting_user'])(
     'restores only unresolved inventory and preserves selected final outputs (%s)',
     async (status) => {

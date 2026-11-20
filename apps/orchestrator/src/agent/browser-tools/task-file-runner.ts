@@ -106,6 +106,29 @@ export async function runTaskFileMaterials(
               steps: turns,
             },
           },
+    async onCompletionRejected(event) {
+      const iteration = ++sequence;
+      progress = progress
+        .then(async () => {
+          await opts.onTick?.({
+            iteration,
+            toolsInTurn: [],
+            textPreamble: '',
+            apiLatencyMs: 0,
+            execution: {
+              actionKind: 'browser_finish_rejected',
+              actionSummary: '文件结果证据尚未核对完成',
+              ok: false,
+              errorCode: 'completion_evidence_rejected',
+              message: JSON.stringify(event),
+            },
+          });
+        })
+        .catch(() =>
+          logger.warn({ taskId: opts.taskId }, 'file task completion diagnostic failed'),
+        );
+      await progress;
+    },
     onStep(step) {
       toolsUsed.add(step.tool);
       const summary =

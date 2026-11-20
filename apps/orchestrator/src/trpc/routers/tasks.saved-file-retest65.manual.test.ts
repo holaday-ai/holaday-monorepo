@@ -23,6 +23,7 @@ import * as storage from '../../files/storage-provider.js';
 import { createHttpApp } from '../../http.js';
 import * as messages from '../../llm/messages-adapter.js';
 import { openIsolatedMysqlProbe } from '../../testing/isolated-mysql-probe.js';
+import { captureTaskHistoryCloseout } from '../../testing/task-history-closeout.js';
 import * as extensionWs from '../../ws/server.js';
 
 const boundary = vi.hoisted(() => ({ current: null as DB | null }));
@@ -482,7 +483,64 @@ it.runIf(process.env.HOLADAY_SAVED_FILE_RETEST65 === '1')(
         });
         return;
       }
-      await snapshot(armed ? 'real-model-saved-file-acceptance' : 'awaiting-bindings-no-tasks');
+      const observed = await snapshot(
+        armed ? 'real-model-saved-file-acceptance' : 'awaiting-bindings-no-tasks',
+      );
+      if (
+        armed &&
+        observed.taskRows.length === 1 &&
+        ['completed', 'failed', 'cancelled'].includes(observed.taskRows[0]!.status) &&
+        observed.drain.active === 0 &&
+        observed.drain.unknown === 0
+      ) {
+        const task = observed.taskRows[0]!;
+        // Close the owned live observer before opening the history browser: one Chrome lane.
+        await writeFile(join(out, 'ui-command.json'), '{"op":"stop"}\n', { mode: 0o600 });
+        const uiDeadline = Date.now() + 10_000;
+        let uiClosed = false;
+        while (Date.now() < uiDeadline) {
+          uiClosed = await readFile(join(out, 'ui-closed.json'), 'utf8')
+            .then(JSON.parse)
+            .then((value) => value.ownedBrowserClosed === true)
+            .catch(() => false);
+          if (uiClosed) break;
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        expect(uiClosed).toBe(true);
+        await captureTaskHistoryCloseout({
+          out,
+          origin,
+          token: tokens.github!,
+          taskId: task.externalId,
+          expectedStatus: task.status,
+          files: observed.files.map((file) => ({
+            fileId: file.externalId,
+            filename: file.filename,
+            bytes: file.sizeBytes,
+            sha256: file.actualSHA256,
+          })),
+          readFromNewConnection: async () => {
+            const beforeConnectionId = (probe.evidence.connectionIds as number[]).at(-1)!;
+            await probe.reconnect((db) => {
+              boundary.current = db;
+            });
+            const rows = await probe.db.select().from(tasks);
+            expect(rows).toHaveLength(1);
+            return {
+              beforeConnectionId,
+              afterConnectionId: (probe.evidence.connectionIds as number[]).at(-1)!,
+              status: rows[0]!.status,
+            };
+          },
+        });
+        const final = await snapshot('terminal-evidence-captured-before-cleanup');
+        expect(final.ledger.attempts.slice(0, 57)).toEqual(baselineLedger.attempts);
+        expect(final.ledger.attempts.length).toBeLessThanOrEqual(65);
+        await writeFile(join(out, 'final-live.json'), JSON.stringify(final, null, 2), {
+          mode: 0o600,
+        });
+        return;
+      }
     }
     throw new Error('Live acceptance deadline reached; preserve state and never replay');
   },

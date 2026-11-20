@@ -346,5 +346,25 @@
     "used": 64,
     "maximum": 65,
     "remaining": 1
+  },
+  "latestLocalBindingHistoryFix": {
+    "report": "browser-binding-history-local-20261119.json",
+    "sourceBaseCommit": "7d044e0ff896a8b04b4b95489111fe596f0fd136",
+    "sourceHashes": {
+      "apps/orchestrator/src/agent/browser-tools/completion-diagnostic.ts": "4ffae42b5060ba343ab3c77bb72491063aba2b23845ad1985b62262f2a83f509",
+      "apps/orchestrator/src/agent/browser-tools/completion-fields.ts": "a9022132c90849cfd75fe45b41c8513c517e9862d25c2f5ff2908c38ddf56435",
+      "apps/orchestrator/src/agent/browser-tools/completion-file-evidence.ts": "c12cde0c03341d60b84cc4bab70420a90febc0248e3edad7cde78650cb844e3f",
+      "apps/orchestrator/src/agent/browser-tools/task-file-runner.ts": "6e2f34a431bdb43a60aff277b4d4f1afc552b39a7c152c9b827ae0393b68ad17",
+      "apps/orchestrator/src/agent/browser-tools/unified-browser-loop.ts": "dc83f79bdd1985b0e4eb114a3a13ff307d00d364f4eb2a9a6775a17104f87b76",
+      "apps/orchestrator/src/trpc/routers/tasks.ts": "f76b6b4242c2b979593522402a64ebff1d1faa99e8faead54b414a93dbc1a996"
+    },
+    "relatedTests": 356,
+    "strictTypes": true,
+    "backendBuild": true,
+    "localCompletedAndFailedCases": true,
+    "newSqlAndDualViewportDownloads": true,
+    "newModelCalls": 0,
+    "realModelAcceptance": false,
+    "oldCandidateNeedsRefresh": true
   }
 }

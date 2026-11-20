@@ -11147,7 +11147,9 @@ export const tasksRouter = router({
           and(
             eq(taskFiles.userId, userRow.id),
             eq(taskFiles.taskId, taskRow.id),
-            eq(taskFiles.kind, 'output'),
+            isExplicitFileOnlyRequest(taskRow.intent)
+              ? inArray(taskFiles.kind, ['input', 'output'])
+              : eq(taskFiles.kind, 'output'),
             eq(taskFiles.status, 'active'),
             or(isNull(taskFiles.expiresAt), gt(taskFiles.expiresAt, attachmentNow)),
           ),

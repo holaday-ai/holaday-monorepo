@@ -256,6 +256,7 @@ interface Fact {
   sourceURL?: string;
   fileId?: string;
   tableFactId?: string;
+  fileProperty?: string;
   /** One item of a list (e.g. search results): no single-heading comparison. */
   listItem?: boolean;
   /** A quoted literal: not finding it verbatim means the page never said it. */
@@ -404,6 +405,7 @@ function explicitFacts(input: unknown): Fact[] {
         ...(typeof f.sourceURL === 'string' ? { sourceURL: f.sourceURL } : {}),
         ...(typeof f.fileId === 'string' ? { fileId: f.fileId } : {}),
         ...(typeof f.tableFactId === 'string' ? { tableFactId: f.tableFactId } : {}),
+        ...(typeof f.fileProperty === 'string' ? { fileProperty: f.fileProperty } : {}),
       },
     ];
   });
@@ -1056,6 +1058,8 @@ export function assessCompletionFacts(input: {
   receipts?: string;
   /** Actual file ranges read by the host; these never prove a page/tab binding. */
   materials?: readonly { fileId: string; text: string }[];
+  /** Metadata from successful, scoped host reads; never inferred from file contents. */
+  fileReceipts?: readonly { fileId: string; filename: string }[];
   tableFacts?: readonly {
     id: string;
     fileId: string;
@@ -1129,7 +1133,7 @@ export function assessCompletionFacts(input: {
     },
   );
   for (const fact of facts) {
-    const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}|${fact.fileId ?? ''}|${fact.tableFactId ?? ''}`;
+    const key = `${fact.name}|${fact.value}|${fact.tabId ?? ''}|${fact.sourceURL ?? ''}|${fact.fileId ?? ''}|${fact.tableFactId ?? ''}|${fact.fileProperty ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     // "未读到" declares a value absent: it claims nothing about the page.
@@ -1163,6 +1167,20 @@ export function assessCompletionFacts(input: {
       (!fact.sourceURL || sameSource(page.sourceURL, fact.sourceURL));
     const eligible = pages.filter(bound);
     const label = `${fieldLabel(fact.name)}「${fact.value.slice(0, 120)}」`;
+    if (fact.fileProperty !== undefined) {
+      const receipt = input.fileReceipts?.find((value) => value.fileId === fact.fileId);
+      if (
+        fact.fileProperty !== 'filename' ||
+        normalizeFact(fact.name) !== 'filename' ||
+        fact.tableFactId ||
+        fact.tabId ||
+        fact.sourceURL ||
+        !receipt ||
+        receipt.filename !== fact.value
+      )
+        contradictions.push(`${label} 与该文件的主机元数据回执不符或混用了其他出处`);
+      continue;
+    }
     if (fact.tableFactId) {
       const computed = input.tableFacts?.find(
         (value) => value.id === fact.tableFactId && value.fileId === fact.fileId,

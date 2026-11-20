@@ -459,6 +459,134 @@ it('completes the real file loop without a page and exposes only the contract to
   }
 });
 
+it.each(['name', 'id'] as const)(
+  'corrects filename/content and statistic %s bindings from canonical host evidence without relaxing validation',
+  async (fault) => {
+    const request = `${intent}生成CSV的两列分开填写。`;
+    const f = await fixture(request);
+    let turn = 0;
+    let outputId = '';
+    let metric: { id: string; fileId: string; name: string; value: string };
+    const rejected: unknown[] = [];
+    const metadata = { provider: 'anthropic', model: 'scripted-binding-recovery' } as const;
+    const adapter: MessagesAdapter = {
+      metadata,
+      async create(request) {
+        turn++;
+        const raw = request.messages.at(-1)?.content;
+        const block = Array.isArray(raw) ? raw.find((x) => x.type === 'tool_result') : undefined;
+        const text =
+          block?.type === 'tool_result' && typeof block.content === 'string' ? block.content : '';
+        const result = text.includes('\n{')
+          ? JSON.parse(text.slice(text.indexOf('\n{') + 1))
+          : text.startsWith('{')
+            ? JSON.parse(text)
+            : null;
+        let name: string;
+        let input: Record<string, unknown>;
+        if (turn === 1) {
+          name = 'read_task_file';
+          input = { fileId: f.row.externalId };
+        } else if (turn === 2) {
+          name = 'analyze_task_table';
+          input = {
+            fileId: f.row.externalId,
+            mode: 'aggregate',
+            metrics: [{ op: 'sum', column: 'A' }],
+          };
+        } else if (turn === 3) {
+          name = 'create_file';
+          input = { filename: 'summary.csv', format: 'csv', content: 'metric,value\nsum,1.5\n' };
+        } else if (turn === 4) {
+          outputId = result.file.fileId;
+          name = 'read_task_file';
+          input = { fileId: outputId };
+        } else if (turn === 5) {
+          name = 'analyze_task_table';
+          input = { fileId: outputId, mode: 'aggregate', metrics: [{ op: 'count_rows' }] };
+        } else if (turn === 6) {
+          metric = result.overall[0];
+          name = 'finish';
+          input = {
+            status: 'completed',
+            summary: '文件读取和核对已完成。',
+            fields: [
+              { name: '原始文件', value: 'source.csv', fileId: f.row.externalId },
+              {
+                name: fault === 'name' ? 'CSV记录数' : metric.name,
+                value: metric.value,
+                fileId: outputId,
+                tableFactId: fault === 'id' ? 'tbf_unknown' : metric.id,
+              },
+            ],
+          };
+        } else {
+          expect(turn).toBe(7);
+          expect(result?.fileEvidence?.fields).toEqual(
+            expect.arrayContaining([
+              {
+                name: 'filename',
+                value: 'source.csv',
+                fileId: f.row.externalId,
+                fileProperty: 'filename',
+              },
+              {
+                name: 'filename',
+                value: 'summary.csv',
+                fileId: outputId,
+                fileProperty: 'filename',
+              },
+              { name: '记录数', value: '1', fileId: outputId, tableFactId: metric!.id },
+            ]),
+          );
+          name = 'finish';
+          input = {
+            status: 'completed',
+            summary: '文件读取和核对已完成。',
+            fields: result.fileEvidence.fields,
+          };
+        }
+        return {
+          id: `binding-${turn}`,
+          metadata,
+          content: [{ type: 'tool_use', id: `binding-tool-${turn}`, name, input }],
+          stopReason: 'tool_use',
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadInputTokens: null,
+            cacheCreationInputTokens: null,
+            complete: true,
+          },
+        };
+      },
+    };
+    try {
+      const result = await runUnifiedBrowserLoop({
+        intent: request,
+        adapter,
+        taskFileContract: f.contract,
+        execute: async () => {
+          throw Error('browser execution forbidden');
+        },
+        maxSteps: 8,
+        onCompletionRejected: async (event) => {
+          rejected.push(event);
+        },
+      });
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'completed' });
+      expect(turn).toBe(7);
+      expect(rejected).toHaveLength(1);
+      expect(JSON.stringify(rejected)).toContain(
+        fault === 'name' ? 'table_name_mismatch' : 'table_fact_missing',
+      );
+      expect(JSON.stringify(rejected)).toContain('file_content_unmatched');
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  },
+);
+
 it.each(['navigate', 'upload', 'web_search', 'request_human'])(
   'does not execute a model-invented %s call',
   async (tool) => {

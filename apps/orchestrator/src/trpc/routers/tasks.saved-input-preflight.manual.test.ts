@@ -20,6 +20,7 @@ import * as storage from '../../files/storage-provider.js';
 import { createHttpApp } from '../../http.js';
 import * as messages from '../../llm/messages-adapter.js';
 import { openIsolatedMysqlProbe } from '../../testing/isolated-mysql-probe.js';
+import { captureTaskHistoryCloseout } from '../../testing/task-history-closeout.js';
 
 const boundary = vi.hoisted(() => ({ current: null as DB | null }));
 vi.mock('../../db/client.js', () => ({
@@ -125,6 +126,9 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
     expect(sourcePath.startsWith(join(root, '.superpowers/sdd/'))).toBe(true);
     expect(material.filename).toMatch(/^[^/\\]+\.(?:csv|json)$/);
     const github = material.filename.endsWith('.json');
+    const history = process.env.HOLADAY_SAVED_INPUT_HISTORY === '1';
+    const forceBadFinish = process.env.HOLADAY_SAVED_INPUT_BAD_FINISH === '1';
+    const expectedStatus = forceBadFinish ? 'failed' : 'completed';
     const bytes = await readFile(sourcePath);
     const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
     expect(hash(bytes)).toBe(material.sha256);
@@ -276,14 +280,40 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
                 status: 'completed',
                 summary:
                   '已完整读取历史材料，逐项生成并核对summary.csv，保留失败数和未提供字段的空白，交付原始JSON与新CSV。',
-                fields: aggregate.overall.map((metric) => ({
-                  name: metric.name,
-                  value: metric.value,
-                  fileId: generatedId,
-                  tableFactId: metric.id,
-                })),
+                fields: history
+                  ? [
+                      { name: '原始JSON文件', value: material.filename, fileId: inputId },
+                      {
+                        name: 'CSV记录数',
+                        value: '8',
+                        fileId: generatedId,
+                        tableFactId: aggregate.overall[0]!.id,
+                      },
+                    ]
+                  : aggregate.overall.map((metric) => ({
+                      name: metric.name,
+                      value: metric.value,
+                      fileId: generatedId,
+                      tableFactId: metric.id,
+                    })),
               };
-            } else throw new Error('Historical JSON did not finish within five scripted turns');
+            } else if (history && turns === 6) {
+              const correction = resultFrom(request);
+              expect(
+                correction.fileEvidence.diagnostics.map((item: { code: string }) => item.code),
+              ).toEqual(['file_content_unmatched', 'table_name_mismatch']);
+              const fields = correction.fileEvidence.fields;
+              name = 'finish';
+              input = {
+                status: 'completed',
+                summary: '已完成文件读取与核对，交付原始JSON和新CSV。',
+                fields: forceBadFinish
+                  ? fields.map((field: { tableFactId?: string; value: string }) =>
+                      field.tableFactId ? { ...field, value: '999' } : field,
+                    )
+                  : fields,
+              };
+            } else throw new Error('Historical JSON did not finish within its scripted turns');
           } else if (turns === 2) {
             expect(resultFrom(request)).toMatchObject({
               fileId: inputId,
@@ -401,6 +431,21 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
         executionDrain: admission,
       }),
     );
+    if (history) {
+      const uiRoot = resolve(process.env.HOLADAY_SAVED_INPUT_WORKBENCH ?? '');
+      expect(uiRoot.startsWith('/private/tmp/pr360-readiness/')).toBe(true);
+      const manifest = JSON.parse(
+        await readFile(
+          '/private/tmp/pr360-readiness/candidate-4639355e-v1/workbench-files.json',
+          'utf8',
+        ),
+      ) as Array<{ path: string; sha256: string }>;
+      expect(manifest).toHaveLength(332);
+      for (const file of manifest)
+        expect(hash(await readFile(join(uiRoot, file.path))), file.path).toBe(file.sha256);
+      app.use(express.static(uiRoot));
+      app.get(/.*/, (_req, res) => res.sendFile('index.html', { root: uiRoot }));
+    }
     server = createServer(app);
     await new Promise<void>((yes) => server!.listen(0, '127.0.0.1', yes));
     const address = server.address();
@@ -460,8 +505,8 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
       },
       { timeout: 30_000, interval: 250 },
     );
-    expect(detail.status, JSON.stringify(detail)).toBe('completed');
-    expect(turns).toBe(github ? 5 : 7);
+    expect(detail.status, JSON.stringify(detail)).toBe(expectedStatus);
+    expect(turns).toBe(github ? (history ? 6 : 5) : 7);
     expect(JSON.stringify(detail)).toContain(inputId);
     expect(JSON.stringify(detail)).toContain(generatedId);
     expect(attemptedExternalFetches).toEqual([]);
@@ -488,7 +533,7 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
       boundary.current = db;
     });
     const reloaded = await rpc('tasks.detail', { taskId });
-    expect(reloaded.status).toBe('completed');
+    expect(reloaded.status).toBe(expectedStatus);
     const [rows] = await probe.db.execute(
       sql`SELECT status, result FROM tasks WHERE external_id=${taskId}`,
     );
@@ -501,19 +546,67 @@ it.runIf(process.env.HOLADAY_SAVED_INPUT_PREFLIGHT === '1')(
     expect(JSON.stringify(steps)).toContain('read_task_file');
     expect(JSON.stringify(steps)).toContain('analyze_task_table');
     expect(JSON.stringify(steps)).toContain('create_file');
-    expect(String((detail.result as { summary?: string }).summary)).toContain(inputId);
-    expect(String((detail.result as { summary?: string }).summary)).toContain(generatedId);
+    if (!forceBadFinish) {
+      expect(String((detail.result as { summary?: string }).summary)).toContain(inputId);
+      expect(String((detail.result as { summary?: string }).summary)).toContain(generatedId);
+    }
+    if (history) expect(JSON.stringify(steps)).toContain('table_name_mismatch');
     await vi.waitFor(() => expect(drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }));
+    expect(hash(await readFile(ledger))).toBe(ledgerBefore);
+    if (history) {
+      await captureTaskHistoryCloseout({
+        out,
+        origin,
+        token,
+        taskId,
+        expectedStatus,
+        files: [
+          {
+            fileId: inputId,
+            filename: material.filename,
+            bytes: bytes.length,
+            sha256: material.sha256,
+          },
+          {
+            fileId: generatedId,
+            filename: 'summary.csv',
+            bytes: summary.length,
+            sha256: hash(summary),
+          },
+        ],
+        readFromNewConnection: async () => {
+          const beforeConnectionId = (probe.evidence.connectionIds as number[]).at(-1)!;
+          await probe.reconnect((db) => {
+            boundary.current = db;
+          });
+          const current = await rpc('tasks.detail', { taskId });
+          return {
+            beforeConnectionId,
+            afterConnectionId: (probe.evidence.connectionIds as number[]).at(-1)!,
+            status: String(current.status),
+          };
+        },
+      });
+      expect(hash(await readFile(ledger))).toBe(ledgerBefore);
+    }
+    if (process.env.HOLADAY_SAVED_INPUT_HISTORY === '1') {
+      const history = await readFile(join(out, 'history-verification.json'), 'utf8')
+        .then(JSON.parse)
+        .catch(() => null);
+      expect(history?.passed).toBe(true);
+      expect(history?.downloads).toHaveLength(4);
+    }
     drain.close();
     expect(drain.snapshot().idle).toBe(true);
-    expect(hash(await readFile(ledger))).toBe(ledgerBefore);
     await writeFile(
       join(out, 'receipt.json'),
       JSON.stringify(
         {
           scope:
             'actual saved bytes; real HTTP/SQL/tools; scripted model only, not paid real-site acceptance',
-          fullFileOnlyTaskAccepted: true,
+          fullFileOnlyTaskAccepted: !forceBadFinish,
+          historyCollectedBeforeCleanup: history,
+          expectedStatus,
           completionBoundary: 'opaque task-file contract; source and output receipts verified',
           sourceSHA256: material.sha256,
           sourceBytes: bytes.length,

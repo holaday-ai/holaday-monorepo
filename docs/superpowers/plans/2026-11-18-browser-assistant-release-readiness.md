@@ -1,5 +1,7 @@
 # Browser Assistant Release Readiness Implementation Plan
 
+当前本地修复更新：按用户要求禁止新增模型调用；保存JSON的新合成任务已验证证据绑定纠错、独立SQL和桌面/移动实际双文件下载，成功与严格失败两场景均通过；356项相关回归/类型/静态/后端构建通过。旧真实任务仍failed、模型64/65不变，整体Goal未完成，不合并不上线。见[本地修复报告](../../reports/2026-11-19-browser-binding-history-local.md)。下文历史结果保留。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans, inline and serial. 用户已确认当前对话、一次性完成、低内存串行；不再派代理。
 
 **Goal:** 完成PR360合并后的上线前准备、真实服务接线与已确认站点/账号/设备验收，形成准确的待发布候选；不执行上线。

@@ -59,6 +59,75 @@ describe('normalization', () => {
 });
 
 describe('fact assessment', () => {
+  it('binds a canonical filename to its host read receipt without treating it as file contents', () => {
+    const assess = (field: Record<string, unknown>) =>
+      assessCompletionFacts({
+        summary: '附件已读取',
+        pages: [],
+        fields: [field],
+        materials: [{ fileId: 'file_report', text: 'amount\n1\nforged.csv' }],
+        fileReceipts: [{ fileId: 'file_report', filename: 'report.csv' }],
+      });
+    expect(
+      assess({
+        fileProperty: 'filename',
+        name: 'filename',
+        value: 'report.csv',
+        fileId: 'file_report',
+      }),
+    ).toMatchObject({
+      contradictions: [],
+      unverified: [],
+    });
+    for (const field of [
+      { fileProperty: 'filename', name: 'filename', value: 'forged.csv', fileId: 'file_report' },
+      { fileProperty: 'filename', name: 'filename', value: 'report.csv', fileId: 'file_other' },
+      {
+        fileProperty: 'filename',
+        name: 'filename',
+        value: 'report.csv',
+        fileId: 'file_report',
+        tabId: 'tab_unread',
+      },
+      {
+        fileProperty: 'filename',
+        name: 'filename',
+        value: 'report.csv',
+        fileId: 'file_report',
+        sourceURL: 'https://other.example/',
+      },
+      { name: '文件正文', value: 'report.csv', fileId: 'file_report' },
+    ])
+      expect(assess(field).contradictions.length).toBeGreaterThan(0);
+  });
+  it('keeps a filename field inside document contents separate from host filename metadata', () => {
+    expect(
+      assessCompletionFacts({
+        summary: '正文里的文件名',
+        pages: [],
+        fields: [{ name: 'filename', value: 'embedded.csv', fileId: 'file_report' }],
+        materials: [{ fileId: 'file_report', text: 'filename: embedded.csv' }],
+        fileReceipts: [{ fileId: 'file_report', filename: 'outer.json' }],
+      }),
+    ).toMatchObject({ contradictions: [], unverified: [] });
+    expect(
+      assessCompletionFacts({
+        summary: '分别核对两种来源',
+        pages: [],
+        fields: [
+          { name: 'filename', value: 'embedded.csv', fileId: 'file_report' },
+          {
+            name: 'filename',
+            value: 'embedded.csv',
+            fileId: 'file_report',
+            fileProperty: 'filename',
+          },
+        ],
+        materials: [{ fileId: 'file_report', text: 'filename: embedded.csv' }],
+        fileReceipts: [{ fileId: 'file_report', filename: 'outer.json' }],
+      }).contradictions.length,
+    ).toBeGreaterThan(0);
+  });
   it('does not relabel a bound row count as an amount total even if the value is a real computed number', () => {
     const result = assessCompletionFacts({
       summary: '完整统计',

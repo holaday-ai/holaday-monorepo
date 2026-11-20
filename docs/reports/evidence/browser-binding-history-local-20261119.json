@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "kind": "binding-and-history-local-fix",
+  "atUTC": "2026-11-20T04:07:08.786496+00:00",
+  "sourceBaseCommit": "7d044e0ff896a8b04b4b95489111fe596f0fd136",
+  "changedRuntimeSourceHashes": {
+    "apps/orchestrator/src/agent/browser-tools/completion-diagnostic.ts": "4ffae42b5060ba343ab3c77bb72491063aba2b23845ad1985b62262f2a83f509",
+    "apps/orchestrator/src/agent/browser-tools/completion-fields.ts": "a9022132c90849cfd75fe45b41c8513c517e9862d25c2f5ff2908c38ddf56435",
+    "apps/orchestrator/src/agent/browser-tools/completion-file-evidence.ts": "c12cde0c03341d60b84cc4bab70420a90febc0248e3edad7cde78650cb844e3f",
+    "apps/orchestrator/src/agent/browser-tools/task-file-runner.ts": "6e2f34a431bdb43a60aff277b4d4f1afc552b39a7c152c9b827ae0393b68ad17",
+    "apps/orchestrator/src/agent/browser-tools/unified-browser-loop.ts": "dc83f79bdd1985b0e4eb114a3a13ff307d00d364f4eb2a9a6775a17104f87b76",
+    "apps/orchestrator/src/trpc/routers/tasks.ts": "f76b6b4242c2b979593522402a64ebff1d1faa99e8faead54b414a93dbc1a996"
+  },
+  "frozenWorkbenchSHA256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
+  "sourceBytes": 7560,
+  "sourceSHA256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+  "generatedBytes": 304,
+  "generatedSHA256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+  "validation": {
+    "static-final2": {
+      "mode": "static",
+      "exit": 0,
+      "seconds": 0.57,
+      "heapMB": 1024,
+      "passed": null,
+      "failed": null
+    },
+    "types-final": {
+      "mode": "types",
+      "exit": 0,
+      "seconds": 12.36,
+      "heapMB": 2048,
+      "passed": null,
+      "failed": null
+    },
+    "tests-final": {
+      "mode": "tests",
+      "exit": 0,
+      "seconds": 49.79,
+      "heapMB": 1024,
+      "passed": 356,
+      "failed": 0
+    },
+    "build": {
+      "mode": "build",
+      "exit": 0,
+      "seconds": 15.52,
+      "heapMB": 2048,
+      "passed": null,
+      "failed": null
+    }
+  },
+  "cases": [
+    {
+      "fixture": "saved-input-preflight-binding-final-completed-v1",
+      "status": "completed",
+      "sql": {
+        "beforeConnectionId": 40,
+        "afterConnectionId": 41,
+        "status": "completed"
+      },
+      "downloads": [
+        {
+          "viewport": 1440,
+          "fileId": "file_pcoDG9b8hrPBoHtxQMFyP",
+          "filename": "pr360-premerge-20261118.json",
+          "bytes": 7560,
+          "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 1440,
+          "fileId": "file_GCkPyyL2qqaneH5uQ8tzk",
+          "filename": "summary.csv",
+          "bytes": 304,
+          "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 390,
+          "fileId": "file_pcoDG9b8hrPBoHtxQMFyP",
+          "filename": "pr360-premerge-20261118.json",
+          "bytes": 7560,
+          "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 390,
+          "fileId": "file_GCkPyyL2qqaneH5uQ8tzk",
+          "filename": "summary.csv",
+          "bytes": 304,
+          "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+          "via": "actual history card click"
+        }
+      ],
+      "views": [
+        {
+          "width": 1440,
+          "height": 900,
+          "historyReloaded": true,
+          "status": "completed",
+          "noHorizontalOverflow": true
+        },
+        {
+          "width": 390,
+          "height": 844,
+          "historyReloaded": true,
+          "status": "completed",
+          "noHorizontalOverflow": true
+        }
+      ],
+      "pageErrors": [],
+      "blockedAssetOrigins": [
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai"
+      ],
+      "receiptSHA256": "8ec2e5a5d36f78088902d090464d63781d6e3f3df3f239e5b96e5de3eaf3f2d2",
+      "historyProofSHA256": "f7e28ac0856d1be8a2a057ac2c43ca68e6240a1e3f9304ba5de43738f0ecc0b3",
+      "rawFinishModel": "scripted local adapter; no provider invocation"
+    },
+    {
+      "fixture": "saved-input-preflight-binding-final-failed-v1",
+      "status": "failed",
+      "sql": {
+        "beforeConnectionId": 44,
+        "afterConnectionId": 45,
+        "status": "failed"
+      },
+      "downloads": [
+        {
+          "viewport": 1440,
+          "fileId": "file_9K37n2EMspkztLRcdrAjC",
+          "filename": "pr360-premerge-20261118.json",
+          "bytes": 7560,
+          "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 1440,
+          "fileId": "file_oCFjPTpmuWW8e2gK5pbgy",
+          "filename": "summary.csv",
+          "bytes": 304,
+          "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 390,
+          "fileId": "file_9K37n2EMspkztLRcdrAjC",
+          "filename": "pr360-premerge-20261118.json",
+          "bytes": 7560,
+          "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+          "via": "actual history card click"
+        },
+        {
+          "viewport": 390,
+          "fileId": "file_oCFjPTpmuWW8e2gK5pbgy",
+          "filename": "summary.csv",
+          "bytes": 304,
+          "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+          "via": "actual history card click"
+        }
+      ],
+      "views": [
+        {
+          "width": 1440,
+          "height": 900,
+          "historyReloaded": true,
+          "status": "failed",
+          "noHorizontalOverflow": true
+        },
+        {
+          "width": 390,
+          "height": 844,
+          "historyReloaded": true,
+          "status": "failed",
+          "noHorizontalOverflow": true
+        }
+      ],
+      "pageErrors": [],
+      "blockedAssetOrigins": [
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai",
+        "https://assets.holaday.ai"
+      ],
+      "receiptSHA256": "e85c2a587a863add710e8e6179d04407d36a45b655424088640aefb3b9b01609",
+      "historyProofSHA256": "e64b7f2a470b8050e3f0804d42abe5133962308b09a4beb52086514aa4e29a30",
+      "rawFinishModel": "scripted local adapter; no provider invocation"
+    }
+  ],
+  "resourcesClosed": {
+    "atUTC": "2026-11-20T04:04:13.095642+00:00",
+    "cases": [
+      {
+        "case": "saved-input-preflight-binding-final-completed-v1",
+        "taskId": "tsk_Yz4d9G3tx2XuveBKCBDA9",
+        "status": "completed",
+        "browserClosed": true,
+        "schemaCleaned": true,
+        "httpPortsClosed": [
+          62505
+        ]
+      },
+      {
+        "case": "saved-input-preflight-binding-final-failed-v1",
+        "taskId": "tsk_4Yk6xyt7QXiFgESoaJVLj",
+        "status": "failed",
+        "browserClosed": true,
+        "schemaCleaned": true,
+        "httpPortsClosed": [
+          62587
+        ]
+      }
+    ],
+    "ownedContainerRemoved": true,
+    "temporaryPasswordDeleted": true,
+    "modelLedgerUnchanged": true,
+    "modelUsed": 64,
+    "modelMaximum": 65,
+    "modelCallsThisWork": 0,
+    "websiteExports": 0,
+    "oldTasksReplayed": false,
+    "productionChanged": false
+  },
+  "modelLedgerSHA256": "006f7ed9eee490a34075aa7775e49ac9180daf580451fdd66ebd0803b848106f",
+  "newModelCalls": 0,
+  "used": 64,
+  "maximum": 65,
+  "latestUserInstructionForbidsNewCalls": true,
+  "websiteExports": 0,
+  "oldRealTasksReplayed": false,
+  "originalRealTaskStatusRemains": "failed",
+  "realModelAcceptanceOfFix": false,
+  "productionWrites": 0,
+  "merged": false,
+  "deployed": false,
+  "fullGoalComplete": false,
+  "limitations": [
+    "Old paid-run full finish arguments were not persisted; these are local reproductions of confirmed failure categories, not reconstruction of its exact output.",
+    "Current UI is the unchanged frozen workbench; backend is current source in an actual HTTP/SQL test App.",
+    "Scripted local-model turns do not measure provider latency or establish real model acceptance."
+  ]
+}
