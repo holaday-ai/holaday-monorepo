@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "read-only-nonproduction-linux-capability-inventory",
+  "platform": "Darwin",
+  "machine": "arm64",
+  "uid": 501,
+  "createsResources": false,
+  "changesPrivileges": false,
+  "opensNetwork": false,
+  "signalsProcesses": false,
+  "exitProofAccepted": false,
+  "productionAccepted": false,
+  "reasons": [
+    "Linux kernel/systemd/cgroup v2 are not available on this host"
+  ],
+  "credentialsRead": false,
+  "modelCalls": 0,
+  "kmsCalls": 0
+}

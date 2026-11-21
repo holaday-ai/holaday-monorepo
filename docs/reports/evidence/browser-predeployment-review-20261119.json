@@ -3,19 +3,19 @@
   "kind": "browser-predeployment-review-only",
   "preparedAtUTC": "2026-11-19T17:20:21.625946+00:00",
   "preparedAtSourceHead": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
-  "runtimeSourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+  "runtimeSourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
   "runtimeInputCount": 1833,
   "runtimeInputsEquivalent": true,
-  "candidateManifestSHA256": "6109a34fbcf2b8311f4ad90160bfd8155c51fea8d2d3f6b005344abd88fdcc58",
+  "candidateManifestSHA256": "57b0999fc4242a7aeb1061cd1ebbd2ce47bff40a3f1cf4d70786313b44801608",
   "artifacts": {
     "backend": {
-      "archive": "backend-f2ccd2cb.zip",
-      "bytes": 4213759,
-      "sha256": "7cad081f929995ae1b8ac961c82b8923977d27604011234b8fe1e5f1fcd52a24",
+      "archive": "backend-1fccf1b4.zip",
+      "bytes": 4213844,
+      "sha256": "cb99fa3f94862f741cf5afad72cc5986b7f2f1fe72eabb08316be8df58a628a9",
       "files": 1616,
       "fileManifest": "backend-files.json",
-      "fileManifestSHA256": "f5389eddbe48be2022865cec9a8d359d77b850519bcab83cb7f723e7387f9351",
-      "builtFromSourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+      "fileManifestSHA256": "b7a1c3c641ddadf297be0ff185be2241895af60e4d9a2886803d34863c2e3544",
+      "builtFromSourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
       "reusedUnchanged": false
     },
     "workbench": {
@@ -207,7 +207,7 @@
     "node": "22.23.3",
     "databaseAndVaultVerified": false
   },
-  "componentReuseProofSHA256": "7e93e95ea4cb096e3e226af01038a0947f099cdeb9a33594a12558d0c2e5a19f",
+  "componentReuseProofSHA256": "a5a31e845087c12e4a11445dc0a7fcf60e621549aad922b5008921fc21eed3ee",
   "kmsRealServiceAcceptance": {
     "executed": false,
     "latestObservedState": "authenticated console reloaded; CloudShell still reports account verification; no deletion/upload/crypto",
@@ -236,28 +236,48 @@
     "isolatedSchemaCleaned": true
   },
   "currentCandidateStartup": {
-    "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+    "sourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
     "verified": false,
     "previousCandidateRecord": {
-      "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+      "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
       "verified": false,
       "previousCandidateRecord": {
-        "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-        "verified": true,
+        "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+        "verified": false,
         "previousCandidateRecord": {
-          "backendBuildPassed": true,
-          "localSqlPreflightPassed": true,
-          "linuxStartupForCurrentBackendAccepted": true,
-          "unchangedWorkbenchAndExtensionReused": true,
-          "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+          "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+          "verified": true,
+          "previousCandidateRecord": {
+            "backendBuildPassed": true,
+            "localSqlPreflightPassed": true,
+            "linuxStartupForCurrentBackendAccepted": true,
+            "unchangedWorkbenchAndExtensionReused": true,
+            "previousLinuxEvidenceScope": "current bbcf exact reviewed TS/tsx entry verified on emulated Linux amd64; production native identity unverified",
+            "actualSourceEntrypointOnEmulatedX64": {
+              "passed": true,
+              "runtimeInputHashesVerified": 1832,
+              "node": "22.23.3",
+              "uid": 998,
+              "fullNetworkIsolation": true,
+              "samePidTwoPorts": true,
+              "closedBusinessStatus": 503,
+              "gracefulExitCode": 0,
+              "ownedContainerRemoved": true,
+              "nativeProductionProcessIdentityAccepted": false,
+              "connectedDatabaseAccepted": false,
+              "vaultEnabledAccepted": false,
+              "compiledBackendZipStartupAccepted": false
+            }
+          },
+          "verificationReport": "browser-current4639-offline-20261119.json",
           "actualSourceEntrypointOnEmulatedX64": {
             "passed": true,
+            "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
             "runtimeInputHashesVerified": 1832,
-            "node": "22.23.3",
-            "uid": 998,
             "fullNetworkIsolation": true,
             "samePidTwoPorts": true,
-            "closedBusinessStatus": 503,
+            "healthStatus": 200,
+            "businessStatus": 503,
             "gracefulExitCode": 0,
             "ownedContainerRemoved": true,
             "nativeProductionProcessIdentityAccepted": false,
@@ -266,26 +286,11 @@
             "compiledBackendZipStartupAccepted": false
           }
         },
-        "verificationReport": "browser-current4639-offline-20261119.json",
-        "actualSourceEntrypointOnEmulatedX64": {
-          "passed": true,
-          "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-          "runtimeInputHashesVerified": 1832,
-          "fullNetworkIsolation": true,
-          "samePidTwoPorts": true,
-          "healthStatus": 200,
-          "businessStatus": 503,
-          "gracefulExitCode": 0,
-          "ownedContainerRemoved": true,
-          "nativeProductionProcessIdentityAccepted": false,
-          "connectedDatabaseAccepted": false,
-          "vaultEnabledAccepted": false,
-          "compiledBackendZipStartupAccepted": false
-        }
+        "reason": "Current changed candidate not rerun; Linux entry evidence remains bound to4639; local HTTP/SQL tests do not attest production entry."
       },
-      "reason": "Current changed candidate not rerun; Linux entry evidence remains bound to4639; local HTTP/SQL tests do not attest production entry."
+      "reason": "Current candidate only local HTTP App/native pool validated; actual production/Linux boot not rerun."
     },
-    "reason": "Current candidate only local HTTP App/native pool validated; actual production/Linux boot not rerun."
+    "reason": "Only controlled local cleanup regression checked; production/Linux entry not rerun."
   },
   "githubSavedInputPreflight": {
     "sourceBytes": 7560,
@@ -328,7 +333,7 @@
     "realModelAcceptance": false,
     "productionChanged": false
   },
-  "reviewedHead": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+  "reviewedHead": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
   "latestSavedMaterialRealModelResults": {
     "sourceCommit": "bbcf442204e860aff2caceb41fa867a7e6cdfdcd",
     "sheetsAccepted": true,
@@ -337,40 +342,51 @@
     "currentCandidatePaidRetest": false
   },
   "currentCandidateUiComponentVerification": {
-    "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
-    "report": "browser-cloud-manual-local-20261120.json",
-    "passed": true,
-    "backend": "actual local HTTP/JWT/SQL/native pool and streamed manual input",
-    "admissionMode": "default",
-    "frozenWorkbenchUnchanged": true,
-    "controlledExitProofAccepted": false,
-    "realModelAcceptance": false,
+    "sourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
+    "performed": false,
+    "passed": false,
     "previousCandidateRecord": {
-      "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
-      "report": "browser-binding-history-local-20261119.json",
+      "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+      "report": "browser-cloud-manual-local-20261120.json",
       "passed": true,
-      "backend": "actual HTTP/SQL test App with scripted adapter",
+      "backend": "actual local HTTP/JWT/SQL/native pool and streamed manual input",
+      "admissionMode": "default",
       "frozenWorkbenchUnchanged": true,
-      "completedAndFailedCases": true,
-      "newSqlConnectionAndActualDualViewportDownloads": true,
-      "realModelAcceptance": false
-    }
+      "controlledExitProofAccepted": false,
+      "realModelAcceptance": false,
+      "previousCandidateRecord": {
+        "sourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d",
+        "report": "browser-binding-history-local-20261119.json",
+        "passed": true,
+        "backend": "actual HTTP/SQL test App with scripted adapter",
+        "frozenWorkbenchUnchanged": true,
+        "completedAndFailedCases": true,
+        "newSqlConnectionAndActualDualViewportDownloads": true,
+        "realModelAcceptance": false
+      }
+    },
+    "reason": "Prior manual App UI stays at f2ccd2cb; workbench bytes unchanged, backend changed."
   },
   "latestOfflineVerificationAtUTC": "2026-11-20T00:34:46.392608+00:00",
   "currentCandidateRealModelRetest": {
-    "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+    "sourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
     "performed": false,
     "accepted": false,
     "priorResult": {
-      "report": "browser-saved65-results-20261119.json",
-      "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
-      "status": "failed",
-      "csvSemanticAccepted": true,
-      "independentSqlAndHistoryAccepted": false,
-      "actualNewCalls": 7,
-      "used": 64,
-      "maximum": 65,
-      "remaining": 1
+      "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+      "performed": false,
+      "accepted": false,
+      "priorResult": {
+        "report": "browser-saved65-results-20261119.json",
+        "sourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+        "status": "failed",
+        "csvSemanticAccepted": true,
+        "independentSqlAndHistoryAccepted": false,
+        "actualNewCalls": 7,
+        "used": 64,
+        "maximum": 65,
+        "remaining": 1
+      }
     }
   },
   "latestLocalBindingHistoryFix": {
@@ -394,7 +410,7 @@
     "oldCandidateNeedsRefresh": false,
     "runtimeSourceCommit": "a5ed894a55be8f2b55b77fb9b914f17689495c7d"
   },
-  "candidateBoundAtUTC": "2026-11-20T14:32:28.409914+00:00",
+  "candidateBoundAtUTC": "2026-11-21T04:06:12.572886+00:00",
   "latestLocalCloudBrowserManual": {
     "sourceCommit": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
     "uiPassed": true,
@@ -413,5 +429,15 @@
     "actualProductionEntryAccepted": false,
     "goalComplete": false,
     "report": "browser-cloud-manual-local-20261120.json"
+  },
+  "latestControlledCleanupFix": {
+    "sourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
+    "report": "browser-controlled-exit-local-20261120.json",
+    "synchronousFinalizerFixPassed": true,
+    "relatedTsTests": 215,
+    "rootPythonTests": 78,
+    "physicalGroupExitAccepted": false,
+    "originalRootExitProducerImplemented": false,
+    "linuxKernelBoundarySynthetic": true
   }
 }

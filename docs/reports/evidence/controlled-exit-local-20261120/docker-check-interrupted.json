@@ -1,0 +1,10 @@
+{
+  "ownedCheckShell": 99388,
+  "ownedDockerClients": [
+    99533
+  ],
+  "terminatedOnlyOwnedReadOnlyCheck": true,
+  "dockerDaemonChanged": false,
+  "containersCreated": 0,
+  "note": "Docker metadata checks did not return promptly; stopped only the owned clients, not Docker daemon or existing containers."
+}
