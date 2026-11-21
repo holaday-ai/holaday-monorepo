@@ -151,7 +151,9 @@ class _GroupMaterial:
         for role, worker, pin, view in self._terminal_workers:
             if (self._workers.get(role) is not worker or worker._retired or worker._material is not self
                     or worker._pin is not pin or worker._view is not view or pin._retired
-                    or pin._fd is None or pin._proc is None or view._retired or view._pin is not pin):
+                    or pin._fd is None or pin._proc is None or view._retired or view._pin is not pin
+                    or pin._cgroup is None or pin._cgroup._retired
+                    or pin._cgroup._owner is not pin or not pin._cgroup._fds):
                 raise ValueError()
         if self._runtime is not None:
             from quartet_runtime import _RunningQuartet

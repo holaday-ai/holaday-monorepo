@@ -10,6 +10,10 @@ ROLES = ('anchor', 'xvfb', 'brave', 'x11vnc', 'websockify')
 
 
 def replay(row, resources, requests):
+    if row.get('action') == 'role_terminal_observed':
+        return replay_terminal(row, resources)
+    if row.get('action') in ('role_stop_dispatch', 'role_stop_accepted', 'role_stop_observed'):
+        return replay_stop(row, resources)
     if row.get('action') == 'close_intent':
         return replay_close_intent(row, resources)
     if row.get('action') == 'prepare':
@@ -112,6 +116,57 @@ def replay_close_intent(row, resources):
                       'roles': {role: dict(row['roles'][role]) for role in ROLES}}
     group['state'] = 'closing'
     # No stop ACK/job completion, terminal capability, exit or reusable slot.
+
+
+def replay_stop(row, resources):
+    common = {'version', 'revision', 'action', 'resource', 'closeId', 'role'}
+    resource, role, action = row.get('resource'), row.get('role'), row['action']
+    if (type(resource) is not str or resource not in resources or resources[resource]['version'] != 2
+            or type(role) is not str or role not in ROLES): raise ValueError()
+    group = resources[resource]
+    close = group.get('close', {})
+    if group['state'] != 'closing' or close.get('closeId') != row.get('closeId'): raise ValueError()
+    stops = close.get('stops', {})
+    order = ROLES[1:] + ROLES[:1]
+    if action == 'role_stop_dispatch':
+        if (set(row) != common or role in stops or len(stops) >= 5
+                or role != order[len(stops)] or any(value['state'] != 'observed' for value in stops.values())):
+            raise ValueError()
+        close.setdefault('stops', {})[role] = {'state': 'dispatching'}
+    elif action == 'role_stop_accepted':
+        if (set(row) != common | {'job'} or stops.get(role, {}).get('state') != 'dispatching'
+                or type(row['job']) is not str
+                or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', row['job']) is None
+                or int(row['job'].rsplit('/', 1)[1]) >= 2**32
+                or any(value.get('job') == row['job'] for value in group['roles'].values())
+                or any(value.get('job') == row['job'] for value in stops.values())): raise ValueError()
+        stops[role].update(state='accepted', job=row['job'])
+    elif action == 'role_stop_observed':
+        if (set(row) != common | {'job', 'result', 'signalSerial'}
+                or stops.get(role, {}).get('state') != 'accepted' or row['job'] != stops[role]['job']
+                or row['result'] != 'done' or type(row['signalSerial']) is not int
+                or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        stops[role].update(state='observed', result='done', signalSerial=row['signalSerial'])
+    else: raise ValueError()
+    # All five stop receipts still leave the resource closing and its slot reserved.
+
+
+def replay_terminal(row, resources):
+    fields = {'version', 'revision', 'action', 'resource', 'closeId', 'role', 'job', 'signalSerial', 'cgroup'}
+    resource, role = row.get('resource'), row.get('role')
+    if (set(row) != fields or type(resource) is not str or resource not in resources
+            or resources[resource]['version'] != 2 or type(role) is not str or role not in ROLES): raise ValueError()
+    group = resources[resource]
+    close = group.get('close', {})
+    stops = close.get('stops', {})
+    if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+            or set(stops) != set(ROLES) or any(value['state'] != 'observed' for value in stops.values())
+            or row['job'] != stops[role]['job'] or row['signalSerial'] != stops[role]['signalSerial']
+            or type(row['signalSerial']) is not int or row['cgroup'] not in ('empty', 'removed')
+            or role in close.get('terminalObservations', {})): raise ValueError()
+    close.setdefault('terminalObservations', {})[role] = {'job': row['job'],
+        'signalSerial': row['signalSerial'], 'cgroup': row['cgroup']}
+    # Historical observations only: neither reap nor one-time Node IO consumption is proven.
 
 
 def replay_material(row, resources):

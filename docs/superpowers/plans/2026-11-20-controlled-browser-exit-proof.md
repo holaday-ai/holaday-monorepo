@@ -36,7 +36,7 @@
 - [x] GREEN：同步与异步失败都断连一次，原实际peer关闭，unknown>0、物理slot保留；重复release不得重跑finalizer。
 - [x] 定向TS215/215及root侧Python78/78，严格类型/静态/后端构建通过；作者串行复核，无独立审查声明。格式前后发射JS token一致。
 
-### Task 2: 原组停止事务与物理证据生产者（关闭意图已实现，停止/终态仍缺）
+### Task 2: 原组停止事务与物理证据生产者（内部停止/必要终态观察已接，完整退出接口仍缺）
 
 **Files to assess:** scripts/pool-broker/quartet_runtime.py、quartet_create_control.py、quartet_listener.py、quartet_records.py、resource_journal.py；新增的stop/exit模块与相应用例须先据原始句柄契约细化。apps/orchestrator/src/browser-pool/broker-control-protocol.ts、broker-pool-runtime.ts、browser-pool.ts为最终消费者，不提前发成功。
 
@@ -46,7 +46,10 @@
   - [x] 内部原实例 `begin_close()` 在首个IO前封闭 `check()`，同一journal持久记录一次closeId及原manager/五unit/start job/InvocationID；重复调用不另建事务，失败保留unknown/slot，不发退出许可。
   - [ ] 将该内部入口接到同一原boot的认证关闭通道；当前listener/Node尚无实际关闭路由，不把私有方法当作已接通的整组关闭。
 - [ ] 同一原manager定向停止原五unit：先四角色、后anchor；依赖停止/显式停止须统一纳入原job回执，不从StopUnit ACK推断完成。
+  - [x] 内部无参数 `stop_original()` 按原五角色派发，逐角色先持久dispatch，绑定原manager/Id/InvocationID/Restart；保存原StopUnit ACK与同一原连接的JobRemoved(done)，重复不重派，丢ACK或换代保持unknown。
+  - [ ] 在创建/首次派发前订阅并保存原启动job及提前依赖停止的完成回执；当前新增持久订阅用于关闭阶段，不能追认已丢失的启动完成信号。
 - [ ] 持原cgroup对象，核对job完成、无待启动/重启、原身份仍匹配且不能重新填充；原pidfd显示退出并区分reap，任何缺失/漂移保留unknown。
+  - [x] 原worker取得pidfd/proc后即持cgroup2目录链/events；原引用替换或撤销拒绝。内部 `collect_terminal_evidence()` 组合原stop对象、原pidfd退出、原cgroup空/退役、重复单位身份/Job0/Restart=no/NRestarts0/MainPID0与终态观察；这些必要事实仍只保存closing，不产groupExit/slot许可。
 - [ ] 消费者先收口该组既有SDK、会话及全部原始IO，再消费一次性原物理终态；仅解除本组凭据，不能清除DB/模型或其他boot未知。
 - [ ] 在既有journal记录原终态后才允许槽位复用；证明丢失或写失败仍保留资源，不自动重派。
 
@@ -75,7 +78,7 @@ cgroup.events的populated覆盖本组和后代的活进程，但单次0不是封
 - [x] 用户批准的新Holaday-ExitLab已创建，systemd249/PID1、原manager、cgroup2和自有pidfd实际核验。
 - [x] 六个自有最小单元/九个原进程引用测量完成：普通停止、double-fork/setsid/leader先退、忽略TERM、停止期间fork、两个最小组互不影响。此项不完成Task3的完整B2验收。
 - [x] 记录真实终态差异：原cgroup inode/nlink=2保持、events FD变ENODEV、路径ENOENT；持RefUnit时InvocationID保持。停止超时升级后service可为failed，同时原stop job done和pidfd退出；不翻译为业务成功。
-- [ ] Task2接线继续：先在创建放行前持原cgroup/events/worker引用，并为关闭建立独立、不可外传伪造的终态能力。原job与封闭派发/持久记录、原Node IO及一次性消费组合验证；不从ENODEV/目录消失/JSON布尔值直接放行，也不把实测中未出现的nlink=0写成前提。
+- [ ] Task2接线继续：保留已取得的原cgroup/events/worker引用及必要终态对象；补齐创建前订阅的原启动/提前依赖job完成、认证关闭路由、原Node IO收口及一次性物理终态消费。当前内部停止与必要观察未完成整组退出；不从ENODEV/目录消失/JSON布尔值直接放行，也不把实测中未出现的nlink=0写成前提。
 - [ ] Task3继续：原B2五单元/两组、固定身份/文件视图/不可迁出、Chromium sandbox、迟到或丢失ACK与manager漂移、原sealed native bundle，均保留未完成。
 
-详见[实际源代码、原始回执与范围](../../reports/2026-11-21-controlled-browser-exit-wsl-lab.md)。产品运行源码未改变，native manifest仍unverified；原unknown、slot保留及禁止模型/重导出/重放/合并/上线约束继续有效。
+详见[实际源代码、原始回执与范围](../../reports/2026-11-21-controlled-browser-exit-wsl-lab.md)。该WSL测量当时产品源码未改变；随后内部close意图、停止及必要终态观察源码已变化且尚未重新构建。native manifest仍unverified，原unknown/slot保留及禁止模型/重导出/重放/合并/上线约束继续有效。

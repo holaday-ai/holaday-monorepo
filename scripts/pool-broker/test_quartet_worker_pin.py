@@ -28,6 +28,32 @@ NATIVE = test_manager_probe.NATIVE
 REAL_CAPTURE = manager_probe._capture
 
 
+def cgroup_fixture(s, proxy, stack):
+    """Real directories/files; root metadata and cgroup2 type remain explicit seams."""
+    inodes = set()
+    for role in ('anchor', 'xvfb', 'brave', 'x11vnc', 'websockify'):
+        path = s.root / ('sys/fs/cgroup/holadaypool.slice/holadaypool-' + s.resource +
+                         '.slice/holaday-pool-' + role + '-' + s.resource + '.service')
+        path.mkdir(parents=True, exist_ok=True)
+        (path / 'cgroup.events').write_bytes(b'populated 1\nfrozen 0\n')
+        (path / 'cgroup.events').chmod(0o644)
+        current = path / 'cgroup.events'
+        while current != s.root.parent:
+            info = current.stat()
+            inodes.add((info.st_dev, info.st_ino))
+            current = current.parent
+    s.cgroup_fs_type = 0x63677270
+    original_fstat, original_stat = proxy.fstat, proxy.stat
+    def root_info(info):
+        if (info.st_dev, info.st_ino) not in inodes: return info
+        fields = {name: getattr(info, name) for name in dir(info) if name.startswith('st_')}
+        fields['st_uid'], fields['st_gid'] = 0, 0
+        return SimpleNamespace(**fields)
+    proxy.fstat = lambda fd: root_info(original_fstat(fd))
+    proxy.stat = lambda *args, **kwargs: root_info(original_stat(*args, **kwargs))
+    stack.enter_context(patch.object(worker_pin, '_filesystem_type', lambda _fd: s.cgroup_fs_type))
+
+
 class WorkerPinTests(unittest.TestCase):
     def test_collector_last_cleanup_clock_never_returns_after_worker_revocation(self):
         with self.system() as s:
@@ -193,6 +219,7 @@ class WorkerPinTests(unittest.TestCase):
                 return fd
             proxy.open, proxy.close, proxy.pidfd_open = opened, close, pidfd_open
             proxy.getresuid, proxy.getresgid = lambda: (0, 0, 0), lambda: (0, 0, 0)
+            cgroup_fixture(s, proxy, stack)
             signal = SimpleNamespace(pidfd_send_signal=lambda fd, number, info, flags:
                                      s.events.append('signal-zero') if fd in s.worker_fds and number == 0 else self.fail('bad signal'))
             class Poll:

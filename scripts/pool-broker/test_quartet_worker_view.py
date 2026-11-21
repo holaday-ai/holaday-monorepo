@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import manager_probe
 import quartet_worker_pin
+from test_quartet_worker_pin import cgroup_fixture
 import test_quartet_material
 
 try:
@@ -103,6 +104,7 @@ class WorkerViewTests(unittest.TestCase):
                 proxy.fstatvfs = lambda fd: SimpleNamespace(f_flag=s.mounts.get(s.fds.get(fd),
                     14 if s.fds.get(fd) in ('tmp', 'shm', 'profile') else 1))
                 proxy.getresuid, proxy.getresgid = lambda: (0, 0, 0), lambda: (0, 0, 0)
+                cgroup_fixture(s, proxy, stack)
                 class Poll:
                     def register(self, fd, events): self.fd = fd
                     def poll(self, timeout): return [(self.fd, 1)] if s.exited else []

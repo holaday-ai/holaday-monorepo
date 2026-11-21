@@ -32,6 +32,8 @@ class _RunningQuartet:
             item._material, item._offer, item._workers = material, offer, material._terminal_workers
             item._retired = False
             item._closing, item._close_id = False, None
+            item._stop_started, item._stop_receipts, item._close_stream = False, None, None
+            item._terminal_started, item._terminal_evidence = False, None
             offer._budget()  # Original create/control deadline, including its tail.
             material._owner_veto()
             # No native boundary between the final original veto and transfer.
@@ -54,6 +56,9 @@ class _RunningQuartet:
                     and self._close_id is not None and group.get('close', {}).get('closeId') == self._close_id)):
             raise ValueError()
         offer._veto()  # Original ownership only; no obsolete creation time scope.
+        if self._close_stream is not None: self._close_stream._veto()
+        if self._terminal_evidence is not None:
+            for evidence in self._terminal_evidence: evidence._veto()
 
     def check(self):
         if self._closing:
@@ -118,8 +123,88 @@ class _RunningQuartet:
         self._retired = True
         self._offer.close()
 
+    def stop_original(self):
+        """One fixed original five-unit stop transaction, without a physical exit permit."""
+        if self._stop_started:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._stop_receipts is None: raise ValueError()
+                for receipt in self._stop_receipts:
+                    if self._close_stream._receipts.get(receipt._job) is not receipt: raise ValueError()
+                return self._stop_receipts
+            except Exception: _deny()
+        try:
+            self._veto()
+            self._stop_started = True  # Reentrant close cannot dispatch another stop.
+            self.begin_close()
+            material, receipts = self._material, []
+            def stop():
+                material._identity()
+                stream = material._manager._job_stream
+                if stream is None:
+                    from manager_probe import _ManagerJobStream
+                    stream = _ManagerJobStream.open(material._manager,
+                        scope_guard=material._remaining, terminal_veto=material._owner_veto)
+                self._close_stream = stream
+                self._veto()
+                for role in ROLES[1:] + ROLES[:1]:
+                    material._append('role_stop_dispatch', closeId=self._close_id, role=role)
+                    receipts.append(stream._stop_original_role(self, role))
+                material._remaining()
+            material._run(stop)
+            self._stop_receipts = tuple(receipts)
+            if len(self._stop_receipts) != 5: raise ValueError()
+            self._veto()
+            material._owner_veto()
+            return self._stop_receipts
+        except Exception:
+            self.retire()
+            _deny()
+
     def retire(self):
         self._retired = True
         self._material.close()
         self._offer.close()
         # No stop, groupExit, physical slot release, or successful drain claim.
+
+    def collect_terminal_evidence(self):
+        """Collect necessary original stop/kernel facts; no complete exit/slot authority."""
+        if self._terminal_started:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._terminal_evidence is None: raise ValueError()
+                return self._terminal_evidence
+            except Exception: _deny()
+        try:
+            self._veto()
+            if self._stop_receipts is None or len(self._stop_receipts) != 5: raise ValueError()
+            self._terminal_started = True
+            material, collected = self._material, []
+            def observe():
+                for role, _worker, pin, _view in self._workers:
+                    stop = next(value for value in self._stop_receipts if value._unit == pin._record[0])
+                    def sample():
+                        self._close_stream._terminal_properties_locked(self, pin, stop)
+                        evidence = pin._cgroup._observe_terminal(stop)
+                        self._close_stream._terminal_properties_locked(self, pin, stop)
+                        evidence._veto()
+                        return evidence
+                    evidence = pin._run(sample, material._remaining, locked=True,
+                        terminal_veto=material._owner_veto)
+                    evidence._veto()
+                    material._append('role_terminal_observed', closeId=self._close_id, role=role,
+                        job=stop._job, signalSerial=stop._serial, cgroup=evidence._kind)
+                    for original in collected: original._veto()
+                    collected.append(evidence)
+                material._remaining()
+            material._run(observe)
+            self._terminal_evidence = tuple(collected)
+            if len(self._terminal_evidence) != 5: raise ValueError()
+            self._veto()
+            material._owner_veto()
+            return self._terminal_evidence
+        except Exception:
+            self.retire()
+            _deny()
