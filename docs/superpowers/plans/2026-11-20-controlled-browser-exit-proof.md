@@ -15,7 +15,7 @@
 - 单路、无代理；测试heap1024MB/单fork、类型与构建2048MB；日志保存，重验证串行。
 - 不新增模型/KMS调用、不重导出、不重放旧任务、不生产写入、不合并、不上线；既有AWS只读轮询独立持续。
 - 不修改现有UNPROVEN、unknown、原始身份/观察守卫求绿，不用PID扫描或ChildProcess.close签整组退出。
-- 当前Darwin缺systemd/pidfd/cgroup环境；Docker只读查询未及时返回，已仅终止自有客户端，未启动/停止Docker或容器。不自行安装软件、切生产或扩大系统管理权限。
+- 当前Darwin缺systemd/pidfd/cgroup环境；Docker只读查询未及时返回，已仅终止自有客户端，未启动/停止Docker或容器。2026-11-21用户另行批准只在新Holaday-ExitLab准备官方最小环境与合成实验；现有Ubuntu和全局WSL不改。不在其他目标自行安装、切生产或扩大系统管理权限。
 
 ## Review Focus
 
@@ -67,3 +67,13 @@ StopUnit只返回异步job，必须先订阅JobRemoved再派发并按原job过�
 cgroup.events的populated覆盖本组和后代的活进程，但单次0不是封闭后不可重新填充或reap的证明。[Linux内核文档](https://docs.kernel.org/admin-guide/cgroup-v2.html#un-populated-notification)
 
 原cgroup在stop后可能被移除、unit的InvocationID可能进入终态表示；须先在自有隔离组实测这些事件和原FD的生命周期，不能猜测not-found/0 InvocationID就是同一原组成功退出。未拿到该平台契约前不新增成功退出生产者；现有unknown与pin保留。
+
+### 2026-11-21 已取得的最小平台测量
+
+- [x] 用户批准的新Holaday-ExitLab已创建，systemd249/PID1、原manager、cgroup2和自有pidfd实际核验。
+- [x] 六个自有最小单元/九个原进程引用测量完成：普通停止、double-fork/setsid/leader先退、忽略TERM、停止期间fork、两个最小组互不影响。此项不完成Task3的完整B2验收。
+- [x] 记录真实终态差异：原cgroup inode/nlink=2保持、events FD变ENODEV、路径ENOENT；持RefUnit时InvocationID保持。停止超时升级后service可为failed，同时原stop job done和pidfd退出；不翻译为业务成功。
+- [ ] Task2接线继续：先在创建放行前持原cgroup/events/worker引用，并为关闭建立独立、不可外传伪造的终态能力。原job与封闭派发/持久记录、原Node IO及一次性消费组合验证；不从ENODEV/目录消失/JSON布尔值直接放行，也不把实测中未出现的nlink=0写成前提。
+- [ ] Task3继续：原B2五单元/两组、固定身份/文件视图/不可迁出、Chromium sandbox、迟到或丢失ACK与manager漂移、原sealed native bundle，均保留未完成。
+
+详见[实际源代码、原始回执与范围](../../reports/2026-11-21-controlled-browser-exit-wsl-lab.md)。产品运行源码未改变，native manifest仍unverified；原unknown、slot保留及禁止模型/重导出/重放/合并/上线约束继续有效。

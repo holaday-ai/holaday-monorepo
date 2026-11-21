@@ -1,0 +1,861 @@
+{
+  "kind": "synthetic-original-systemd-job-cgroup-contract",
+  "probeRevision": 2,
+  "nonce": "a66c49615962",
+  "managerOwner": ":1.2",
+  "busId": "5d4697313f24f1fa963989e36b013f25",
+  "kernelBootId": "28af9522-0d47-4b60-9a74-a09b9b59ff2d",
+  "distro": "Holaday-ExitLab",
+  "unitMemoryMaxBytes": 67108864,
+  "unitTasksMax": 16,
+  "unitCPUQuotaPercent": 25,
+  "unitRuntimeMaxSeconds": 20,
+  "cases": [
+    {
+      "label": "basic",
+      "mode": "basic",
+      "unit": "holaday-exitlab-a66c49615962-basic.service",
+      "peers": [],
+      "startJob": {
+        "id": 304,
+        "path": "/org/freedesktop/systemd1/job/304",
+        "unit": "holaday-exitlab-a66c49615962-basic.service",
+        "result": "done",
+        "observedMonotonic": 11.853775996
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2dbasic_2eservice",
+      "invocationBefore": "7daa8d08c39642aa9db68119daf72043",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-basic.service",
+      "cgroupInode": 2447,
+      "heldBefore": {
+        "inode": 2447,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2447,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "7daa8d08c39642aa9db68119daf72043",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 497,
+        "Result": "success",
+        "ExecMainCode": 0,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-basic.service",
+        "NRestarts": 0,
+        "currentPathInode": 2447,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 497,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1183",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-basic.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532227]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 11.866323765,
+      "stopJobAck": "/org/freedesktop/systemd1/job/359",
+      "stopJob": {
+        "id": 359,
+        "path": "/org/freedesktop/systemd1/job/359",
+        "unit": "holaday-exitlab-a66c49615962-basic.service",
+        "result": "done",
+        "observedMonotonic": 11.877020404
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2447,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "InvocationID": "7daa8d08c39642aa9db68119daf72043",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "success",
+        "ExecMainCode": 2,
+        "ExecMainStatus": 15,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 497,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1183",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-basic.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532227]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 0.012365509999998636,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    },
+    {
+      "label": "double_fork",
+      "mode": "double_fork",
+      "unit": "holaday-exitlab-a66c49615962-double_fork.service",
+      "peers": [],
+      "startJob": {
+        "id": 360,
+        "path": "/org/freedesktop/systemd1/job/360",
+        "unit": "holaday-exitlab-a66c49615962-double_fork.service",
+        "result": "done",
+        "observedMonotonic": 11.892177741
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2ddouble_5ffork_2eservice",
+      "invocationBefore": "032ab696fa7944e9b9037166e4d7c173",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+      "cgroupInode": 2491,
+      "heldBefore": {
+        "inode": 2491,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2491,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "exited",
+        "InvocationID": "032ab696fa7944e9b9037166e4d7c173",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "success",
+        "ExecMainCode": 1,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+        "NRestarts": 0,
+        "currentPathInode": 2491,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 500,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1188",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": false,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          },
+          {
+            "role": "intermediate",
+            "pid": 501,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1190",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": false,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          },
+          {
+            "role": "grandchild",
+            "pid": 502,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1191",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 11.937897421,
+      "stopJobAck": "/org/freedesktop/systemd1/job/415",
+      "stopJob": {
+        "id": 415,
+        "path": "/org/freedesktop/systemd1/job/415",
+        "unit": "holaday-exitlab-a66c49615962-double_fork.service",
+        "result": "done",
+        "observedMonotonic": 14.148562649
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2491,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "failed",
+        "SubState": "failed",
+        "InvocationID": "032ab696fa7944e9b9037166e4d7c173",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "timeout",
+        "ExecMainCode": 1,
+        "ExecMainStatus": 0,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 500,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1188",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": false,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          },
+          {
+            "role": "intermediate",
+            "pid": 501,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1190",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": false,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          },
+          {
+            "role": "grandchild",
+            "pid": 502,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1191",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-double_fork.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532290]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 2.2137353289999986,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    },
+    {
+      "label": "ignore_term",
+      "mode": "ignore_term",
+      "unit": "holaday-exitlab-a66c49615962-ignore_term.service",
+      "peers": [],
+      "startJob": {
+        "id": 416,
+        "path": "/org/freedesktop/systemd1/job/416",
+        "unit": "holaday-exitlab-a66c49615962-ignore_term.service",
+        "result": "done",
+        "observedMonotonic": 14.18568107
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2dignore_5fterm_2eservice",
+      "invocationBefore": "83b322794c3c4b958d7b685c604f1510",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-ignore_term.service",
+      "cgroupInode": 2535,
+      "heldBefore": {
+        "inode": 2535,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2535,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "83b322794c3c4b958d7b685c604f1510",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 506,
+        "Result": "success",
+        "ExecMainCode": 0,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-ignore_term.service",
+        "NRestarts": 0,
+        "currentPathInode": 2535,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 506,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1415",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-ignore_term.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532349]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 14.199041932,
+      "stopJobAck": "/org/freedesktop/systemd1/job/471",
+      "stopJob": {
+        "id": 471,
+        "path": "/org/freedesktop/systemd1/job/471",
+        "unit": "holaday-exitlab-a66c49615962-ignore_term.service",
+        "result": "done",
+        "observedMonotonic": 16.443762866
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2535,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "failed",
+        "SubState": "failed",
+        "InvocationID": "83b322794c3c4b958d7b685c604f1510",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "timeout",
+        "ExecMainCode": 2,
+        "ExecMainStatus": 9,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 506,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1415",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-ignore_term.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532349]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 2.2483994779999996,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    },
+    {
+      "label": "term_fork",
+      "mode": "term_fork",
+      "unit": "holaday-exitlab-a66c49615962-term_fork.service",
+      "peers": [],
+      "startJob": {
+        "id": 472,
+        "path": "/org/freedesktop/systemd1/job/472",
+        "unit": "holaday-exitlab-a66c49615962-term_fork.service",
+        "result": "done",
+        "observedMonotonic": 16.484372776
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2dterm_5ffork_2eservice",
+      "invocationBefore": "67e382d56a4a4889b4241ce5c3be8b34",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-term_fork.service",
+      "cgroupInode": 2579,
+      "heldBefore": {
+        "inode": 2579,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2579,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "67e382d56a4a4889b4241ce5c3be8b34",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 509,
+        "Result": "success",
+        "ExecMainCode": 0,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-term_fork.service",
+        "NRestarts": 0,
+        "currentPathInode": 2579,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 509,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1644",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-term_fork.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532408]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 16.497054553,
+      "stopJobAck": "/org/freedesktop/systemd1/job/527",
+      "stopJob": {
+        "id": 527,
+        "path": "/org/freedesktop/systemd1/job/527",
+        "unit": "holaday-exitlab-a66c49615962-term_fork.service",
+        "result": "done",
+        "observedMonotonic": 18.731877399
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2579,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "failed",
+        "SubState": "failed",
+        "InvocationID": "67e382d56a4a4889b4241ce5c3be8b34",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "timeout",
+        "ExecMainCode": 1,
+        "ExecMainStatus": 0,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 509,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1644",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-term_fork.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532408]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          },
+          {
+            "role": "late-child",
+            "pid": 510,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1649",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-term_fork.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532408]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 2.250387093999997,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    },
+    {
+      "label": "isolation-a",
+      "mode": "basic",
+      "unit": "holaday-exitlab-a66c49615962-isolation-a.service",
+      "peers": [],
+      "startJob": {
+        "id": 528,
+        "path": "/org/freedesktop/systemd1/job/528",
+        "unit": "holaday-exitlab-a66c49615962-isolation-a.service",
+        "result": "done",
+        "observedMonotonic": 18.795066135
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2disolation_2da_2eservice",
+      "invocationBefore": "efaaa3ba41534b6483c240c1a95255a8",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-isolation-a.service",
+      "cgroupInode": 2623,
+      "heldBefore": {
+        "inode": 2623,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2623,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "efaaa3ba41534b6483c240c1a95255a8",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 513,
+        "Result": "success",
+        "ExecMainCode": 0,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-isolation-a.service",
+        "NRestarts": 0,
+        "currentPathInode": 2623,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 513,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1874",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-isolation-a.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532467]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 18.837524527,
+      "stopJobAck": "/org/freedesktop/systemd1/job/638",
+      "stopJob": {
+        "id": 638,
+        "path": "/org/freedesktop/systemd1/job/638",
+        "unit": "holaday-exitlab-a66c49615962-isolation-a.service",
+        "result": "done",
+        "observedMonotonic": 18.848467436
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2623,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "InvocationID": "efaaa3ba41534b6483c240c1a95255a8",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "success",
+        "ExecMainCode": 2,
+        "ExecMainStatus": 15,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 513,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1874",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-isolation-a.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532467]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 0.01265501800000024,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    },
+    {
+      "label": "isolation-b",
+      "mode": "basic",
+      "unit": "holaday-exitlab-a66c49615962-isolation-b.service",
+      "peers": [],
+      "startJob": {
+        "id": 583,
+        "path": "/org/freedesktop/systemd1/job/583",
+        "unit": "holaday-exitlab-a66c49615962-isolation-b.service",
+        "result": "done",
+        "observedMonotonic": 18.822577695
+      },
+      "unitObject": "/org/freedesktop/systemd1/unit/holaday_2dexitlab_2da66c49615962_2disolation_2db_2eservice",
+      "invocationBefore": "b85387c754dd4e6b8d4d73d42fdd8531",
+      "cgroupBefore": "/system.slice/holaday-exitlab-a66c49615962-isolation-b.service",
+      "cgroupInode": 2667,
+      "heldBefore": {
+        "inode": 2667,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "beforeStop": {
+        "held": {
+          "inode": 2667,
+          "nlink": 2,
+          "events": "populated 1\nfrozen 0"
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "active",
+        "SubState": "running",
+        "InvocationID": "b85387c754dd4e6b8d4d73d42fdd8531",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 514,
+        "Result": "success",
+        "ExecMainCode": 0,
+        "ExecMainStatus": 0,
+        "ControlGroup": "/system.slice/holaday-exitlab-a66c49615962-isolation-b.service",
+        "NRestarts": 0,
+        "currentPathInode": 2667,
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 514,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1881",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-isolation-b.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532527]",
+            "originalPidfdReadable": false
+          }
+        ]
+      },
+      "stopRequestedMonotonic": 18.851743993,
+      "stopJobAck": "/org/freedesktop/systemd1/job/639",
+      "stopJob": {
+        "id": 639,
+        "path": "/org/freedesktop/systemd1/job/639",
+        "unit": "holaday-exitlab-a66c49615962-isolation-b.service",
+        "result": "done",
+        "observedMonotonic": 18.862817742
+      },
+      "afterStop": {
+        "held": {
+          "inode": 2667,
+          "nlink": 2,
+          "eventsReadError": {
+            "errno": 19,
+            "name": "ENODEV"
+          }
+        },
+        "managerStillOriginal": true,
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "InvocationID": "b85387c754dd4e6b8d4d73d42fdd8531",
+        "Job": [
+          0,
+          "/"
+        ],
+        "MainPID": 0,
+        "Result": "success",
+        "ExecMainCode": 2,
+        "ExecMainStatus": 15,
+        "ControlGroup": "",
+        "NRestarts": 0,
+        "currentPathError": {
+          "errno": 2,
+          "name": "ENOENT"
+        },
+        "peers": [
+          {
+            "role": "leader",
+            "pid": 514,
+            "uid": 65534,
+            "gid": 65534,
+            "starttime": "1881",
+            "cgroup": "0::/system.slice/holaday-exitlab-a66c49615962-isolation-b.service",
+            "armed": true,
+            "released": true,
+            "noNewPrivileges": true,
+            "capEff": "0000000000000000",
+            "privateNetworkNamespace": "net:[4026532527]",
+            "originalPeerEOF": true,
+            "originalPidfdReadable": true
+          }
+        ]
+      },
+      "stopElapsedSeconds": 0.012510286000001258,
+      "measuredOriginalJobAndPinnedWorkersExited": true
+    }
+  ],
+  "productionAccepted": false,
+  "exitProofAccepted": false,
+  "slotReusePermitted": false,
+  "reapOfAllDescendantsProven": false,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "errors": [],
+  "dispatchAttempts": [
+    {
+      "unit": "holaday-exitlab-a66c49615962-basic.service",
+      "mode": "fail",
+      "monotonic": 11.811308571
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-double_fork.service",
+      "mode": "fail",
+      "monotonic": 11.878742052
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-ignore_term.service",
+      "mode": "fail",
+      "monotonic": 14.151736304
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-term_fork.service",
+      "mode": "fail",
+      "monotonic": 16.447546589
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-isolation-a.service",
+      "mode": "fail",
+      "monotonic": 18.747525654
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-isolation-b.service",
+      "mode": "fail",
+      "monotonic": 18.80894435
+    }
+  ],
+  "acceptedCreateJobs": [
+    {
+      "unit": "holaday-exitlab-a66c49615962-basic.service",
+      "originalJob": "/org/freedesktop/systemd1/job/304"
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-double_fork.service",
+      "originalJob": "/org/freedesktop/systemd1/job/360"
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-ignore_term.service",
+      "originalJob": "/org/freedesktop/systemd1/job/416"
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-term_fork.service",
+      "originalJob": "/org/freedesktop/systemd1/job/472"
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-isolation-a.service",
+      "originalJob": "/org/freedesktop/systemd1/job/528"
+    },
+    {
+      "unit": "holaday-exitlab-a66c49615962-isolation-b.service",
+      "originalJob": "/org/freedesktop/systemd1/job/583"
+    }
+  ],
+  "twoGroupOriginalBUnchangedWhileAStopped": true,
+  "allRequestedMeasurementsCollected": true,
+  "unfinishedOwnedUnits": [],
+  "unknownObjectsNotRetried": true,
+  "notes": [
+    "Only fixed nonce-owned transient units were started/stopped; no general unit/PID scans or signals.",
+    "Held cgroup read failures and zero/changed InvocationID are raw measurements, never success authority.",
+    "Lab workers use nobody, not the product B2 slot policy; no native bundle or five-unit production acceptance.",
+    "RuntimeMax20s bounds owned workers even on measurement failure; no ambiguous stop dispatch is retried."
+  ]
+}

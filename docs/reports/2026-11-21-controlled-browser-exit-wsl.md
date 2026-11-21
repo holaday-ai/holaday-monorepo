@@ -1,5 +1,7 @@
 # Windows WSL 只读核验与退出证明下一步
 
+本页保留授权前的只读检查状态。用户随后已批准并完成独立实验环境及最小合成测量，详见[授权后实际结果](2026-11-21-controlled-browser-exit-wsl-lab.md)；无需重复申请该环境授权。
+
 通过已连接的 TeamViewer 操作 Windows `YALEI-GPU5070TI`，在本次新开的普通 PowerShell 中逐条核对并执行查询。运行源码仍为 `1fccf1b46671b8bfbd68e6577b375f94a5830f83`；本轮没有修改运行代码，也没有签发物理退出证明。
 
 ## 已观察结果

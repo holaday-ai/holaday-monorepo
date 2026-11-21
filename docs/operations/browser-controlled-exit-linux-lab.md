@@ -1,6 +1,6 @@
 # 受控浏览器退出的独立Linux验收准备
 
-当前只准备，不创建云主机/VM/账号、不安装软件、不调整IAM、不操作生产。用户已要求先处理退出证明，非生产Linux目标信息正在补充；下列资源为工程建议，未代表用户批准购买或开通。
+2026-11-21 已在用户单独批准的 Holaday-ExitLab WSL 2 发行版完成平台预检及最小合成停止测量，见[实际结果与界限](../reports/2026-11-21-controlled-browser-exit-wsl-lab.md)。该授权适用于新测试发行版及合成实验；下列通用云主机/VM 资源仍为工程建议，未代表批准购买或开通。现有 Ubuntu、全局 WSL 配置、IAM 和生产未改。
 
 ## 建议资源与边界
 
@@ -33,4 +33,10 @@
 
 已远程只读核实 WSL 2.6.3、Ubuntu 22.04.1/WSL 2、Linux 6.6.87.2 和可见的 cgroup v2。进入已有 Ubuntu 执行查询会启动该发行版；未安装、改配置或重启。systemd 249 已安装，但 PID 1 为 init(Ubuntu)，systemctl 报 offline，/etc/wsl.conf 不存在；gcc/make/busctl/node 的 PATH 查询也未解析出路径。因此当前环境尚不能做原系统管理器的五单元退出证明。
 
-下一步建议经单独授权准备 Holaday-ExitLab 独立发行版，再测 systemd/cgroup 原对象契约。不能把 WSL 的版本、可见 controller 或 systemd 安装包直接计为物理退出通过。详见[本次实查与范围](../reports/2026-11-21-controlled-browser-exit-wsl.md)。
+当时建议单独授权准备 Holaday-ExitLab 独立发行版，再测 systemd/cgroup 原对象契约；授权后执行结果见下节。不能把 WSL 的版本、可见 controller 或 systemd 安装包直接计为物理退出通过。详见[授权前只读实查](../reports/2026-11-21-controlled-browser-exit-wsl.md)。
+
+## 授权后实测（2026-11-21）
+
+上述实验环境授权已获得并执行，不再等待授权。新发行版的 systemd249.11-0ubuntu3.12/PID1、原 D-Bus manager、cgroup2 和自有 pidfd 已核验。五类场景、六单元、九原进程引用及 EOF 收齐，两个最小组合成隔离通过；最终两发行版都 Stopped，Ubuntu 仍默认。
+
+原 held cgroup 的 inode/nlink 在停止后保持，而 events FD 变 ENODEV、路径 ENOENT；RefUnit 持有时 InvocationID 保持。后续不得以 nlink=0、MainPID=0、目录消失或单个 FD 错误替代原组终态生产者。原业务 IO、全后代 reap、B2 五单元与 sealed native bundle 仍未验收。[完整回执与源代码](../reports/2026-11-21-controlled-browser-exit-wsl-lab.md)

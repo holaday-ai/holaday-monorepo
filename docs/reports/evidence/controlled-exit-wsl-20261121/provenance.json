@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic-wsl-lab-measurement-provenance",
+  "baseDocumentationHead": "3a80d7668cd1c2b1c812b5e051aa5b0d09c4e8f0",
+  "runtimeSourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
+  "runtimeChanged": false,
+  "labDistro": "Holaday-ExitLab",
+  "sourceImage": {
+    "url": "https://cloud-images.ubuntu.com/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz",
+    "bytes": 341130963,
+    "sha256": "1483cc5c1dce13064f774834cbffdff226559fd522a67a381a8ea77d63fb4109",
+    "tarMembers": 50631,
+    "unpackedBytes": 1026677876,
+    "wslConfInOfficialImage": "[boot]\nsystemd=true\n",
+    "existingUbuntuModified": false
+  },
+  "wslVersion": "2.6.3.0",
+  "linuxKernel": "6.6.87.2-microsoft-standard-WSL2",
+  "systemdVersion": "249.11-0ubuntu3.12",
+  "finalState": {
+    "observedVia": "TeamViewer screenshot",
+    "command": "wsl --list --verbose",
+    "defaultDistro": "Ubuntu",
+    "distros": [
+      {
+        "name": "Ubuntu",
+        "state": "Stopped",
+        "wslVersion": 2
+      },
+      {
+        "name": "Holaday-ExitLab",
+        "state": "Stopped",
+        "wslVersion": 2
+      }
+    ],
+    "explicitWslShutdown": false,
+    "explicitWslTerminate": false,
+    "globalWslConfigChanged": false
+  },
+  "sourceV1SHA256": "613359d3906a73630af9f78d157d22c25de8faf191c5bd634d7003bbed86bf5f",
+  "sourceV2SHA256": "6df626b3a6377e236117f9e16090850ac665c08e6a45e9d30f323b4d7063de81",
+  "modelLedgerSHA256": "006f7ed9eee490a34075aa7775e49ac9180daf580451fdd66ebd0803b848106f",
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "oldBusinessTaskReplay": false,
+  "newLabUnitStartAttempts": 7,
+  "newLabAcceptedStartJobs": 6,
+  "newLabMatchedStopJobsDone": 6,
+  "originalWorkerPinsObservedExited": 9,
+  "twoMinimalGroupsIndependent": true,
+  "exitProofAccepted": false,
+  "slotReusePermitted": false,
+  "productFiveUnitAcceptance": false,
+  "reapOfAllDescendantsProven": false,
+  "productionChanged": false,
+  "merge": false,
+  "deploy": false,
+  "notes": [
+    "Initial script failed before an accepted start job; preserved and not adopted/retried. Corrected string property in v2 and used fresh nonce.",
+    "Original Windows import/transcripts/screenshots stay in local recovery; tracked receipts contain synthetic Linux test data only.",
+    "Requested per-unit64MiB/25percentCPU/16tasks/20s bounds; no stress test of resource controllers.",
+    "Only the new lab was configured; no global WSL file, existing Ubuntu, Windows reboot, WSL shutdown/terminate commands."
+  ],
+  "files": [
+    {
+      "path": "capability-probe.py",
+      "bytes": 2898,
+      "sha256": "759ea59634d3f28434cbe6ee213ed2f92bc116306430636c5b56384236e8c322"
+    },
+    {
+      "path": "capability.json",
+      "bytes": 1644,
+      "sha256": "ee0b5fbf5531d5bbfe2cc7e9010c50a1201bc860b054b48a09b5dc6a620517f7"
+    },
+    {
+      "path": "contract-probe-v2.py",
+      "bytes": 14840,
+      "sha256": "6df626b3a6377e236117f9e16090850ac665c08e6a45e9d30f323b4d7063de81"
+    },
+    {
+      "path": "contract-v1-failure.json",
+      "bytes": 2003,
+      "sha256": "57d9c48ccd1365c55a2e25cc39bcdcf10dc4e5ba9b912ff2d8ad17ec11568e40"
+    },
+    {
+      "path": "contract-v2.json",
+      "bytes": 27130,
+      "sha256": "9354f6a820dcfaee734100b2c82bca9ad95385bf0787040e3cf4df657b8b2220"
+    },
+    {
+      "path": "measurement-summary.json",
+      "bytes": 4880,
+      "sha256": "ffd87889f5b917bab93bc78bb2126618cf3b1381a9328fdf93011f02901b5739"
+    }
+  ],
+  "productRuntimeEntryExecuted": false
+}
