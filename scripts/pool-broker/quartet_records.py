@@ -10,6 +10,8 @@ ROLES = ('anchor', 'xvfb', 'brave', 'x11vnc', 'websockify')
 
 
 def replay(row, resources, requests):
+    if row.get('action') == 'close_intent':
+        return replay_close_intent(row, resources)
     if row.get('action') == 'prepare':
         return replay_prepare(row, resources, requests)
     if row.get('action') in ('create_offer', 'create_accept'):
@@ -76,6 +78,40 @@ def replay(row, resources, requests):
             group['state'] = 'observed'
     else:
         raise ValueError()
+
+
+def replay_close_intent(row, resources):
+    """Reserve a stop transaction, never reconstruct its original live owner."""
+    fields = {'version', 'revision', 'action', 'resource', 'closeId',
+              'managerGuid', 'managerOwner', 'roles'}
+    resource = row.get('resource')
+    if (set(row) != fields or type(resource) is not str or resource not in resources
+            or resources[resource]['version'] != 2): raise ValueError()
+    group = resources[resource]
+    if group['state'] != 'ready' or 'close' in group: raise ValueError()
+    _identifier(row['closeId'], 32)
+    if any(value.get('close', {}).get('closeId') == row['closeId'] for value in resources.values()):
+        raise ValueError()
+    material = group.get('material', {})
+    if (material.get('managerGuid') != row['managerGuid']
+            or material.get('managerOwner') != row['managerOwner']
+            or type(row['roles']) is not dict or set(row['roles']) != set(ROLES)
+            or set(group.get('roles', {})) != set(ROLES)): raise ValueError()
+    for role in ROLES:
+        original = group['roles'][role]
+        binding = row['roles'][role]
+        if (original.get('state') != 'observed' or original.get('granted') is not True
+                or original.get('managerGuid') != row['managerGuid']
+                or original.get('managerOwner') != row['managerOwner']
+                or type(binding) is not dict
+                or binding != {key: original[key] for key in ('unit', 'job', 'invocation')}):
+            raise ValueError()
+    group['close'] = {'state': 'intent', 'closeId': row['closeId'],
+                      'revision': row['revision'], 'managerGuid': row['managerGuid'],
+                      'managerOwner': row['managerOwner'],
+                      'roles': {role: dict(row['roles'][role]) for role in ROLES}}
+    group['state'] = 'closing'
+    # No stop ACK/job completion, terminal capability, exit or reusable slot.
 
 
 def replay_material(row, resources):

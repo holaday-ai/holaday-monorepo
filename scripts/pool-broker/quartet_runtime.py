@@ -2,6 +2,7 @@
 from quartet_material import _GroupMaterial
 from quartet_create_offer import _CreateOffer
 from quartet_records import ROLES
+from quartet_journal import _random
 
 
 def _deny():
@@ -30,6 +31,7 @@ class _RunningQuartet:
             item = object.__new__(cls)
             item._material, item._offer, item._workers = material, offer, material._terminal_workers
             item._retired = False
+            item._closing, item._close_id = False, None
             offer._budget()  # Original create/control deadline, including its tail.
             material._owner_veto()
             # No native boundary between the final original veto and transfer.
@@ -42,15 +44,22 @@ class _RunningQuartet:
 
     def _veto(self):
         material, offer = self._material, self._offer
+        group = material._journal._resources[material._resource]
+        state = group['state']
         if (self._retired or material._retired or material._runtime is not self or material._ready_offer is not offer
                 or material._terminal_workers is not self._workers or len(self._workers) != 5
                 or offer._journal is not material._journal or offer._prepared is not material._prepared
                 or not offer._accepted or not offer._consumed
-                or material._journal._resources[material._resource]['state'] != 'ready'):
+                or state != 'ready' and not (state == 'closing' and self._closing
+                    and self._close_id is not None and group.get('close', {}).get('closeId') == self._close_id)):
             raise ValueError()
         offer._veto()  # Original ownership only; no obsolete creation time scope.
 
     def check(self):
+        if self._closing:
+            # Reject further admission without discarding the original objects
+            # needed by the pending stop transaction.
+            _deny()
         try:
             self._veto()
             material = self._material
@@ -63,6 +72,42 @@ class _RunningQuartet:
                     pin._run(pin._observe, material._remaining, locked=True)
                 material._remaining()
             material._run(verify)
+            self._veto()
+            material._owner_veto()
+        except Exception:
+            self.retire()
+            _deny()
+
+    def begin_close(self):
+        """Fence admission and durably reserve this original group's close once.
+
+        This private entry accepts no PID, path, unit, capability or success DTO.
+        It does not issue StopUnit or produce physical exit authority.
+        """
+        if self._closing:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._material._journal._resources[self._material._resource]['state'] != 'closing':
+                    raise ValueError()  # Reentrant pending intent, not a second transaction.
+                return
+            except Exception:
+                _deny()
+        try:
+            self._veto()
+            self._closing = True  # Before any clock, platform or journal IO.
+            material = self._material
+            def record():
+                material._identity()
+                roles = {}
+                for role, _worker, pin, _view in self._workers:
+                    _group, original = pin._row()
+                    if pin._record != pin._record_of(original): raise ValueError()
+                    roles[role] = {key: original[key] for key in ('unit', 'job', 'invocation')}
+                self._close_id = material._journal._io(_random, 16)
+                material._append('close_intent', closeId=self._close_id,
+                    managerGuid=material._manager._guid, managerOwner=material._manager._owner, roles=roles)
+            material._run(record)
             self._veto()
             material._owner_veto()
         except Exception:

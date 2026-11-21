@@ -36,13 +36,15 @@
 - [x] GREEN：同步与异步失败都断连一次，原实际peer关闭，unknown>0、物理slot保留；重复release不得重跑finalizer。
 - [x] 定向TS215/215及root侧Python78/78，严格类型/静态/后端构建通过；作者串行复核，无独立审查声明。格式前后发射JS token一致。
 
-### Task 2: 原组停止事务与物理证据生产者（尚未实现）
+### Task 2: 原组停止事务与物理证据生产者（关闭意图已实现，停止/终态仍缺）
 
 **Files to assess:** scripts/pool-broker/quartet_runtime.py、quartet_create_control.py、quartet_listener.py、quartet_records.py、resource_journal.py；新增的stop/exit模块与相应用例须先据原始句柄契约细化。apps/orchestrator/src/browser-pool/broker-control-protocol.ts、broker-pool-runtime.ts、browser-pool.ts为最终消费者，不提前发成功。
 
 **Interfaces required:** close只接同一原资源能力和原boot，不接受任意PID/unit/path；同一持久stop事务绑定同一原manager、五个原unit/InvocationID及启动/停止job。终态生产者必须持原内核引用和终态封闭条件，不接受外部传入的success字典。公开DTO/协议字符串本身不构成退出能力。
 
 - [ ] 先记录close intent并封闭该组新派发，独立管理与egress能力不互换；未知/崩溃重启只对账原事务。
+  - [x] 内部原实例 `begin_close()` 在首个IO前封闭 `check()`，同一journal持久记录一次closeId及原manager/五unit/start job/InvocationID；重复调用不另建事务，失败保留unknown/slot，不发退出许可。
+  - [ ] 将该内部入口接到同一原boot的认证关闭通道；当前listener/Node尚无实际关闭路由，不把私有方法当作已接通的整组关闭。
 - [ ] 同一原manager定向停止原五unit：先四角色、后anchor；依赖停止/显式停止须统一纳入原job回执，不从StopUnit ACK推断完成。
 - [ ] 持原cgroup对象，核对job完成、无待启动/重启、原身份仍匹配且不能重新填充；原pidfd显示退出并区分reap，任何缺失/漂移保留unknown。
 - [ ] 消费者先收口该组既有SDK、会话及全部原始IO，再消费一次性原物理终态；仅解除本组凭据，不能清除DB/模型或其他boot未知。
