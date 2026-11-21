@@ -86,6 +86,7 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
     dataMode: mode,
     controlMode: mode,
     onLog: (_message: string) => {},
+    finishSession: (): Promise<void> => Promise.resolve(),
   };
   let acceptedResolve!: () => void;
   const accepted = new Promise<void>((resolve) => {
@@ -449,6 +450,7 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
           displayStart: 100,
           screenSize: '1280x800x24',
           vncEnabled: true,
+          finishSession: () => hooks.finishSession(),
         },
         pino(
           {
@@ -1561,6 +1563,40 @@ it('strict Pool release ignores a forged draining DTO and closes its original SD
   await vi.waitFor(() => expect(originalPeer.readyState).toBe(WebSocket.CLOSED));
   expect(f.pool.stats().idle).toBe(1);
 });
+
+it.each(['throw', 'reject'] as const)(
+  'strict Pool closes original transports after a %s from the session finalizer',
+  async (failure) => {
+    const f = await fixture('cdp-pool', true);
+    const instance = await startOwnedOperation(
+      f.drain,
+      'request',
+      () => f.pool.allocate('tsk_cleanup_failure', 'synthetic-user'),
+      { parent: f.owner, errorOutcome: 'known' },
+    ).result;
+    const originalPeer = f.browserPeers[0];
+    if (!originalPeer) throw new Error('Expected original synthetic SDK peer');
+    expect(originalPeer.readyState).toBe(WebSocket.OPEN);
+    const disconnect = vi.spyOn(instance.executor, 'disconnect');
+    let finalizations = 0;
+    f.hooks.finishSession = () => {
+      finalizations++;
+      const error = new Error('synthetic session finalization failure');
+      if (failure === 'throw') throw error;
+      return Promise.reject(error);
+    };
+
+    await expect(f.pool.release(instance.taskId)).rejects.toThrow();
+    await vi.waitFor(() => expect(originalPeer.readyState).toBe(WebSocket.CLOSED));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(finalizations).toBe(1);
+    expect(f.pool.stats().idle).toBe(1);
+    expect(f.drain.snapshot().unknown).toBeGreaterThan(0);
+    await expect(f.pool.release(instance.taskId)).rejects.toThrow();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(finalizations).toBe(1);
+  },
+);
 
 it('strict Pool does not grant ownership or retention from mutable instance fields', async () => {
   const f = await fixture('cdp-pool', true);

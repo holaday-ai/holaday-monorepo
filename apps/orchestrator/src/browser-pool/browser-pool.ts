@@ -441,7 +441,11 @@ export class BrowserPool {
         record.instance && this.backgroundWork.get(record.instance)?.stop(),
       ]);
       const session = await Promise.allSettled([
-        record.executor && this.config.finishSession?.(record.executor),
+        // Capture synchronous hook failures as well as rejected promises so
+        // original SDK/group cleanup below always runs and retains uncertainty.
+        Promise.resolve().then(
+          () => record.executor && this.config.finishSession?.(record.executor),
+        ),
       ]);
       const outcomes = await Promise.allSettled([
         Promise.resolve().then(() => record.executor?.disconnect()),
