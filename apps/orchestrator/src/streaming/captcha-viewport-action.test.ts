@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { expect, it } from 'vitest';
 import { browserControlSessions } from '../agent/supercar/browser-control-sessions.js';
@@ -9,6 +10,85 @@ import {
 } from './captcha-viewport-action.js';
 
 const observation = { frameId: 'frame', tabId: 'tab', viewportRevision: 1 };
+
+it.each([1, 2])(
+  'authorizes the visible target in a scrolled viewport at device scale %s without dispatching input',
+  async (deviceScaleFactor) => {
+    const browser = await chromium.launch({
+      executablePath: chromium.executablePath(),
+      headless: true,
+    });
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 657 },
+      deviceScaleFactor,
+    });
+    const page = await context.newPage();
+    await page.setContent(
+      '<body style="margin:0;width:2600px;height:2200px">' +
+        '<button id="target" style="position:absolute;left:1700px;top:1800px;width:180px;height:50px" onclick="this.dataset.clicked=\'true\'">Owned synthetic button</button></body>',
+    );
+    await page.locator('#target').scrollIntoViewIfNeeded();
+    const point = await page.locator('#target').evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+    const scroll = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
+    expect(scroll.x).toBeGreaterThan(0);
+    expect(scroll.y).toBeGreaterThan(0);
+    const instance = {
+      taskId: 'tsk_scrolled_target',
+      userId: 'usr_scrolled_target',
+      status: 'ready',
+      executor: { getPage: async () => page },
+    } as unknown as BrowserInstance;
+    const binding = browserControlSessions.review(instance);
+    try {
+      const input = {
+        type: 'input',
+        observation,
+        payload: { type: 'mouseDown' as const, ...point, button: 'left' as const, clickCount: 1 },
+      };
+      const originalPoint = { ...input.payload };
+      const allowed = await authorizeHumanViewportInput(instance, input);
+      expect(allowed.decision).toEqual({ kind: 'allow', sensitive: false });
+      expect(allowed.request).toMatchObject({
+        taskId: instance.taskId,
+        actor: 'human',
+        lane: 'cdp',
+        observationRevision: 1,
+      });
+      const cdp = await context.newCDPSession(page);
+      const { root } = await cdp.send('DOM.getDocument');
+      const { nodeId } = await cdp.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: '#target',
+      });
+      const { node } = await cdp.send('DOM.describeNode', { nodeId });
+      const { frameTree } = await cdp.send('Page.getFrameTree');
+      expect(allowed.request.actionDigest).toBe(
+        createHash('sha256')
+          .update(
+            JSON.stringify([
+              `${frameTree.frame.id}:${node.backendNodeId}`,
+              input.observation,
+              input.payload,
+            ]),
+          )
+          .digest('hex'),
+      );
+      await cdp.detach();
+      expect(input.payload).toEqual(originalPoint);
+      expect(await page.locator('#target').getAttribute('data-clicked')).toBeNull();
+      binding.control.close();
+      await expect(authorizeHumanViewportInput(instance, input)).rejects.toThrow(
+        'browser_control_not_owned',
+      );
+    } finally {
+      binding.control.close();
+      await browser.close();
+    }
+  },
+);
 
 it('REBUILD-4: allowed with no lease on the open control during a CAPTCHA, never returning private input', async () => {
   const browser = await chromium.launch({ headless: true });

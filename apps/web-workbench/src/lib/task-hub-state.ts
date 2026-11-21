@@ -1,7 +1,13 @@
+import type { UiTask } from '@/types/task';
 import type { AwaitingKind } from './awaiting-user-copy';
 import { pageErrorMessage } from './page-error-copy';
 import { taskDisplayTitle } from './task-display-copy';
+import {
+  isExecutionUnconfirmed,
+  normalizeExecutionObservation,
+} from './task-execution-observation';
 import { deriveTaskProductState } from './task-product-state';
+import { taskStatusLabel } from './task-status-copy';
 
 export type HistoryStatusFilter = 'all' | 'completed' | 'review' | 'failed' | 'running';
 export type HistoryRangeFilter = '7d' | '30d' | 'all';
@@ -50,6 +56,8 @@ export function historyStatusFilterToServerStatuses(
 }
 
 export interface NormalizedTaskHubRow {
+  readonly browserSource?: 'local-chrome';
+  readonly executionObservation?: UiTask['executionObservation'];
   readonly taskId: string;
   readonly intent: string;
   readonly title: string | null;
@@ -155,9 +163,13 @@ type TaskHubProductStateInput =
       readonly awaitingKind?: AwaitingKind | null;
       readonly queuePosition?: number | null;
       readonly tickCount?: number | null;
+      readonly browserSource?: 'local-chrome';
+      readonly executionObservation?: UiTask['executionObservation'];
     };
 
 function toTaskHubProductState(input: TaskHubProductStateInput) {
+  if (typeof input !== 'string' && isExecutionUnconfirmed(input))
+    return { lifecycle: 'unknown' as const };
   return typeof input === 'string'
     ? deriveTaskProductState({ status: input })
     : deriveTaskProductState({
@@ -166,6 +178,12 @@ function toTaskHubProductState(input: TaskHubProductStateInput) {
         queuePosition: input.queuePosition ?? null,
         tickCount: input.tickCount ?? null,
       });
+}
+
+export function taskHubStatusLabel(task: NormalizedTaskHubRow): string {
+  return isExecutionUnconfirmed(task)
+    ? '执行结果待核实'
+    : taskStatusLabel(task.status, task.awaitingKind);
 }
 
 export function taskHubNeedsAttention(input: TaskHubProductStateInput): boolean {
@@ -334,6 +352,12 @@ function normalizeTaskHubRow(value: unknown): NormalizedTaskHubRow | null {
     intent: safeTaskHubText(value.intent) || '未命名任务',
     title: safeNullableTaskHubText(value.title),
     status: normalizeTaskHubStatus(value.status),
+    ...(value.browserSource === 'local-chrome'
+      ? {
+          browserSource: 'local-chrome' as const,
+          executionObservation: normalizeExecutionObservation(value.executionObservation),
+        }
+      : {}),
     awaitingKind: normalizeAwaitingKind(value.awaitingKind),
     createdAt: safeTaskHubDate(value.createdAt) ?? '',
     completedAt: safeNullableTaskHubDate(value.completedAt),

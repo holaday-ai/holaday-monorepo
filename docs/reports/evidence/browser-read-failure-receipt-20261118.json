@@ -1,0 +1,103 @@
+{
+  "checkedAtUTC": "2026-11-19T03:21:55.028343+00:00",
+  "parentCommit": "4b4bc7daee2e431d1dde4fe03061937b315895c4",
+  "status": "confirmed read failure classification fixed; real file acceptance and mutating unknown reconciliation remain open",
+  "codeSHA256": {
+    "apps/orchestrator/src/ws/server.ts": "7b059537a5fc376aff62318fb1019841a4f882f48270d11dfc577c6e93e71e2b",
+    "apps/orchestrator/src/ws/server-drain.test.ts": "f8389a4bfabce8ccf80228d184f74d995dd92ce5cc7cd3cf0ef294ae8b9f32fb"
+  },
+  "realGitHubAttempt": {
+    "taskId": "tsk_ti6DehGxoEHE5tCU3hCSh",
+    "actualApp": true,
+    "actualSQL": "8.0.46",
+    "actualChrome": "157.0.8103.79",
+    "qaVersion": "0.0.3",
+    "nativeDownloads": 0,
+    "modelCalls": 0,
+    "quotaUsed": 1,
+    "iterations": 0,
+    "observedError": "observation_failed",
+    "underlyingReadOnlyDiagnostic": "stale_observation",
+    "SQLStatusAtSnapshot": "executing",
+    "taskReplayed": false,
+    "files": 0,
+    "SQLSnapshotBytes": 174434,
+    "SQLSnapshotSHA256": "a6c9a7f0288af1d04212c2327cb0d27b90dd24c4f924891441917891d683f406",
+    "appExitCode": 0,
+    "ownedTargetCleanedAfterSnapshot": true
+  },
+  "classification": {
+    "authenticatedMatchedReceiptOnly": true,
+    "serverOwnedOpenOrObserveOnly": true,
+    "exactObservationFailureEnvelopeOnly": true,
+    "unknownActionOrExtraFieldsRejected": true,
+    "timeoutsDisconnectsInputsCleanupStillUnknown": true,
+    "queueUnknownWriteVetoUnchanged": true,
+    "noUnknownTicketsCleared": true
+  },
+  "checks": {
+    "RED": {
+      "passed": 83,
+      "failed": 2,
+      "reason": "QUEUE_PERSISTENCE_UNKNOWN on confirmed open/observe read failure"
+    },
+    "GREEN": {
+      "exitCode": 0,
+      "seconds": 6.57,
+      "passed": 86,
+      "failed": 0,
+      "skipped": 0
+    },
+    "strictTypes": {
+      "mode": "types",
+      "exitCode": 0,
+      "seconds": 5.34,
+      "heapMB": 2048
+    },
+    "backendBuild": {
+      "exitCode": 0,
+      "seconds": 16.46,
+      "heapMB": 2048,
+      "memoryFreePointPercent": 44
+    },
+    "final": {
+      "exitCode": 0,
+      "seconds": 6.53,
+      "passed": 86,
+      "failed": 0,
+      "skipped": 0
+    },
+    "static": {
+      "mode": "static",
+      "exitCode": 0,
+      "seconds": 0.33,
+      "heapMB": 512
+    }
+  },
+  "privateDiagnostic": {
+    "compiledCurrentProjectAdapter": true,
+    "temporaryQAOnlyInstrumentationRestored": true,
+    "profileCopied": false,
+    "modelCalls": 0,
+    "nativeInputs": 0,
+    "nativeDownloads": 0,
+    "subsequentReadSuccessIsNotFileTaskAcceptance": true,
+    "cachedSameNameWorkerSourceDetected": true
+  },
+  "modelLedger": {
+    "attempts": 5,
+    "cap": 25,
+    "allReceived": true,
+    "reset": false
+  },
+  "stillRequired": [
+    "both actual file tasks and history downloads",
+    "safe no-replay convergence for genuinely unknown input/file outcomes",
+    "physical owner input",
+    "stable subjects, actual KMS, account save/rebuild/expire/revoke/switch",
+    "exact rollout approval bindings"
+  ],
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

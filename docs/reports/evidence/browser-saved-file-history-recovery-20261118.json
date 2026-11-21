@@ -1,0 +1,236 @@
+{
+  "checkedAtUTC": "2026-11-19T04:10:01.925726+00:00",
+  "parentCommit": "2742d64c9876d564b5a2071c48af52b400f4fe0b",
+  "status": "historical saved-file delivery recovered; original task and overall Goal remain unconfirmed",
+  "codeSHA256": {
+    "apps/orchestrator/src/trpc/routers/task-result-attachment-availability.ts": "69a54e43da02ee79cc3e470685753acfedd2d6ffa5ecda58ca46da767d110fd2",
+    "apps/orchestrator/src/trpc/routers/tasks-attachment-availability.test.ts": "d95b44cac278c69384e61988642048d9a4ee47cb686c523e8952cb01075fc79f",
+    "apps/orchestrator/src/trpc/routers/tasks.execution-detail.test.ts": "97b9c2e7f808602daaaca5d6807213a209c0c9c666f5516e73186e4f4e9a750e",
+    "apps/orchestrator/src/trpc/routers/tasks.ts": "0a5a284438c5bde7a6847de0ac042f8ff5bcc6922e141df83780a4a767cdd87e",
+    "apps/orchestrator/src/trpc/routers/tasks.saved-files-recovery.manual.test.ts": "323c58811ae633f50bd76461e71e132e27757c4cb57f73da35d5ee8995301e47",
+    "apps/web-workbench/src/components/TaskStream.tsx": "8e00db76907f9e3f60d7169aa3c54cf2b601515bbdb1fa4dde3cddfcd892ba53",
+    "apps/web-workbench/src/components/TaskStream.fix57.test.tsx": "35d41fbfd31648d5c10eb02bd1f3f3cf1d283c08adae13680430a37d634226f7"
+  },
+  "behavior": {
+    "existingOwnerTaskKindExpiryFiltersPreserved": true,
+    "existingBatchQueryExtended": true,
+    "noExtraPerTaskQueries": true,
+    "activeInventoryFieldsOverrideStaleMetadata": true,
+    "unresolvedTaskFilesRecoveredWithoutChangingTaskStatus": true,
+    "successfulPublishedOutputSelectionPreserved": true,
+    "existingScreenshotRolePreserved": true,
+    "noUnknownTicketClearedOrQueueVetoChanged": true
+  },
+  "targetedChecks": {
+    "backendRED": {
+      "passed": 4,
+      "failed": 2
+    },
+    "uiRED": {
+      "passed": 7,
+      "failed": 2
+    },
+    "compatibilityRED": {
+      "passed": 18,
+      "failed": 2
+    },
+    "backendFinal": {
+      "exitCode": 0,
+      "seconds": 5.94,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0
+    },
+    "ui": {
+      "exitCode": 0,
+      "seconds": 2.21,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "backendBuild": {
+      "exitCode": 0,
+      "seconds": 15.73,
+      "heapMB": 2048,
+      "memoryFreePointPercent": 49
+    },
+    "strictUI": {
+      "mode": "types",
+      "exitCode": 0,
+      "seconds": 14.52,
+      "heapMB": 2048,
+      "componentRoots": 2,
+      "viteAndChromeAmbient": true,
+      "DOMIterablePreserved": true,
+      "transitiveImports": true
+    },
+    "static": {
+      "mode": "static",
+      "exitCode": 0,
+      "seconds": 0.42,
+      "heapMB": 512
+    },
+    "preExistingStaticWarnings": 4,
+    "strictBackend": {
+      "mode": "types",
+      "exitCode": 0,
+      "seconds": 12.89,
+      "heapMB": 2048,
+      "roots": 5,
+      "chromeAmbient": true,
+      "transitiveImports": true
+    },
+    "uiFinal": {
+      "exitCode": 0,
+      "seconds": 2.32,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "historicalProof": {
+    "taskId": "tsk_2ncmrVDbv9Yh5xWG3Tf4z",
+    "actualChrome": "157.0.8103.79",
+    "headless": true,
+    "browserPlugin": "not available; existing project Playwright workflow",
+    "sourceSQLSnapshotBytes": 184006,
+    "sourceSQLSnapshotSHA256": "7f0950acc9c656ea7575b191ed1a47cacc9b931185bc2e120b3320ecef87bf9a",
+    "dataOnlyRestoreTables": [
+      "task_events",
+      "task_files",
+      "task_quotas",
+      "task_steps",
+      "tasks",
+      "users"
+    ],
+    "actualSQL": "8.0.46",
+    "clonedStructures": 96,
+    "newProbeOwnerMarkerPreserved": true,
+    "syntheticAppOwnerScope": true,
+    "foreignTaskHTTP": 404,
+    "foreignFileHTTP": 404,
+    "blockedMutations": 0,
+    "historyReload": true,
+    "consoleErrors": [],
+    "consoleWarnings": [],
+    "views": [
+      {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "files": [
+          {
+            "filename": "pr360-premerge-20261118.json",
+            "sizeBytes": 7560,
+            "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+            "bounds": {
+              "x": 359,
+              "y": 369.25,
+              "width": 414,
+              "height": 40
+            }
+          },
+          {
+            "filename": "summary.csv",
+            "sizeBytes": 304,
+            "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+            "bounds": {
+              "x": 359,
+              "y": 443.25,
+              "width": 414,
+              "height": 40
+            }
+          }
+        ],
+        "summaryRows": 8,
+        "initialFailuresPreserved": true,
+        "overlappingBatchesSeparate": true
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "files": [
+          {
+            "filename": "pr360-premerge-20261118.json",
+            "sizeBytes": 7560,
+            "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+            "bounds": {
+              "x": 37,
+              "y": 281.75,
+              "width": 316,
+              "height": 40
+            }
+          },
+          {
+            "filename": "summary.csv",
+            "sizeBytes": 304,
+            "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+            "bounds": {
+              "x": 37,
+              "y": 355.75,
+              "width": 316,
+              "height": 40
+            }
+          }
+        ],
+        "summaryRows": 8,
+        "initialFailuresPreserved": true,
+        "overlappingBatchesSeparate": true
+      }
+    ],
+    "sourceWebsiteExportsTriggered": 0,
+    "modelAPICalls": 0,
+    "canonicalLedgerUnchanged": true,
+    "SQLTaskStatusUnchanged": "executing",
+    "taskAccepted": false,
+    "originalSourceDataRowsUnchanged": true,
+    "ownedSQLCleaned": true,
+    "ownedBlankBrowserClosed": true,
+    "authenticatedWebsiteProfilesUsedOrCopied": false
+  },
+  "historicalRunReceipts": {
+    "v1": {
+      "exitCode": 0,
+      "seconds": 21.92,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "v2": {
+      "exitCode": 1,
+      "seconds": 20.71,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "v3": {
+      "exitCode": 0,
+      "seconds": 21.32,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "v2Limitation": "All body assertions passed and owned resources cleaned, but process exited1 with no error in log; cause remains unlocated and record retained. V3 added cleanup-stage diagnostics, all assertions and process exit0; not claimed as a fixed root cause."
+  },
+  "modelLedger": {
+    "attempts": 14,
+    "received": 13,
+    "unknown": 1,
+    "frozen": true,
+    "reset": false
+  },
+  "stillRequired": [
+    "auditable genuinely unknown task status/convergence",
+    "provider unknown accounting before further model calls",
+    "complete real Sheets task and full task completion acceptance",
+    "physical owner input, stable subjects, actual KMS and account lifecycle",
+    "exact rollout bindings and separate authorization"
+  ],
+  "AWSConsole": "Session expired; existing-account sign-in handoff is visible and pending owner login. Same approved test key/package scope remains.",
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

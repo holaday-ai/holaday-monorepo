@@ -607,7 +607,8 @@ function pickExtensionClientForUser(
 interface PendingExtensionToolCall {
   clientId: string;
   taskId: string;
-  resolve: (outcome: ExtensionToolCallOutcome) => void;
+  /** Only the authenticated, request/task-matched receipt handler supplies true. */
+  resolve: (outcome: ExtensionToolCallOutcome, confirmedReply?: true) => void;
   timer: NodeJS.Timeout;
 }
 
@@ -837,13 +838,30 @@ async function sendOwnedExtensionToolCall(
   let settled = false;
   // biome-ignore lint/style/useConst: Settlement must tolerate reentry before timer assignment.
   let timer: NodeJS.Timeout | undefined;
-  const settle = (result: ExtensionToolCallOutcome) => {
+  const settle = (result: ExtensionToolCallOutcome, confirmedReply?: true) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
     pendingExtensionCalls.delete(requestId);
     rememberSettledExtensionCall(requestId, target.id, taskId);
-    if (!result.ok) lifetime.drain.markUnknown(lifetime.owner);
+    const reply = result.result;
+    // A finished read can fail freshness/redaction without executing an input.
+    // Transport failures, cleanup failures and every input operation remain
+    // uncertain. Neither page data nor a serialized client flag grants this.
+    const confirmedReadFailure =
+      confirmedReply === true &&
+      opts.kind === 'session' &&
+      (opts.args?.session?.op === 'open' || opts.args?.session?.op === 'observe') &&
+      result.error?.code === 'observation_failed' &&
+      reply !== null &&
+      typeof reply === 'object' &&
+      !Array.isArray(reply) &&
+      'ok' in reply &&
+      reply.ok === false &&
+      'error' in reply &&
+      reply.error === 'observation_failed' &&
+      Object.keys(reply).every((key) => key === 'ok' || key === 'error');
+    if (!result.ok && !confirmedReadFailure) lifetime.drain.markUnknown(lifetime.owner);
     complete(result);
   };
   timer = setTimeout(
@@ -1341,11 +1359,14 @@ async function handleClientMessage(
     clearTimeout(pending.timer);
     pendingExtensionCalls.delete(msg.requestId);
     rememberSettledExtensionCall(msg.requestId, pending.clientId, pending.taskId);
-    pending.resolve({
-      ok: msg.ok,
-      ...(msg.result !== undefined ? { result: msg.result } : {}),
-      ...(msg.error ? { error: msg.error } : {}),
-    });
+    pending.resolve(
+      {
+        ok: msg.ok,
+        ...(msg.result !== undefined ? { result: msg.result } : {}),
+        ...(msg.error ? { error: msg.error } : {}),
+      },
+      true,
+    );
     return;
   }
 }

@@ -245,6 +245,10 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
   }
 
   async observeCurrentPage(): Promise<DriverResult> {
+    return this.observeSelectedPage(true);
+  }
+
+  private async observeSelectedPage(retryStaleSnapshot: boolean): Promise<DriverResult> {
     if (this.selectedDisposeRequested) {
       return driverError(DRIVER_ERRORS.NOT_ATTACHED, 'selected-tab adapter is disposing');
     }
@@ -350,6 +354,13 @@ export class PlaywrightCrxAdapter implements HolaDayBrowserDriver {
       };
       return { status: 'ok', data };
     } catch (err) {
+      // A newly loaded background tab may mutate during its first snapshot.
+      // Discard that entire read and repeat once, including origin, lifecycle,
+      // redaction and freshness checks. Never repeat an input or download.
+      if (retryStaleSnapshot && err instanceof Error && err.message === 'stale_observation') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        return this.observeSelectedPage(false);
+      }
       return driverError(
         DRIVER_ERRORS.EXTRACT_FAILED,
         `failed to observe attached tab: ${err instanceof Error ? err.message : String(err)}`,

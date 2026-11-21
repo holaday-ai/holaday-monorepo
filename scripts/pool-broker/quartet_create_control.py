@@ -1,5 +1,6 @@
 """One original app stream, durable reservation and fixed complete group start."""
 import array
+import hmac
 import os
 import select
 import secrets
@@ -10,7 +11,7 @@ import time
 import launch_authorization
 from quartet_create_offer import _CreateOffer
 from quartet_protocol import (decode_control_frame, decode_quartet_request, encode_control_frame,
-    QuartetCreateRequest, decode_boot_frame, encode_boot_frame)
+    QuartetCreateRequest, QuartetResourceRequest, decode_boot_frame, encode_boot_frame)
 from resource_journal import ResourceJournal
 
 
@@ -40,6 +41,8 @@ class _CreateControl:
         item._stream = stream if isinstance(stream, socket.socket) else None
         item._offer = None
         item._material = item._runtime = None
+        item._request = None
+        item._preparation_attempted = False
         item._launch_attempted = item._creation_attempted = False
         item._retired = item._attempted = item._accepted = False
         item._input_bytes = item._output_bytes = 0
@@ -73,12 +76,15 @@ class _CreateControl:
             item.close()
             _deny()
 
-    def _veto(self):
-        if self._listener is not None: self._listener._veto()
+    def _owner_veto(self):
+        if self._listener is not None: self._listener._owner_veto()
         journal, reg, pin = self._journal, self._registration, self._pin
         if (self._retired or self._stream is None or journal._retired or reg._revoked or not reg._received
                 or journal._registration is not reg or journal._pin is not pin or reg._pin is not pin
                 or pin._fd is None or self._offer is not None and self._offer._retired): raise ValueError()
+    def _veto(self):
+        self._owner_veto()
+        if self._listener is not None: self._listener._veto()
         # The child's own boundary performs its final full owner veto. Do not
         # recursively sweep that graph for every call to its parent time scope.
         if self._material is not None and self._material._retired: raise ValueError()
@@ -217,14 +223,26 @@ class _CreateControl:
             self.close()
             _deny()
 
-    def prepare(self):
+    def receive_request(self):
         try:
             if self._attempted or self._boot_window is not None: raise ValueError()
             self._attempted = True
             request_frame = self._receive()
             request = decode_quartet_request(request_frame[4:])
-            if type(request) is not QuartetCreateRequest: raise ValueError()
+            if request.boot != self._journal._boot: raise ValueError()
             self._no_queued_input()
+            self._request = request
+            return request
+        except Exception:
+            self.close()
+            _deny()
+
+    def prepare(self):
+        try:
+            if self._preparation_attempted: raise ValueError()
+            self._preparation_attempted = True
+            request = self.receive_request() if self._request is None else self._request
+            if type(request) is not QuartetCreateRequest: raise ValueError()
             self._begin()
             self._offer = _CreateOffer.open(self._journal, request,
                 deadline_ns=self._deadline_ns, scope_guard=self._budget)
@@ -239,6 +257,49 @@ class _CreateControl:
             self._accepted = True
             self._phase_ns = self._deadline_ns
             return self._offer
+        except Exception:
+            self.close()
+            _deny()
+
+    def close_original_group(self):
+        from quartet_listener import _QuartetListener
+        from quartet_runtime import _RunningQuartet
+        try:
+            self._check()
+            request, listener = self._request, self._listener
+            if (not self._attempted or self._preparation_attempted or self._runtime is not None
+                    or type(request) is not QuartetResourceRequest or request.action != 'close'
+                    or type(listener) is not _QuartetListener or not listener._busy
+                    or request.boot != self._journal._boot): raise ValueError()
+            originals = []
+            for live in listener._groups:
+                if type(live) is not _RunningQuartet or live._material._journal is not self._journal: raise ValueError()
+                row = self._journal._resources[live._material._resource]
+                if hmac.compare_digest(row['capability'], request.capability): originals.append(live)
+            if len(originals) != 1: raise ValueError()
+            live = originals[0]
+            if (live._close_control is not None or live._close_request_id not in (None, request.request_id)
+                    or request.request_id == self._journal._resources[live._material._resource]['requestId']):
+                raise ValueError()
+            self._runtime = live
+            live._close_control, live._close_request_id = self, request.request_id
+            self._phase_ns = self._deadline_ns
+            self._check()
+            live.stop_original()
+            live.collect_terminal_evidence()
+            self._check()
+            self._no_queued_input()
+            self._send(live._close_receipt(self))
+            self._no_queued_input()
+            stream = self._stream
+            stream.close()
+            self._budget()
+            live._material._owner_veto()
+            if self._stream is not stream or self._runtime is not live: raise ValueError()
+            live._close_control = None
+            self._runtime = self._stream = self._request = None
+            self._retired = True
+            return live
         except Exception:
             self.close()
             _deny()

@@ -58,7 +58,7 @@ async function installBrowser() {
   return chromeMock;
 }
 
-async function call(kind: string, args?: unknown) {
+async function call(kind: string, args?: unknown, timeoutMs = 3000) {
   const parsed = parseServerMessage(
     JSON.stringify({
       type: 'server.extension.tool_call',
@@ -66,7 +66,7 @@ async function call(kind: string, args?: unknown) {
       requestId: crypto.randomUUID(),
       kind,
       args,
-      timeoutMs: 3000,
+      timeoutMs,
     }),
   );
   expect(parsed.success, 'tool must survive the actual wire schema').toBe(true);
@@ -440,6 +440,245 @@ describe('background task tab preparation', () => {
       first?.type === 'client.extension.tool_result' && first.result,
     );
     expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+  });
+  function preparedTarget() {
+    const selectionId = target.selectionId;
+    if (!selectionId) throw new Error('selection missing');
+    return { ...target, selectionId };
+  }
+  it('negotiates a loading receipt through the wire and later observes the same page ready', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const args = {
+      target: preparedTarget(),
+      preparationId: '58731392-fb39-48c0-9ea9-7431395567b1',
+      reportReadiness: true,
+    };
+    const first = call('task_tab', args, 15000);
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(await first).toMatchObject({
+      ok: true,
+      result: {
+        taskTabStatus: 'loading',
+        taskTabCreated: true,
+        preparationId: args.preparationId,
+        sourceTabId: 42,
+        sourceOrigin: 'https://work.example',
+        tabId: 73,
+      },
+    });
+    loading = false;
+    expect(await call('task_tab', args, 15000)).toMatchObject({
+      ok: true,
+      result: { tabId: 73, selectionId: expect.any(String) },
+    });
+    expect(browser.tabs.create).toHaveBeenCalledOnce();
+  });
+  it('advertises readiness as an explicit extension capability', async () => {
+    await readyBrowser();
+    expect(await call('tabs')).toMatchObject({
+      ok: true,
+      result: {
+        userBrowserProtocol: { capabilities: expect.arrayContaining(['task_tab_readiness_v1']) },
+      },
+    });
+  });
+  it('observes a slow prepared tab again under the same preparation without creating another', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading', pendingUrl: target.expectedUrl } : {}),
+    }));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a1';
+    const first = prepareIndependentTaskTab(preparedTarget(), id);
+    const failed = expect(first).rejects.toThrow('task_tab_not_ready');
+    await vi.advanceTimersByTimeAsync(8100);
+    await failed;
+    loading = false;
+
+    const [retry, concurrent] = await Promise.all([
+      prepareIndependentTaskTab(preparedTarget(), id),
+      prepareIndependentTaskTab(preparedTarget(), id),
+    ]);
+    expect(retry).toMatchObject({ taskTabCreated: true, tabId: 73, url: 'https://work.example' });
+    expect(concurrent).toEqual(retry);
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+    expect(browser.tabs.update).not.toHaveBeenCalled();
+    expect(browser.windows.update).not.toHaveBeenCalled();
+    expect(browser.scripting.executeScript).not.toHaveBeenCalled();
+  });
+  it('does not reuse a timed-out prepared page after it leaves the authorized origin', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: args[0] === 73 && !loading ? 'https://other.example/' : target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a2';
+    const failed = expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'task_tab_not_ready',
+    );
+    await vi.advanceTimersByTimeAsync(8100);
+    await failed;
+    loading = false;
+    await expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'origin_grant_required',
+    );
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+    expect(browser.tabs.update).not.toHaveBeenCalled();
+  });
+  it('returns the recovered page through a new wire request with the original preparation id', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const args = {
+      target: preparedTarget(),
+      preparationId: '58731392-fb39-48c0-9ea9-7431395567a6',
+    };
+    const first = call('task_tab', args, 15000);
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(await first).toMatchObject({ ok: false });
+    loading = false;
+    expect(await call('task_tab', args, 15000)).toMatchObject({
+      ok: true,
+      result: { taskTabCreated: true, tabId: 73, url: 'https://work.example' },
+    });
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+  });
+  it('observes a known page again after its metadata request times out', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    browser.tabs.get
+      .mockImplementationOnce(async () => ({
+        id: 42,
+        url: target.expectedUrl,
+        title: 'Projects',
+      }))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a7';
+    const failed = expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'extension_tool_timeout',
+    );
+    await vi.advanceTimersByTimeAsync(1600);
+    await failed;
+    expect(await prepareIndependentTaskTab(preparedTarget(), id)).toMatchObject({ tabId: 73 });
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+  });
+  it('retains an uncertain create failure instead of invoking create again', async () => {
+    const browser = await readyBrowser();
+    browser.tabs.create.mockRejectedValue(new Error('extension_tool_timeout'));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a8';
+    await expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'extension_tool_timeout',
+    );
+    await expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'extension_tool_timeout',
+    );
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+  });
+  it('does not expire an uncertain creation when another preparation cleans up old entries', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    const bound = preparedTarget();
+    browser.tabs.create.mockRejectedValueOnce(new Error('extension_tool_timeout'));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a9';
+    await expect(prepareIndependentTaskTab(bound, id)).rejects.toThrow('extension_tool_timeout');
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    const discovered = await call('tabs');
+    const source = (
+      discovered as { result: { tabs: Array<{ tabId: number; selectionId: string }> } }
+    ).result.tabs.find((tab) => tab.tabId === 42)!;
+    await prepareIndependentTaskTab(
+      { ...target, selectionId: source.selectionId },
+      '58731392-fb39-48c0-9ea9-7431395567aa',
+    );
+    await expect(prepareIndependentTaskTab(bound, id)).rejects.toThrow('extension_tool_timeout');
+    expect(browser.tabs.create).toHaveBeenCalledTimes(2);
+  });
+  it('rechecks the owner after a delayed prepared-page observation', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a3';
+    const failed = expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'task_tab_not_ready',
+    );
+    await vi.advanceTimersByTimeAsync(8100);
+    await failed;
+    loading = false;
+    let finish!: (tab: { id: number; url: string; title: string }) => void;
+    browser.tabs.get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const retried = expect(prepareIndependentTaskTab(preparedTarget(), id)).rejects.toThrow(
+      'target_changed',
+    );
+    vi.mocked(getCurrentWsToken).mockReturnValue('owner-b');
+    finish({ id: 73, url: target.expectedUrl, title: 'Projects' });
+    await retried;
+    expect(browser.tabs.create).toHaveBeenCalledTimes(1);
+    expect(browser.tabs.update).not.toHaveBeenCalled();
+  });
+  it('retains an unresolved created page while another preparation expires its selection', async () => {
+    vi.useFakeTimers();
+    const browser = await readyBrowser();
+    const bound = preparedTarget();
+    let loading = true;
+    browser.tabs.get.mockImplementation(async (...args: unknown[]) => ({
+      id: args[0] as number,
+      url: target.expectedUrl,
+      title: 'Projects',
+      ...(args[0] === 73 && loading ? { status: 'loading' } : {}),
+    }));
+    const id = '58731392-fb39-48c0-9ea9-7431395567a4';
+    const failed = expect(prepareIndependentTaskTab(bound, id)).rejects.toThrow(
+      'task_tab_not_ready',
+    );
+    await vi.advanceTimersByTimeAsync(8100);
+    await failed;
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    const discovered = await call('tabs');
+    const source = (
+      discovered as { result: { tabs: Array<{ tabId: number; selectionId: string }> } }
+    ).result.tabs.find((tab) => tab.tabId === 42)!;
+    browser.tabs.create.mockResolvedValue({ id: 74, url: target.expectedUrl, title: 'Other task' });
+    await prepareIndependentTaskTab(
+      { ...target, selectionId: source.selectionId },
+      '58731392-fb39-48c0-9ea9-7431395567a5',
+    );
+    loading = false;
+    expect(await prepareIndependentTaskTab(bound, id)).toMatchObject({ tabId: 73 });
+    expect(browser.tabs.create).toHaveBeenCalledTimes(2);
+    expect(browser.tabs.update).not.toHaveBeenCalled();
   });
   it('rejects an owner switch before opening another tab', async () => {
     const browser = await readyBrowser();

@@ -11,6 +11,7 @@ import type {
 import { MessagesAdapterError } from '../../llm/messages-adapter.js';
 import type { ExtensionToolCallOptions, ExtensionToolCallOutcome } from '../../ws/server.js';
 import { BrowserTaskFiles } from '../browser-tools/browser-task-files.js';
+import type { TableAggregate } from '../browser-tools/browser-task-table.js';
 import type { LlmCallRecord, LlmCallRecorder } from '../llm-call-recorder.js';
 import { friendlyTaskFailureReason } from '../task-failure-copy.js';
 import { BrowserControl, HUMAN_IDLE_MS } from './browser-control.js';
@@ -203,6 +204,33 @@ function records(): { recorder: LlmCallRecorder; values: LlmCallRecord[] } {
 }
 
 describe('runSelectedChromeTask', () => {
+  it('projects repeated observations once into the actual model request without dropping tool pairs', async () => {
+    const observe = (id: string) =>
+      response(id, [{ type: 'tool_use', id, name: 'browser_observe', input: {} }]);
+    const h = createHarness([observe('observe-first'), observe('observe-again'), finish('Draft')]);
+    const result = await runSelectedChromeTask({
+      taskId: 'task-a',
+      intent: '只读核对页面，不重放任何操作',
+      target,
+      client: h.client,
+      control: h.control,
+      messagesAdapter: h.messagesAdapter,
+      maxIterations: 3,
+    });
+    expect(result.status).toBe('completed');
+    const request = JSON.stringify(h.requests[2]?.messages);
+    const content = h.requests[2]!.messages.flatMap((message) =>
+      typeof message.content === 'string'
+        ? [message.content]
+        : message.content.flatMap((block) => (block.type === 'tool_result' ? [block.content] : [])),
+    ).join('\n');
+    expect(content.match(/"bodyText":"Draft"/g)).toHaveLength(1);
+    for (const id of ['observe-first', 'observe-again']) {
+      expect(request).toContain(`\"toolUseId\":\"${id}\"`);
+      expect(request).toContain(`\"id\":\"${id}\"`);
+    }
+    expect(request).toContain('只读核对页面，不重放任何操作');
+  });
   it.each([
     '给我一份 CSV 文件',
     'Please provide a CSV file',
@@ -1922,6 +1950,94 @@ describe('selected Chrome task file reading and statistics', () => {
       text: 'name,amount\nalice,0.1\nbob,0.2\n',
       coverage: { complete: true },
     });
+  });
+  it.each(['corrected', 'superseded-fact'])(
+    'finishes only with facts from the explicitly corrected analysis: %s',
+    async (variant) => {
+      const f = await owned('phase,files,total\ninitial,2,5\nrecheck,,3\n');
+      const h = createHarness([]);
+      let turn = 0;
+      let first: TableAggregate | undefined;
+      h.messagesAdapter.create = async (request) => {
+        h.requests.push(request);
+        if (++turn === 1)
+          return call(
+            'analyze_task_table',
+            {
+              fileId: f.fileId,
+              mode: 'aggregate',
+              groupBy: ['A'],
+              metrics: [{ op: 'count_rows' }, { op: 'sum', column: 'B' }],
+            },
+            'initial-analysis',
+          );
+        if (turn === 2) {
+          first = results(request).at(-1)! as TableAggregate;
+          return call(
+            'analyze_task_table',
+            {
+              fileId: f.fileId,
+              mode: 'aggregate',
+              groupBy: ['A'],
+              supersedesAnalysisId: first!.analysisId,
+              metrics: [{ op: 'count_rows' }, { op: 'count_nonempty', column: 'B' }],
+            },
+            'corrected-analysis',
+          );
+        }
+        const latest = results(request).at(-1)! as TableAggregate;
+        const metric = (variant === 'corrected' ? latest : first!).overall[0]!;
+        return done({
+          fields: [
+            { name: metric.name, value: metric.value, fileId: f.fileId, tableFactId: metric.id },
+          ],
+        });
+      };
+      expect((await run(h, f.scope, 3)).status).toBe(
+        variant === 'corrected' ? 'completed' : 'failed',
+      );
+    },
+  );
+  it('publishes file progress from actual read and table receipts, including incomplete reads', async () => {
+    const f = await owned();
+    const h = createHarness([
+      call('read_task_file', { fileId: f.fileId, maxChars: 5 }, 'prefix'),
+      call('read_task_file', { fileId: f.fileId, offset: 5 }, 'rest'),
+      call('analyze_task_table', { fileId: f.fileId, mode: 'describe' }),
+    ]);
+    const ticks: Array<{ execution?: unknown }> = [];
+    await runSelectedChromeTask({
+      taskId: 'task-a',
+      intent: '读取并统计文件',
+      target,
+      client: h.client,
+      control: h.control,
+      messagesAdapter: h.messagesAdapter,
+      browserTaskFiles: f.scope,
+      maxIterations: 3,
+      onTick: async (tick) => {
+        ticks.push(tick);
+      },
+    });
+    const records = ticks.map((tick) => tick.execution);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionKind: 'read_task_file',
+          ok: true,
+          message: '已读取部分文件，全文尚未读完。',
+        }),
+        expect.objectContaining({
+          actionKind: 'read_task_file',
+          ok: true,
+          message: '已读取完整文件文本。',
+        }),
+        expect.objectContaining({ actionKind: 'analyze_task_table', ok: true }),
+      ]),
+    );
+    expect(records).not.toContainEqual(
+      expect.objectContaining({ actionKind: 'selected_chrome_plan_discarded' }),
+    );
   });
   it('rejects a complete finish after reading only a prefix', async () => {
     const f = await owned();

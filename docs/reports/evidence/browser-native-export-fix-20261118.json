@@ -1,0 +1,187 @@
+{
+  "checkedAtUTC": "2026-11-19T02:57:23.543916+00:00",
+  "status": "local fix verified; real-site retests, unknown-state reconciliation and full Goal still incomplete",
+  "parentCommit": "9924866426d7ba609644a1634f7c8b1880652cf2",
+  "codeSHA256": {
+    "apps/extension/manifest.config.ts": "cbdbcdc198d8ef5e8170f53bab345f224e801e868b57323fb22d67a8e44f8837",
+    "apps/extension/package.json": "35861f9ab6b7097d6b287fafe102bc04ce9eeeb3f7c88b9debb2a3b16d486bf3",
+    "apps/extension/src/shared/local-chrome-qa.test.ts": "7e01aa5ad6f8fe49fafd18a45f4c6fd397b658d19c46387d132ded31027f544d",
+    "apps/orchestrator/src/agent/supercar/native-download.test.ts": "91bc539ce279470ce2bde38f5f25ec05169498081001fb72de358886abf7bea5",
+    "apps/orchestrator/src/agent/supercar/native-download-sources.test.ts": "514898047ce47025ffce97ed07338beb1abed0d8074cd4ceb4eff652030ddd9e",
+    "apps/orchestrator/src/agent/supercar/selected-native-download.test.ts": "de1afad48aa3e5ec40ba15a4829651667fc302e69201961abe07d12b54746fa7",
+    "apps/orchestrator/src/trpc/routers/tasks.real-site.manual.test.ts": "a493bf712b69b5f7edbef6248c8cf67eb6e442943b0b52c75f78b67a5d61d1a6",
+    "packages/browser-driver/src/native-download.ts": "87c66dfb060d83c2ff41450467523c3885809029ac273280e664418dbfcec04e",
+    "packages/browser-driver/src/native-download-sources.ts": "811381dc465c859439afec944f4839b74502627b023fa0636daa0355025e4faf",
+    "packages/browser-driver/src/selected-target.ts": "91a53ee0329e9d9a57dbe1ec6e562e8186ce9cbc96cad853685b100b3af120d4"
+  },
+  "behavior": {
+    "sameOriginDefaultPreserved": true,
+    "providerPolicies": [
+      "exact immutable GitHub repository/commit/file on raw download host",
+      "exact Google spreadsheet path+id and selected gid, CSV only"
+    ],
+    "additionalDOMOriginsGranted": false,
+    "nativeReceiptAndResponseFrameCorrelated": true,
+    "ownedDescendantFramesOnly": true,
+    "noRefetch": true,
+    "trustedPointerUpArmsFocusLease": true,
+    "otherChildUserDownloadRejected": true,
+    "ungrantedCommittedDocumentRetiresFrameAndPriorAssociations": true
+  },
+  "regressions": {
+    "nativeAndProtocol": {
+      "passed": 88,
+      "failed": 0,
+      "skipped": 0,
+      "testFiles": 4,
+      "browserNotes": "Native controller and bound resolver use actual Chrome157; selected-session wrapper retains its pinned Chromium fixture. Source-policy cases are pure tests."
+    },
+    "qaPermissions": {
+      "passed": 26,
+      "failed": 0,
+      "skipped": 0
+    },
+    "strictTypes": {
+      "roots": 7,
+      "chromeAmbientIncluded": true,
+      "transitiveImports": true,
+      "exitCode": 0,
+      "heapMB": 2048
+    },
+    "backendBuild": {
+      "exitCode": 0,
+      "heapMB": 2048
+    },
+    "fullAppSQL": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "actualSql": "8.0.46",
+      "clonedTableStructures": 96,
+      "ownedTargetCleaned": true,
+      "migrations": [
+        "0071_task_files_browser_source"
+      ],
+      "fullAppComposer": true,
+      "historyReload": true,
+      "originalRequests": 1,
+      "analyzedRows": 10001,
+      "statistics": [
+        {
+          "name": "amount [B] 合计",
+          "value": "1099.9"
+        },
+        {
+          "name": "记录数",
+          "value": "10001"
+        }
+      ],
+      "views": [
+        {
+          "width": 1440,
+          "height": 900,
+          "files": [
+            {
+              "filename": "report.csv",
+              "sha256": "e930101747adf5b900376d7e9079c48c81b4e518257a238a18d106a6beb25bbe",
+              "sizeBytes": 90027,
+              "bounds": {
+                "x": 536,
+                "y": 454,
+                "width": 414,
+                "height": 40
+              }
+            },
+            {
+              "filename": "analysis.csv",
+              "sha256": "9df3c578f0067ea37b6b26f1d1218520fd0fc7d113224241edb82f0141a61e43",
+              "sizeBytes": 35,
+              "bounds": {
+                "x": 536,
+                "y": 368,
+                "width": 414,
+                "height": 40
+              }
+            }
+          ]
+        },
+        {
+          "width": 390,
+          "height": 844,
+          "files": [
+            {
+              "filename": "report.csv",
+              "sha256": "e930101747adf5b900376d7e9079c48c81b4e518257a238a18d106a6beb25bbe",
+              "sizeBytes": 90027,
+              "bounds": {
+                "x": 37,
+                "y": 234.75,
+                "width": 316,
+                "height": 40
+              }
+            },
+            {
+              "filename": "analysis.csv",
+              "sha256": "9df3c578f0067ea37b6b26f1d1218520fd0fc7d113224241edb82f0141a61e43",
+              "sizeBytes": 35,
+              "bounds": {
+                "x": 37,
+                "y": 148.75,
+                "width": 316,
+                "height": 40
+              }
+            }
+          ]
+        }
+      ],
+      "sourceUserPageUnchanged": true,
+      "normalUserInput": "typing while formal export waits",
+      "extensionVersion": "0.0.3",
+      "browserChannel": "chrome",
+      "modelAPICalls": 0,
+      "limitations": [
+        "controlled local site and scripted model",
+        "synthetic app account and quota/classifier test boundaries",
+        "controlled WS bridge; actual project plugin and native input/download",
+        "not real-site, stable-account or physical OS acceptance"
+      ]
+    }
+  },
+  "formalCandidate": {
+    "version": "0.0.6",
+    "zipBytes": 1001082,
+    "zipSHA256": "63c6b23fba58cc333ec68be52e3c581c189557dfe18d26660583f489b23e01f7",
+    "zipIntegrity": true,
+    "builtOnly": true,
+    "uploadedOrDeployed": false
+  },
+  "originalRealSheetsIncident": {
+    "preserved": true,
+    "taskReplayed": false,
+    "nativeOriginalCompletedAndForensicallyVerified": true,
+    "taskFiles": 0,
+    "sqlStatusAtSnapshot": "executing",
+    "fullSqlSnapshotBytes": 166987,
+    "fullSqlSnapshotSHA256": "78afe505d91c0f9af46fbdf6473c30ca44d835d5f2224cc25375369af4aff75d",
+    "ownedAppExitCode": 0,
+    "ownedTargetCleanedAfterSnapshot": true,
+    "unrelatedResourcesChanged": false
+  },
+  "realModelLedger": {
+    "attempts": 5,
+    "allResponsesReceived": true,
+    "reset": false,
+    "additionalCallsForThisFix": 0
+  },
+  "stillRequired": [
+    "real GitHub/Sheets task and history downloads",
+    "auditable unknown-state convergence without replay",
+    "owner physical input and takeover/disconnect evidence",
+    "stable site subjects and real account save/rebuild/expire/revoke/switch",
+    "actual KMS and least-privilege service identity",
+    "exact rollout bindings and separately authorized execution window"
+  ],
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

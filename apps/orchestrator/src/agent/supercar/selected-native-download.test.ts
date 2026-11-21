@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DriverAction } from '../../../../../packages/browser-driver/src/driver.js';
+import * as downloadSources from '../../../../../packages/browser-driver/src/native-download-sources.js';
 import type { NativeDownloadEvent } from '../../../../../packages/browser-driver/src/native-download.js';
 import { SelectedTargetResolver } from '../../../../../packages/browser-driver/src/selected-target.js';
 
@@ -10,6 +11,7 @@ let browser: Browser;
 let page: Page;
 let cdp: CDPSession;
 let origin: string;
+let exportOrigin: string;
 let live: boolean;
 const content = 'sku,qty\nORIGINAL-731,31\n';
 const bytes = Buffer.from(content);
@@ -17,19 +19,43 @@ const sha256 = createHash('sha256').update(bytes).digest('hex');
 const requests: Array<{ method: string; body: string }> = [];
 const resolvers: SelectedTargetResolver[] = [];
 const server = createServer(async (request, response) => {
+  if (request.url === '/human-other') {
+    response.setHeader('Content-Type', 'text/html');
+    response.end(
+      '<a download="human.csv" href="data:text/csv,HUMAN-PRIVATE-731">My other file</a>',
+    );
+    return;
+  }
+  if (request.url?.startsWith('/redirect')) {
+    response.writeHead(302, { location: `${exportOrigin}/export` });
+    response.end();
+    return;
+  }
   if (request.url?.startsWith('/export')) {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     requests.push({ method: request.method!, body: Buffer.concat(chunks).toString() });
     response.setHeader('Content-Type', 'text/csv');
-    response.setHeader('Content-Disposition', 'attachment; filename="report.csv"');
+    if (!request.url.includes('without-disposition'))
+      response.setHeader('Content-Disposition', 'attachment; filename="report.csv"');
     response.end(bytes);
   } else {
     response.setHeader('Content-Type', 'text/html');
     response.end('<body></body>');
   }
 });
+const exportServer = createServer((request, response) => {
+  requests.push({ method: request.method!, body: '' });
+  response.writeHead(200, {
+    'Content-Type': 'text/csv',
+    'Content-Disposition': 'attachment; filename="report.csv"',
+  });
+  response.end(bytes);
+});
 const events = [
+  'Page.frameAttached',
+  'Page.frameDetached',
+  'Page.frameNavigated',
   'Network.requestWillBeSent',
   'Fetch.requestPaused',
   'Page.downloadWillBegin',
@@ -81,9 +107,16 @@ async function capture(value: SelectedTargetResolver) {
   return result;
 }
 beforeAll(async () => {
+  await new Promise<void>((resolve) => exportServer.listen(0, '127.0.0.1', resolve));
+  exportOrigin = `http://localhost:${(exportServer.address() as { port: number }).port}`;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  browser = await chromium.launch({
+    ...(process.env.HOLADAY_NATIVE_DOWNLOAD_BROWSER_CHANNEL === 'chrome'
+      ? { channel: 'chrome' }
+      : {}),
+    args: ['--renderer-process-limit=2'],
+  });
 });
 beforeEach(async () => {
   live = true;
@@ -95,15 +128,139 @@ beforeEach(async () => {
   await cdp.send('Network.enable');
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const value of resolvers.splice(0)) await value.dispose();
   await page.context().close();
 });
 afterAll(async () => {
   await browser?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => exportServer.close(() => resolve()));
 });
 
 describe('original downloads through the bound selected target', () => {
+  it('captures a bound download link without Content-Disposition in the response', async () => {
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/export?without-disposition">Export report</a>',
+    );
+    const value = resolver();
+    const observed: Array<Record<string, unknown>> = [];
+    const stop = subscribe((method, params) => {
+      const request = params.request as { url?: string } | undefined;
+      observed.push({
+        method,
+        requestId: params.requestId,
+        networkId: params.networkId,
+        frameId: params.frameId,
+        resourceType: params.resourceType ?? params.type,
+        url: request?.url,
+        state: params.state,
+        responseStatusCode: params.responseStatusCode,
+      });
+    });
+    const file = await value.captureDownload(click, await prepare(value), () => live);
+    stop();
+    if (file.status !== 'captured') throw new Error(JSON.stringify({ result: file, observed }));
+    expect(
+      Buffer.from(await value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live)),
+    ).toEqual(bytes);
+    expect(file.metadata).toMatchObject({
+      filename: 'report.csv',
+      sizeBytes: bytes.length,
+      sha256,
+    });
+    expect(requests).toEqual([{ method: 'GET', body: '' }]);
+    value.releaseDownload(file.downloadId);
+  });
+
+  it('does not publish an ordinary response without a native download receipt', async () => {
+    await page.setContent(
+      '<button id="export" onclick="fetch(\'/ordinary-document\')">Fetch document</button>',
+    );
+    const value = resolver();
+    const result = await value
+      .captureDownload(click, await prepare(value), () => live)
+      .catch((error: Error) => ({ status: 'rejected', error: error.message }));
+    expect(result.status).not.toBe('captured');
+    expect('downloadId' in result).toBe(false);
+    expect(page.url()).toBe(`${origin}/`);
+  });
+
+  it('captures the exact approved redirect of the bound native download link', async () => {
+    vi.spyOn(downloadSources, 'nativeDownloadResponseSourcesForPage').mockReturnValue({
+      patterns: [`${exportOrigin}/*`],
+      accepts: (url) => url === `${exportOrigin}/export`,
+    });
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/redirect">Export report</a>',
+    );
+    const value = resolver();
+    const file = await capture(value);
+    expect(
+      Buffer.from(await value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live)),
+    ).toEqual(bytes);
+    expect(file.source).toMatchObject({ origin, originBasis: 'owning_page' });
+    expect(requests).toHaveLength(1);
+    value.releaseDownload(file.downloadId);
+  });
+
+  it('rejects the unapproved redirect of a bound native download link', async () => {
+    await page.setContent(
+      '<a id="export" download="report.csv" href="/redirect">Export report</a>',
+    );
+    const value = resolver();
+    const result = await value.captureDownload(click, await prepare(value), () => live);
+    expect(result).toMatchObject({ status: 'clicked', clickOutcome: 'applied' });
+    expect('downloadId' in result).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("does not attribute a person's download in another same-origin child frame to the root task click", async () => {
+    await page.setContent(
+      '<iframe src="/human-other"></iframe><button id="export" onclick="document.body.dataset.clicks=\'1\'">Export task report</button>',
+    );
+    await page.frameLocator('iframe').getByRole('link', { name: 'My other file' }).waitFor();
+    const value = resolver();
+    const pending = value.captureDownload(click, await prepare(value), () => live);
+    await page.waitForFunction(() => document.body.dataset.clicks === '1');
+    await page.frameLocator('iframe').getByRole('link', { name: 'My other file' }).click();
+    const result = await pending;
+    expect(result).toMatchObject({
+      status: 'clicked',
+      clickOutcome: 'applied',
+      reason: 'scope_unavailable',
+    });
+    expect('downloadId' in result).toBe(false);
+  });
+  it.each(['new-child', 'existing-child'])(
+    'keeps the bound click and immutable file through %s with an injected host export policy',
+    async (mode) => {
+      // Provider eligibility is tested separately; inject only a local response
+      // policy here. Target binding, native input, events and bytes remain real.
+      vi.spyOn(downloadSources, 'nativeDownloadResponseSourcesForPage').mockReturnValue({
+        patterns: [`${exportOrigin}/export*`],
+        accepts: (url) => url === `${exportOrigin}/export`,
+      });
+      await page.setContent(
+        mode === 'new-child'
+          ? '<button id="export" onclick="const f=document.createElement(\'iframe\');f.hidden=true;f.src=\'/redirect\';document.body.append(f)">Export report</button>'
+          : '<iframe name="target" src="/idle"></iframe><form action="/redirect" target="target"><button id="export">Export report</button></form>',
+      );
+      if (mode === 'existing-child') await page.frameLocator('iframe').locator('body').waitFor();
+      const value = resolver();
+      const file = await capture(value);
+      expect(
+        Buffer.from(await value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live)),
+      ).toEqual(bytes);
+      expect(file.source).toMatchObject({ origin, originBasis: 'owning_page' });
+      expect(requests).toHaveLength(1);
+      expect(downloadSources.nativeDownloadResponseSourcesForPage).toHaveBeenCalledWith(page.url());
+      value.releaseDownload(file.downloadId);
+      await expect(
+        value.readDownloadChunk(file.downloadId, 0, bytes.length, () => live),
+      ).rejects.toThrow();
+    },
+  );
   it('does not attribute another native file to the task when the person acts in the task document', async () => {
     await page.setContent(
       `<button id="export">Export report</button><button id="human">My other file</button><script>function makeFile(text,name){const link=document.createElement('a');link.href=window.URL.createObjectURL(new Blob([text],{type:'text/csv'}));link.download=name;link.click();}document.querySelector('#export').onclick=()=>{document.body.dataset.clicks='1';};document.querySelector('#human').onclick=()=>makeFile('HUMAN-PRIVATE-731','human.csv');</script>`,

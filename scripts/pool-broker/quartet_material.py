@@ -50,6 +50,7 @@ class _GroupMaterial:
         item._fds, item._chain, item._objects = [], [], {}
         item._host_ns, item._credentials, item._bindings = {}, {}, {}
         item._workers = {}
+        item._start_stream, item._start_receipts = None, {}
         item._terminal_workers = ()
         item._runtime = item._ready_offer = item._launch_offer = None
         item._scope_guard = scope_guard
@@ -106,6 +107,8 @@ class _GroupMaterial:
         return min(remaining, outer) if outer is not None else remaining
 
     def _outer_budget(self):
+        if self._runtime is not None and self._runtime._close_control is not None:
+            return self._runtime._close_control._budget()
         launch_budget = (self._launch_offer._budget()
             if self._runtime is None and self._launch_offer is not None else None)
         scope = self._scope_guard if self._runtime is None else None
@@ -146,12 +149,23 @@ class _GroupMaterial:
             self._probe_clock._veto()
         if self._protocol is not None:
             self._protocol._veto()
+        if self._start_stream is not None:
+            self._start_stream._veto()
+            if self._manager._job_stream is not self._start_stream: raise ValueError()
+            for role, receipt in self._start_receipts.items():
+                row = journal._resources[self._resource]['roles'].get(role, {})
+                if (receipt._stream is not self._start_stream
+                        or self._start_stream._receipts.get(receipt._job) is not receipt
+                        or row.get('job') != receipt._job or row.get('unit') != receipt._unit
+                        or row.get('startSignalSerial') != receipt._serial): raise ValueError()
         # Once terminal validation begins, every earlier original worker stays
         # in scope during later workers, journal IO and the final return tail.
         for role, worker, pin, view in self._terminal_workers:
             if (self._workers.get(role) is not worker or worker._retired or worker._material is not self
                     or worker._pin is not pin or worker._view is not view or pin._retired
-                    or pin._fd is None or pin._proc is None or view._retired or view._pin is not pin):
+                    or pin._fd is None or pin._proc is None or view._retired or view._pin is not pin
+                    or pin._cgroup is None or pin._cgroup._retired
+                    or pin._cgroup._owner is not pin or not pin._cgroup._fds):
                 raise ValueError()
         if self._runtime is not None:
             from quartet_runtime import _RunningQuartet

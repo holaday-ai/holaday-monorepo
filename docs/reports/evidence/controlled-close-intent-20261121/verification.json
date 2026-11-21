@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUTC": "2026-11-21T09:19:20.656287+00:00",
+  "baseHead": "0e1a196f99c5402f0f3db4524f372c0afb8fdfa7",
+  "fullPythonBrokerSuite": {
+    "command": "python3 -m unittest discover -s . -p 'test_*.py'",
+    "workingDirectory": "scripts/pool-broker",
+    "exitCode": 0,
+    "passed": 706,
+    "seconds": 566.333,
+    "newCases": 4,
+    "serial": true,
+    "outputSHA256": "0269e9e3ea496689a4885615d7c33db1e192bb752912d3e6f0262f3a0d8e3c89"
+  },
+  "red": {
+    "expectedMissingEntryFailures": 3,
+    "outputSHA256": "3a7ba9c05f94b2b7ea6ad83ecf364b682255aa51fc33812232fb5afaf25ed29b"
+  },
+  "sourceBindings": [
+    {
+      "path": "scripts/pool-broker/quartet_runtime.py",
+      "bytes": 5692,
+      "sha256": "6f4a3de83f1755a876c350b3d92398d386ca5edc11aa5d1f7e68105fd7bc39f3"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_records.py",
+      "bytes": 23034,
+      "sha256": "34a327f73928cb3185e06227cf0cbc261fc70a094538a75c4be1474c49b1aec7"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_close_intent.py",
+      "bytes": 6229,
+      "sha256": "b12020de3824182ede3677ca56efc037a4a52653551b0a6dee9d5d5154d26058"
+    }
+  ],
+  "linuxKernelAndSystemdSynthetic": true,
+  "internalCloseAdmissionVerified": true,
+  "authenticatedCloseRouteWired": false,
+  "stopUnitImplemented": false,
+  "physicalTerminalProducerImplemented": false,
+  "physicalExitProofAccepted": false,
+  "slotReusePermitted": false,
+  "nativeManifestStatus": "unverified",
+  "newWorkingSourceBuilt": false,
+  "modelLedgerSHA256": "006f7ed9eee490a34075aa7775e49ac9180daf580451fdd66ebd0803b848106f",
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "businessTaskReplay": false,
+  "windowsLabTouched": false,
+  "merge": false,
+  "deployment": false
+}

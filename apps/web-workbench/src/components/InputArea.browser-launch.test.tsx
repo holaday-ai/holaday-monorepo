@@ -1,7 +1,7 @@
 import { useTaskStore } from '@/stores/task-store';
 import { BROWSER_LAUNCH_RECOVERED_EVENT } from '@holaday/shared-types';
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { InputArea } from './InputArea';
@@ -24,8 +24,7 @@ afterEach(() => {
   localStorage.clear();
   vi.resetAllMocks();
 });
-function mount(floating = false) {
-  const submit = vi.fn();
+function mount(floating = false, submit = vi.fn()) {
   render(
     <MemoryRouter>
       <ToastProvider>
@@ -115,4 +114,76 @@ it('preserves a new user draft when an older submission is recovered', async () 
   fireEvent.change(input, { target: { value: '整理另一份报表' } });
   recoverDraft();
   expect(input.value).toBe('整理另一份报表');
+});
+
+it.each([false, true])(
+  'keeps a submission error visible after its toast expires and preserves the draft (floating=%s)',
+  async (floating) => {
+    vi.useFakeTimers();
+    try {
+      const submit = vi.fn(async () => ({ error: '独立页面仍在加载，请稍后继续核对。' }));
+      mount(floating, submit);
+      const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: '整理报表，保留输入' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await vi.waitFor(() => expect(input.disabled).toBe(false));
+      expect(screen.getByRole('alert').textContent).toContain('仍在加载');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(screen.queryByRole('button', { name: /关闭提示.*仍在加载/ })).toBeNull();
+      expect(screen.getByRole('alert').textContent).toContain('仍在加载');
+      expect(input.value).toBe('整理报表，保留输入');
+      expect(submit).toHaveBeenCalledOnce();
+      fireEvent.change(input, { target: { value: '用户修改后的新指令' } });
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+it('shows actual preparation feedback while submission is pending without asserting acceptance', async () => {
+  let finish!: (value: { error: string }) => void;
+  const submit = vi.fn(
+    () =>
+      new Promise<{ error: string }>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  mount(false, submit);
+  const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '整理报表' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  act(() =>
+    useTaskStore.setState({
+      browserPreparationStatus: '独立页面已创建，仍在加载；正在核对原页面…',
+    }),
+  );
+  expect(
+    screen.getByRole('button', { name: '独立页面已创建，仍在加载；正在核对原页面…' }),
+  ).toBeTruthy();
+  expect(screen.queryByText(/已收到任务/)).toBeNull();
+  await act(async () => finish({ error: '独立页面仍在加载，请稍后继续核对。' }));
+  expect(input.value).toBe('整理报表');
+  expect(screen.getByRole('alert')).toBeTruthy();
+});
+
+it('does not display a late submission error under a different account', async () => {
+  let finish!: (value: { error: string }) => void;
+  const submit = vi.fn(
+    () =>
+      new Promise<{ error: string }>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  mount(false, submit);
+  const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '整理原账号报表' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  localStorage.setItem('holaday.access_token', 'fixture-other-owner');
+  await act(async () => finish({ error: '原账号的回执错误' }));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(submit).toHaveBeenCalledOnce();
 });

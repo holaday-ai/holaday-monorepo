@@ -14,6 +14,7 @@ let browser: Browser;
 let page: Page;
 let cdp: CDPSession;
 let origin: string;
+let exportOrigin: string;
 let frameId: string;
 let nodeObjectId: string;
 let live: boolean;
@@ -22,9 +23,18 @@ let resumeResponse: (() => void) | undefined;
 const controllers: NativeDownloadCaptureController[] = [];
 const files: Array<{ dispose(): void }> = [];
 const requests: Array<{ method: string; path: string; body: string }> = [];
+const redirects: string[] = [];
+const observedPaths: string[] = [];
 const bytes = Buffer.from('sku,qty\nORIGINAL-731,31\n');
 const hash = createHash('sha256').update(bytes).digest('hex');
 const server = createServer(async (request, response) => {
+  observedPaths.push(request.url!);
+  if (request.url?.split('?')[0] === '/download-redirect') {
+    redirects.push(request.url);
+    response.writeHead(302, { location: `${exportOrigin}/export` });
+    response.end();
+    return;
+  }
   if (request.url?.startsWith('/export')) {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -56,7 +66,25 @@ const server = createServer(async (request, response) => {
     response.end('<body></body>');
   }
 });
+const exportServer = createServer((request, response) => {
+  if (request.url === '/foreign') {
+    response.setHeader('Content-Type', 'text/html');
+    response.end(
+      '<a download="foreign.csv" href="data:text/csv,FOREIGN-PRIVATE-731">Another origin file</a>',
+    );
+    return;
+  }
+  requests.push({ method: request.method!, path: request.url!, body: '' });
+  response.writeHead(200, {
+    'Content-Type': 'text/csv',
+    'Content-Disposition': 'attachment; filename="report.csv"',
+  });
+  response.end(bytes);
+});
 const events = [
+  'Page.frameAttached',
+  'Page.frameDetached',
+  'Page.frameNavigated',
   'Network.requestWillBeSent',
   'Fetch.requestPaused',
   'Page.downloadWillBegin',
@@ -75,12 +103,22 @@ const subscribe = (listener: NativeDownloadEvent) => {
 const send = (method: string, params?: Record<string, unknown>) =>
   cdp.send(method as never, params as never) as Promise<unknown>;
 beforeAll(async () => {
+  await new Promise<void>((resolve) => exportServer.listen(0, '127.0.0.1', resolve));
+  // Different host as well as port: cover a real cross-site iframe navigation.
+  exportOrigin = `http://localhost:${(exportServer.address() as AddressInfo).port}`;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  browser = await chromium.launch({ args: ['--renderer-process-limit=2'] });
+  browser = await chromium.launch({
+    ...(process.env.HOLADAY_NATIVE_DOWNLOAD_BROWSER_CHANNEL === 'chrome'
+      ? { channel: 'chrome' }
+      : {}),
+    args: ['--renderer-process-limit=2'],
+  });
 });
 beforeEach(async () => {
   requests.length = 0;
+  redirects.length = 0;
+  observedPaths.length = 0;
   live = true;
   resumeResponse = undefined;
   page = await browser.newPage({ acceptDownloads: true });
@@ -99,6 +137,7 @@ afterEach(async () => {
 afterAll(async () => {
   await browser?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => exportServer.close(() => resolve()));
 });
 async function fixture(html: string) {
   await page.setContent(html);
@@ -129,6 +168,94 @@ const options = () => ({
 });
 
 describe('original native download bytes around one owned click', () => {
+  it('does not retain a new child frame grant after it commits an ungranted document', async () => {
+    // Same site but a different origin: do not rely on an OOPIF swap/detach to
+    // retire its inherited blank-document authority.
+    const foreign = `${exportOrigin.replace('localhost', '127.0.0.1')}/foreign`;
+    await fixture(
+      `<button id="export" onclick="const f=document.createElement('iframe');f.src='${foreign}';document.body.append(f)">Export report</button>`,
+    );
+    const pending = controller().capture({ ...options(), captureMs: 2000 });
+    const link = page.frameLocator('iframe').getByRole('link', { name: 'Another origin file' });
+    await link.waitFor();
+    const downloaded = page.waitForEvent('download');
+    await link.click();
+    expect((await downloaded).suggestedFilename()).toBe('foreign.csv');
+    const result = await pending;
+    expect(result).toMatchObject({ status: 'clicked', clickOutcome: 'applied' });
+    expect('file' in result).toBe(false);
+  });
+  it('does not read a response merely because its interception pattern matches', async () => {
+    await fixture('<a id="export" href="/download-redirect">Export report</a>');
+    const result = await controller().capture({
+      ...options(),
+      responseSources: {
+        patterns: [`${exportOrigin}/export*`],
+        accepts: () => false,
+      },
+    });
+    expect(result).toMatchObject({
+      status: 'clicked',
+      clickOutcome: 'applied',
+      reason: 'origin_grant_required',
+    });
+    expect(requests).toHaveLength(1);
+  });
+  it('does not read a different origin without a host-owned export policy', async () => {
+    await fixture('<a id="export" href="/download-redirect">Export report</a>');
+    const result = await controller().capture(options());
+    expect(result).toMatchObject({
+      status: 'clicked',
+      clickOutcome: 'applied',
+      reason: 'origin_grant_required',
+    });
+    expect(requests).toHaveLength(1);
+  });
+  it('does not attribute an approved response from outside the clicked frame subtree', async () => {
+    await fixture('<a id="export" href="/download-redirect">Export report</a>');
+    const result = await controller().capture({
+      ...options(),
+      frameId: 'other-task-frame',
+      responseSources: {
+        patterns: [`${exportOrigin}/export*`],
+        accepts: (url) => url === `${exportOrigin}/export`,
+      },
+    });
+    expect(result).toMatchObject({ status: 'clicked', clickOutcome: 'applied' });
+    expect(requests).toHaveLength(1);
+  });
+  it.each(['redirect', 'new-child', 'existing-child', 'new-child-direct'])(
+    'captures one approved export response through %s without another request',
+    async (mode) => {
+      await fixture(
+        mode === 'redirect'
+          ? '<a id="export" href="/download-redirect">Export report</a>'
+          : mode === 'new-child'
+            ? '<button id="export" onclick="const f=document.createElement(\'iframe\');f.hidden=true;f.src=\'/download-redirect\';document.body.append(f)">Export report</button>'
+            : mode === 'new-child-direct'
+              ? `<button id="export" onclick="const f=document.createElement('iframe');f.hidden=true;f.src='${exportOrigin}/export';document.body.append(f)">Export report</button>`
+              : '<iframe name="download-target" src="/idle"></iframe><form action="/download-redirect" target="download-target"><button id="export">Export report</button></form>',
+      );
+      if (mode === 'existing-child') await page.frameLocator('iframe').locator('body').waitFor();
+      const result = await controller().capture({
+        ...options(),
+        responseSources: {
+          patterns: [`${exportOrigin}/export*`],
+          accepts: (url: string) => url === `${exportOrigin}/export`,
+        },
+      });
+      expect(result.status, JSON.stringify({ result, observedPaths, redirects, requests })).toBe(
+        'captured',
+      );
+      if (result.status === 'captured') {
+        files.push(result.file);
+        expect(Buffer.from(result.file.read(0, bytes.length))).toEqual(bytes);
+        expect(result.file.source()).toMatchObject({ origin, originBasis: 'owning_page' });
+      }
+      expect(redirects).toHaveLength(mode === 'new-child-direct' ? 0 : 1);
+      expect(requests).toHaveLength(1);
+    },
+  );
   it('keeps the original owned request when its headers arrive after new-request capture expires', async () => {
     await fixture('<a id="export" href="/export?late-headers">Export report</a>');
     const result = await controller().capture({ ...options(), captureMs: 50, totalMs: 1500 });

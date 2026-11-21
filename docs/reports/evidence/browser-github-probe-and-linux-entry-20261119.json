@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "kind": "github subject draft and Linux arm64 closed entrypoint verification",
+  "preparedAtUTC": "2026-11-19T09:21:22.571369+00:00",
+  "sourceHeadAtVerification": "01d388ddb99a30a784876c60abc3d7ead2026d00",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "runtimeInputCount": 1827,
+  "runtimeInputsManifestSHA256": "b4f7788fb6c002246b94ffbd536a42314a98a8bbbf0ad2433ecb89397537c371",
+  "runtimeCodeChanges": 0,
+  "github": {
+    "independentNormalAcceptanceProfileLoggedIn": true,
+    "actualPage": "https://github.com/holaday-ai/holaday-monorepo/pull/360",
+    "probeDraft": [
+      {
+        "origin": "https://github.com",
+        "path": "/holaday-ai/holaday-monorepo/pull/360",
+        "selector": "body.logged-in",
+        "subject": {
+          "selector": "meta[name=\"octolytics-actor-id\"]",
+          "attribute": "content",
+          "adapter": "github-octolytics-actor-id-v1"
+        }
+      }
+    ],
+    "loginSelectorCount": 1,
+    "subjectSelectorCount": 1,
+    "subjectIsPositiveNumericId": true,
+    "actualDomIdMatchesConnectedProfile": true,
+    "actorLoginMatchesConnectedProfile": true,
+    "connectedProfileIsCorroborationOnly": true,
+    "actualCurrentServerParserAccepted": true,
+    "workerOrFactoryInvoked": false,
+    "snapshotCaptured": false,
+    "restoredSnapshotVerified": false,
+    "accountSwitchOrLogoutTested": false,
+    "productionApplied": false,
+    "pageScriptExecuted": false,
+    "cookiesOrStorageInspected": false,
+    "rawDomPersisted": false,
+    "devtoolsClosed": true,
+    "source": "https://docs.github.com/en/rest/users/users#get-a-user-using-their-id"
+  },
+  "linuxArm64": {
+    "passed": true,
+    "scope": "actual reviewed production shell and source entry, closed ordinary maintenance; synthetic isolated configuration",
+    "node": "v22.23.3",
+    "pnpm": "10.33.0",
+    "arch": "arm64",
+    "uid": 998,
+    "networkNoneThroughout": true,
+    "nativeBindings": {
+      "argon2SyntheticHashVerify": true,
+      "sharpSyntheticOnePixelPng": true
+    },
+    "healthStatus": 200,
+    "businessRequestStatus": 503,
+    "actualEntrypointCmdlineVerified": true,
+    "sameManagedPidOwnsHttpAndWs": true,
+    "maintenanceStatus": {
+      "mode": "closed",
+      "idle": true,
+      "needsReconciliation": false,
+      "newBootIdentity": true
+    },
+    "gracefulExit": {
+      "code": 0,
+      "signal": null
+    },
+    "writerLockRemoved": true,
+    "controlSocketRemoved": true,
+    "finalJournalClosed": true,
+    "httpListenerClosed": true,
+    "ownedContainerRemoved": true,
+    "resourceLimits": {
+      "Memory": 805306368,
+      "MemorySwap": 805306368,
+      "NanoCpus": 500000000,
+      "PidsLimit": 128
+    },
+    "peakMemoryBytes": 805306368,
+    "oomEvents": 0,
+    "oomKillEvents": 0,
+    "connectedDatabaseAcceptance": false,
+    "vaultEnabledAcceptance": false,
+    "productionAbiAcceptance": false,
+    "fullReleaseAcceptance": false
+  },
+  "retainedPreStartupHarnessFailures": [
+    {
+      "run": "v1",
+      "applicationStarts": 0,
+      "failures": [
+        "overstrict sysfs interface enumeration",
+        "case-sensitive Docker absence assertion"
+      ],
+      "independentContainerAbsenceVerified": true
+    },
+    {
+      "run": "v2",
+      "applicationStarts": 0,
+      "failures": [
+        "invalid synthetic Argon2 timeCost1; minimum2"
+      ],
+      "ownedContainerRemoved": true
+    }
+  ],
+  "finalRun": "v3; offline cache reused; one application start; passed",
+  "actualServingExecutable": {
+    "observedAtUTC": "2026-11-19T09:18:58.283913+00:00",
+    "actualServingProcessPinnedBeforeAndAfter": true,
+    "actualExecutableHeaderReadOnlyBytes": 20,
+    "elfMachine": 62,
+    "executableArchitecture": "x86_64",
+    "environmentOrHeapRead": false,
+    "businessRowsRead": 0,
+    "productionWrites": 0,
+    "modelCalls": 0,
+    "kmsCalls": 0
+  },
+  "privateReceiptBindings": [
+    {
+      "path": "github-probe-20261119-v1/observation.json",
+      "bytes": 1869,
+      "sha256": "333a5658313a6168c5d9e85a94b0ecef0be77690aa6f3c8b8b29fb841d671b46"
+    },
+    {
+      "path": "github-probe-20261119-v1/trusted-probe-draft.json",
+      "bytes": 293,
+      "sha256": "ab83fa8336e0fd4eb69ebaaaea07a1438d6b12624b20ee9135b8fa486572b546"
+    },
+    {
+      "path": "github-probe-20261119-v1/parser-validation.json",
+      "bytes": 154,
+      "sha256": "a382961ac12069a6aac60408a5ef94dcb6030759ec39539e151208770043d985"
+    },
+    {
+      "path": "github-probe-20261119-v1/validate.mjs",
+      "bytes": 958,
+      "sha256": "7f6e45862e4249a825cd05acde69e1f4374a4d6221411def17e986e7e79d14e2"
+    },
+    {
+      "path": "linux-entry-20261119-v1/cold-start.mjs",
+      "bytes": 8350,
+      "sha256": "a5bac512e875241b1ce98e606856907b58c370bb508d44f46e9ecc78b3437db5"
+    },
+    {
+      "path": "linux-entry-20261119-v1/run.py",
+      "bytes": 5706,
+      "sha256": "fc8e916d55b71313b61e5f53dd3f16f1d35c5a998be2cc1b1b7849932cda290e"
+    },
+    {
+      "path": "linux-entry-20261119-v1/install.log",
+      "bytes": 17098,
+      "sha256": "03b10acac88fe566e89500b540f8ede6cc1010dfe647ff3de2e304e89c66a5a7"
+    },
+    {
+      "path": "linux-entry-20261119-v1/runtime.log",
+      "bytes": 944,
+      "sha256": "f46055139677a7b0914364fb1dbae2f1c9e4729f35c783294e3f0ad783befe3d"
+    },
+    {
+      "path": "linux-entry-20261119-v1/failure-reconciliation.json",
+      "bytes": 1429,
+      "sha256": "49207f754ae9a7a93835b7ff5b37460aa9e53e45cd94bf39be5049b5e72ebdf7"
+    },
+    {
+      "path": "linux-entry-20261119-v2/cold-start.mjs",
+      "bytes": 8697,
+      "sha256": "3e938d1c1689b8d37309ef13cd49a01b7f0a9f8e13982ebae519544434ac5827"
+    },
+    {
+      "path": "linux-entry-20261119-v2/run.py",
+      "bytes": 6483,
+      "sha256": "2081c049eb08c5cecce667bca624318f134894df9ac89ca8e03c53a2bb9f1445"
+    },
+    {
+      "path": "linux-entry-20261119-v2/install.log",
+      "bytes": 9960,
+      "sha256": "9d9af50e69f8cd414ae61edaaf84a1abaffe3e33eac484c213b2c6b7cb925cb9"
+    },
+    {
+      "path": "linux-entry-20261119-v2/runtime.log",
+      "bytes": 740,
+      "sha256": "2adfb99961343b7eb9f38229c74023717c182aa40beb9f61a414b5e8ef3f5f6b"
+    },
+    {
+      "path": "linux-entry-20261119-v2/receipt.json",
+      "bytes": 913,
+      "sha256": "be9f0b44e27e1ec5b2161c712aa7725dddebf38fe0d350497a4f3cd88d9ef0ca"
+    },
+    {
+      "path": "linux-entry-20261119-v2/container-absence.json",
+      "bytes": 212,
+      "sha256": "ca60580623d8e6e9172b7cd4c88aa0cca39ff9e1d748882c3df119a857d68ea3"
+    },
+    {
+      "path": "linux-entry-20261119-v3/cold-start.mjs",
+      "bytes": 9020,
+      "sha256": "f6d50fb51522633b7b45aedcf3cbef8c2cc8219ad268c1d84c782ab73bcc6376"
+    },
+    {
+      "path": "linux-entry-20261119-v3/run.py",
+      "bytes": 6513,
+      "sha256": "aa4cc4aa3f6a902c044f99fd014f79757e2712940d4ef2672dc5fb8041eefdb1"
+    },
+    {
+      "path": "linux-entry-20261119-v3/install.log",
+      "bytes": 1021,
+      "sha256": "f0a68770bcb18df6ccf72e401b92eaa641bedc178fb38589eee66f20e7a595ae"
+    },
+    {
+      "path": "linux-entry-20261119-v3/runtime.log",
+      "bytes": 956,
+      "sha256": "41196a6f11c7caba5e94b971beeb14ef5760c408cc76d8f581cc708c56c78a99"
+    },
+    {
+      "path": "linux-entry-20261119-v3/receipt.json",
+      "bytes": 2221,
+      "sha256": "d6b347975aaa8d628bf28c75110e3b9b027f5239be1079d5713d1e6eef8da1c8"
+    },
+    {
+      "path": "linux-entry-20261119-v3/cold-start-result.json",
+      "bytes": 1158,
+      "sha256": "2a4bb0f7b787be8ae44d678f5fe2ded101190dd5e3eeccf43e95d6248ac24e97"
+    },
+    {
+      "path": "linux-entry-20261119-v3/cold-start-application.log",
+      "bytes": 1121,
+      "sha256": "780f09068316f234e3a60cf0856e62b9043b0c07300f9fa5aa52ec5b76ead388"
+    },
+    {
+      "path": "linux-entry-20261119-v3/cold-start-progress.json",
+      "bytes": 71,
+      "sha256": "30b2ded4dc419dd17da6b68fe4aa2f70ec695a5afc6ef22286450d98f3ea030e"
+    },
+    {
+      "path": "linux-entry-20261119-v3/container-absence.json",
+      "bytes": 212,
+      "sha256": "eb0dae3432326f878ec7a24211b37d3db9ef11350e4610093a0dad17fb490cc2"
+    },
+    {
+      "path": "github-linux-review-20261119-v1/production-executable-architecture.json",
+      "bytes": 333,
+      "sha256": "d321adc95d656b2e5a25a918fb1e8a294669a576d2c717762f7996ae4b52c77c"
+    },
+    {
+      "path": "github-linux-review-20261119-v1/target-architecture.py",
+      "bytes": 1839,
+      "sha256": "c591b26f83ed57fd4bfd187ba2f1678b6068af60339c1204832a7ff678acccc4"
+    }
+  ],
+  "modelLedger": {
+    "attempts": 25,
+    "received": 24,
+    "oldClientUnknownOrdinal": 14,
+    "sha256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+    "additionalBudgetAuthorized": false
+  },
+  "effects": {
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "productionBusinessWrites": 0,
+    "originalOrFreshSheetExports": 0,
+    "productionConfigurationChanges": 0,
+    "deployment": false
+  },
+  "remaining": [
+    "Google stable current-site subject and both sites same-snapshot account lifecycle",
+    "production x86_64 exact dependency and closed-entry verification",
+    "real KMS fixed package and dedicated production service identity",
+    "original full PR360 acceptance JSON workflow, full100-row Sheets workflow, physical input and billing evidence",
+    "effective production configuration and final protected release bindings"
+  ],
+  "goalComplete": false,
+  "releaseReady": false,
+  "executionAllowed": false,
+  "productionChanged": false
+}

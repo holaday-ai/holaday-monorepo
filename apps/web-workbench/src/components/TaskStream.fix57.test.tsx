@@ -134,6 +134,47 @@ it('while running: one live status line from the steps, not a stack of tool rows
   expect(screen.queryByText(/snapshot|navigate/)).toBeNull();
 });
 
+it('shows recent receipt-backed progress without opening the status disclosure', () => {
+  show(
+    { taskId: 'tsk_progress', intent: '读取导出文件', status: 'executing' },
+    {
+      stepsByTask: {
+        tsk_progress: [
+          { tickIndex: 1, status: 'done', actionKind: 'selected_chrome_download', startedAt: 1 },
+          { tickIndex: 2, status: 'done', actionKind: 'read_task_file', startedAt: 2 },
+          { tickIndex: 3, status: 'done', actionKind: 'create_file', startedAt: 3 },
+          { tickIndex: 4, status: 'failed', actionKind: 'selected_chrome_finish', startedAt: 4 },
+        ],
+      },
+    },
+  );
+  const timeline = screen.getByTestId('process-timeline');
+  expect(timeline.querySelectorAll('li')).toHaveLength(3);
+  expect(timeline.textContent).toContain('已读取任务文件');
+  expect(timeline.textContent).toContain('已生成任务文件');
+  expect(timeline.textContent).toContain('最终结果尚未核实');
+  expect(screen.queryByText('selected_chrome_finish')).toBeNull();
+});
+
+it('keeps the recent evidence visible after execution becomes unconfirmed', () => {
+  show(
+    {
+      taskId: 'tsk_stopped',
+      intent: '文件验收',
+      status: 'executing',
+      browserSource: 'local-chrome',
+      executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+    },
+    {
+      stepsByTask: {
+        tsk_stopped: [{ tickIndex: 1, status: 'done', actionKind: 'create_file', startedAt: 1 }],
+      },
+    },
+  );
+  expect(screen.getByTestId('process-timeline').textContent).toContain('已生成任务文件');
+  expect(screen.queryByTestId('live-status-line')).toBeNull();
+});
+
 function terminalFileCase({ unavailable = false, sameFilename = false } = {}) {
   const payload = {
     fileId: 'file_shared',
@@ -168,6 +209,19 @@ function terminalFileCase({ unavailable = false, sameFilename = false } = {}) {
     ],
   });
 }
+it('shows unconfirmed execution without a live spinner or replay action while preserving the row status', () => {
+  show({
+    taskId: 'tsk_unknown_execution',
+    intent: '只读验收',
+    status: 'executing',
+    browserSource: 'local-chrome',
+    executionObservation: { state: 'unconfirmed', reason: 'session_not_observed' },
+  });
+  expect(screen.getByText('执行结果待核实')).toBeTruthy();
+  expect(screen.queryByTestId('live-status-line')).toBeNull();
+  expect(screen.queryByRole('button', { name: /重试|重新执行|继续执行/ })).toBeNull();
+  expect(useTaskStore.getState().tasks[0]?.status).toBe('executing');
+});
 it('terminal file cards render one copy of a file returned in both summary and host attachments', () => {
   terminalFileCase();
   expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(1);
@@ -183,3 +237,38 @@ it('terminal file cards keep different file ids even when their filenames match'
   terminalFileCase({ sameFilename: true });
   expect(screen.getAllByRole('button', { name: /report\.csv/ })).toHaveLength(2);
 });
+it.each(['executing', 'awaiting_user'])(
+  'shows actual saved outputs while task status is %s without claiming completion',
+  (status) => {
+    show({
+      taskId: 'tsk_saved_unresolved',
+      intent: '导出原件和摘要',
+      status,
+      attachments: [
+        {
+          fileId: 'file_raw',
+          filename: 'original.json',
+          sizeBytes: 7560,
+          downloadUrl: '/api/files/file_raw/download',
+          mimetype: 'application/json',
+          kind: 'json',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+        {
+          fileId: 'file_summary',
+          filename: 'summary.csv',
+          sizeBytes: 304,
+          downloadUrl: '/api/files/file_summary/download',
+          mimetype: 'text/csv',
+          kind: 'csv',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+      ],
+    });
+    expect(screen.getByText('文件已保存，任务结果尚未确认。')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /original\.json/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /summary\.csv/ })).toHaveLength(1);
+    expect(screen.queryByTestId('assistant-answer')).toBeNull();
+    expect(useTaskStore.getState().tasks[0]?.status).toBe(status);
+  },
+);

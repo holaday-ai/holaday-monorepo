@@ -1,0 +1,17 @@
+[
+  {
+    "action": "disconnect",
+    "atUTC": "2026-11-20T14:26:05.297Z",
+    "pid": 97662
+  },
+  {
+    "action": "reconnect",
+    "atUTC": "2026-11-20T14:26:18.400Z",
+    "pid": 97662
+  },
+  {
+    "action": "finish",
+    "atUTC": "2026-11-20T14:26:38.545Z",
+    "pid": 97662
+  }
+]

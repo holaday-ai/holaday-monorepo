@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "kind": "controlled-cleanup-precondition-fix-not-physical-exit-proof",
+  "recordedAtUTC": "2026-11-21T04:06:12.569670+00:00",
+  "sourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
+  "baseHeadAtTests": "ad483337497cf0bd247a88115c1777846afa8096",
+  "testInputBinding": "Working changes committed byte-for-byte after format; pre/post TypeScript emitted JS tokens match. Final static/types/build hashes match committed files.",
+  "candidateManifestSHA256": "57b0999fc4242a7aeb1061cd1ebbd2ce47bff40a3f1cf4d70786313b44801608",
+  "runtimeInputCount": 1833,
+  "changedRuntimeInputs": [
+    "apps/orchestrator/src/browser-pool/browser-pool.ts"
+  ],
+  "artifacts": {
+    "backend": {
+      "archive": "backend-1fccf1b4.zip",
+      "bytes": 4213844,
+      "sha256": "cb99fa3f94862f741cf5afad72cc5986b7f2f1fe72eabb08316be8df58a628a9",
+      "files": 1616,
+      "fileManifest": "backend-files.json",
+      "fileManifestSHA256": "b7a1c3c641ddadf297be0ff185be2241895af60e4d9a2886803d34863c2e3544",
+      "builtFromSourceCommit": "1fccf1b46671b8bfbd68e6577b375f94a5830f83",
+      "reusedUnchanged": false
+    },
+    "workbench": {
+      "archive": "workbench-4639355e.zip",
+      "bytes": 33109508,
+      "sha256": "5e931b073d615ef3084aa591122a4f0e127ea9a93488a338d08380f8b0fcf378",
+      "files": 332,
+      "fileManifest": "workbench-files.json",
+      "fileManifestSHA256": "59637f6a6588d8bcb9533ac69e442a64d875d9f973ddd40b1873cf29259c25f9",
+      "builtFromSourceCommit": "4639355e3b76fd9a224f93522738f495d8f67577",
+      "reusedUnchanged": true
+    },
+    "extension": {
+      "archive": "extension-b4c4b3a1.zip",
+      "bytes": 1001382,
+      "sha256": "c8bfb32416a3536c3a78f6337a441973f088179226e4b77e0e211761b9ef3294",
+      "files": 18,
+      "fileManifest": "extension-files.json",
+      "fileManifestSHA256": "a72dfa6f80bb02694fac4e8664679396a6ab3bf7ddf23c0febfc32f467c5577d",
+      "builtFromSourceCommit": "b4c4b3a1a020e130cf7e4eb68ae9b04d01642620",
+      "reusedUnchanged": true
+    }
+  },
+  "red": {
+    "mode": "red-finalizer",
+    "exit": 1,
+    "seconds": 5.83,
+    "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+    "heapMB": 1024,
+    "serial": true,
+    "targets": [
+      "src/browser-pool/owned-pool-process.test.ts",
+      "src/browser-pool/browser-pool-process.test.ts",
+      "src/browser-pool/broker-pool-runtime.test.ts",
+      "src/browser-pool/broker-client.test.ts",
+      "src/browser-pool/broker-native-loader.test.ts",
+      "src/execution/execution-drain.test.ts"
+    ],
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "kernelBoundarySynthetic": true,
+    "groupExitAcceptance": false,
+    "passed": 1,
+    "failed": 1
+  },
+  "green": {
+    "mode": "green-finalizer",
+    "exit": 0,
+    "seconds": 4.77,
+    "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+    "heapMB": 1024,
+    "serial": true,
+    "targets": [
+      "src/browser-pool/owned-pool-process.test.ts",
+      "src/browser-pool/browser-pool-process.test.ts",
+      "src/browser-pool/broker-pool-runtime.test.ts",
+      "src/browser-pool/broker-client.test.ts",
+      "src/browser-pool/broker-native-loader.test.ts",
+      "src/execution/execution-drain.test.ts"
+    ],
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "kernelBoundarySynthetic": true,
+    "groupExitAcceptance": false,
+    "passed": 2,
+    "failed": 0
+  },
+  "relatedTs": {
+    "mode": "ts-final",
+    "exit": 0,
+    "seconds": 175.47,
+    "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+    "heapMB": 1024,
+    "serial": true,
+    "targets": [
+      "src/browser-pool/owned-pool-process.test.ts",
+      "src/browser-pool/browser-pool-process.test.ts",
+      "src/browser-pool/broker-pool-runtime.test.ts",
+      "src/browser-pool/broker-client.test.ts",
+      "src/browser-pool/broker-native-loader.test.ts",
+      "src/execution/execution-drain.test.ts"
+    ],
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "kernelBoundarySynthetic": true,
+    "groupExitAcceptance": false,
+    "passed": 215,
+    "failed": 0
+  },
+  "rootPython": {
+    "mode": "py",
+    "exit": 0,
+    "seconds": 6.49,
+    "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+    "heapMB": 1024,
+    "serial": true,
+    "targets": [
+      "test_quartet_protocol",
+      "test_quartet_create_control",
+      "test_quartet_journal",
+      "test_quartet_application_monitor",
+      "test_quartet_worker_pin",
+      "test_resource_recovery"
+    ],
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "kernelBoundarySynthetic": true,
+    "groupExitAcceptance": false,
+    "testsRun": 78
+  },
+  "checks": {
+    "static": {
+      "mode": "static",
+      "exit": 0,
+      "seconds": 0.13,
+      "heapMB": 2048,
+      "command": [
+        "/Users/yaleiqi/.holaday-recovery/tasks/deploy16/node-v22.23.3/node-v22.23.3-darwin-arm64/bin/node",
+        "/Users/yaleiqi/.codex/worktrees/browser-assistant-0644/holaday-monorepo/node_modules/@biomejs/biome/bin/biome",
+        "check",
+        "apps/orchestrator/src/browser-pool/browser-pool.ts",
+        "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts"
+      ],
+      "sourceSHA256": {
+        "apps/orchestrator/src/browser-pool/browser-pool.ts": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+        "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa"
+      }
+    },
+    "types": {
+      "mode": "types",
+      "exit": 0,
+      "seconds": 4.55,
+      "heapMB": 2048,
+      "command": [
+        "/Users/yaleiqi/.holaday-recovery/tasks/deploy16/node-v22.23.3/node-v22.23.3-darwin-arm64/bin/node",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        ".controlled-exit-types.json"
+      ],
+      "sourceSHA256": {
+        "apps/orchestrator/src/browser-pool/browser-pool.ts": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+        "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa"
+      }
+    },
+    "build": {
+      "mode": "build",
+      "exit": 0,
+      "seconds": 16.02,
+      "heapMB": 2048,
+      "command": [
+        "/Users/yaleiqi/.holaday-recovery/tasks/deploy16/node-v22.23.3/node-v22.23.3-darwin-arm64/bin/node",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        "tsconfig.build.json"
+      ],
+      "sourceSHA256": {
+        "apps/orchestrator/src/browser-pool/browser-pool.ts": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+        "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa"
+      }
+    }
+  },
+  "formatTokenEquivalence": {
+    "basis": "TypeScript emitted JavaScript lexical tokens, excluding whitespace/comments",
+    "before": [
+      {
+        "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+        "sourceSHA256": "1f5bdecf94406ca2e7f817c012592585a9a8b600e613a14a9b3e9905f9260d35",
+        "emittedTokensSHA256": "c666abc24c0fc2ca1602e817b30094d1b72e8c4651045f6e7d5cbee6ee49a481",
+        "tokens": 275
+      },
+      {
+        "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts",
+        "sourceSHA256": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa",
+        "emittedTokensSHA256": "ad90e64e877ad698c9cef941b859e84553abbabeaea14f4fa08784f004b31c6f",
+        "tokens": 10608
+      }
+    ],
+    "after": [
+      {
+        "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+        "sourceSHA256": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+        "emittedTokensSHA256": "c666abc24c0fc2ca1602e817b30094d1b72e8c4651045f6e7d5cbee6ee49a481",
+        "tokens": 275
+      },
+      {
+        "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts",
+        "sourceSHA256": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa",
+        "emittedTokensSHA256": "ad90e64e877ad698c9cef941b859e84553abbabeaea14f4fa08784f004b31c6f",
+        "tokens": 10608
+      }
+    ],
+    "equivalent": true
+  },
+  "repair": {
+    "synchronousFinalizerCannotSkipSdkAndGroupCleanup": true,
+    "rejectedPromiseControlStillPassed": true,
+    "finishAndDisconnectAtMostOnce": true,
+    "unknownAndPhysicalSlotRetained": true,
+    "newExitAuthorityGranted": false
+  },
+  "proofGaps": {
+    "legacyLeaderStdioNotGroupExit": true,
+    "strictNodeLocalCloseNotGroupExit": true,
+    "originalRootStopAndTerminalProducerImplemented": false,
+    "originalJournalPhysicalExitImplemented": false,
+    "linuxKernelSystemdActualAcceptance": false
+  },
+  "localPlatform": {
+    "schemaVersion": 1,
+    "kind": "read-only-nonproduction-linux-capability-inventory",
+    "platform": "Darwin",
+    "machine": "arm64",
+    "uid": 501,
+    "createsResources": false,
+    "changesPrivileges": false,
+    "opensNetwork": false,
+    "signalsProcesses": false,
+    "exitProofAccepted": false,
+    "productionAccepted": false,
+    "reasons": [
+      "Linux kernel/systemd/cgroup v2 are not available on this host"
+    ],
+    "credentialsRead": false,
+    "modelCalls": 0,
+    "kmsCalls": 0
+  },
+  "nativeLinuxBoundaryInTests": "explicit synthetic boundary; real Darwin NAPI/Unix/HTTP/WS/SDK used",
+  "pendingQuestion": "nonproduction Linux test host information requested; no answer assumed",
+  "newResourcesCreated": 0,
+  "productionChanged": false,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "oldTasksReplayed": false,
+  "merge": false,
+  "deployment": false,
+  "physicalGroupExitAccepted": false,
+  "goalComplete": false,
+  "executionAllowed": false,
+  "candidateRealModelAccepted": false,
+  "candidateLinuxStartupAccepted": false,
+  "previousManualUiSource": "f2ccd2cb98aa606b754e1a1a07b626f258504f1d",
+  "modelLedgerSHA256": "006f7ed9eee490a34075aa7775e49ac9180daf580451fdd66ebd0803b848106f",
+  "evidenceFiles": [
+    {
+      "path": "controlled-exit-local-20261120/build-exit.json",
+      "bytes": 561,
+      "sha256": "e9ed6449201374c05df9402a8e51df9f6c75624ace4d929a8939cfe89cac5dc4"
+    },
+    {
+      "path": "controlled-exit-local-20261120/docker-check-interrupted.json",
+      "bytes": 309,
+      "sha256": "d5600f86ac967dcbbdf7aa983bce2671d8f0e2017507ac79a082569249f02dff"
+    },
+    {
+      "path": "controlled-exit-local-20261120/green-finalizer-exit.json",
+      "bytes": 614,
+      "sha256": "6363d5d93c903b3472b1ed6e567972af8a7bda5dfb0a27ad471ad88ab78f9e37"
+    },
+    {
+      "path": "controlled-exit-local-20261120/linux-capability-probe.py",
+      "bytes": 2647,
+      "sha256": "f0fcf90aa362c6555b044200f476d10ddea10d7455b69965587302af8692734a"
+    },
+    {
+      "path": "controlled-exit-local-20261120/local-platform-inventory.json",
+      "bytes": 475,
+      "sha256": "27667d7e53022ac2a029b4d1efdda4f44acc84b7f891fc8af91aa1b95c66120a"
+    },
+    {
+      "path": "controlled-exit-local-20261120/py-exit.json",
+      "bytes": 482,
+      "sha256": "cac2e1fecadeb75eae1107a8fcf96c75af61a5bc990d781328fc5dc03c471621"
+    },
+    {
+      "path": "controlled-exit-local-20261120/red-finalizer-exit.json",
+      "bytes": 612,
+      "sha256": "18f803cd3d94d3f9b296c4d3e6596d468393bd51fdf74290f539d8a507a2c05c"
+    },
+    {
+      "path": "controlled-exit-local-20261120/static-exit.json",
+      "bytes": 743,
+      "sha256": "8449a302010f8ebf63e971eba2e2349318dd830e2e1691ee6c2bd47e74de0ecc"
+    },
+    {
+      "path": "controlled-exit-local-20261120/token-equivalence.json",
+      "bytes": 1330,
+      "sha256": "7aa2a1bfaf365beccc01b9e6bde2263a170c1e2a56521e59343d53d625014c56"
+    },
+    {
+      "path": "controlled-exit-local-20261120/ts-direct-timeout.json",
+      "bytes": 306,
+      "sha256": "4db0d04715ddf70110150d1097fbc9dcdaaa9437c61c2431c81ba5c942d03f9e"
+    },
+    {
+      "path": "controlled-exit-local-20261120/ts-final-exit.json",
+      "bytes": 611,
+      "sha256": "7af298ad3d483f1412c6dec168c2b0558e9d9f074faa8da31e8636c4bd1283c6"
+    },
+    {
+      "path": "controlled-exit-local-20261120/types-exit.json",
+      "bytes": 568,
+      "sha256": "ff5f9ef14fcb72312510d673b5393668f390c2acf6c3d5acab09a0d3427579af"
+    }
+  ]
+}

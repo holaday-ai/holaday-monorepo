@@ -79,6 +79,9 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
     closedData: 0,
     messages: 0,
     upgrades: 0,
+    stops: 0,
+    rawClosedAtStop: [] as number[],
+    stoppedResources: [] as string[],
     versions: [] as number[],
   };
   const hooks = {
@@ -86,6 +89,7 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
     dataMode: mode,
     controlMode: mode,
     onLog: (_message: string) => {},
+    finishSession: (): Promise<void> => Promise.resolve(),
   };
   let acceptedResolve!: () => void;
   const accepted = new Promise<void>((resolve) => {
@@ -308,6 +312,30 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
           const message = decodeBrokerControlFrame(input);
           input = Buffer.alloc(0);
           if ('action' in message) {
+            if (message.action === 'close') {
+              const slot = [0, 1].find(
+                (value) => message.capability === Buffer.alloc(32, value + 3).toString('hex'),
+              );
+              if (slot === undefined || message.boot !== boot) throw new Error();
+              const resource = (slot ? '2' : '1').repeat(32);
+              counts.stops++;
+              counts.rawClosedAtStop.push(counts.closedData);
+              counts.stoppedResources.push(resource);
+              socket.end(
+                encodeBrokerControlFrame({
+                  version: 2,
+                  phase: 'terminal-observed',
+                  candidate,
+                  boot,
+                  requestId: message.requestId,
+                  resource,
+                  slot,
+                  closeId: 'e'.repeat(32),
+                  evidenceDigest: 'f'.repeat(64),
+                }),
+              );
+              return;
+            }
             if (message.action !== 'create') throw new Error();
             counts.creates++;
             const slot = message.slot;
@@ -449,6 +477,7 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
           displayStart: 100,
           screenSize: '1280x800x24',
           vncEnabled: true,
+          finishSession: () => hooks.finishSession(),
         },
         pino(
           {
@@ -1561,6 +1590,40 @@ it('strict Pool release ignores a forged draining DTO and closes its original SD
   await vi.waitFor(() => expect(originalPeer.readyState).toBe(WebSocket.CLOSED));
   expect(f.pool.stats().idle).toBe(1);
 });
+
+it.each(['throw', 'reject'] as const)(
+  'strict Pool closes original transports after a %s from the session finalizer',
+  async (failure) => {
+    const f = await fixture('cdp-pool', true);
+    const instance = await startOwnedOperation(
+      f.drain,
+      'request',
+      () => f.pool.allocate('tsk_cleanup_failure', 'synthetic-user'),
+      { parent: f.owner, errorOutcome: 'known' },
+    ).result;
+    const originalPeer = f.browserPeers[0];
+    if (!originalPeer) throw new Error('Expected original synthetic SDK peer');
+    expect(originalPeer.readyState).toBe(WebSocket.OPEN);
+    const disconnect = vi.spyOn(instance.executor, 'disconnect');
+    let finalizations = 0;
+    f.hooks.finishSession = () => {
+      finalizations++;
+      const error = new Error('synthetic session finalization failure');
+      if (failure === 'throw') throw error;
+      return Promise.reject(error);
+    };
+
+    await expect(f.pool.release(instance.taskId)).rejects.toThrow();
+    await vi.waitFor(() => expect(originalPeer.readyState).toBe(WebSocket.CLOSED));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(finalizations).toBe(1);
+    expect(f.pool.stats().idle).toBe(1);
+    expect(f.drain.snapshot().unknown).toBeGreaterThan(0);
+    await expect(f.pool.release(instance.taskId)).rejects.toThrow();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(finalizations).toBe(1);
+  },
+);
 
 it('strict Pool does not grant ownership or retention from mutable instance fields', async () => {
   const f = await fixture('cdp-pool', true);
@@ -2875,4 +2938,36 @@ it('does not open original HPD after group closes in the final peer clock check'
   // Flush the actual data listener with a marker, not an event-loop guess.
   await f.flushData();
   expect(f.counts.data).toBe(2);
+});
+
+it('original close dispatch waits for raw group IO then consumes once while retaining the physical slot', async () => {
+  const f = await fixture();
+  const group = await f.runtime.create(0);
+  const raw = await group.connect(1);
+  await once(raw, 'data');
+  const originalClose = raw.close.bind(raw);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(raw, 'close').mockImplementation(async () => {
+    await originalClose();
+    await held;
+  });
+  const closing = group.close();
+  expect(group.close()).toBe(closing);
+  try {
+    await vi.waitFor(() => expect(f.counts.closedData).toBe(1));
+    expect(f.counts.stops).toBe(0);
+  } finally {
+    release();
+  }
+  await closing;
+  expect(f.counts.stops).toBe(1);
+  expect(f.counts.rawClosedAtStop).toEqual([1]);
+  expect(f.counts.stoppedResources).toEqual(['1'.repeat(32)]);
+  await group.close();
+  expect(f.counts.stops).toBe(1);
+  expect(f.drain.snapshot().unknown).toBeGreaterThan(0);
+  await expect(f.runtime.create(0)).rejects.toThrow();
 });

@@ -1,0 +1,45 @@
+{
+  "kind": "synthetic-original-systemd-job-cgroup-contract",
+  "nonce": "f52b574dca6c",
+  "managerOwner": ":1.2",
+  "busId": "58295dfd3b9d6e8dc11c8dd66b013d9e",
+  "kernelBootId": "14113753-2e75-41c4-94a0-64c7017d07b7",
+  "distro": "Holaday-ExitLab",
+  "unitMemoryMaxBytes": 67108864,
+  "unitTasksMax": 16,
+  "unitCPUQuotaPercent": 25,
+  "unitRuntimeMaxSeconds": 20,
+  "cases": [],
+  "productionAccepted": false,
+  "exitProofAccepted": false,
+  "slotReusePermitted": false,
+  "reapOfAllDescendantsProven": false,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "errors": [
+    {
+      "type": "DBusException",
+      "message": "System.Error.ENXIO: No such device or address",
+      "traceback": "Traceback (most recent call last):\n  File \"<stdin>\", line 235, in <module>\n  File \"<stdin>\", line 126, in __init__\n  File \"/usr/lib/python3/dist-packages/dbus/proxies.py\", line 141, in __call__\n    return self._connection.call_blocking(self._named_service,\n  File \"/usr/lib/python3/dist-packages/dbus/connection.py\", line 652, in call_blocking\n    reply_message = self.send_message_with_reply_and_block(\ndbus.exceptions.DBusException: System.Error.ENXIO: No such device or address\n"
+    }
+  ],
+  "dispatchAttempts": [
+    {
+      "unit": "holaday-exitlab-f52b574dca6c-basic.service",
+      "mode": "fail",
+      "monotonic": 18.434631772
+    }
+  ],
+  "acceptedCreateJobs": [],
+  "allRequestedMeasurementsCollected": false,
+  "unfinishedOwnedUnits": [
+    "holaday-exitlab-f52b574dca6c-basic.service"
+  ],
+  "unknownObjectsNotRetried": true,
+  "notes": [
+    "Only fixed nonce-owned transient units were started/stopped; no general unit/PID scans or signals.",
+    "Held cgroup read failures and zero/changed InvocationID are raw measurements, never success authority.",
+    "Lab workers use nobody, not the product B2 slot policy; no native bundle or five-unit production acceptance.",
+    "RuntimeMax20s bounds owned workers even on measurement failure; no ambiguous stop dispatch is retried."
+  ]
+}

@@ -2,6 +2,7 @@ import {
   BROWSER_LAUNCH_JOURNAL_PREFIX,
   BrowserLaunchJournal,
   type BrowserLaunchJournalDependencies,
+  pollBrowserTaskPreparation,
   resolveBrowserLaunchTarget,
 } from '@holaday/shared-types';
 import { getAccessToken } from './auth';
@@ -30,7 +31,7 @@ export function hasWebBrowserLaunchRecords(): boolean {
   if (typeof localStorage === 'undefined') return false;
   return Object.keys(localStorage).some((k) => k.startsWith(BROWSER_LAUNCH_JOURNAL_PREFIX));
 }
-export async function webBrowserLaunchContext(current: () => void) {
+export async function webBrowserLaunchContext(current: () => void, onLoading?: () => void) {
   const token = getAccessToken();
   if (!token) throw new Error('请重新登录后继续任务。');
   const client = createPinnedTrpc(token);
@@ -52,7 +53,20 @@ export async function webBrowserLaunchContext(current: () => void) {
     receipt: (clientRequestId) => client.tasks.localChromeLaunchReceipt.query({ clientRequestId }),
     resolve,
     prepare: (selection, preparationId, resumeOnly, mode) =>
-      client.tasks.localChromeTaskTab.mutate({ selection, preparationId, resumeOnly, mode }),
+      pollBrowserTaskPreparation({
+        source: selection,
+        preparationId,
+        current: assertCurrent,
+        onLoading,
+        prepare: ({ preparationReadiness, ...target }, id) =>
+          client.tasks.localChromeTaskTab.mutate({
+            selection: target,
+            preparationId: id,
+            resumeOnly,
+            mode,
+            ...(preparationReadiness ? { reportReadiness: true } : {}),
+          }),
+      }),
     create: (body) =>
       client.tasks.create.mutate(body as Parameters<typeof client.tasks.create.mutate>[0]),
     release: async (entry) => {

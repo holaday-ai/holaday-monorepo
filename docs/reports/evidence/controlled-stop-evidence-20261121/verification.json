@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUTC": "2026-11-21T14:35:50.860839+00:00",
+  "baseHead": "0c1a5dca5ddf723ad5c8ac3c8fc7fd5fe2a33e2f",
+  "fullPythonBrokerSuite": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py' -v",
+    "workingDirectory": "scripts/pool-broker",
+    "exitCode": 0,
+    "passed": 724,
+    "seconds": 888.866,
+    "newCases": 18,
+    "serial": true,
+    "outputSHA256": "2e1b875ff40fe765bbd71b1569221c713c4299abadfe82bf083d5c055c905af9"
+  },
+  "redEvidence": [
+    {
+      "file": "cgroup-pin-red.log",
+      "expectedFailureCount": 3,
+      "sha256": "e19f2ac282ad80bc96bdfa72f6b8e3b985c2cdbda7749a0265e0b577d9dac90a"
+    },
+    {
+      "file": "job-wire-red.log",
+      "expectedFailureCount": 3,
+      "sha256": "25442f98ff760175f2190774342ac1c31b43b9dcce67e6b50f5b0ea1d2de80b3"
+    },
+    {
+      "file": "job-stream-red.log",
+      "expectedFailureCount": 4,
+      "sha256": "6b6a3f49a07b89388ca34afec10981b98dbcdb5f957731b1490c969406cdafb1"
+    },
+    {
+      "file": "job-stream-noise-red.log",
+      "expectedFailureCount": 1,
+      "sha256": "3fde65cd947d53c2868850b50342398a9dc73f28fe7333b3222d80215a4f5460"
+    },
+    {
+      "file": "quartet-stop-red.log",
+      "expectedFailureCount": 3,
+      "sha256": "5404327e341c9147efcd13ca62d4b0d919a1029c73bfb2e89a3afe1fc402fd5f"
+    },
+    {
+      "file": "terminal-evidence-red.log",
+      "expectedFailureCount": 3,
+      "sha256": "7d9716b41c573bbcce3d05d710352210f4f6d6710c48210c4db5538c0114619a"
+    }
+  ],
+  "sourceBindings": [
+    {
+      "path": "scripts/pool-broker/manager_probe.py",
+      "bytes": 41439,
+      "sha256": "b16f3625dbc061cd435ba111a89cc8cdab46988f17f156c4072c5de5ecaa6531"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_material.py",
+      "bytes": 27046,
+      "sha256": "d6b14d877ab16da9bf23ba509537fd67c6dee5375468109ca31962b4ecba3d5a"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_records.py",
+      "bytes": 26603,
+      "sha256": "d73ea31ae468b6714509a9c97e65a22f8d9090bf876d55f9f166d0c86a938d35"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_runtime.py",
+      "bytes": 9886,
+      "sha256": "e0bfa3cd6073a19d30bff33415b59192086c7d0412b8dc1d8c8e2874a404f90e"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_worker_pin.py",
+      "bytes": 26072,
+      "sha256": "239439f2b521a4765c182275f1a90cd1d047f9da7c84c55e5eb278db07488300"
+    },
+    {
+      "path": "scripts/pool-broker/test_manager_job_stream.py",
+      "bytes": 8098,
+      "sha256": "a27e2030fc0cf8490276b677effc12d48a5f6023a6ed96799c82aa567ed23377"
+    },
+    {
+      "path": "scripts/pool-broker/test_manager_job_wire.py",
+      "bytes": 3323,
+      "sha256": "55200adfc65705b81b641772abb9ac93783ac235a1d66d81e8aa3048054f1718"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_cgroup_pin.py",
+      "bytes": 3811,
+      "sha256": "7d3aa8a230946da49ea06193beadbc2ca0af4c7fbd398882f4c8e0c17c752999"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_stop.py",
+      "bytes": 6856,
+      "sha256": "d8adc1e2eddde059064454d4e419ac8ea44bda4be557544109419b3664b43597"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_terminal_evidence.py",
+      "bytes": 3419,
+      "sha256": "8169027ae99cae6efdb5811689a4e3eea1f4a2a68fd2e9f5653edaf9d8af90c8"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_worker_pin.py",
+      "bytes": 23097,
+      "sha256": "34149b71f71b4891cc5373b8cf8da2d65f08548cc89d016361c7620474c9ca5e"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_worker_view.py",
+      "bytes": 15562,
+      "sha256": "4f79a84a6d4c21a800fa3bb983b751df3111465c47304964aab3293368e38007"
+    }
+  ],
+  "authorReviewOnly": true,
+  "independentReviewClaimed": false,
+  "linuxKernelAndSystemdSynthetic": true,
+  "originalCgroupReferencesHeldBeforeReady": true,
+  "sameOriginalManagerJobStreamImplemented": true,
+  "internalOriginalStopTransactionImplemented": true,
+  "necessaryOriginalTerminalObservationsImplemented": true,
+  "authenticatedCloseRouteWired": false,
+  "originalStartJobCompletionCollected": false,
+  "oneTimeNodeConsumptionImplemented": false,
+  "allDescendantReapingProven": false,
+  "physicalExitProofAccepted": false,
+  "slotReusePermitted": false,
+  "nativeManifestStatus": "unverified",
+  "newWorkingSourceBuilt": false,
+  "modelLedgerUnchanged": true,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "businessTaskReplay": false,
+  "windowsLabTouched": false,
+  "newLinuxProbeRun": false,
+  "merge": false,
+  "deployment": false
+}

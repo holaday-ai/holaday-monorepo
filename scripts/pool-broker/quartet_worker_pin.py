@@ -6,12 +6,15 @@ still required by the (not yet wired) root transaction. No work is authorized
 by this object and no application registration contract is relaxed.
 """
 
+import ctypes
+import errno
 import json
 import math
 import os
 import re
 import select
 import signal
+import stat
 import struct
 import sys
 import time
@@ -28,6 +31,201 @@ _SERVICE_FIELDS = (('Type', 's'), ('Restart', 's'), ('UID', 'u'), ('GID', 'u'),
                    ('MainPID', 'u'), ('ControlGroup', 's'))
 
 
+def _filesystem_type(fd):
+    """Linux fstatfs on a held FD, never a path or caller-provided filesystem label."""
+    data = ctypes.create_string_buffer(256)
+    call = ctypes.CDLL(None, use_errno=True).fstatfs
+    call.argtypes, call.restype = (ctypes.c_int, ctypes.c_void_p), ctypes.c_int
+    if call(fd, data) != 0: raise OSError(ctypes.get_errno(), 'fstatfs')
+    return ctypes.c_long.from_buffer(data).value
+
+
+class _CgroupPin:
+    """Original cgroup2 directory/events owner. It cannot certify terminal exit."""
+    def __init__(self): raise TypeError('private original cgroup reference')
+    def __reduce_ex__(self, _protocol): raise TypeError('private original cgroup reference')
+
+    @classmethod
+    def acquire(cls, owner):
+        item = object.__new__(cls)
+        item._fds, item._chain, item._events = [], [], None
+        item._terminal = None
+        item._retired, item._owner = False, owner
+        try:
+            if type(owner) is not _WorkerPin or owner._cgroup is not None: raise ValueError()
+            owner._cgroup = item  # Parent revocation owns every subsequently returned FD.
+            item._budget()
+            parts = ('/', 'sys', 'fs', 'cgroup', 'holadaypool.slice',
+                     'holadaypool-' + owner._resource + '.slice', owner._record[0])
+            parent = None
+            for index, name in enumerate(parts):
+                fd = item._open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                parent=parent)
+                signature = item._metadata(fd, directory=True, cgroup=index >= 3)
+                item._chain.append((fd, parent, name, signature, index >= 3))
+                parent = fd
+            item._events = item._open('cgroup.events',
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, parent=parent)
+            item._event_signature = item._metadata(item._events, directory=False, cgroup=True)
+            item.check_running()
+            return item
+        except Exception:
+            item.close()
+            _deny()
+
+    def _budget(self):
+        if self._retired or self._owner._cgroup is not self: raise ValueError()
+        self._owner._budget()
+        if self._retired or self._owner._cgroup is not self: raise ValueError()
+
+    def _open(self, name, flags, *, parent):
+        self._budget()
+        fd = os.open(name, flags, **({'dir_fd': parent} if parent is not None else {}))
+        self._fds.append(fd)  # Own before any callback-capable veto.
+        self._budget()
+        return fd
+
+    @staticmethod
+    def _signature(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+    def _metadata(self, fd, *, directory, cgroup):
+        self._budget()
+        info = os.fstat(fd)
+        self._budget()
+        if (info.st_uid != 0 or info.st_gid != 0 or info.st_mode & 0o7022
+                or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))):
+            raise ValueError()
+        if cgroup:
+            kind = _filesystem_type(fd)
+            self._budget()
+            if kind != 0x63677270: raise ValueError()
+        return self._signature(info)
+
+    def check_running(self):
+        self._budget()
+        for fd, parent, name, signature, cgroup in self._chain:
+            if self._metadata(fd, directory=True, cgroup=cgroup) != signature: raise ValueError()
+            if parent is not None:
+                linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                self._budget()
+                if self._signature(linked) != signature: raise ValueError()
+        if self._metadata(self._events, directory=False, cgroup=True) != self._event_signature:
+            raise ValueError()
+        linked = os.stat('cgroup.events', dir_fd=self._chain[-1][0], follow_symlinks=False)
+        self._budget()
+        if self._signature(linked) != self._event_signature: raise ValueError()
+        raw = os.pread(self._events, 257, 0)
+        self._budget()
+        if type(raw) is not bytes or not raw.endswith(b'\n') or not 1 <= len(raw) <= 256:
+            raise ValueError()
+        values = {}
+        for line in raw.splitlines():
+            match = re.fullmatch(rb'(populated|frozen) ([01])', line)
+            if match is None or match[1] in values: raise ValueError()
+            values[match[1]] = match[2]
+        if values.get(b'populated') != b'1': raise ValueError()
+        self._budget()
+
+    def close(self):
+        self._retired = True
+        failed = False
+        while self._fds:
+            fd = self._fds.pop()
+            try: os.close(fd)
+            except Exception: failed = True
+        if failed: _deny()
+
+    def _observe_terminal(self, stop):
+        """Collect necessary evidence from retained kernel objects, not a path/boolean DTO."""
+        self._budget()
+        owner = self._owner
+        if (type(stop) is not manager_probe._JobReceipt or stop._stream is not owner._manager._job_stream
+                or stop._stream._receipts.get(stop._job) is not stop or stop._unit != owner._record[0]):
+            raise ValueError()
+        group = owner._journal._resources[owner._resource]
+        close = group.get('close', {})
+        recorded = close.get('stops', {}).get(owner._role, {})
+        if (group['state'] != 'closing' or recorded.get('state') != 'observed'
+                or recorded.get('job') != stop._job or recorded.get('signalSerial') != stop._serial):
+            raise ValueError()
+        leaf_missing = False
+        for index, (fd, parent, name, signature, cgroup) in enumerate(self._chain):
+            if self._metadata(fd, directory=True, cgroup=cgroup) != signature: raise ValueError()
+            if parent is None: continue
+            try:
+                linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                self._budget()
+                if index < len(self._chain) - 2: raise ValueError()
+                if index == len(self._chain) - 1: leaf_missing = True
+            else:
+                self._budget()
+                if self._signature(linked) != signature: raise ValueError()
+        if self._metadata(self._events, directory=False, cgroup=True) != self._event_signature:
+            raise ValueError()
+        try:
+            raw = os.pread(self._events, 257, 0)
+        except OSError as error:
+            self._budget()
+            if error.errno != errno.ENODEV or not leaf_missing: raise ValueError()
+            kind = 'removed'
+        else:
+            self._budget()
+            if (leaf_missing or type(raw) is not bytes or not raw.endswith(b'\n')
+                    or not 1 <= len(raw) <= 256): raise ValueError()
+            values = {}
+            for line in raw.splitlines():
+                match = re.fullmatch(rb'(populated|frozen) ([01])', line)
+                if match is None or match[1] in values: raise ValueError()
+                values[match[1]] = match[2]
+            if values.get(b'populated') != b'0': raise ValueError()
+            kind = 'empty'
+        try:
+            linked = os.stat('cgroup.events', dir_fd=self._chain[-1][0], follow_symlinks=False)
+        except FileNotFoundError:
+            self._budget()
+            if kind != 'removed': raise ValueError()
+        else:
+            self._budget()
+            if kind != 'empty' or self._signature(linked) != self._event_signature: raise ValueError()
+        poller = select.poll()
+        poller.register(owner._fd, select.POLLIN | select.POLLHUP | select.POLLERR)
+        observed = poller.poll(0)
+        self._budget()
+        if (len(observed) != 1 or observed[0][0] != owner._fd
+                or type(observed[0][1]) is not int or not observed[0][1] & select.POLLIN
+                or observed[0][1] & ~(select.POLLIN | select.POLLHUP)): raise ValueError()
+        if self._metadata(self._events, directory=False, cgroup=True) != self._event_signature:
+            raise ValueError()
+        item = object.__new__(_WorkerTerminalEvidence)
+        item._owner, item._cgroup, item._stop = owner, self, stop
+        item._pidfd, item._proc, item._fds = owner._fd, owner._proc, tuple(self._fds)
+        item._kind, item._close_id = kind, close['closeId']
+        self._terminal = item
+        item._veto()
+        self._budget()
+        return item
+
+
+class _WorkerTerminalEvidence:
+    """Necessary original kernel/stop observation. No reap, group exit or slot permit."""
+    __slots__ = ('_owner', '_cgroup', '_stop', '_pidfd', '_proc', '_fds', '_kind', '_close_id')
+    def __init__(self): raise TypeError('private original terminal evidence')
+    def __reduce_ex__(self, _protocol): raise TypeError('private original terminal evidence')
+
+    def _veto(self):
+        owner, group, stop = self._owner, self._cgroup, self._stop
+        if (owner._retired or owner._cgroup is not group or group._retired or group._owner is not owner
+                or group._terminal is not self or tuple(group._fds) != self._fds
+                or owner._fd != self._pidfd or owner._proc != self._proc
+                or stop._stream is not owner._manager._job_stream
+                or stop._stream._receipts.get(stop._job) is not stop or stop._unit != owner._record[0]
+                or owner._journal._resources[owner._resource].get('close', {}).get('closeId') != self._close_id):
+            raise ValueError()
+        stop._stream._veto()
+
+
 def _deny():
     try:
         raise ValueError('POOL_BROKER_WORKER_PIN_UNPROVEN') from None
@@ -38,7 +236,7 @@ def _deny():
 
 class _WorkerPin:
     __slots__ = ('_fd', '_proc', '_temporary', '_journal', '_manager', '_resource', '_role',
-                 '_peer', '_pid', '_uid', '_gid', '_record', '_busy', '_retired', '_origin_veto')
+                 '_peer', '_pid', '_uid', '_gid', '_record', '_busy', '_retired', '_origin_veto', '_cgroup')
 
     def __init__(self):
         raise TypeError('use original worker transaction')
@@ -64,6 +262,7 @@ class _WorkerPin:
     def _acquire(cls, journal, manager, resource, role, credentials, scope_guard, locked, scope_veto):
         self = object.__new__(cls)
         self._fd, self._proc, self._temporary = None, None, []
+        self._cgroup = None
         self._retired, self._busy = False, False
         self._origin_veto = scope_veto
         try:
@@ -97,6 +296,7 @@ class _WorkerPin:
                 self._observe()
                 self._proc = os.open('/proc/' + str(self._pid), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
                 self._budget()
+                _CgroupPin.acquire(self)
                 self._verify()
 
             self._run(acquire, scope_guard, locked=locked)
@@ -258,6 +458,8 @@ class _WorkerPin:
             if (len(lines) != 1 or re.fullmatch(key + rb'[ \t]+[0-9]+(?:[ \t]+[0-9]+){3}', lines[0]) is None
                     or [int(v) for v in lines[0].split()[1:]] != [value] * 4):
                 raise ValueError()
+        if type(self._cgroup) is not _CgroupPin: raise ValueError()
+        self._cgroup.check_running()
         if (self._property('MainPID', 'u', service=True) != self._pid
                 or self._property('InvocationID', 'ay') != self._record[3]):
             raise ValueError()
@@ -344,13 +546,16 @@ class _WorkerPin:
             _deny()
 
     def _discard(self):
+        failed = False
+        if self._cgroup is not None:
+            try: self._cgroup.close()
+            except Exception: failed = True
         fds, self._temporary = self._temporary, []
         for name in ('_proc', '_fd'):
             fd = getattr(self, name)
             setattr(self, name, None)
             if fd is not None:
                 fds.append(fd)
-        failed = False
         while fds:
             fd = fds.pop()
             try:

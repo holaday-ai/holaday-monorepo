@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { VaultRuntime } from './browser-session-vault/runtime.js';
 import type { OrdinaryApplicationHooks } from './execution/ordinary-application.js';
 import { type MaintenanceRecord, OrdinaryMaintenance } from './execution/ordinary-maintenance.js';
 
@@ -34,6 +35,9 @@ const s = vi.hoisted(() => {
     rehydrate: vi.fn(async () => ({ userCount: 0, taskCount: 0 })),
     retention: vi.fn(async () => {}),
     crystallize: vi.fn(async () => {}),
+    productionVault: vi.fn<
+      (options: Record<string, unknown>) => Promise<(VaultRuntime & { close(): void }) | undefined>
+    >(async () => undefined),
   };
 });
 vi.mock('undici', () => ({ ProxyAgent: class {}, setGlobalDispatcher() {} }));
@@ -49,7 +53,18 @@ vi.mock('./config/env.js', () => ({
     BROWSER_VNC_WS_ENABLED: false,
     HTTP_PORT: 4000,
     WS_PORT: 4002,
+    BROWSER_SESSION_IMPORT_V2: false,
+    BROWSER_PROFILE_PERSIST_V1: false,
+    BROWSER_HOME_PROFILE_V1: false,
+    BROWSER_VAULT_KMS_PROVIDER: 'aws-kms',
+    BROWSER_VAULT_KMS_REGION: 'ap-southeast-1',
+    BROWSER_VAULT_KMS_KEY_ARN: 'fixture-key-reference',
+    BROWSER_VAULT_AWS_PROFILE: 'fixture-profile',
+    BROWSER_VAULT_TRUSTED_PROBES_JSON: 'fixture-probes',
   },
+}));
+vi.mock('./browser-session-vault/production-runtime.js', () => ({
+  createProductionVaultRuntime: s.productionVault,
 }));
 vi.mock('./config/logger.js', () => ({ logger: s.logger }));
 vi.mock('./db/client.js', () => ({
@@ -242,6 +257,48 @@ async function ordinaryFixture(periodic = false) {
   expect(hooks).toBeDefined();
   return { application, coordinator, closeState, closeControl, readRecord: () => record };
 }
+it('uses production Vault bootstrap before listeners and closes its client on retirement', async () => {
+  const runtime = {
+    cloudHomeEnabled: false,
+    vault: {} as never,
+    worker: {} as never,
+    prepare: vi.fn(async () => {}),
+    finish: vi.fn(async () => {}),
+    sweep: vi.fn(async () => {}),
+    close: vi.fn(),
+  };
+  s.productionVault.mockResolvedValueOnce(runtime);
+  const fixture = await ordinaryFixture();
+  expect(s.productionVault).toHaveBeenCalledOnce();
+  expect(s.productionVault.mock.calls[0]?.[0]).toMatchObject({
+    importEnabled: false,
+    profileEnabled: false,
+    cloudHomeEnabled: false,
+    provider: 'aws-kms',
+    region: 'ap-southeast-1',
+    keyArn: 'fixture-key-reference',
+    profile: 'fixture-profile',
+    probesJson: 'fixture-probes',
+  });
+  expect(s.productionVault.mock.invocationCallOrder[0]).toBeLessThan(
+    s.http.mock.invocationCallOrder[0]!,
+  );
+  expect(s.http.mock.calls[0]?.[0]).toMatchObject({ browserVault: runtime });
+  await fixture.application.shutdown('synthetic');
+  expect(runtime.close).toHaveBeenCalledOnce();
+});
+it('does not construct any listeners when production Vault readiness fails', async () => {
+  s.productionVault.mockRejectedValueOnce(new Error('vault_kms_unavailable'));
+  await expect(ordinaryFixture()).rejects.toThrow('vault_kms_unavailable');
+  expect(s.http).not.toHaveBeenCalled();
+  expect(s.ws).not.toHaveBeenCalled();
+});
+it('rejects unproven controlled background settings before resolving any KMS identity', async () => {
+  vi.stubEnv('RETENTION_REAPER_ENABLED', 'true');
+  const { startApplication } = await import('./application-main.js');
+  await expect(startApplication({} as never)).rejects.toThrow('CONTROLLED_BACKGROUND_UNPROVEN');
+  expect(s.productionVault).not.toHaveBeenCalled();
+});
 it.each(['retention', 'crystallize'] as const)(
   'enabled %s keeps shutdown pending until the original sweep settles',
   async (kind) => {

@@ -98,13 +98,14 @@ def _control_payload(data):
         return raw
     common = {'version', 'phase', 'requestId', 'candidate', 'boot', 'resource', 'slot'}
     phase = data.get('phase')
-    if type(phase) is not str or phase not in ('prepared', 'accepted', 'ready'): raise ValueError()
-    extra = {'capability', 'egressCapability', 'nonce'} if phase == 'prepared' else {'preparedDigest'}
+    if type(phase) is not str or phase not in ('prepared', 'accepted', 'ready', 'terminal-observed'): raise ValueError()
+    extra = ({'capability', 'egressCapability', 'nonce'} if phase == 'prepared' else
+             {'closeId', 'evidenceDigest'} if phase == 'terminal-observed' else {'preparedDigest'})
     if set(data) != common | extra or type(data['slot']) is not int or not 0 <= data['slot'] < 32:
         raise ValueError()
     for name, width in (('requestId', 32), ('candidate', 40), ('boot', 32), ('resource', 32)):
         _identifier(data[name], width)
-    for name in extra: _identifier(data[name], 64)
+    for name in extra: _identifier(data[name], 32 if name == 'closeId' else 64)
     if phase == 'prepared' and len({data[name] for name in extra}) != 3: raise ValueError()
     return raw
 

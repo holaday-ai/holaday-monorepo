@@ -269,6 +269,33 @@ it('local QA manifest cannot request cookie/history or production auth access', 
   expect(manifest.name).toContain('Local QA');
 });
 
+it('explicit real-site QA adds only the two approved sites without widening the auth bridge', async () => {
+  vi.stubEnv('VITE_LOCAL_CHROME_QA_REAL_SITES', 'github-sheets');
+  const manifest = await loadManifest();
+  expect(manifest.host_permissions).toEqual([
+    'http://127.0.0.1/*',
+    'https://github.com/*',
+    'https://docs.google.com/*',
+  ]);
+  expect(manifest.content_scripts?.[0]?.matches).toEqual(['http://127.0.0.1/*']);
+  expect(manifest.permissions).not.toContain('cookies');
+  expect(manifest.permissions).not.toContain('history');
+});
+
+it.each(['all', '<all_urls>', 'https://example.com'])(
+  'rejects an unapproved real-site QA preset: %s',
+  async (preset) => {
+    vi.stubEnv('VITE_LOCAL_CHROME_QA_REAL_SITES', preset);
+    await expect(import('../../manifest.config.js')).rejects.toThrow('fixed github-sheets preset');
+  },
+);
+
+it('rejects real-site QA permissions on a formal release', async () => {
+  vi.stubEnv('VITE_LOCAL_CHROME_QA', '');
+  vi.stubEnv('VITE_LOCAL_CHROME_QA_REAL_SITES', 'github-sheets');
+  await expect(import('../../manifest.config.js')).rejects.toThrow('requires local QA');
+});
+
 it('local QA can still obtain the token from its exact workbench', async () => {
   const executeScript = vi.fn(async (_options: unknown) => [{ result: 'synthetic-qa-token' }]);
   vi.stubGlobal('chrome', {

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "scope": "native bound anchor download correlation, not full acceptance",
+  "realV5": {
+    "taskStatusPreserved": "executing",
+    "newModelResponsesReceived": 4,
+    "newModelUnknown": 0,
+    "appliedExportClicks": 1,
+    "taskFiles": 0,
+    "nativeForensicBytes": 4015,
+    "nativeForensicSHA256": "bcf4406489a2d913f683a70b81e3757b9d360d2d480770bbe21a1e4b97a403a1",
+    "matchesFixedGitBlob": true,
+    "hostCaptureAccepted": false,
+    "queuePersistenceUnknownPreserved": true,
+    "oldExportReplayed": false,
+    "historyProfileCopied": false
+  },
+  "budget": {
+    "attempts": 18,
+    "received": 17,
+    "oldClientUnknown": 1,
+    "maxAttempts": 25,
+    "reset": false
+  },
+  "distinctRealSiteDiagnostic": {
+    "sourceBytes": 3182,
+    "nativeCaptureInvocations": 1,
+    "capturedBytes": 3182,
+    "sourceSHA256": "e851c1fc41d806c16a3185dd1abb78d23e3e423fa8aa902c28e3ee8ed85eac5d",
+    "modelCalls": 0,
+    "taskCalls": 0,
+    "temporaryAdapterExposure": true,
+    "qaSourceRestored": true,
+    "path": "fetch to Blob to native receipt",
+    "countsAsFullAcceptance": false
+  },
+  "localReproduction": {
+    "nativeAnchorHasFetchEvent": true,
+    "nativeAnchorHasNetworkId": false,
+    "firstCorrectlySelectedTestFailed": 1,
+    "firstRunnerMistakenlySkipped": 16,
+    "broadHeaderRemovalTrial": "failed and reverted",
+    "originalV5UniqueRootCauseProven": false
+  },
+  "fix": {
+    "hintSource": "actual bound DOM a[download]",
+    "hintFromModelAllowed": false,
+    "hintInitialOrigin": "same selected origin",
+    "method": "GET",
+    "frame": "clicked frame only",
+    "maxExactAllowedRedirectLinks": 8,
+    "originalResponseOnly": true,
+    "completedMatchingNativeReceiptRequired": true,
+    "inputReplay": false,
+    "newPermissions": false,
+    "ordinaryResponseWithoutReceiptPublished": false
+  },
+  "checks": {
+    "focusedBoundaryPassed": 4,
+    "fullNativeRegressionPassed": 92,
+    "fullNativeRegressionIncludesFocused": true,
+    "staticExitCode": 0,
+    "strictTypesExitCode": 0,
+    "initialTypeFailure": "manual audit action union narrowed before reading selector",
+    "initialStaticFailure": "indentation corrected; log retained",
+    "defaultManualOptOutSkipped": 1
+  },
+  "manualAudit": {
+    "optInOnly": true,
+    "actualDownloadReplyDelegatedUnmodified": true,
+    "onlySelectorHashKnownLabelAndReceiptMetadata": true,
+    "pageSelectorUrlCredentialOrModelTextStored": false
+  },
+  "fullRealSiteAcceptancePassed": false,
+  "prior8251CandidateContainsFix": false,
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

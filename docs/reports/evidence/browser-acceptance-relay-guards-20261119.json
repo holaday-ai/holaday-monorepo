@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "scope": "acceptance tooling only",
+  "productRuntimeChanged": false,
+  "runtimeSourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+  "checks": {
+    "budget": 16,
+    "localHttp": 7,
+    "nodeChildAndEnvelope": 9,
+    "explicitPrivateWiring": 7,
+    "passedTotal": 39,
+    "optOutSkipped": 7,
+    "staticExitCode": 0
+  },
+  "admission": {
+    "attempts": 14,
+    "received": 13,
+    "clientUnknown": 1,
+    "maxAttempts": 25,
+    "providerRequestsSentByThisChange": 0,
+    "canonicalLedgerChanged": false,
+    "actualPrivateDryRunAdmitted": true,
+    "dryRunExecutionAllowed": false
+  },
+  "guards": {
+    "originalUnknownBodyReplayAllowed": false,
+    "newUnknownStillBlocks": true,
+    "auditPrefixBound": true,
+    "auditProviderSigned": false,
+    "auditAuthority": "operator verified provider metadata, sealed local sidecar",
+    "credentialsCopied": false,
+    "providerDeadlineSeconds": 75,
+    "sshDeadlineSeconds": 95,
+    "nodeDeadlineSeconds": 105,
+    "retries": 0,
+    "redirects": 0,
+    "responseLimitBytes": 2097152
+  },
+  "acceptance": {
+    "originalTaskRecovered": false,
+    "fullRealSiteAcceptancePassed": false,
+    "kmsPassed": false,
+    "billingVerified": false,
+    "goalComplete": false,
+    "productionChanged": false
+  },
+  "exhaustedLedgerFollowup": {
+    "attempts": 25,
+    "received": 24,
+    "oldUnknownOrdinal": 14,
+    "maxAttempts": 25,
+    "red": {
+      "passed": 6,
+      "failed": 1,
+      "cause": "stale success expectation; actual guard correctly returned BUDGET_EXHAUSTED"
+    },
+    "green": {
+      "passed": 7,
+      "failed": 0,
+      "exitCode": 0,
+      "seconds": 0.29,
+      "providerRequestsSent": 0,
+      "originalLedgerUnchanged": true,
+      "ledgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af"
+    },
+    "optOut": {
+      "exitCode": 0,
+      "skipped": 7,
+      "providerRequestsSent": 0
+    },
+    "testSourceSHA256": "9c40832f6ca012700408462f75105ee0efbdb2e486c3cd0830ffcfca07aba22a",
+    "privateHelperSHA256": "da92389c0c2700ca5a4ce9140900ac81271d97d7cf29b84e65bd1e11c957f2a4",
+    "privateHelperPolicyOrLedgerChanged": false,
+    "additionalBudgetAuthorized": false
+  }
+}

@@ -1,4 +1,5 @@
 type Tab = { id?: number; url?: string; title?: string; status?: string; pendingUrl?: string };
+type PreparationTab = Tab & { taskTabStatus?: 'loading' };
 type Source = { tabId: number; origin: string };
 interface RecordEntry {
   version: 1;
@@ -10,6 +11,7 @@ interface RecordEntry {
   mode?: 'current' | 'independent';
   tabId?: number;
   tabHash?: string;
+  navigationAcknowledged?: true;
 }
 interface Dependencies {
   owner(): string | null;
@@ -50,6 +52,7 @@ function record(value: unknown): RecordEntry {
           'tabId',
           'tabHash',
           'mode',
+          'navigationAcknowledged',
         ].includes(key),
     ) ||
     v.version !== 1 ||
@@ -63,6 +66,9 @@ function record(value: unknown): RecordEntry {
     typeof v.phase !== 'string' ||
     !phases.has(v.phase) ||
     (v.mode !== undefined && v.mode !== 'current' && v.mode !== 'independent') ||
+    (v.navigationAcknowledged !== undefined &&
+      (v.navigationAcknowledged !== true ||
+        !['navigating', 'ready', 'released'].includes(String(v.phase)))) ||
     (v.tabId !== undefined && (!Number.isSafeInteger(v.tabId) || Number(v.tabId) < 0)) ||
     (v.tabHash !== undefined && (typeof v.tabHash !== 'string' || !digest.test(v.tabHash))) ||
     (v.phase !== 'creating' && (!Number.isSafeInteger(v.tabId) || Number(v.tabId) < 0)) ||
@@ -86,7 +92,8 @@ export class TaskTabJournal {
     preparationId: string,
     resumeOnly = false,
     mode: 'current' | 'independent' = 'independent',
-  ): Promise<Tab> {
+    reportReadiness = false,
+  ): Promise<PreparationTab> {
     const owner = this.deps.owner();
     this.assertCurrent();
     if (!owner || !uuid.test(preparationId)) throw new Error('target_required');
@@ -166,18 +173,22 @@ export class TaskTabJournal {
     }
     if (entry.phase === 'created') {
       const marker = this.deps.marker(entry.nonce);
-      await this.poll(async () => {
-        const placeholder = await this.deps.get(tabId);
-        if (
-          placeholder.id !== tabId ||
-          (placeholder.pendingUrl && placeholder.pendingUrl !== marker) ||
-          (placeholder.url && placeholder.url !== marker)
-        )
-          throw new Error('target_changed');
-        if (placeholder.pendingUrl || placeholder.status === 'loading' || !placeholder.url)
-          return null;
-        return placeholder;
-      });
+      const placeholder = await this.poll<PreparationTab>(
+        async () => {
+          const placeholder = await this.deps.get(tabId);
+          if (
+            placeholder.id !== tabId ||
+            (placeholder.pendingUrl && placeholder.pendingUrl !== marker) ||
+            (placeholder.url && placeholder.url !== marker)
+          )
+            throw new Error('target_changed');
+          if (placeholder.pendingUrl || placeholder.status === 'loading' || !placeholder.url)
+            return null;
+          return placeholder;
+        },
+        reportReadiness ? () => ({ id: tabId, taskTabStatus: 'loading' }) : undefined,
+      );
+      if (placeholder.taskTabStatus === 'loading') return placeholder;
       const original = await this.deps.get(entry.sourceTabId);
       this.assertCurrent();
       if (original.pendingUrl || (await hash(original.url ?? '')) !== entry.sourceHash)
@@ -188,15 +199,28 @@ export class TaskTabJournal {
       if (!original.url) throw new Error('target_changed');
       await this.deps.navigate(tabId, original.url);
       this.assertCurrent();
+      entry = { ...entry, navigationAcknowledged: true };
+      await this.save(key, entry);
     }
     const marker = this.deps.marker(entry.nonce);
-    const ready = await this.poll(async () => {
-      const tab = await this.deps.get(tabId);
-      if (tab.id !== tabId) throw new Error('target_changed');
-      if (tab.pendingUrl || tab.status === 'loading' || tab.url === marker) return null;
-      if (new URL(tab.url ?? '').origin !== entry.origin) throw new Error('origin_grant_required');
-      return tab;
-    });
+    const ready = await this.poll<PreparationTab>(
+      async () => {
+        const tab = await this.deps.get(tabId);
+        if (tab.id !== tabId) throw new Error('target_changed');
+        for (const url of [tab.url, tab.pendingUrl]) {
+          if (url && url !== marker && new URL(url).origin !== entry.origin)
+            throw new Error('origin_grant_required');
+        }
+        if (tab.pendingUrl || tab.status === 'loading' || tab.url === marker) return null;
+        if (new URL(tab.url ?? '').origin !== entry.origin)
+          throw new Error('origin_grant_required');
+        return tab;
+      },
+      reportReadiness && entry.navigationAcknowledged
+        ? () => ({ id: tabId, taskTabStatus: 'loading' })
+        : undefined,
+    );
+    if (ready.taskTabStatus === 'loading') return ready;
     entry = { ...entry, phase: 'ready', tabHash: await hash(ready.url ?? '') };
     await this.save(key, entry);
     return ready;
@@ -223,15 +247,19 @@ export class TaskTabJournal {
     await this.deps.write(key, entry);
     this.assertCurrent();
   }
-  private async poll<T>(read: () => Promise<T | null>): Promise<T> {
+  private async poll<T>(read: () => Promise<T | null>, pending?: () => T): Promise<T> {
     const deadline = Date.now() + 8_000;
+    let observedPending = false;
     for (let n = 0; n < (this.deps.maxPolls ?? 160) && Date.now() <= deadline; n++) {
       this.assertCurrent();
       const value = await read();
       this.assertCurrent();
       if (value !== null) return value;
+      observedPending = true;
       await this.deps.wait();
     }
+    this.assertCurrent();
+    if (observedPending && pending) return pending();
     throw new Error('task_tab_not_ready');
   }
 }

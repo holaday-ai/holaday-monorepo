@@ -396,23 +396,19 @@ export function WorkbenchApp(): JSX.Element {
           res.error.includes('HOLA DAY 专注浏览器任务') ||
           res.error.includes('代码开发请用') ||
           res.error.includes('Claude Code');
-        if (codeRejected) {
-          toast.show(
-            res.error.includes('Claude Code') && !res.error.includes('专注浏览器')
-              ? res.error
-              : '写代码不是我最擅长的，你可以用 Claude Code 或 Cursor。如果你是想让我搜索资料、整理文档或者操作网页，我很乐意帮你。',
-          );
-        } else {
-          toast.show(taskActionError('发送失败', res.error), 'error');
-        }
         return {
           ...keepComposerOnSubmitFailure,
+          error:
+            codeRejected &&
+            !(res.error.includes('Claude Code') && !res.error.includes('专注浏览器'))
+              ? '写代码不是我最擅长的，你可以用 Claude Code 或 Cursor。如果你是想让我搜索资料、整理文档或者操作网页，我很乐意帮你。'
+              : res.error,
           ...(res.browserOperationId ? { browserOperationId: res.browserOperationId } : {}),
         };
       }
       return { ...clearComposerOnSubmitSuccess, ...(res.notice ? { notice: res.notice } : {}) };
     },
-    [createTask, toast],
+    [createTask],
   );
   const assignModelDataRegion = React.useCallback(async (region: ModelDataRegion) => {
     await trpc.auth.assignModelDataRegion.mutate({ region });
@@ -722,8 +718,7 @@ export function WorkbenchApp(): JSX.Element {
             if (isReplyMode && selectedTaskId) {
               const res = await replyToTask(selectedTaskId, intent, fileIds);
               if ('error' in res) {
-                toast.show(taskActionError('回复失败', res.error), 'error');
-                return keepComposerOnSubmitFailure;
+                return { ...keepComposerOnSubmitFailure, error: res.error };
               }
               if (!res.ok) {
                 setConfirmRebuildTask({
@@ -747,8 +742,7 @@ export function WorkbenchApp(): JSX.Element {
                 skillSelection,
               );
               if ('error' in res) {
-                toast.show(taskActionError('追问失败', res.error), 'error');
-                return keepComposerOnSubmitFailure;
+                return { ...keepComposerOnSubmitFailure, error: res.error };
               }
               toast.show(
                 selectedHasBrowserRecord ? 'AI 已接手当前页面继续执行' : '已基于上一个任务追问',

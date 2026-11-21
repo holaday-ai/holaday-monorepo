@@ -18,6 +18,12 @@ export interface BrokerPhaseFrame extends Scope {
   readonly phase: 'accepted' | 'ready';
   readonly preparedDigest: string;
 }
+/** Necessary observations only. Decoding does not grant physical exit or slot reuse. */
+export interface BrokerTerminalObservedFrame extends Scope {
+  readonly phase: 'terminal-observed';
+  readonly closeId: string;
+  readonly evidenceDigest: string;
+}
 export type BrokerControlRequest = Readonly<{
   version: 2;
   requestId: string;
@@ -27,7 +33,11 @@ export type BrokerControlRequest = Readonly<{
     | Readonly<{ action: 'create'; slot: number }>
     | Readonly<{ action: 'query' | 'close'; capability: string }>
   );
-export type BrokerControlFrame = BrokerControlRequest | BrokerPreparedFrame | BrokerPhaseFrame;
+export type BrokerControlFrame =
+  | BrokerControlRequest
+  | BrokerPreparedFrame
+  | BrokerPhaseFrame
+  | BrokerTerminalObservedFrame;
 
 const invalid = (): never => {
   throw new Error('POOL_BROKER_CONTROL_FRAME_INVALID');
@@ -60,9 +70,14 @@ function canonical(data: unknown): Buffer {
     if (create) slot(value.slot);
     else identifier(value.capability, 64);
   } else {
-    if (!['prepared', 'accepted', 'ready'].includes(value.phase as string)) invalid();
+    if (!['prepared', 'accepted', 'ready', 'terminal-observed'].includes(value.phase as string))
+      invalid();
     const prepared = value.phase === 'prepared';
-    const extra = prepared ? ['capability', 'egressCapability', 'nonce'] : ['preparedDigest'];
+    const extra = prepared
+      ? ['capability', 'egressCapability', 'nonce']
+      : value.phase === 'terminal-observed'
+        ? ['closeId', 'evidenceDigest']
+        : ['preparedDigest'];
     keys(value, [
       'version',
       'phase',
@@ -76,7 +91,7 @@ function canonical(data: unknown): Buffer {
     identifier(value.candidate, 40);
     identifier(value.resource, 32);
     slot(value.slot);
-    for (const key of extra) identifier(value[key], 64);
+    for (const key of extra) identifier(value[key], key === 'closeId' ? 32 : 64);
     if (prepared && new Set(extra.map((key) => value[key])).size !== 3) invalid();
   }
   const raw = Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(value).sort())));

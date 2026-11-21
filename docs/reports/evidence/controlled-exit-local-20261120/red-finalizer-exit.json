@@ -1,0 +1,22 @@
+{
+  "mode": "red-finalizer",
+  "exit": 1,
+  "seconds": 5.83,
+  "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+  "heapMB": 1024,
+  "serial": true,
+  "targets": [
+    "src/browser-pool/owned-pool-process.test.ts",
+    "src/browser-pool/browser-pool-process.test.ts",
+    "src/browser-pool/broker-pool-runtime.test.ts",
+    "src/browser-pool/broker-client.test.ts",
+    "src/browser-pool/broker-native-loader.test.ts",
+    "src/execution/execution-drain.test.ts"
+  ],
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "kernelBoundarySynthetic": true,
+  "groupExitAcceptance": false,
+  "passed": 1,
+  "failed": 1
+}

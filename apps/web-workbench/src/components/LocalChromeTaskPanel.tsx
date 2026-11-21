@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { awaitingUserCopy, awaitingUserStreamMessage } from '@/lib/awaiting-user-copy';
+import { isExecutionUnconfirmed } from '@/lib/task-execution-observation';
 import { trpc } from '@/lib/trpc';
 import { useTaskStore } from '@/stores/task-store';
 import type { UiTaskStatus } from '@/types/task';
@@ -17,6 +18,10 @@ export function LocalChromeTaskPanel({
   // offline / no page selected) shows the same connect-the-extension copy as
   // the task stream instead of the in-session control states.
   const connection = useTaskStore((s) => s.awaitingUserByTask[taskId]?.browserConnection);
+  const executionUnconfirmed = useTaskStore((s) => {
+    const task = s.tasks.find((entry) => entry.taskId === taskId);
+    return task ? isExecutionUnconfirmed(task) : false;
+  });
   const [stopping, setStopping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const terminal = ['completed', 'failed', 'cancelled', 'timeout', 'partial_success'].includes(
@@ -63,16 +68,20 @@ export function LocalChromeTaskPanel({
         <h2 className="text-base font-medium">
           {waitingForExtension
             ? awaitingUserCopy('permission', connection).panelTitle
-            : '在你的 Chrome 中执行'}
+            : executionUnconfirmed
+              ? '执行状态待核实'
+              : '在你的 Chrome 中执行'}
         </h2>
         <p role="status" className="max-w-xs text-sm text-muted-foreground">
           {waitingForExtension
             ? awaitingUserCopy('permission', connection).panelBody
-            : terminal
-              ? '任务已结束，页面保留在 Chrome。'
-              : stopping
-                ? '正在停止，等待执行结果确认…'
-                : 'AI 正在处理你选择的页面，你也可以直接在 Chrome 里操作。'}
+            : executionUnconfirmed
+              ? '当前服务无法确认任务仍在执行。已保存的文件保留在任务中，请先核对结果。'
+              : terminal
+                ? '任务已结束，页面保留在 Chrome。'
+                : stopping
+                  ? '正在停止，等待执行结果确认…'
+                  : 'AI 正在处理你选择的页面，你也可以直接在 Chrome 里操作。'}
         </p>
         {waitingForExtension ? (
           <p className="max-w-xs text-xs text-muted-foreground">
@@ -85,7 +94,7 @@ export function LocalChromeTaskPanel({
           </p>
         ) : null}
       </div>
-      {!terminal ? (
+      {!terminal && !executionUnconfirmed ? (
         <footer className="flex justify-center gap-2">
           <Button
             variant="ghost"

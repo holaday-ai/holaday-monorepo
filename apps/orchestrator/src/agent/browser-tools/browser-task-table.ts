@@ -60,6 +60,10 @@ export const taskTableRequestSchema = z.discriminatedUnion('mode', [
       metrics: z.array(metricSchema).min(1).max(8),
       offset: z.number().int().min(0).max(TASK_TABLE_LIMITS.groups).optional(),
       limit: z.number().int().min(1).max(50).optional(),
+      supersedesAnalysisId: z
+        .string()
+        .regex(/^tbl_[a-f0-9]{32}$/)
+        .optional(),
     })
     .strict(),
 ]);
@@ -72,6 +76,7 @@ export interface TaskTableFact {
   name: string;
   value: string;
   complete: boolean;
+  analysisId?: string;
 }
 interface MetricResult extends Omit<TaskTableFact, 'value'> {
   value: string | null;
@@ -112,6 +117,8 @@ export interface TableDescription extends BaseResult {
 export interface TableAggregate extends BaseResult {
   mode: 'aggregate';
   analysisId: string;
+  /** Present only after a complete same-scope correction explicitly replaces an old query. */
+  supersededAnalysisId?: string;
   overall: MetricResult[];
   groups: Array<{ keys: string[]; rowCount: number; metrics: MetricResult[] }>;
   page: {
@@ -128,7 +135,7 @@ export type TaskTableResult = TableDescription | TableAggregate;
 export const ANALYZE_TASK_TABLE_TOOL: NeutralToolDefinition = {
   name: 'analyze_task_table',
   description:
-    '按真实任务CSV/TSV文件统计；先 describe 读取列位置ID和样本，再 aggregate。数值仅支持明确的十进制（可带科学计数法）；不猜货币/百分号/千分位，不把空白或错误当0。原文件完整扫描，返回行数、筛选、质量与分组分页；只能报告回执中的统计，finish fields 绑定 fileId/tableFactId。当前不支持Excel二进制工作簿，请先导出CSV。',
+    '按本任务提供、下载或已生成的CSV/TSV文件统计；生成文件可读/统计，不增加上传授权。先 describe 读取列位置ID和样本，再 aggregate。数值仅支持明确的十进制（可带科学计数法）；不猜货币/百分号/千分位，不把空白或错误当0。原文件完整扫描，返回行数、筛选、质量与分组分页；只能报告回执中的统计，finish fields 绑定 fileId/tableFactId。纠正不需要的统计指标时，可用 supersedesAnalysisId 指向旧 analysisId；仅同文件/版本/表头/分隔符/筛选/分组且新结果全部完整时替换，旧查询的 fields 随即失效。当前不支持Excel二进制工作簿，请先导出CSV。',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -178,6 +185,12 @@ export const ANALYZE_TASK_TABLE_TOOL: NeutralToolDefinition = {
       },
       offset: { type: 'integer', minimum: 0 },
       limit: { type: 'integer', minimum: 1, maximum: 50 },
+      supersedesAnalysisId: {
+        type: 'string',
+        pattern: '^tbl_[a-f0-9]{32}$',
+        description:
+          '明确替换同一范围的旧统计查询；新查询完整后才生效，不能使用旧查询的事实标识交付。',
+      },
     },
   },
 };
@@ -190,7 +203,12 @@ function columnName(index: number): string {
   return result;
 }
 /** Validate structure/limits before the library allocates cells. The library decodes values. */
-async function csvShape(text: string, delimiter: string, signal?: AbortSignal) {
+export async function csvShape(
+  text: string,
+  delimiter: string,
+  signal?: AbortSignal,
+  expectedColumns?: number,
+) {
   let state: 'start' | 'plain' | 'quoted' | 'closed' = 'start';
   let rows = 0;
   let columns = 1;
@@ -198,6 +216,10 @@ async function csvShape(text: string, delimiter: string, signal?: AbortSignal) {
   let pending = false;
   const finish = () => {
     rows++;
+    if (expectedColumns !== undefined && pending && columns !== expectedColumns)
+      throw new Error(
+        `CSV第${rows}条记录应为${expectedColumns}列，实际${columns}列。空值仍需保留分隔符，不要补成0。`,
+      );
     width = Math.max(width, columns);
     if (
       rows > TASK_TABLE_LIMITS.rows + 100 ||
@@ -324,6 +346,7 @@ interface AnalysisState {
   result: TableAggregate;
   ranges: Array<[number, number]>;
   quality: boolean;
+  supersededBy?: string;
 }
 /** Pure table calculations over the existing admitted material scope. No code execution or new grants. */
 export class BrowserTaskTable {
@@ -334,7 +357,7 @@ export class BrowserTaskTable {
     const request = taskTableRequestSchema.parse(value);
     try {
       if (signal?.aborted) throw new Error('统计已取消。');
-      const [file] = await this.files.resolve(this.files.taskId, [request.fileId]);
+      const [file] = await this.files.resolveReadable(this.files.taskId, [request.fileId]);
       if (!file || !/\.(csv|tsv)$/i.test(file.name))
         throw new Error('当前统计工具只接收CSV/TSV文件；请将工作簿导出为CSV后提供。');
       if (file.buffer.length > TASK_TABLE_LIMITS.bytes)
@@ -500,6 +523,29 @@ export class BrowserTaskTable {
         metrics: request.metrics,
       };
       const analysisId = `tbl_${digest(JSON.stringify({ sha256: baseResult.sha256, query })).slice(0, 32)}`;
+      if (this.analyses.get(analysisId)?.supersededBy)
+        throw new Error('此查询已被完整重核替换，请使用替换后的analysisId和统计回执。');
+      const replaced = request.supersedesAnalysisId
+        ? this.analyses.get(request.supersedesAnalysisId)
+        : undefined;
+      if (request.supersedesAnalysisId) {
+        const filterKey = (items: Scope['filters']) =>
+          JSON.stringify(items.map((item) => JSON.stringify(item)).sort());
+        if (
+          !replaced ||
+          replaced.supersededBy ||
+          request.supersedesAnalysisId === analysisId ||
+          replaced.fileId !== file.fileId ||
+          replaced.result.sha256 !== baseResult.sha256 ||
+          replaced.result.scope.headerRow !== headerRow ||
+          replaced.result.scope.delimiter !== delimiter ||
+          filterKey(replaced.result.scope.filters) !== filterKey(filters) ||
+          JSON.stringify(replaced.result.scope.groupBy) !== JSON.stringify(groupBy)
+        )
+          throw new Error(
+            '替换目标必须是本任务同一文件版本、表头、分隔符、筛选和分组下尚未替换的另一统计查询。',
+          );
+      }
       const metricResults = (states: MetricState[], key: string): MetricResult[] =>
         request.metrics.map((metric, i) => {
           const state = states[i]!;
@@ -593,6 +639,7 @@ export class BrowserTaskTable {
           columns: columns.filter((_, index) => usedColumns.has(index)),
           mode: 'aggregate',
           analysisId,
+          ...(replaced && complete ? { supersededAnalysisId: request.supersedesAnalysisId } : {}),
           scope: { ...scope, matchedRows, filters, groupBy },
           overall: overallResults,
           groups: groupBy.length ? allGroups.slice(start, end) : [],
@@ -624,6 +671,7 @@ export class BrowserTaskTable {
         ranges: result.page.ranges,
         quality,
       });
+      if (replaced && result.complete) replaced.supersededBy = analysisId;
       this.failed.delete(file.fileId);
       return structuredClone(result);
     } catch (error) {
@@ -633,24 +681,28 @@ export class BrowserTaskTable {
   }
   incomplete(): boolean {
     return (
-      this.failed.size > 0 || [...this.analyses.values()].some((state) => !state.result.complete)
+      this.failed.size > 0 ||
+      [...this.analyses.values()].some((state) => !state.supersededBy && !state.result.complete)
     );
   }
   completeFiles(): ReadonlySet<string> {
     const ids = new Set(
       [...this.analyses.values()]
-        .filter((state) => state.result.complete)
+        .filter((state) => !state.supersededBy && state.result.complete)
         .map((state) => state.fileId),
     );
     for (const state of this.analyses.values())
-      if (!state.result.complete) ids.delete(state.fileId);
+      if (!state.supersededBy && !state.result.complete) ids.delete(state.fileId);
     for (const id of this.failed) ids.delete(id);
     return ids;
   }
   coverageNote(english = false): string {
     return [...this.analyses.values()]
+      .filter((state) => !state.supersededBy)
       .map(({ result }) => {
-        const metrics = result.overall
+        // Grouped batches may overlap. Automatic result notes describe their
+        // coverage; an overall total belongs only to an explicit ungrouped query.
+        const metrics = (result.scope.groupBy.length ? [] : result.overall)
           .map(
             (metric) =>
               `${metric.name}=${metric.value ?? (english ? 'no numeric value' : '无数值')}${metric.exact ? '' : ` (${english ? 'rounded decimal places' : '舍入至小数位数'} ${metric.fractionDigits})`}`,
@@ -679,12 +731,16 @@ export class BrowserTaskTable {
         const source =
           result.source.kind === 'browser_download'
             ? result.source.origin
-            : english
-              ? 'user attachment'
-              : '用户附件';
+            : result.source.kind === 'task_generated'
+              ? english
+                ? 'task-generated file'
+                : '任务生成文件'
+              : english
+                ? 'user attachment'
+                : '用户附件';
         return english
-          ? `${result.filename}: source ${source}; scanned ${result.scope.scannedRows} data rows, matched ${result.scope.matchedRows}, blank rows excluded ${result.scope.blankRows}; filters ${filters}; group columns ${groups}, groups shown ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}. ${metrics}. ${result.complete ? '' : 'Partial statistics: missing/invalid values or unseen result groups.'} File scope does not verify complete website exports.`
-          : `${result.filename}：来源 ${source}；统计扫描 ${result.scope.scannedRows} 条数据，筛选后 ${result.scope.matchedRows} 条，排除空记录 ${result.scope.blankRows} 条；筛选 ${filters}；分组列 ${groups}，已返回分组 ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}。核对值：${metrics}。${result.complete ? '' : '统计尚有缺失/无效值或未返回的分组，属于部分结果。'}网站导出范围尚未核实。`;
+          ? `${result.filename}: source ${source}; scanned ${result.scope.scannedRows} data rows, matched ${result.scope.matchedRows}, blank rows excluded ${result.scope.blankRows}; filters ${filters}; group columns ${groups}, groups shown ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}. ${metrics ? `${metrics}. ` : ''}${result.complete ? '' : 'Partial statistics: missing/invalid values or unseen result groups.'} File scope does not verify complete website exports.`
+          : `${result.filename}：来源 ${source}；统计扫描 ${result.scope.scannedRows} 条数据，筛选后 ${result.scope.matchedRows} 条，排除空记录 ${result.scope.blankRows} 条；筛选 ${filters}；分组列 ${groups}，已返回分组 ${result.page.ranges.reduce((n, [a, b]) => n + b - a, 0)}/${result.page.total}。${metrics ? `核对值：${metrics}。` : ''}${result.complete ? '' : '统计尚有缺失/无效值或未返回的分组，属于部分结果。'}网站导出范围尚未核实。`;
       })
       .concat(
         this.failed.size
@@ -703,6 +759,7 @@ export function taskTableFacts(result: TaskTableResult): TaskTableFact[] {
           : [
               {
                 id: metric.id,
+                analysisId: result.analysisId,
                 fileId: result.fileId,
                 name: metric.name,
                 value: metric.value,

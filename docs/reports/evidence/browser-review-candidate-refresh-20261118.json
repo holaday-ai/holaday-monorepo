@@ -1,0 +1,301 @@
+{
+  "checkedAtUTC": "2026-11-19T04:50:24.905797+00:00",
+  "runtimeSourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+  "documentationAndManualTestFollowupOnly": true,
+  "candidateManifestSHA256": "b78a81e1a46e0f54bb69a44b521c785158c1e86515858470a95af13240a3429e",
+  "durableDirectory": "/Users/yaleiqi/.holaday-recovery/tasks/browser-assistant-next/release-readiness-20261118/review-candidate-8251bc1f",
+  "candidate": {
+    "schemaVersion": 1,
+    "kind": "local_review_build_only",
+    "sourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+    "createdAtUTC": "2026-11-19T04:46:13.088584+00:00",
+    "node": "22.23.3",
+    "sourceGitTree": "08104f7c7a1b32559efb7e643d380002687d9aed",
+    "artifacts": {
+      "backend": {
+        "archive": "backend-8251bc1f.zip",
+        "bytes": 4249487,
+        "sha256": "8ff9fdace3d5f3db7ada5c6e5e1ceb7f25f9cb490749f788d210e7ab67552702",
+        "files": 1608,
+        "fileManifest": "backend-files.json",
+        "fileManifestSHA256": "2ce1e5f48d18b3de92f45f17ebb59e6000e19c8096e54bfc0b647f582ca51c5d"
+      },
+      "workbench": {
+        "archive": "workbench-8251bc1f.zip",
+        "bytes": 33107532,
+        "sha256": "6470776ab9df6efd0ba25875075e0d48012df0a8d9a8a7331d67b4be4420f7fd",
+        "files": 332,
+        "fileManifest": "workbench-files.json",
+        "fileManifestSHA256": "f798a7e2a2ef34677cb32244b38eb330cc742135ad5100f9b5b10bbe7d84b846"
+      },
+      "extension": {
+        "archive": "extension-8251bc1f.zip",
+        "bytes": 999520,
+        "sha256": "8a87641d23de4ba795dc2b36dbea22fbb2e1776f0c46d40cd47c0ca5f04c253f",
+        "files": 18,
+        "fileManifest": "extension-files.json",
+        "fileManifestSHA256": "3abea99da254c1e85d3ff1d8b047599f0971b902cd1f69b33946c5952e06eae1"
+      }
+    },
+    "buildReceipts": {
+      "backend": {
+        "stage": "backend",
+        "exitCode": 0,
+        "seconds": 15.17,
+        "heapMB": 2048,
+        "node": "22.23.3",
+        "sourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+        "memoryFreePointPercent": 50,
+        "formalMode": false,
+        "QAFlagsPassed": false,
+        "networkModelCalls": 0,
+        "createdAtUTC": "2026-11-19T04:43:18.725918+00:00"
+      },
+      "workbench": {
+        "stage": "workbench",
+        "exitCode": 0,
+        "seconds": 10.33,
+        "heapMB": 2048,
+        "node": "22.23.3",
+        "sourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+        "memoryFreePointPercent": 44,
+        "formalMode": false,
+        "QAFlagsPassed": false,
+        "networkModelCalls": 0,
+        "createdAtUTC": "2026-11-19T04:43:54.723110+00:00"
+      },
+      "extension": {
+        "stage": "extension",
+        "exitCode": 0,
+        "seconds": 4.56,
+        "heapMB": 512,
+        "node": "22.23.3",
+        "sourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+        "memoryFreePointPercent": 47,
+        "formalMode": true,
+        "QAFlagsPassed": false,
+        "networkModelCalls": 0,
+        "createdAtUTC": "2026-11-19T04:45:09.520836+00:00"
+      }
+    },
+    "runtimeInputs": "runtime-inputs.json",
+    "runtimeInputsSHA256": "8d573f5b9e61aad632d60c9779e14c33f79c327af4295196fb38fabe0e807427",
+    "runtimeInputCount": 1827,
+    "runtimeInputScope": "tracked app/package/build inputs, excluding tests, testing, docs, e2e and build outputs",
+    "dependencyInstall": "not bundled; use exact monorepo pnpm lock, workspace sources and existing approved TS loader; backend zip is not standalone installer",
+    "lockSHA256": "19a88d73693074cd35660c381680806eb4bfc89b506800bdf297a41da51f7aad",
+    "formalExtension": {
+      "version": "0.0.6",
+      "name": "HOLA DAY",
+      "permissions": [
+        "storage",
+        "tabs",
+        "scripting",
+        "activeTab",
+        "cookies",
+        "webNavigation",
+        "alarms",
+        "sidePanel",
+        "debugger",
+        "history"
+      ],
+      "hostPermissions": [
+        "<all_urls>"
+      ],
+      "packageCheckExitCode": 0,
+      "oldZIPUnchanged": true,
+      "oldZIP_SHA256": "63c6b23fba58cc333ec68be52e3c581c189557dfe18d26660583f489b23e01f7",
+      "comparedToOldContentChangedPaths": [],
+      "installed": false,
+      "uploaded": false,
+      "QAApprovalDoesNotAuthorizeFormalInstall": true
+    },
+    "frozenWorkbenchReadOnlyAcceptance": "pending",
+    "compiledBackendStartupAcceptance": "not claimed",
+    "fullRealSiteAccountPhysicalKMSAcceptance": false,
+    "releaseApprovalBound": false,
+    "executionAllowed": false,
+    "deploymentAuthorized": false,
+    "productionChanged": false,
+    "pr361Merged": false
+  },
+  "manualEntry": "apps/orchestrator/src/trpc/routers/tasks.saved-files-recovery.manual.test.ts",
+  "manualEntrySHA256": "b50c9e90187908a561a57e0a3cef3dac439af2857eaacc8d82c37cb782eebcf1",
+  "frozenUIAcceptance": {
+    "exit": {
+      "exitCode": 0,
+      "seconds": 12.18,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "actualProof": {
+      "scope": "historical actual saved-file recovery only; original task result remains unresolved",
+      "browser": "157.0.8103.79",
+      "candidateBinding": {
+        "sourceCommit": "8251bc1faa07525e460ebdf43123f9ec8daf6f54",
+        "manifestSHA256": "b78a81e1a46e0f54bb69a44b521c785158c1e86515858470a95af13240a3429e",
+        "workbenchZIP_SHA256": "6470776ab9df6efd0ba25875075e0d48012df0a8d9a8a7331d67b4be4420f7fd",
+        "runtimeInputsVerified": 1827,
+        "extractedFilesVerified": 332,
+        "scope": "actual frozen workbench ZIP with equivalent source backend; compiled backend boot not claimed"
+      },
+      "browserPlugin": "Browser plugin not available; existing project Playwright workflow",
+      "readOnlyHTTP": true,
+      "origin": "http://127.0.0.1:57535",
+      "restoredTables": [
+        "task_events",
+        "task_files",
+        "task_quotas",
+        "task_steps",
+        "tasks",
+        "users"
+      ],
+      "sql": "8.0.46",
+      "taskId": "tsk_2ncmrVDbv9Yh5xWG3Tf4z",
+      "taskStatusUnchanged": "executing",
+      "taskAccepted": false,
+      "originalWebsiteExports": 0,
+      "modelAPICalls": 0,
+      "canonicalModelLedgerUnchanged": true,
+      "historyReload": true,
+      "executionObservation": {
+        "state": "unconfirmed",
+        "reason": "session_not_observed"
+      },
+      "executionObservationScope": "current_process_only_not_a_terminal_verdict",
+      "foreignTaskStatus": 404,
+      "foreignFileStatus": 404,
+      "blockedMutations": 0,
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "views": [
+        {
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "downloads": [
+            {
+              "filename": "pr360-premerge-20261118.json",
+              "path": "/private/tmp/pr360-readiness/saved-file-recovery-historical-v7/artifacts/1440-pr360-premerge-20261118.json",
+              "sizeBytes": 7560,
+              "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+              "bounds": {
+                "x": 536,
+                "y": 369,
+                "width": 414,
+                "height": 40
+              }
+            },
+            {
+              "filename": "summary.csv",
+              "path": "/private/tmp/pr360-readiness/saved-file-recovery-historical-v7/artifacts/1440-summary.csv",
+              "sizeBytes": 304,
+              "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+              "bounds": {
+                "x": 536,
+                "y": 443,
+                "width": 414,
+                "height": 40
+              }
+            }
+          ],
+          "facts": {
+            "scope": "file bytes/facts only; not project-browser, account or physical acceptance",
+            "projectPluginVerified": false,
+            "originalSHA256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+            "generatedSHA256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+            "summaryRows": 8,
+            "initialBackendFailuresPreserved": true,
+            "failedCoreBatchPreserved": true,
+            "overlappingBatchesSeparate": true,
+            "fileFactsVerified": true
+          }
+        },
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "downloads": [
+            {
+              "filename": "pr360-premerge-20261118.json",
+              "path": "/private/tmp/pr360-readiness/saved-file-recovery-historical-v7/artifacts/390-pr360-premerge-20261118.json",
+              "sizeBytes": 7560,
+              "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+              "bounds": {
+                "x": 37,
+                "y": 281.75,
+                "width": 316,
+                "height": 40
+              }
+            },
+            {
+              "filename": "summary.csv",
+              "path": "/private/tmp/pr360-readiness/saved-file-recovery-historical-v7/artifacts/390-summary.csv",
+              "sizeBytes": 304,
+              "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+              "bounds": {
+                "x": 37,
+                "y": 355.75,
+                "width": 316,
+                "height": 40
+              }
+            }
+          ],
+          "facts": {
+            "scope": "file bytes/facts only; not project-browser, account or physical acceptance",
+            "projectPluginVerified": false,
+            "originalSHA256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+            "generatedSHA256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+            "summaryRows": 8,
+            "initialBackendFailuresPreserved": true,
+            "failedCoreBatchPreserved": true,
+            "overlappingBatchesSeparate": true,
+            "fileFactsVerified": true
+          }
+        }
+      ],
+      "productionChanged": false
+    },
+    "defaultEntryGate": {
+      "receipt": {
+        "exitCode": 0,
+        "seconds": 6.03,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 1
+      },
+      "meaning": "manual entry remains skipped without explicit opt-in; no SQL/browser/task execution"
+    }
+  },
+  "failedProbeV6": {
+    "exit": {
+      "exitCode": 1,
+      "seconds": 6.0,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0
+    },
+    "cause": "manual harness root had trailing slash; lexical boundary compared a doubled slash; fixed by canonical resolve(root)",
+    "stoppedBeforeDatabaseAndBrowser": true
+  },
+  "types": {
+    "mode": "types",
+    "exitCode": 0,
+    "seconds": 12.42,
+    "heapMB": 2048
+  },
+  "static": {
+    "checkedFiles": 1,
+    "errors": 0,
+    "warnings": 0
+  },
+  "actualFullTaskAccepted": false,
+  "compiledBackendBootAccepted": false,
+  "finalApprovalBound": false,
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

@@ -1,4 +1,4 @@
-import type { ServerMessage } from '@holaday/shared-types';
+import type { ServerMessage, TaskTabLoadingReceipt } from '@holaday/shared-types';
 import { withDeadline } from '../shared/deadline.js';
 import { browserLaunchSessionId } from './browser-launch-profile.js';
 import { TASK_TAB_JOURNAL_PREFIX, TaskTabJournal } from './task-tab-journal.js';
@@ -185,23 +185,64 @@ export async function selectedTabOwnership(target: Target): Promise<'selected' |
   return (await selectedTabState(target)).selection.ownership;
 }
 
-type PreparedTaskTab = {
+type ReadyTaskTab = {
   taskTabCreated: boolean;
   tabId: number;
   selectionId: string;
   url: string;
   title: string;
 };
-const taskTabPreparations = new Map<
-  string,
-  {
-    owner: string;
-    target: string;
-    expiresAt: number;
-    settled: boolean;
-    result: Promise<PreparedTaskTab>;
-  }
->();
+type PreparedTaskTab = ReadyTaskTab | TaskTabLoadingReceipt;
+function loadingReceipt(
+  target: NonNullable<Target>,
+  preparationId: string,
+  tabId: number,
+  launchBrowserSessionId?: string,
+): TaskTabLoadingReceipt {
+  return {
+    taskTabStatus: 'loading',
+    taskTabCreated: true,
+    preparationId,
+    sourceTabId: target.tabId,
+    sourceOrigin: new URL(target.expectedUrl).origin,
+    tabId,
+    ...(launchBrowserSessionId ? { launchBrowserSessionId } : {}),
+  };
+}
+function requestedReadiness(result: PreparedTaskTab, reportReadiness: boolean): PreparedTaskTab {
+  if ('taskTabStatus' in result && !reportReadiness) throw new Error('task_tab_not_ready');
+  return result;
+}
+interface TaskTabPreparation {
+  owner: string;
+  target: string;
+  expiresAt: number;
+  settled: boolean;
+  retainOnExpiry: boolean;
+  observationFailed: boolean;
+  observe?: () => Promise<PreparedTaskTab>;
+  result: Promise<PreparedTaskTab>;
+}
+const taskTabPreparations = new Map<string, TaskTabPreparation>();
+
+function settlePreparation(entry: TaskTabPreparation): void {
+  void entry.result.then(
+    (result) => {
+      entry.settled = true;
+      entry.observationFailed = 'taskTabStatus' in result;
+      entry.retainOnExpiry = entry.observationFailed;
+    },
+    (error) => {
+      entry.settled = true;
+      // A known created page can be observed again. An uncertain create or a
+      // changed target/account stays rejected and must never be recreated.
+      entry.observationFailed =
+        entry.observe !== undefined &&
+        error instanceof Error &&
+        ['task_tab_not_ready', 'extension_tool_timeout'].includes(error.message);
+    },
+  );
+}
 
 /** Only Chrome metadata is read. The raw, potentially signed URL stays in this worker. */
 export async function prepareIndependentTaskTab(
@@ -211,11 +252,21 @@ export async function prepareIndependentTaskTab(
   resumeOnly = false,
   mode: 'current' | 'independent' = 'independent',
   expectedBrowserSessionId?: string,
+  reportReadiness = false,
 ): Promise<PreparedTaskTab> {
   if (recoverable) {
     if (expectedBrowserSessionId && (await browserLaunchSessionId()) !== expectedBrowserSessionId)
       throw new Error('target_changed');
-    return prepareRecoverableTaskTab(target, preparationId, resumeOnly, mode);
+    return requestedReadiness(
+      await prepareRecoverableTaskTab(
+        target,
+        preparationId,
+        resumeOnly,
+        mode,
+        expectedBrowserSessionId,
+      ),
+      reportReadiness,
+    );
   }
   if (mode === 'current' || resumeOnly || expectedBrowserSessionId)
     throw new Error('capability_missing');
@@ -227,21 +278,32 @@ export async function prepareIndependentTaskTab(
   const existing = taskTabPreparations.get(key);
   if (existing) {
     if (existing.target !== fingerprint) throw new Error('target_changed');
+    if (existing.settled && existing.observationFailed && existing.observe) {
+      existing.settled = false;
+      existing.observationFailed = false;
+      existing.result = existing.observe();
+      settlePreparation(existing);
+    }
     const prepared = await existing.result;
     // A timed-out caller can safely retry, but never receive a different owner's handle.
     if (getCurrentWsToken() !== owner) throw new Error('target_changed');
-    return prepared;
+    return requestedReadiness(prepared, reportReadiness);
   }
   for (const [id, item] of taskTabPreparations) {
-    if (item.settled && (item.expiresAt <= Date.now() || item.owner !== owner))
+    if (
+      item.settled &&
+      ((!item.retainOnExpiry && item.expiresAt <= Date.now()) || item.owner !== owner)
+    )
       taskTabPreparations.delete(id);
   }
   if (taskTabPreparations.size >= 64) throw new Error('browser_busy');
-  const entry = {
+  const entry: TaskTabPreparation = {
     owner,
     target: fingerprint,
     expiresAt: Date.now() + SELECTION_TTL_MS,
     settled: false,
+    retainOnExpiry: false,
+    observationFailed: false,
     result: Promise.resolve(null) as unknown as Promise<PreparedTaskTab>,
   };
   taskTabPreparations.set(key, entry);
@@ -251,39 +313,44 @@ export async function prepareIndependentTaskTab(
     if (!/^https?:$/.test(raw.protocol) || raw.username || raw.password)
       throw new Error('target_changed');
     if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+    entry.retainOnExpiry = true;
     const created = await chrome.tabs.create({ url: source.url, active: false });
-    if (created.id === undefined) throw new Error('tab_create_failed');
-    const deadline = Date.now() + 8000;
-    for (;;) {
-      if (getCurrentWsToken() !== owner) throw new Error('target_changed');
-      const tab = await withDeadline(chrome.tabs.get(created.id), 1500, 'extension_tool_timeout');
-      const origin = publicWebUrl(tab.url);
-      if (!tab.pendingUrl && tab.status !== 'loading') {
-        if (origin && origin !== raw.origin) throw new Error('origin_grant_required');
-        if (origin === raw.origin) {
-          return {
-            taskTabCreated: true as const,
-            tabId: created.id,
-            selectionId: rememberSelection(tab, owner, 'task'),
-            url: origin,
-            title: (tab.title ?? '').slice(0, 512),
-          };
+    if (created.id === undefined || created.id === target.tabId)
+      throw new Error('tab_create_failed');
+    const tabId = created.id;
+    entry.observe = async () => {
+      const deadline = Date.now() + 8000;
+      for (;;) {
+        if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+        const tab = await withDeadline(chrome.tabs.get(tabId), 1500, 'extension_tool_timeout');
+        if (getCurrentWsToken() !== owner) throw new Error('target_changed');
+        if (tab.id !== tabId) throw new Error('target_changed');
+        for (const candidate of [tab.url, tab.pendingUrl]) {
+          if (candidate && publicWebUrl(candidate) !== raw.origin)
+            throw new Error('origin_grant_required');
         }
+        const origin = publicWebUrl(tab.url);
+        if (!tab.pendingUrl && tab.status !== 'loading') {
+          if (origin && origin !== raw.origin) throw new Error('origin_grant_required');
+          if (origin === raw.origin) {
+            return {
+              taskTabCreated: true as const,
+              tabId,
+              selectionId: rememberSelection(tab, owner, 'task'),
+              url: origin,
+              title: (tab.title ?? '').slice(0, 512),
+            };
+          }
+        }
+        if (Date.now() >= deadline) return loadingReceipt(target, preparationId, tabId);
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
       }
-      if (Date.now() >= deadline) throw new Error('task_tab_not_ready');
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    }
+    };
+    return entry.observe();
   })();
   // Keep unknown/late creation outcomes in the dedupe map. Never create a second tab on retry.
-  void entry.result.then(
-    () => {
-      entry.settled = true;
-    },
-    () => {
-      entry.settled = true;
-    },
-  );
-  return entry.result;
+  settlePreparation(entry);
+  return requestedReadiness(await entry.result, reportReadiness);
 }
 
 const recoveryFlights = new Map<string, { source: string; promise: Promise<PreparedTaskTab> }>();
@@ -292,6 +359,7 @@ async function prepareRecoverableTaskTab(
   preparationId: string | undefined,
   resumeOnly: boolean,
   mode: 'current' | 'independent',
+  expectedBrowserSessionId?: string,
 ): Promise<PreparedTaskTab> {
   const owner = getAuthenticatedExtensionUserId();
   const token = getCurrentWsToken();
@@ -300,7 +368,7 @@ async function prepareRecoverableTaskTab(
     throw new Error('capability_missing');
   const origin = new URL(target.expectedUrl).origin;
   if (origin !== target.expectedUrl) throw new Error('target_changed');
-  const source = JSON.stringify([target.tabId, origin, mode]);
+  const source = JSON.stringify([target.tabId, origin, mode, expectedBrowserSessionId]);
   const key = JSON.stringify([owner, preparationId]);
   const existing = recoveryFlights.get(key);
   if (existing) {
@@ -313,9 +381,11 @@ async function prepareRecoverableTaskTab(
     getAuthenticatedExtensionClientId() === connection;
   const journal = taskTabJournal(owner, current, target);
   const promise = journal
-    .prepare({ tabId: target.tabId, origin }, preparationId, resumeOnly, mode)
+    .prepare({ tabId: target.tabId, origin }, preparationId, resumeOnly, mode, true)
     .then((tab) => {
       if (!current()) throw new Error('target_changed');
+      if (tab.taskTabStatus === 'loading')
+        return loadingReceipt(target, preparationId, tab.id!, expectedBrowserSessionId);
       return {
         taskTabCreated: mode === 'independent',
         tabId: tab.id!,

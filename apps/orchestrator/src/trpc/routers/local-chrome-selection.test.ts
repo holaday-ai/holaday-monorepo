@@ -306,3 +306,125 @@ it.each(['wrong-connection', 'source-tab', 'other-origin', 'missing-marker'])(
     ).rejects.toThrow('未扣除额度');
   },
 );
+
+function readinessFixture(capability = true) {
+  vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
+  vi.stubEnv('BROWSER_LAUNCH_RECOVERY_ENABLED', 'false');
+  vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+    viewportV2: true,
+    observationV2: true,
+    replayV1: false,
+    routingV2: true,
+  });
+  vi.spyOn(ws, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+  const handshake = {
+    ok: true as const,
+    extensionClientId: 'connection',
+    result: {
+      selectedSessionVersion: 1,
+      tabs: [
+        {
+          tabId: 42,
+          selectionId: selection.selectionId,
+          title: 'Work',
+          url: selection.expectedUrl,
+        },
+      ],
+      truncated: false,
+      userBrowserProtocol: {
+        ...USER_BROWSER_PROTOCOL,
+        capabilities: [
+          ...USER_BROWSER_PROTOCOL.capabilities,
+          'task_tab_start',
+          ...(capability ? ['task_tab_readiness_v1'] : []),
+        ],
+      },
+    },
+  };
+  const input = {
+    selection,
+    preparationId: '61c56349-421b-4a44-b946-507476393185',
+    reportReadiness: true,
+  };
+  const loading = {
+    taskTabStatus: 'loading',
+    taskTabCreated: true,
+    preparationId: input.preparationId,
+    sourceTabId: 42,
+    sourceOrigin: selection.expectedUrl,
+    tabId: 73,
+    selectedSessionVersion: 1,
+  };
+  const send = vi
+    .spyOn(ws, 'sendExtensionToolCall')
+    .mockResolvedValueOnce(handshake)
+    .mockResolvedValueOnce({ ok: true, extensionClientId: 'connection', result: loading });
+  const caller = router({
+    prepare: selectionRoutes.localChromeTaskTabProcedure,
+    tabs: localChromeTabsProcedure,
+  }).createCaller({ userId: 'alice' } as Context);
+  return { caller, send, input, loading, handshake };
+}
+it('returns a strictly bound acknowledged loading receipt without action authority', async () => {
+  const h = readinessFixture();
+  expect(await h.caller.prepare(h.input)).toEqual({
+    preparationState: 'loading',
+    taskTabCreated: true,
+    extensionClientId: 'connection',
+    preparationId: h.input.preparationId,
+    sourceTabId: 42,
+    sourceOrigin: selection.expectedUrl,
+    tabId: 73,
+  });
+  expect(h.send).toHaveBeenLastCalledWith(
+    'alice',
+    expect.objectContaining({ args: expect.objectContaining({ reportReadiness: true }) }),
+  );
+});
+it('returns unsupported without creating a page when the new readiness capability is absent', async () => {
+  const h = readinessFixture(false);
+  expect(await h.caller.prepare(h.input)).toEqual({ preparationState: 'unsupported' });
+  expect(h.send).toHaveBeenCalledOnce();
+});
+it('advertises readiness only for the actual connected extension capability', async () => {
+  const h = readinessFixture();
+  h.send.mockReset().mockResolvedValue(h.handshake);
+  expect((await h.caller.tabs()).tabs[0]).toHaveProperty('preparationReadiness', true);
+});
+it.each([
+  { preparationId: '61c56349-421b-4a44-b946-507476393186' },
+  { sourceTabId: 41 },
+  { sourceOrigin: 'https://other.example' },
+  { tabId: 42 },
+  { taskTabCreated: false },
+  { url: 'https://work.example/private' },
+  { selectionId: selection.selectionId },
+  { taskTabStatus: 'unexpected' },
+  { launchBrowserSessionId: '82cf0bca-b78c-4f12-af23-035421ab959c' },
+])('rejects a loading receipt with mismatched or ambiguous authority (%j)', async (change) => {
+  const h = readinessFixture();
+  h.send
+    .mockReset()
+    .mockResolvedValueOnce(h.handshake)
+    .mockResolvedValueOnce({
+      ok: true,
+      extensionClientId: 'connection',
+      result: { ...h.loading, ...change },
+    });
+  await expect(h.caller.prepare(h.input)).rejects.toThrow();
+});
+it('does not accept a loading receipt from another connection or a legacy caller', async () => {
+  const h = readinessFixture();
+  h.send
+    .mockReset()
+    .mockResolvedValueOnce(h.handshake)
+    .mockResolvedValueOnce({ ok: true, extensionClientId: 'other', result: h.loading });
+  await expect(h.caller.prepare(h.input)).rejects.toThrow();
+  h.send
+    .mockReset()
+    .mockResolvedValueOnce(h.handshake)
+    .mockResolvedValueOnce({ ok: true, extensionClientId: 'connection', result: h.loading });
+  await expect(
+    h.caller.prepare({ selection, preparationId: h.input.preparationId }),
+  ).rejects.toThrow();
+});

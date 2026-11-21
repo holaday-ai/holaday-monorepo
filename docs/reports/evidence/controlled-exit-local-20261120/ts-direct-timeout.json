@@ -1,0 +1,11 @@
+{
+  "timeoutSeconds": 180,
+  "result": "no completed report; not a test pass or product failure",
+  "parentPid": 943,
+  "observedOrphanWorkerPid": 946,
+  "workerExitObservedBeforeCleanupSignal": true,
+  "signalsSentToWorker": 0,
+  "logsRetained": true,
+  "modelCalls": 0,
+  "kernelExitAcceptance": false
+}

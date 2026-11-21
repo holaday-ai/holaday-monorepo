@@ -211,6 +211,24 @@ export function liveStatusText(input: {
     }
   }
   const kind = last.actionKind ?? '';
+  const receiptLabels: Record<string, [string, string, string]> = {
+    selected_chrome_download: ['正在保存网页原件…', '已保存网页原件', '网页原件尚未保存'],
+    read_task_file: ['正在读取任务文件…', '已读取任务文件', '任务文件读取未完成'],
+    analyze_task_table: ['正在核对表格数据…', '已执行表格统计', '表格统计尚未核实'],
+    create_file: ['正在生成任务文件…', '已生成任务文件', '任务文件生成未完成'],
+    selected_chrome_observe: ['正在读取当前页面…', '已读取当前页面', '当前页面读取未完成'],
+    selected_chrome_action: ['正在操作当前页面…', '已执行页面操作', '页面操作结果尚未确认'],
+    selected_chrome_screenshot: ['正在保存页面截图…', '已保存页面截图', '页面截图尚未保存'],
+    selected_chrome_finish: ['正在核实最终结果…', '已核实最终结果', '最终结果尚未核实'],
+    selected_chrome_plan_discarded: [
+      '正在重新核对页面…',
+      '页面已变化，已弃用旧计划',
+      '旧计划未执行',
+    ],
+  };
+  const receiptLabel = receiptLabels[kind];
+  if (receiptLabel)
+    return receiptLabel[last.status === 'done' ? 1 : last.status === 'running' ? 0 : 2];
   switch (kind) {
     case 'browser_rescue':
       return stripInternalRefs(last.actionSummary ?? '') || '这条路没走通，换个来源试试…';
@@ -913,6 +931,10 @@ export function stepTimeline(
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     if (!step) continue;
+    // Older servers used this fallback for successful file tools too; it is not
+    // reliable evidence of a discarded plan or a changed page.
+    if (step.actionKind === 'selected_chrome_plan_discarded' && step.actionSummary === '计划未执行')
+      continue;
     const said = step.actionKind === 'text' ? stripInternalRefs(step.actionSummary ?? '') : '';
     const live = said && said !== 'text' ? said : liveStatusText({ steps: steps.slice(0, i + 1) });
     if (live === '正在思考下一步…' || live === '正在处理…') continue;

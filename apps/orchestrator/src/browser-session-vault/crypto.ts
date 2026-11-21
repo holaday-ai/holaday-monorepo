@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 export interface EncryptionContext {
   userId: string;
@@ -34,6 +34,10 @@ const aad = (c: EncryptionContext) =>
       ...(c.access ? [c.access] : []),
     ]),
   );
+/** Non-secret KMS context: bind the exact same bytes as the local AEAD. */
+export function encryptionContextDigest(context: EncryptionContext): string {
+  return createHash('sha256').update(aad(context)).digest('hex');
+}
 function encrypt(key: Buffer, value: Buffer, context: EncryptionContext) {
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);

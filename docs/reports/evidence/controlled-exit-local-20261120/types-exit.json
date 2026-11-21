@@ -1,0 +1,16 @@
+{
+  "mode": "types",
+  "exit": 0,
+  "seconds": 4.55,
+  "heapMB": 2048,
+  "command": [
+    "/Users/yaleiqi/.holaday-recovery/tasks/deploy16/node-v22.23.3/node-v22.23.3-darwin-arm64/bin/node",
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    ".controlled-exit-types.json"
+  ],
+  "sourceSHA256": {
+    "apps/orchestrator/src/browser-pool/browser-pool.ts": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+    "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "mode": "py",
+  "exit": 0,
+  "seconds": 6.49,
+  "sourceCommit": "ad483337497cf0bd247a88115c1777846afa8096",
+  "heapMB": 1024,
+  "serial": true,
+  "targets": [
+    "test_quartet_protocol",
+    "test_quartet_create_control",
+    "test_quartet_journal",
+    "test_quartet_application_monitor",
+    "test_quartet_worker_pin",
+    "test_resource_recovery"
+  ],
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "kernelBoundarySynthetic": true,
+  "groupExitAcceptance": false,
+  "testsRun": 78
+}

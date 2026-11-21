@@ -10,6 +10,43 @@ ROLES = ('anchor', 'xvfb', 'brave', 'x11vnc', 'websockify')
 
 
 def replay(row, resources, requests):
+    if row.get('action') == 'role_intervening_job_observed':
+        resource, role, job = row.get('resource'), row.get('role'), row.get('job')
+        if (set(row) != {'version', 'revision', 'action', 'resource', 'closeId', 'role', 'job', 'signalSerial'}
+                or type(resource) is not str or resource not in resources
+                or type(role) is not str or role not in ROLES or type(job) is not str
+                or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', job) is None
+                or not 0 < int(job.rsplit('/', 1)[1]) < 2**32
+                or type(row['signalSerial']) is not int or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        group = resources[resource]
+        close = group.get('close', {})
+        stops = close.get('stops', {})
+        if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+                or job in close.get('interveningJobs', {}) or role not in stops
+                or any(value.get('job') == job for value in group['roles'].values())
+                or any(value.get('job') == job for value in stops.values())): raise ValueError()
+        close.setdefault('interveningJobs', {})[job] = {'role': role, 'signalSerial': row['signalSerial']}
+        return  # Same-unit completed job, not a substitute for our own explicit stop.
+    if row.get('action') == 'close_observation':
+        resource = row.get('resource')
+        if (set(row) != {'version', 'revision', 'action', 'resource', 'closeId', 'requestId', 'evidenceDigest'}
+                or type(resource) is not str or resource not in resources): raise ValueError()
+        group = resources[resource]
+        close = group.get('close', {})
+        if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+                or set(close.get('terminalObservations', {})) != set(ROLES) or 'observation' in close):
+            raise ValueError()
+        _identifier(row['requestId'], 32); _identifier(row['evidenceDigest'], 64)
+        if any(value.get('close', {}).get('observation', {}).get('requestId') == row['requestId']
+               and value.get('boot') == group['boot'] for value in resources.values()): raise ValueError()
+        close['observation'] = {'requestId': row['requestId'], 'evidenceDigest': row['evidenceDigest']}
+        return  # Closing remains historical/unknown; no physical slot release.
+    if row.get('action') == 'role_terminal_observed':
+        return replay_terminal(row, resources)
+    if row.get('action') in ('role_stop_dispatch', 'role_stop_accepted', 'role_stop_observed'):
+        return replay_stop(row, resources)
+    if row.get('action') == 'close_intent':
+        return replay_close_intent(row, resources)
     if row.get('action') == 'prepare':
         return replay_prepare(row, resources, requests)
     if row.get('action') in ('create_offer', 'create_accept'):
@@ -65,6 +102,12 @@ def replay(row, resources, requests):
                 or any(value.get('job') == row['job'] for value in roles.values())):
             raise ValueError()
         roles[role].update(state='accepted', job=row['job'])
+    elif row['action'] == 'role_start_observed':
+        if (set(row) != common | {'job', 'signalSerial'} or role not in roles
+                or roles[role]['state'] != 'accepted' or row['job'] != roles[role]['job']
+                or 'startSignalSerial' in roles[role] or type(row['signalSerial']) is not int
+                or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        roles[role]['startSignalSerial'] = row['signalSerial']
     elif row['action'] == 'role_observe':
         if (set(row) != common | {'invocation'} or role not in roles or roles[role]['state'] != 'accepted'):
             raise ValueError()
@@ -76,6 +119,92 @@ def replay(row, resources, requests):
             group['state'] = 'observed'
     else:
         raise ValueError()
+
+
+def replay_close_intent(row, resources):
+    """Reserve a stop transaction, never reconstruct its original live owner."""
+    fields = {'version', 'revision', 'action', 'resource', 'closeId',
+              'managerGuid', 'managerOwner', 'roles'}
+    resource = row.get('resource')
+    if (set(row) != fields or type(resource) is not str or resource not in resources
+            or resources[resource]['version'] != 2): raise ValueError()
+    group = resources[resource]
+    if group['state'] != 'ready' or 'close' in group: raise ValueError()
+    _identifier(row['closeId'], 32)
+    if any(value.get('close', {}).get('closeId') == row['closeId'] for value in resources.values()):
+        raise ValueError()
+    material = group.get('material', {})
+    if (material.get('managerGuid') != row['managerGuid']
+            or material.get('managerOwner') != row['managerOwner']
+            or type(row['roles']) is not dict or set(row['roles']) != set(ROLES)
+            or set(group.get('roles', {})) != set(ROLES)): raise ValueError()
+    for role in ROLES:
+        original = group['roles'][role]
+        binding = row['roles'][role]
+        if (original.get('state') != 'observed' or original.get('granted') is not True
+                or original.get('managerGuid') != row['managerGuid']
+                or original.get('managerOwner') != row['managerOwner']
+                or type(binding) is not dict
+                or binding != {key: original[key] for key in ('unit', 'job', 'invocation')}):
+            raise ValueError()
+    group['close'] = {'state': 'intent', 'closeId': row['closeId'],
+                      'revision': row['revision'], 'managerGuid': row['managerGuid'],
+                      'managerOwner': row['managerOwner'],
+                      'roles': {role: dict(row['roles'][role]) for role in ROLES}}
+    group['state'] = 'closing'
+    # No stop ACK/job completion, terminal capability, exit or reusable slot.
+
+
+def replay_stop(row, resources):
+    common = {'version', 'revision', 'action', 'resource', 'closeId', 'role'}
+    resource, role, action = row.get('resource'), row.get('role'), row['action']
+    if (type(resource) is not str or resource not in resources or resources[resource]['version'] != 2
+            or type(role) is not str or role not in ROLES): raise ValueError()
+    group = resources[resource]
+    close = group.get('close', {})
+    if group['state'] != 'closing' or close.get('closeId') != row.get('closeId'): raise ValueError()
+    stops = close.get('stops', {})
+    order = ROLES[1:] + ROLES[:1]
+    if action == 'role_stop_dispatch':
+        if (set(row) != common or role in stops or len(stops) >= 5
+                or role != order[len(stops)] or any(value['state'] != 'observed' for value in stops.values())):
+            raise ValueError()
+        close.setdefault('stops', {})[role] = {'state': 'dispatching'}
+    elif action == 'role_stop_accepted':
+        if (set(row) != common | {'job'} or stops.get(role, {}).get('state') != 'dispatching'
+                or type(row['job']) is not str
+                or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', row['job']) is None
+                or int(row['job'].rsplit('/', 1)[1]) >= 2**32
+                or any(value.get('job') == row['job'] for value in group['roles'].values())
+                or row['job'] in close.get('interveningJobs', {})
+                or any(value.get('job') == row['job'] for value in stops.values())): raise ValueError()
+        stops[role].update(state='accepted', job=row['job'])
+    elif action == 'role_stop_observed':
+        if (set(row) != common | {'job', 'result', 'signalSerial'}
+                or stops.get(role, {}).get('state') != 'accepted' or row['job'] != stops[role]['job']
+                or row['result'] != 'done' or type(row['signalSerial']) is not int
+                or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        stops[role].update(state='observed', result='done', signalSerial=row['signalSerial'])
+    else: raise ValueError()
+    # All five stop receipts still leave the resource closing and its slot reserved.
+
+
+def replay_terminal(row, resources):
+    fields = {'version', 'revision', 'action', 'resource', 'closeId', 'role', 'job', 'signalSerial', 'cgroup'}
+    resource, role = row.get('resource'), row.get('role')
+    if (set(row) != fields or type(resource) is not str or resource not in resources
+            or resources[resource]['version'] != 2 or type(role) is not str or role not in ROLES): raise ValueError()
+    group = resources[resource]
+    close = group.get('close', {})
+    stops = close.get('stops', {})
+    if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+            or set(stops) != set(ROLES) or any(value['state'] != 'observed' for value in stops.values())
+            or row['job'] != stops[role]['job'] or row['signalSerial'] != stops[role]['signalSerial']
+            or type(row['signalSerial']) is not int or row['cgroup'] not in ('empty', 'removed')
+            or role in close.get('terminalObservations', {})): raise ValueError()
+    close.setdefault('terminalObservations', {})[role] = {'job': row['job'],
+        'signalSerial': row['signalSerial'], 'cgroup': row['cgroup']}
+    # Historical observations only: neither reap nor one-time Node IO consumption is proven.
 
 
 def replay_material(row, resources):

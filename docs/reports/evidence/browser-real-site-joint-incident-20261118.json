@@ -1,0 +1,88 @@
+{
+  "checkedAtUTC": "2026-11-19T01:53:42.245855+00:00",
+  "status": "real-site acceptance failed; no replay",
+  "sourceHead": "9924866426d7ba609644a1634f7c8b1880652cf2",
+  "workingTreeChanges": [
+    "apps/extension/manifest.config.ts",
+    "apps/extension/src/shared/local-chrome-qa.test.ts",
+    "apps/orchestrator/src/trpc/routers/tasks.real-site.manual.test.ts"
+  ],
+  "boundaries": {
+    "realSql": "MySQL8.0.46, fresh owned holaday_it; source template96 tables and no business data",
+    "quotaMocked": false,
+    "classifierMocked": false,
+    "scriptedModelResponses": false,
+    "extensionRegistry": "actual production WS dispatcher",
+    "credentialsCopied": false
+  },
+  "qaPermissionFix": {
+    "preset": "github-sheets",
+    "addedOrigins": [
+      "https://github.com",
+      "https://docs.google.com"
+    ],
+    "authAndBackendLoopbackOnly": true,
+    "cookiesPermission": false,
+    "historyPermission": false,
+    "arbitraryPresetRejected": true,
+    "formalModeRejected": true,
+    "tests": {
+      "passed": 26,
+      "failed": 0,
+      "skipped": 0
+    },
+    "formalFrozenArchiveModified": false
+  },
+  "github": {
+    "explicitPreconditionHttpStatus": 412,
+    "taskCreated": false,
+    "quotaConsumed": false,
+    "modelCalls": 0,
+    "laterHandshakeOpen": true
+  },
+  "sheets": {
+    "actualAppComposerSubmissions": 1,
+    "realModelCalls": 4,
+    "models": [
+      "qwen3.8-max"
+    ],
+    "allHttp200": true,
+    "sqlQuotaTasksUsed": 1,
+    "sqlTaskStatus": "executing",
+    "loopReportedStatus": "failed",
+    "terminalPersistenceError": "QUEUE_PERSISTENCE_UNKNOWN",
+    "downloadStep": "applied; host save unconfirmed; no replay",
+    "nativeOriginalDownloadCompleted": true,
+    "bytes": 1000,
+    "sha256": "f0a91ea82ffde445b25c0cd413d3426f757ba2292aa16435d3ddab540cb86331",
+    "forensicRows": 100,
+    "forensicSum": "5075.00",
+    "forensicReadingIsTaskAcceptance": false,
+    "sqlTaskFileRows": 0,
+    "generatedSummary": false,
+    "historyBothFilesVerified": false,
+    "finalOriginCrossesFromDocsToGoogleusercontent": true,
+    "uniqueRootCauseConfirmed": false,
+    "sameTaskReplayed": false
+  },
+  "modelLedger": {
+    "totalAttempts": 5,
+    "received": 5,
+    "unknownProviderAttempts": 0,
+    "maxAttempts": 25,
+    "reset": false
+  },
+  "remaining": [
+    "capture-event diagnosis and model-free redirect/iframe reproduction",
+    "native file capture and unknown-state reconciliation",
+    "GitHub profile QA worker/handshake",
+    "both real task file/history acceptance",
+    "physical input and takeover/disconnect",
+    "verified stable account subjects",
+    "real KMS and least-privilege runtime binding"
+  ],
+  "productionChanged": false,
+  "deployed": false,
+  "pr361Merged": false,
+  "goalStatus": "active"
+}

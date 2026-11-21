@@ -222,3 +222,78 @@ it('keeps an explicit current-page request on the original target through durabl
     expect.objectContaining({ localChrome: expect.objectContaining({ tabId: 42 }) }),
   );
 });
+
+it('retains the durable preparation during loading and creates once after readiness', async () => {
+  vi.useFakeTimers();
+  try {
+    api.tasks.localChromeTabs.query.mockResolvedValue({
+      tabs: [{ ...source, preparationReadiness: true }],
+    });
+    api.tasks.localChromeTaskTab.mutate.mockImplementationOnce(async ({ preparationId }) => ({
+      preparationState: 'loading',
+      extensionClientId: source.extensionClientId,
+      taskTabCreated: true,
+      preparationId,
+      sourceTabId: 42,
+      sourceOrigin: source.expectedUrl,
+      tabId: 100,
+      launchBrowserSessionId: profile,
+    }));
+    useTaskStore.setState({
+      localChromeSelection: { ...source, preparationReadiness: true },
+    } as never);
+    const operation = useTaskStore.getState().createTask('整理报表');
+    await vi.waitFor(() => expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(await operation).toHaveProperty('taskId');
+    expect(api.tasks.create.mutate).toHaveBeenCalledOnce();
+    expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(2);
+    const [first, second] = api.tasks.localChromeTaskTab.mutate.mock.calls;
+    expect(first).toEqual(second);
+    expect(first?.[0]).toHaveProperty('reportReadiness', true);
+    expect(first?.[0].selection).not.toHaveProperty('preparationReadiness');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('stops automatic recovery after bounded loading checks while preserving the durable record', async () => {
+  vi.useFakeTimers();
+  try {
+    api.tasks.localChromeTabs.query.mockResolvedValue({
+      tabs: [{ ...source, preparationReadiness: true }],
+    });
+    api.tasks.localChromeTaskTab.mutate.mockImplementation(async ({ preparationId }) => ({
+      preparationState: 'loading',
+      extensionClientId: source.extensionClientId,
+      taskTabCreated: true,
+      preparationId,
+      sourceTabId: 42,
+      sourceOrigin: source.expectedUrl,
+      tabId: 100,
+      launchBrowserSessionId: profile,
+    }));
+    const operation = useTaskStore.getState().createTask('整理后台报表');
+    await vi.waitFor(() => expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await operation).toHaveProperty('error', expect.stringContaining('仍在加载'));
+    expect(api.tasks.create.mutate).not.toHaveBeenCalled();
+    const records = Object.keys(localStorage).filter((key) =>
+      key.startsWith(BROWSER_LAUNCH_JOURNAL_PREFIX),
+    );
+    expect(records).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(records[0]!)!).phase).toBe('preparing');
+    useTaskStore.getState().reset();
+    const recovery = useTaskStore.getState().refreshTasks();
+    await vi.waitFor(() => expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(4));
+    await vi.advanceTimersByTimeAsync(2100);
+    await recovery;
+    expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(api.tasks.localChromeTaskTab.mutate).toHaveBeenCalledTimes(6);
+    expect(api.tasks.create.mutate).not.toHaveBeenCalled();
+    expect(api.tasks.localChromeTaskTab.mutate.mock.calls[3]?.[0].resumeOnly).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});

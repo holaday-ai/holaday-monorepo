@@ -23,8 +23,9 @@ import {
   taskHubRowTitle,
   taskHubRowTone,
   taskHubStatusIconKind,
+  taskHubStatusLabel,
 } from '@/lib/task-hub-state';
-import { historyEmptyCopy, taskStatusLabel } from '@/lib/task-status-copy';
+import { historyEmptyCopy } from '@/lib/task-status-copy';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 import { PageContainer, PageHeader, PageLoadingPanel, Section } from '@/pages/PageShell';
@@ -378,7 +379,7 @@ export function HistoryPage(): JSX.Element {
               {tasks.map((t) => {
                 const needsAttention = taskHubNeedsAttention(t);
                 const restingTone = needsAttention ? '' : taskHubRowTone(t);
-                const statusLabel = taskStatusLabel(t.status, t.awaitingKind);
+                const statusLabel = taskHubStatusLabel(t);
                 return (
                   <li
                     key={t.taskId}

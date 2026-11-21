@@ -75,6 +75,11 @@ export function LiveStatusLine({
             />
           ))}
       </button>
+      {!open && timeline.length > 0 && (
+        <div className="mt-2 border-l border-[#DCDDDD] pl-4 dark:border-white/10">
+          <Timeline lines={timeline.slice(-3)} running />
+        </div>
+      )}
       {open && (
         <div className="mt-2 border-l border-[#DCDDDD] pl-4 dark:border-white/10">
           <Timeline lines={timeline} running />
@@ -96,13 +101,15 @@ export function Timeline({
   return (
     <ol className="space-y-1.5" data-testid="process-timeline">
       {lines.map((line, i) => {
-        const current = running && i === lines.length - 1 && line.status !== 'failed';
+        const current = running && i === lines.length - 1 && line.status === 'running';
         return (
           <li key={line.key} className="flex items-start gap-2 text-[13px] leading-5">
             <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center">
               {current ? (
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#FF0061] motion-reduce:animate-none" />
-              ) : line.status === 'failed' ? (
+              ) : line.status === 'failed' ||
+                line.status === 'cancelled' ||
+                line.status === 'running' ? (
                 <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
               ) : (
                 <Check className="h-3.5 w-3.5 text-[#42C0EF]" strokeWidth={3} aria-hidden />

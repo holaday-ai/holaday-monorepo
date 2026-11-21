@@ -1,0 +1,32 @@
+{
+  "basis": "TypeScript emitted JavaScript lexical tokens, excluding whitespace/comments",
+  "before": [
+    {
+      "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+      "sourceSHA256": "1f5bdecf94406ca2e7f817c012592585a9a8b600e613a14a9b3e9905f9260d35",
+      "emittedTokensSHA256": "c666abc24c0fc2ca1602e817b30094d1b72e8c4651045f6e7d5cbee6ee49a481",
+      "tokens": 275
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts",
+      "sourceSHA256": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa",
+      "emittedTokensSHA256": "ad90e64e877ad698c9cef941b859e84553abbabeaea14f4fa08784f004b31c6f",
+      "tokens": 10608
+    }
+  ],
+  "after": [
+    {
+      "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+      "sourceSHA256": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2",
+      "emittedTokensSHA256": "c666abc24c0fc2ca1602e817b30094d1b72e8c4651045f6e7d5cbee6ee49a481",
+      "tokens": 275
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts",
+      "sourceSHA256": "45d7f40dd760f88ef212f00bc28bcd27add35690a8ceb55485d70c66bc6a93aa",
+      "emittedTokensSHA256": "ad90e64e877ad698c9cef941b859e84553abbabeaea14f4fa08784f004b31c6f",
+      "tokens": 10608
+    }
+  ],
+  "equivalent": true
+}

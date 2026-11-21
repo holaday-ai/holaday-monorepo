@@ -1,0 +1,209 @@
+{
+  "kind": "verified-synthetic-contract-summary",
+  "rawSHA256": "9354f6a820dcfaee734100b2c82bca9ad95385bf0787040e3cf4df657b8b2220",
+  "nonce": "a66c49615962",
+  "units": 6,
+  "originalWorkerPins": 9,
+  "twoGroupBUnchanged": true,
+  "measurements": [
+    {
+      "label": "basic",
+      "seconds": 0.0124,
+      "roles": [
+        "leader"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "running",
+      "beforeMainPID": 497,
+      "afterActive": "inactive",
+      "afterSub": "dead",
+      "afterInvocation": "7daa8d08c39642aa9db68119daf72043",
+      "heldBefore": {
+        "inode": 2447,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2447,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    },
+    {
+      "label": "double_fork",
+      "seconds": 2.2137,
+      "roles": [
+        "leader",
+        "intermediate",
+        "grandchild"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "exited",
+      "beforeMainPID": 0,
+      "afterActive": "failed",
+      "afterSub": "failed",
+      "afterInvocation": "032ab696fa7944e9b9037166e4d7c173",
+      "heldBefore": {
+        "inode": 2491,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2491,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    },
+    {
+      "label": "ignore_term",
+      "seconds": 2.2484,
+      "roles": [
+        "leader"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "running",
+      "beforeMainPID": 506,
+      "afterActive": "failed",
+      "afterSub": "failed",
+      "afterInvocation": "83b322794c3c4b958d7b685c604f1510",
+      "heldBefore": {
+        "inode": 2535,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2535,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    },
+    {
+      "label": "term_fork",
+      "seconds": 2.2504,
+      "roles": [
+        "leader",
+        "late-child"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "running",
+      "beforeMainPID": 509,
+      "afterActive": "failed",
+      "afterSub": "failed",
+      "afterInvocation": "67e382d56a4a4889b4241ce5c3be8b34",
+      "heldBefore": {
+        "inode": 2579,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2579,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    },
+    {
+      "label": "isolation-a",
+      "seconds": 0.0127,
+      "roles": [
+        "leader"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "running",
+      "beforeMainPID": 513,
+      "afterActive": "inactive",
+      "afterSub": "dead",
+      "afterInvocation": "efaaa3ba41534b6483c240c1a95255a8",
+      "heldBefore": {
+        "inode": 2623,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2623,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    },
+    {
+      "label": "isolation-b",
+      "seconds": 0.0125,
+      "roles": [
+        "leader"
+      ],
+      "beforeActive": "active",
+      "beforeSub": "running",
+      "beforeMainPID": 514,
+      "afterActive": "inactive",
+      "afterSub": "dead",
+      "afterInvocation": "b85387c754dd4e6b8d4d73d42fdd8531",
+      "heldBefore": {
+        "inode": 2667,
+        "nlink": 2,
+        "events": "populated 1\nfrozen 0"
+      },
+      "heldAfter": {
+        "inode": 2667,
+        "nlink": 2,
+        "eventsReadError": {
+          "errno": 19,
+          "name": "ENODEV"
+        }
+      },
+      "pathAfter": {
+        "errno": 2,
+        "name": "ENOENT"
+      },
+      "allPidfdsExited": true,
+      "allOriginalPeerEOF": true
+    }
+  ],
+  "productionAccepted": false,
+  "productExitProofAccepted": false,
+  "slotReusePermitted": false,
+  "reapOfAllDescendantsProven": false
+}

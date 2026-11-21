@@ -12,6 +12,7 @@ import type { ElementHandle, Frame, Locator, Page } from 'playwright-crx';
 import type { DriverAction } from './driver.js';
 import { grantedFrameOrigin } from './frame-origin.js';
 import { type NativeBlobSources, captureNativeBlobSources } from './native-blob-source.js';
+import { nativeDownloadResponseSourcesForPage } from './native-download-sources.js';
 import {
   NativeDownloadCaptureController,
   NativeDownloadCaptureError,
@@ -213,6 +214,42 @@ const readVersion = (collaborationV2 = false): DocumentVersion => {
     composing: state.activity.composing,
     interrupted: state.activity.interrupted,
   };
+};
+/** A file lease cannot follow a later person-generated download into another
+ * frame. Arm on the owned native pointer-up, after its own focus transition. */
+const trackDownloadFocus = (input: { nonce: string; start: boolean }) => {
+  const state = (
+    window as typeof window & {
+      __holadayV2Document?: {
+        activity?: { sequence: number; interrupted: boolean; active: boolean };
+        downloadFocus?: { nonce: string; armed: boolean };
+        downloadFocusInstalled?: boolean;
+      };
+    }
+  ).__holadayV2Document;
+  if (!input.start) {
+    if (state?.downloadFocus?.nonce === input.nonce) state.downloadFocus = undefined;
+    return;
+  }
+  if (!state?.activity) throw new Error('scope_unavailable');
+  if (state.downloadFocus) throw new Error('browser_busy');
+  if (!state.downloadFocusInstalled) {
+    document.addEventListener(
+      'pointerup',
+      (event) => {
+        if (event.isTrusted && state.downloadFocus) state.downloadFocus.armed = true;
+      },
+      { capture: true, passive: true },
+    );
+    window.addEventListener('blur', () => {
+      if (state.downloadFocus?.armed && state.activity?.active) {
+        state.activity.sequence++;
+        state.activity.interrupted = true;
+      }
+    });
+    state.downloadFocusInstalled = true;
+  }
+  state.downloadFocus = { nonce: input.nonce, armed: false };
 };
 const readElement = async (
   node: Element,
@@ -1343,6 +1380,7 @@ export class SelectedTargetResolver {
     const current = () => !this.disposed && !signal?.aborted && dispatchAllowed();
     let result: NativeDownloadCaptureResult | undefined;
     let finalInputCheck: (() => Promise<void>) | undefined;
+    const focusLease = crypto.randomUUID();
     this.downloadActive = true;
     try {
       await this.executeInternal(
@@ -1358,6 +1396,7 @@ export class SelectedTargetResolver {
             ticket.frame === rootFrame
               ? rootInput
               : await ticket.frame.evaluate<DocumentVersion, boolean>(readVersion, true);
+          await ticket.frame.evaluate(trackDownloadFocus, { nonce: focusLease, start: true });
           const checkInput = async (applied: boolean) => {
             const rootNow = await rootFrame.evaluate<DocumentVersion, boolean>(readVersion, true);
             const frameNow =
@@ -1398,6 +1437,14 @@ export class SelectedTargetResolver {
                 })
             )
               throw new Error('target_changed');
+            const link = (await this.cdp('Runtime.callFunctionOn', {
+              objectId: target.objectId,
+              functionDeclaration:
+                'function(){const a=this.closest("a[download]");return a&&typeof a.href==="string"?a.href:null;}',
+              returnByValue: true,
+            })) as { result?: { value?: unknown } };
+            const downloadLink =
+              typeof link.result?.value === 'string' ? link.result.value : undefined;
             try {
               this.blobLease = await captureNativeBlobSources({
                 owner: this.page,
@@ -1428,6 +1475,8 @@ export class SelectedTargetResolver {
             result = await this.downloads.capture({
               frameId: target.frameId,
               origin: context.origin,
+              responseSources: nativeDownloadResponseSourcesForPage(ticket.frame.url()),
+              downloadLink,
               current,
               prepare: async () => {
                 await checkInput(false);
@@ -1501,6 +1550,12 @@ export class SelectedTargetResolver {
       }
       throw error;
     } finally {
+      try {
+        if (this.origin(ticket.frame) === context.origin)
+          await ticket.frame.evaluate(trackDownloadFocus, { nonce: focusLease, start: false });
+      } catch {
+        /* A closed or newly ungranted document has no lease to release here. */
+      }
       this.downloadActive = false;
     }
   }

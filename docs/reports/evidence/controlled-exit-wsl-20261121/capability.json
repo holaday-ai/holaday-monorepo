@@ -1,0 +1,61 @@
+{
+  "kind": "holaday-isolated-wsl-lab-inventory",
+  "nonce": "holaday-exitlab-20261121-a1",
+  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+  "machine": "x86_64",
+  "pid1Comm": "systemd",
+  "kernelBootId": "14113753-2e75-41c4-94a0-64c7017d07b7",
+  "distro": "Holaday-ExitLab",
+  "uid": 0,
+  "exitProofAccepted": false,
+  "productionAccepted": false,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "ownPidfdOpen": true,
+  "ownPidfdNotExited": true,
+  "controllers": [
+    "cpuset",
+    "cpu",
+    "io",
+    "memory",
+    "hugetlb",
+    "pids",
+    "rdma"
+  ],
+  "ownCgroup": "0::/",
+  "namespaceLinks": {
+    "cgroup": "cgroup:[4026531835]",
+    "pid": "pid:[4026532222]",
+    "mnt": "mnt:[4026532220]",
+    "net": "net:[4026531840]"
+  },
+  "wslConf": "[boot]\nsystemd=true",
+  "tools": {
+    "/usr/bin/python3": {
+      "exists": true,
+      "sha256": "11dde438e1a636073e79c81d4c2543708cc0a2922e7c42c38b1b588e17545f96"
+    },
+    "/usr/bin/systemctl": {
+      "exists": true,
+      "sha256": "205fca4104e64fd0e12c023489276c94687d3f9717a86aeb46c0c8f442b6edb7"
+    },
+    "/usr/bin/busctl": {
+      "exists": true,
+      "sha256": "2479fedca3a38f9e1761699b398a79347abcc279ecfc88459ae06904ea7bde90"
+    },
+    "/usr/bin/systemd-run": {
+      "exists": true,
+      "sha256": "c3268f59168d69b613a03e680d0295c960c1ed6abd8f8ba75327a74221fb2669"
+    }
+  },
+  "manager": {
+    "busId": "58295dfd3b9d6e8dc11c8dd66b013d9e",
+    "owner": ":1.2",
+    "pid": 1,
+    "version": "249.11-0ubuntu3.12",
+    "originalPidfdAvailable": true
+  },
+  "dbusPythonAvailable": true,
+  "glibAvailable": true,
+  "platformPrerequisitesObserved": true
+}

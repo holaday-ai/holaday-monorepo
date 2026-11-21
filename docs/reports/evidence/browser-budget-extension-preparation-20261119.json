@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "kind": "offline guarded extension preparation; no live activation",
+  "preparedAtUTC": "2026-11-19T10:42:29.234137+00:00",
+  "preparedAtSourceHead": "81e028542b3db10b39159867b5c94fe542469245",
+  "runtimeSourceCommit": "81d1948e6fccb280d2d5533229936544252bf266",
+  "runtimeInputCount": 1827,
+  "runtimeInputsEquivalent": true,
+  "toolNotIncludedInFrozenRuntimeInputs": true,
+  "tests": {
+    "firstRedFailures": 10,
+    "firstGreenTests": 26,
+    "historyRedFailures": 3,
+    "finalTests": 27,
+    "finalPassed": 27,
+    "legacyTestsIncluded": 16,
+    "scope": "synthetic unit fixtures; not actual model/provider/site acceptance"
+  },
+  "realLedgerReadOnlyProposal": {
+    "attempts": 25,
+    "approved": false,
+    "authorizationRef": null,
+    "migrationRejected": true,
+    "sourceBytesUnchanged": true
+  },
+  "preparedExtension": {
+    "baselineAttempts": 25,
+    "additionalAttempts": 16,
+    "maxAttempts": 41,
+    "model": "qwen3.8-max",
+    "maxOutputTokens": 4096,
+    "automaticRetries": 0,
+    "allPriorBodiesReplayForbidden": true,
+    "originalUnknownPreserved": true,
+    "providerUnknownStillRequiresAudit": true,
+    "operatorOwnedRecordNotCryptographicUserProof": true,
+    "privateRelayNotUpgraded": true
+  },
+  "livePolicy": {
+    "maxAttempts": 25,
+    "attemptsUsed": 25,
+    "modified": false,
+    "ledgerSHA256": "70703124bf436558cc10f348f8aacf6391789c1d3c66e5aec87fcd4196ab90af",
+    "relaySHA256": "da92389c0c2700ca5a4ce9140900ac81271d97d7cf29b84e65bd1e11c957f2a4",
+    "policySHA256": "8171565fe0f6fb9a53fc5d1b9ce747411432796f236e5de9158ce16b32f0a8c8"
+  },
+  "sourceBindings": [
+    {
+      "path": "scripts/browser-acceptance-model-budget.py",
+      "bytes": 14501,
+      "sha256": "795ec9208bec5d616f33850324cb088bdbf9d78076ba711b3aa621611adee657"
+    },
+    {
+      "path": "scripts/browser-acceptance-model-budget.test.py",
+      "bytes": 18062,
+      "sha256": "4660f58410a4b920ccfcf3cfdbc0035261da467145e70ee1f0eb8098c879fb72"
+    }
+  ],
+  "privateMaterialBindings": [
+    {
+      "path": "budget-extension-red.log",
+      "bytes": 6097,
+      "sha256": "270d49ca2af6e8e9ac8f9105f4ee6c4eb1c9ccc8740b867abd9f47950f02e632"
+    },
+    {
+      "path": "budget-extension-green.log",
+      "bytes": 125,
+      "sha256": "31a56c4449a8a4c9ec055e2791e5de43047569348afbc64b9c518700132207d9"
+    },
+    {
+      "path": "budget-extension-history-red.log",
+      "bytes": 2012,
+      "sha256": "bdf8ce46401f46bcf33f76439a559701da011a28795b845bdf3269642cec0bab"
+    },
+    {
+      "path": "budget-extension-final.log",
+      "bytes": 126,
+      "sha256": "850b3e0f9af248612b1d3a0d007c5a6e3ae369aa7b41006e229ed8232a95ed0b"
+    },
+    {
+      "path": "budget-extension-proposal.json",
+      "bytes": 497,
+      "sha256": "ef922b414bf3f40b523c518fd2af810f336736743edb5cfa131389d834754c79"
+    }
+  ],
+  "effects": {
+    "modelCalls": 0,
+    "kmsCalls": 0,
+    "siteExports": 0,
+    "productionWrites": 0
+  },
+  "additionalBudgetAuthorized": false,
+  "executionAllowed": false,
+  "projectPluginAcceptance": false,
+  "goalComplete": false,
+  "releaseReady": false
+}

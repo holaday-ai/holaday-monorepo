@@ -38,10 +38,8 @@ describe('shouldClearComposerAfterSubmit', () => {
   });
 
   it('names the in-flight submit state by composer context', () => {
-    expect(composerSubmittingStatus({})).toBe('已收到任务，正在打开执行页…');
-    expect(composerSubmittingStatus({ hasFollowUpTarget: true })).toBe(
-      '已收到追问，正在打开跟进任务…',
-    );
-    expect(composerSubmittingStatus({ replyMode: true })).toBe('已收到回复，正在继续当前任务…');
+    expect(composerSubmittingStatus({})).toBe('正在提交任务，等待确认…');
+    expect(composerSubmittingStatus({ hasFollowUpTarget: true })).toBe('正在提交追问，等待确认…');
+    expect(composerSubmittingStatus({ replyMode: true })).toBe('正在提交回复，等待确认…');
   });
 });

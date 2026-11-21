@@ -1,0 +1,116 @@
+{
+  "checkedAtUTC": "2026-11-19T03:40:30.022324+00:00",
+  "runtimeCommitAtRealTrial": "12eaa7415007cffb57a54eada4ab662f660beae7",
+  "status": "real native original and generated file facts verified; task failed, provider attempt unknown and history delivery failed",
+  "taskId": "tsk_2ncmrVDbv9Yh5xWG3Tf4z",
+  "actualApp": true,
+  "actualSQL": "8.0.46",
+  "actualChrome": "157.0.8103.79",
+  "qaVersion": "0.0.3",
+  "compiledWorkerFilesMatched": 5,
+  "containsDiagnosticHook": false,
+  "downloadToolAttempts": 2,
+  "preDispatchReplanRequired": 1,
+  "appliedNativeDownloads": 1,
+  "rawFile": {
+    "filename": "pr360-premerge-20261118.json",
+    "bytes": 7560,
+    "sha256": "159dc809f6ae1341317b1dd8e917c11fa4ad27f6808ebd336139f0f99b706be0",
+    "browserSource": "task_download / owning_page github.com"
+  },
+  "generatedFile": {
+    "filename": "summary.csv",
+    "bytes": 304,
+    "sha256": "45e177978550ef3e61132574bd9708eecde14958d87cb84e73098c0f7c0c77c9",
+    "summaryRows": 8,
+    "initialFailuresPreserved": true,
+    "overlappingBatchesKeptSeparate": true
+  },
+  "fileFactsProof": "forensic bytes from actual FileService; not history UI delivery or full-read acceptance",
+  "readerAndTableToolInvoked": true,
+  "completeHostReadAndStatisticsAccepted": false,
+  "actualTask": {
+    "iterations": 9,
+    "finalLoopStatus": "failed",
+    "SQLStatus": "executing",
+    "taskFiles": 2,
+    "quotaUsed": 1,
+    "unknownPersistenceVetoPreserved": true,
+    "taskReplayed": false
+  },
+  "history": {
+    "firstAttempt": "operator locator matched sidebar and history; stopped without any download",
+    "secondAttempt": "history row selected, task reloaded; no original file download button appeared",
+    "verifiedViews": 0,
+    "passed": false,
+    "taskAccepted": false
+  },
+  "modelLedger": {
+    "attempts": 14,
+    "received": 13,
+    "unknown": 1,
+    "lastUnknownStartedAtUTC": "2026-11-19T03:28:33.179484+00:00",
+    "reset": false,
+    "replayed": false,
+    "newRequestsBlocked": true
+  },
+  "cleanup": {
+    "fullSQLSnapshotBytes": 184006,
+    "fullSQLSnapshotSHA256": "7f0950acc9c656ea7575b191ed1a47cacc9b931185bc2e120b3320ecef87bf9a",
+    "appExitCode": 0,
+    "ownedTargetCleanedAfterSnapshot": true,
+    "dedicatedBrowsersClosed": true,
+    "authenticatedProfilesPreserved": true
+  },
+  "outputContractFix": {
+    "codeSHA256": {
+      "apps/orchestrator/src/agent/browser-tools/browser-task-output.ts": "c99f02914be148a2eded84baacb31077afe1d7b1c98bca8c3cd0693dc3e42d3e",
+      "apps/orchestrator/src/agent/browser-tools/browser-task-output.test.ts": "faa1458fb68a69248fc77fbc5a57ec4b07be9d6e49a74bc3f67c0440ad663e89"
+    },
+    "scope": [
+      "singular classifier before ASCII filename",
+      "negated extra output format",
+      "original plus generated handoff",
+      "explicit quoted filename remains literal"
+    ],
+    "RED": {
+      "passed": 22,
+      "failed": 4
+    },
+    "finalRegression": {
+      "exitCode": 0,
+      "seconds": 42.8,
+      "passed": 202,
+      "failed": 0,
+      "skipped": 0
+    },
+    "strictTypes": {
+      "mode": "types",
+      "exitCode": 0,
+      "seconds": 5.94,
+      "heapMB": 2048
+    },
+    "static": {
+      "mode": "static",
+      "exitCode": 0,
+      "seconds": 0.31,
+      "heapMB": 512
+    },
+    "backendBuild": {
+      "exitCode": 0,
+      "seconds": 15.1,
+      "heapMB": 2048,
+      "memoryFreePointPercent": 45
+    }
+  },
+  "stillRequired": [
+    "authoritative saved-file history recovery",
+    "auditable genuinely unknown task status without replay or clearing drain tickets",
+    "provider unknown request accounting resolution before more real model calls",
+    "both full site tasks, physical input, stable subjects and actual KMS/account lifecycle",
+    "exact rollout bindings and separate authorization"
+  ],
+  "productionChanged": false,
+  "pr361Merged": false,
+  "goalComplete": false
+}

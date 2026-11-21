@@ -1,0 +1,49 @@
+{
+  "kind": "holaday-cloudshell-attempt-v1",
+  "observedAtUTC": "2026-11-18T23:15:59.930194+00:00",
+  "region": "us-east-2",
+  "testKeyAlias": "alias/holaday-browser-vault-test",
+  "authorization": {
+    "explicitOwnerReply": "allow within the specified scope",
+    "uploadAndRunAuthorized": true,
+    "maxCryptoAttempts": 11,
+    "maxDescribeKeyOperations": 3,
+    "incrementalCallAndTransferBudgetUSD": "0.01",
+    "keyBaseFeeExcludedFromIncrementalBudget": true,
+    "credentialSource": "existing console-session temporary identity; credentials stay AWS",
+    "newIamOrAccessKeysAuthorized": false,
+    "productionAuthorized": false
+  },
+  "package": {
+    "bytes": 217415,
+    "sha256": "2365cfbfd71bcef824c2e89ad9cb4046a967d09470c72ffd89a1735e67fe100a",
+    "frozenBytesUnchanged": true,
+    "embeddedAuthorizationSnapshot": "pre-approval; current owner approval recorded separately"
+  },
+  "attempt": {
+    "cloudShellTabOpened": true,
+    "environmentReady": false,
+    "blocker": "AWS new-account verification prevents CloudShell environment creation",
+    "consoleStatedMaxVerificationDelay": "up to two days; not a guaranteed completion time",
+    "fileUploaded": false,
+    "terminalCommandsExecuted": 0,
+    "cryptoAttempts": 0,
+    "describeKeyOperations": 0,
+    "temporaryCredentialsRead": false,
+    "environmentDeleted": false,
+    "regionChanged": false,
+    "permissionsChanged": false,
+    "newIamOrAccessKeys": false
+  },
+  "privateScreenshot": {
+    "name": "aws-cloudshell-account-verification.jpg",
+    "bytes": 57615,
+    "sha256": "5b72a006b579fff68a33ccd70e23eea2625fc3c1c8b3c81733adab79557363ea"
+  },
+  "kmsSdkCallFailureObserved": false,
+  "cloudAcceptancePassed": false,
+  "realAccountAcceptancePassed": false,
+  "productionChanged": false,
+  "deployed": false,
+  "next": "After AWS account verification makes CloudShell available, use the same frozen package and existing bounded authorization once; do not create duplicate key or persistent credentials."
+}

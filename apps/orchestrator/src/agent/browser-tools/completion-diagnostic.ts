@@ -1,8 +1,14 @@
 import { TEXT_URL_RE } from '../../execution/text-urls.js';
 import { safeObservationUrl } from './cloud-observation.js';
+import type { FileBindingDiagnostic } from './completion-file-evidence.js';
 
 /** Never persist raw model finish arguments; redact before truncating. */
-export function completionDiagnostic(event: { summary: string; evidence: string; reason: string }) {
+export function completionDiagnostic(event: {
+  summary: string;
+  evidence: string;
+  reason: string;
+  fileBindings?: FileBindingDiagnostic[];
+}) {
   const safe = (value: string, limit: number) =>
     value
       .replace(TEXT_URL_RE, (url) => safeObservationUrl(url))
@@ -19,5 +25,6 @@ export function completionDiagnostic(event: { summary: string; evidence: string;
     summary: safe(event.summary, 2400),
     evidence: safe(event.evidence, 1200),
     reason: safe(event.reason, 1600),
+    ...(event.fileBindings?.length ? { fileBindings: event.fileBindings } : {}),
   };
 }

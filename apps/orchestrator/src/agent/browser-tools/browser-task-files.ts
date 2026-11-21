@@ -23,6 +23,7 @@ const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex
 /** A run's admitted user materials, not a grant over all of the account's files. */
 export class BrowserTaskFiles {
   private readonly inputs = new Map<string, Reference>();
+  private readonly generated = new Map<string, Reference>();
   private readonly downloadSources = new Map<
     string,
     Readonly<{
@@ -37,6 +38,7 @@ export class BrowserTaskFiles {
       userId: number;
       files: Pick<FileService, 'loadMany'>;
       active: () => Promise<boolean>;
+      taskInternalId?: () => Promise<number | null>;
     },
   ) {}
   get taskId(): string {
@@ -48,13 +50,63 @@ export class BrowserTaskFiles {
   references() {
     return [...this.inputs.values()].map(({ sha256: _hash, ...reference }) => reference);
   }
+  generatedReferences() {
+    return [...this.generated.values()]
+      .filter((reference) => !this.inputs.has(reference.fileId))
+      .map(({ sha256: _hash, ...reference }) => reference);
+  }
   source(
     fileId: string,
   ): Readonly<
     | { kind: 'browser_download'; origin: string; originBasis: 'download_url' | 'owning_page' }
     | { kind: 'user_attachment' }
+    | { kind: 'task_generated' }
   > {
-    return this.downloadSources.get(fileId) ?? { kind: 'user_attachment' };
+    return (
+      this.downloadSources.get(fileId) ?? {
+        kind: this.generated.has(fileId) ? 'task_generated' : 'user_attachment',
+      }
+    );
+  }
+  /** A host create_file receipt grants read/statistics only, never upload authority. */
+  async admitGenerated(receipt: {
+    fileId: string;
+    filename: string;
+    size: number;
+    downloadUrl: string;
+  }): Promise<void> {
+    const taskIdentity = this.options.taskInternalId;
+    if (
+      !(await this.options.active()) ||
+      !taskIdentity ||
+      !/^[A-Za-z0-9_-]{1,160}$/.test(receipt.fileId) ||
+      receipt.downloadUrl !== `/api/files/${receipt.fileId}/download` ||
+      !Number.isSafeInteger(receipt.size) ||
+      receipt.size < 0
+    )
+      throw new Error('生成文件不属于当前任务的可用材料。');
+    const taskId = await taskIdentity();
+    if (taskId === null || !Number.isSafeInteger(taskId) || taskId <= 0)
+      throw new Error('当前任务身份不可用。');
+    const loaded = await this.options.files.loadMany([receipt.fileId], this.options.userId);
+    const file = loaded[0];
+    if (
+      loaded.length !== 1 ||
+      !file ||
+      file.row.externalId !== receipt.fileId ||
+      file.row.taskId !== taskId ||
+      file.row.kind !== 'output' ||
+      file.row.browserSource != null ||
+      file.row.filename !== receipt.filename ||
+      file.row.sizeBytes !== receipt.size ||
+      file.buffer.length !== receipt.size
+    )
+      throw new Error('生成文件回执与当前任务文件不一致。');
+    const refs = BrowserTaskFiles.validatedReferences(loaded, this.options.userId);
+    if ((await taskIdentity()) !== taskId || !(await this.options.active()))
+      throw new Error('任务或账号已不可用。');
+    for (const reference of this.checkedReferences(refs))
+      this.generated.set(reference.fileId, reference);
   }
   /** Called only with the original host receipt of a saved download from this run. */
   async admitDownloaded(receipt: BrowserDownloadReceipt): Promise<void> {
@@ -138,7 +190,7 @@ export class BrowserTaskFiles {
         sizeBytes: file.sizeBytes,
         sha256: file.sha256,
       };
-      const prior = this.inputs.get(reference.fileId);
+      const prior = this.inputs.get(reference.fileId) ?? this.generated.get(reference.fileId);
       if (prior && JSON.stringify(prior) !== JSON.stringify(reference))
         throw new Error('已选附件内容发生变化，请重新提交材料。');
       references.push(reference);
@@ -146,24 +198,52 @@ export class BrowserTaskFiles {
     return references;
   }
   async resolve(taskId: string, ids: readonly string[]): Promise<BrowserUploadFile[]> {
+    return this.resolveFiles(taskId, ids, false);
+  }
+  async resolveReadable(taskId: string, ids: readonly string[]): Promise<BrowserUploadFile[]> {
+    return this.resolveFiles(taskId, ids, true);
+  }
+  private async resolveFiles(
+    taskId: string,
+    ids: readonly string[],
+    includeGenerated: boolean,
+  ): Promise<BrowserUploadFile[]> {
+    const reference = (id: string) =>
+      this.inputs.get(id) ?? (includeGenerated ? this.generated.get(id) : undefined);
     if (
       taskId !== this.options.taskId ||
       !ids.length ||
       ids.length > 5 ||
       new Set(ids).size !== ids.length ||
-      ids.some((id) => !this.inputs.has(id))
+      ids.some((id) => !reference(id))
     )
       throw new Error('附件不在当前任务明确提供的材料范围内。');
     if (!(await this.options.active())) throw new Error('任务或账号已不可用。');
+    const generatedIds = new Set(
+      ids.filter((id) => !this.inputs.has(id) && this.generated.has(id)),
+    );
+    const taskIdentity = this.options.taskInternalId;
+    const generatedTaskId = generatedIds.size ? await taskIdentity?.() : null;
+    if (
+      generatedIds.size &&
+      (typeof generatedTaskId !== 'number' ||
+        !Number.isSafeInteger(generatedTaskId) ||
+        generatedTaskId <= 0)
+    )
+      throw new Error('当前任务身份不可用。');
     const loaded = await this.options.files.loadMany(ids, this.options.userId);
     const result: BrowserUploadFile[] = [];
     for (const id of ids) {
       const file = loaded.find((file) => file.row.externalId === id);
-      const original = this.inputs.get(id)!;
+      const original = reference(id)!;
       if (
         !file ||
         file.row.userId !== this.options.userId ||
         file.row.kind === 'temp' ||
+        (generatedIds.has(id) &&
+          (file.row.taskId !== generatedTaskId ||
+            file.row.kind !== 'output' ||
+            file.row.browserSource != null)) ||
         file.row.filename !== original.name ||
         file.row.mimetype !== original.mimeType ||
         file.buffer.length !== original.sizeBytes ||
@@ -177,7 +257,11 @@ export class BrowserTaskFiles {
         buffer: file.buffer,
       });
     }
-    if (!(await this.options.active())) throw new Error('任务或账号已不可用。');
+    if (
+      (generatedIds.size && (await taskIdentity?.()) !== generatedTaskId) ||
+      !(await this.options.active())
+    )
+      throw new Error('任务或账号已不可用。');
     return result;
   }
 }

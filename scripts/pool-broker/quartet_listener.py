@@ -87,12 +87,14 @@ class _QuartetListener:
             item._busy = False
             if item._retired: item._release()
 
-    def _veto(self):
+    def _owner_veto(self):
         if self._retired: raise ValueError()
         journal, reg, pin = self._journal, self._registration, self._pin
         journal._owner_veto()
         if journal._registration is not reg or journal._pin is not pin or reg._pin is not pin:
             raise ValueError()
+    def _veto(self):
+        self._owner_veto()
         # Root's final registration IO can revoke a previously accepted group.
         # Keep this terminal owner walk pure: no IO or renewed runtime budget.
         for live in self._groups:
@@ -172,7 +174,9 @@ class _QuartetListener:
         channel = None
         try:
             if window is None:
-                if self._count >= 32: raise ValueError()
+                # One create and one close per original physical slot. The
+                # independent journal still caps resources at thirty-two.
+                if self._count >= 64: raise ValueError()
             else:
                 if (self._boot_attempted or self._count != 0
                         or type(window) is not launch_authorization.LaunchWindow
@@ -241,9 +245,14 @@ class _QuartetListener:
             control = self.accept_control()
             if control is None: return
             self._busy = True
-            control.prepare()
-            live = control.launch(manager)
-            self._groups.append(live)
+            request = control.receive_request()
+            if request.action == 'create':
+                control.prepare()
+                live = control.launch(manager)
+                self._groups.append(live)
+            elif request.action == 'close':
+                live = control.close_original_group()
+            else: raise ValueError()  # Query is not an exit or adoption route.
             self._veto()
             if type(live) is not _RunningQuartet: raise ValueError()
             live._veto()

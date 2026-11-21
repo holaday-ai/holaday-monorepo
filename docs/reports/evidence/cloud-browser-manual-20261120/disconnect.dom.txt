@@ -1,0 +1,61 @@
+- img "HOLA DAY"
+- img "HOLA DAY"
+- button "切换侧边栏" [expanded]:
+  - generic: 切换侧边栏
+- list:
+  - button "新任务":
+    - generic: 新任务
+  - button "搜索任务 ⌘K":
+    - text: 搜索任务
+    - generic: ⌘K
+- list:
+  - button "技能":
+    - generic: 技能
+  - button "云浏览器":
+    - generic: 云浏览器
+  - button "视频任务":
+    - generic: 视频任务
+  - button "图片任务":
+    - generic: 图片任务
+  - button "规划任务":
+    - generic: 规划任务
+  - button "文件库":
+    - generic: 文件库
+  - button "项目":
+    - generic: 项目
+- button "任务" [expanded]:
+  - text: 任务
+- button "批量管理任务":
+- generic: 还没有任务
+- generic: 新任务会出现在这里，方便追问、重命名或批量整理。
+- button "专业版 剩余 150 / 150 套餐：专业版Opus 15":
+  - generic: 专业版
+  - text: 剩余 150
+  - generic: / 150
+  - generic: 套餐：专业版
+  - generic "Opus 剩余 15": Opus 15
+- button "更多 设置与帮助":
+  - generic: 更多
+  - generic: 设置与帮助
+- button "切换侧边栏" [expanded]
+- main:
+  - generic: 个人空间
+  - generic: /
+  - strong: 云浏览器
+  - button "后退":
+  - button "前进":
+  - button "刷新":
+  - button "HOLA DAY 主页":
+  - textbox "云浏览器地址栏（输入网址或搜索内容，回车打开）":
+    - /placeholder: 输入网址或搜索内容
+    - text: http://127.0.0.1:55599/second
+  - textbox
+  - text: 正在连接画面…
+  - textbox "描述你想让 HOLA DAY 做什么..."
+  - button "附件与任务选项":
+  - button "收起输入框" [expanded]:
+  - button "发送" [disabled]:
+- generic "账户与通知":
+  - button "浏览器工作区":
+  - button "通知":
+  - button:

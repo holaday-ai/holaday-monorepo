@@ -1,7 +1,10 @@
 """Private original running-group owner. Never reconstruct from durable ready."""
+import hashlib
+import json
 from quartet_material import _GroupMaterial
 from quartet_create_offer import _CreateOffer
 from quartet_records import ROLES
+from quartet_journal import _random
 
 
 def _deny():
@@ -26,10 +29,16 @@ class _RunningQuartet:
                     or material._journal is not offer._journal or material._resource != offer._resource
                     or material._create_deadline_ns != offer._deadline_ns
                     or len(material._terminal_workers) != 5
+                    or set(material._start_receipts) != set(ROLES)
                     or material._journal._resources[material._resource]['state'] != 'ready'): raise ValueError()
             item = object.__new__(cls)
             item._material, item._offer, item._workers = material, offer, material._terminal_workers
             item._retired = False
+            item._closing, item._close_id = False, None
+            item._stop_started, item._stop_receipts, item._close_stream = False, None, None
+            item._terminal_started, item._terminal_evidence = False, None
+            item._close_control = item._close_request_id = item._close_frame = None
+            item._intervening_receipts = {}
             offer._budget()  # Original create/control deadline, including its tail.
             material._owner_veto()
             # No native boundary between the final original veto and transfer.
@@ -42,15 +51,34 @@ class _RunningQuartet:
 
     def _veto(self):
         material, offer = self._material, self._offer
+        group = material._journal._resources[material._resource]
+        state = group['state']
         if (self._retired or material._retired or material._runtime is not self or material._ready_offer is not offer
                 or material._terminal_workers is not self._workers or len(self._workers) != 5
                 or offer._journal is not material._journal or offer._prepared is not material._prepared
                 or not offer._accepted or not offer._consumed
-                or material._journal._resources[material._resource]['state'] != 'ready'):
+                or state != 'ready' and not (state == 'closing' and self._closing
+                    and self._close_id is not None and group.get('close', {}).get('closeId') == self._close_id)):
             raise ValueError()
         offer._veto()  # Original ownership only; no obsolete creation time scope.
+        if self._close_control is not None:
+            self._close_control._owner_veto()
+            if self._close_control._runtime is not self: raise ValueError()
+        if self._close_stream is not None: self._close_stream._veto()
+        for job, receipt in self._intervening_receipts.items():
+            observed = group.get('close', {}).get('interveningJobs', {}).get(job, {})
+            if (receipt._stream is not self._close_stream or self._close_stream._receipts.get(job) is not receipt
+                    or observed.get('signalSerial') != receipt._serial
+                    or receipt._unit != 'holaday-pool-' + observed.get('role', '') + '-' + material._resource + '.service'):
+                raise ValueError()
+        if self._terminal_evidence is not None:
+            for evidence in self._terminal_evidence: evidence._veto()
 
     def check(self):
+        if self._closing:
+            # Reject further admission without discarding the original objects
+            # needed by the pending stop transaction.
+            _deny()
         try:
             self._veto()
             material = self._material
@@ -69,12 +97,167 @@ class _RunningQuartet:
             self.retire()
             _deny()
 
+    def begin_close(self):
+        """Fence admission and durably reserve this original group's close once.
+
+        This private entry accepts no PID, path, unit, capability or success DTO.
+        It does not issue StopUnit or produce physical exit authority.
+        """
+        if self._closing:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._material._journal._resources[self._material._resource]['state'] != 'closing':
+                    raise ValueError()  # Reentrant pending intent, not a second transaction.
+                return
+            except Exception:
+                _deny()
+        try:
+            self._veto()
+            self._closing = True  # Before any clock, platform or journal IO.
+            material = self._material
+            def record():
+                material._identity()
+                roles = {}
+                for role, _worker, pin, _view in self._workers:
+                    _group, original = pin._row()
+                    if pin._record != pin._record_of(original): raise ValueError()
+                    roles[role] = {key: original[key] for key in ('unit', 'job', 'invocation')}
+                self._close_id = material._journal._io(_random, 16)
+                material._append('close_intent', closeId=self._close_id,
+                    managerGuid=material._manager._guid, managerOwner=material._manager._owner, roles=roles)
+            material._run(record)
+            self._veto()
+            material._owner_veto()
+        except Exception:
+            self.retire()
+            _deny()
+
     def _discard(self):
         self._retired = True
         self._offer.close()
+
+    def stop_original(self):
+        """One fixed original five-unit stop transaction, without a physical exit permit."""
+        if self._stop_started:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._stop_receipts is None: raise ValueError()
+                for receipt in self._stop_receipts:
+                    if self._close_stream._receipts.get(receipt._job) is not receipt: raise ValueError()
+                return self._stop_receipts
+            except Exception: _deny()
+        try:
+            self._veto()
+            self._stop_started = True  # Reentrant close cannot dispatch another stop.
+            self.begin_close()
+            material, receipts = self._material, []
+            def stop():
+                material._identity()
+                stream = material._manager._job_stream
+                if stream is None:
+                    from manager_probe import _ManagerJobStream
+                    stream = _ManagerJobStream.open(material._manager,
+                        scope_guard=material._remaining, terminal_veto=material._owner_veto)
+                self._close_stream = stream
+                self._veto()
+                for role in ROLES[1:] + ROLES[:1]:
+                    material._append('role_stop_dispatch', closeId=self._close_id, role=role)
+                    receipts.append(stream._stop_original_role(self, role))
+                material._remaining()
+            material._run(stop)
+            self._stop_receipts = tuple(receipts)
+            if len(self._stop_receipts) != 5: raise ValueError()
+            self._veto()
+            material._owner_veto()
+            return self._stop_receipts
+        except Exception:
+            self.retire()
+            _deny()
 
     def retire(self):
         self._retired = True
         self._material.close()
         self._offer.close()
         # No stop, groupExit, physical slot release, or successful drain claim.
+
+    def collect_terminal_evidence(self):
+        """Collect necessary original stop/kernel facts; no complete exit/slot authority."""
+        if self._terminal_started:
+            try:
+                self._veto()
+                self._material._owner_veto()
+                if self._terminal_evidence is None: raise ValueError()
+                return self._terminal_evidence
+            except Exception: _deny()
+        try:
+            self._veto()
+            if self._stop_receipts is None or len(self._stop_receipts) != 5: raise ValueError()
+            self._terminal_started = True
+            material, collected = self._material, []
+            def observe():
+                for role, _worker, pin, _view in self._workers:
+                    stop = next(value for value in self._stop_receipts if value._unit == pin._record[0])
+                    def sample():
+                        self._close_stream._terminal_properties_locked(self, pin, stop)
+                        evidence = pin._cgroup._observe_terminal(stop)
+                        self._close_stream._terminal_properties_locked(self, pin, stop)
+                        evidence._veto()
+                        return evidence
+                    evidence = pin._run(sample, material._remaining, locked=True,
+                        terminal_veto=material._owner_veto)
+                    evidence._veto()
+                    material._append('role_terminal_observed', closeId=self._close_id, role=role,
+                        job=stop._job, signalSerial=stop._serial, cgroup=evidence._kind)
+                    for original in collected: original._veto()
+                    collected.append(evidence)
+                material._remaining()
+            material._run(observe)
+            self._terminal_evidence = tuple(collected)
+            if len(self._terminal_evidence) != 5: raise ValueError()
+            self._veto()
+            material._owner_veto()
+            return self._terminal_evidence
+        except Exception:
+            self.retire()
+            _deny()
+
+    def _close_receipt(self, control):
+        from quartet_create_control import _CreateControl
+        from quartet_protocol import encode_control_frame
+        if (type(control) is not _CreateControl or self._close_control is not control
+                or control._runtime is not self or self._terminal_evidence is None
+                or self._close_request_id != control._request.request_id): raise ValueError()
+        material = self._material
+        def record():
+            material._identity()
+            self._veto()
+            if self._close_frame is not None: return
+            def capture():
+                for role in ROLES: self._close_stream._intervening_locked(self, role)
+            material._manager._run(capture, material._remaining, terminal_veto=material._owner_veto)
+            row = material._journal._resources[material._resource]
+            facts = {'candidate': material._candidate, 'boot': row['boot'], 'resource': material._resource,
+                     'closeId': self._close_id, 'managerGuid': material._manager._guid,
+                     'managerOwner': material._manager._owner, 'roles': []}
+            for role, _worker, pin, _view in self._workers:
+                start = material._start_receipts[role]
+                evidence = next(item for item in self._terminal_evidence if item._owner is pin)
+                evidence._veto()
+                facts['roles'].append({'role': role, 'unit': pin._record[0], 'invocation': pin._record[3],
+                    'startJob': start._job, 'startSignalSerial': start._serial,
+                    'stopJob': evidence._stop._job, 'stopSignalSerial': evidence._stop._serial,
+                    'cgroup': evidence._kind,
+                    'interveningJobs': [{'job': job, 'signalSerial': receipt._serial}
+                        for job, receipt in sorted(self._intervening_receipts.items()) if receipt._unit == pin._record[0]]})
+            digest = hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            material._append('close_observation', closeId=self._close_id,
+                requestId=self._close_request_id, evidenceDigest=digest)
+            scope = {key: row[key] for key in ('version', 'candidate', 'boot', 'resource', 'slot')}
+            self._close_frame = encode_control_frame(scope | {'phase': 'terminal-observed',
+                'requestId': self._close_request_id, 'closeId': self._close_id, 'evidenceDigest': digest})
+        material._run(record)
+        self._veto()
+        material._owner_veto()
+        return self._close_frame  # Necessary observations only, never a physical exit/slot permit.

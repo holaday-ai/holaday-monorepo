@@ -13,6 +13,7 @@ import { pickDefaultBrowserViewportProfile } from '@/lib/browser-viewport-profil
 import { humaniseTaskError } from '@/lib/error-copy';
 import { hdDebug } from '@/lib/hd-debug';
 import { pageErrorMessage } from '@/lib/page-error-copy';
+import { normalizeExecutionObservation } from '@/lib/task-execution-observation';
 import { trpc } from '@/lib/trpc';
 import type { ImageCreationOptions } from '@/types/image';
 import type {
@@ -35,9 +36,11 @@ import {
   type BrowserLaunchSource,
   BrowserTaskLaunches,
   type BrowserTaskModeChoice,
+  BrowserTaskPreparationPendingError,
   type BrowserViewportProfile,
   type ServerMessage,
   browserConnectionWaitSchema,
+  pollBrowserTaskPreparation,
   resolveBrowserTaskMode,
 } from '@holaday/shared-types';
 import { create } from 'zustand';
@@ -99,6 +102,7 @@ export interface TaskStore {
     title: string;
     backgroundTaskTabs?: boolean;
     taskTabStart?: boolean;
+    preparationReadiness?: boolean;
     taskTabMode?: BrowserTaskModeChoice;
     launchRecovery?: boolean;
     launchRecoveryReady?: boolean;
@@ -118,6 +122,7 @@ export interface TaskStore {
   composerMode: 'new' | 'task';
   loading: boolean;
   error: string | null;
+  browserPreparationStatus: string | null;
   /** Per-task step streams, keyed by taskId. */
   stepsByTask: Record<string, UiStep[]>;
   /** Latest screencast frame per task (G5). */
@@ -265,6 +270,8 @@ export interface TaskStore {
    *     the newest task as a UI default.
    */
   selectTask(taskId: string, source?: 'url' | 'ui'): void;
+  /** Reconcile only the selected view; never submit, resume, cancel or navigate. */
+  refreshSelectedTask(taskId: string): Promise<void>;
   enterNewTaskMode(): void;
   refreshTaskList(): Promise<void>;
   /** Legacy alias — routes through selectTask / enterNewTaskMode. */
@@ -686,6 +693,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   // the current one and bails if superseded. Cheaper + more
   // portable than threading AbortControllers through tRPC.
   let hydrateToken = 0;
+  let activeHydrate: { taskId: string; token: number } | undefined;
   let sessionGeneration = 0;
   const pendingReplies = new Map<string, number>();
   const failedLocalReplies = new Map<string, Array<{ at: number; text: string }>>();
@@ -766,7 +774,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         if (!isCurrentSession(generation) || getAccessToken() !== token) return;
         set({ error: taskStoreError(err) });
         // Bounded metadata reconciliation; no fresh ID or alternate browser is chosen.
-        if (launchRecoveryAttempts++ < 12 && !launchRecoveryTimer) {
+        if (
+          !(err instanceof BrowserTaskPreparationPendingError) &&
+          launchRecoveryAttempts++ < 12 &&
+          !launchRecoveryTimer
+        ) {
           launchRecoveryTimer = setTimeout(
             () => {
               launchRecoveryTimer = undefined;
@@ -935,6 +947,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   function abortInFlightHydrate(): void {
     hydrateToken += 1;
+    activeHydrate = undefined;
   }
 
   function captureSessionGeneration(): number {
@@ -945,12 +958,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     return generation === sessionGeneration;
   }
 
-  async function hydrateDetail(taskId: string): Promise<void> {
+  async function hydrateDetail(taskId: string, options: { silent?: boolean } = {}): Promise<void> {
     if ((pendingReplies.get(taskId) ?? 0) > 0) return;
     seedExecutionOrder(taskId);
     const myToken = ++hydrateToken;
+    activeHydrate = { taskId, token: myToken };
     const generation = captureSessionGeneration();
     const suggestionsAtRequestStart = get().suggestionsByTask[taskId];
+    const stepsAtRequestStart = get().stepsByTask[taskId];
     const versionAtRequestStart = executionOrder.version(taskId);
     try {
       const rawDetail = await trpc.tasks.detail.query({ taskId });
@@ -974,6 +989,18 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const detailStatus = rawDetailStatus
           ? normaliseStatus(rawDetailStatus)
           : (existingTask?.status ?? 'unknown');
+        // A read-only refresh can race live receipts or persistence. Keep same-round
+        // live-only steps and updates received after this request began. A new
+        // execution or terminal snapshot still replaces the prior round normally.
+        const mergedSteps = new Map(steps.map((step) => [step.tickIndex, step]));
+        if (detailOrder !== 'new' && !isTerminalStatus(detailStatus)) {
+          const before = new Map((stepsAtRequestStart ?? []).map((step) => [step.tickIndex, step]));
+          for (const step of prev.stepsByTask[taskId] ?? []) {
+            if (!mergedSteps.has(step.tickIndex) || before.get(step.tickIndex) !== step)
+              mergedSteps.set(step.tickIndex, step);
+          }
+        }
+        const hydratedSteps = [...mergedSteps.values()].sort((a, b) => a.tickIndex - b.tickIndex);
         if (
           detailOrder !== 'new' &&
           hasFinalTaskRow(prev, taskId) &&
@@ -1176,6 +1203,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                       : {}),
                     ...(detailIdentity && detailIdentity !== 'invalid' ? detailIdentity : {}),
                     status: detailStatus,
+                    executionObservation: normalizeExecutionObservation(
+                      detail.executionObservation,
+                    ),
                     tickCount: Math.max(t.tickCount, steps.length),
                     ...(resultText ? { resultText } : {}),
                     ...(planText ? { planText } : {}),
@@ -1209,6 +1239,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             intent: safeTaskListText(detail.intent) || '未命名任务',
             title: safeNullableTaskListText(detail.title),
             status: detailStatus,
+            executionObservation: normalizeExecutionObservation(detail.executionObservation),
             tickCount: steps.length,
             ...(resultText ? { resultText } : {}),
             createdAt: new Date(safeTaskListDate(detail.createdAt) ?? 0),
@@ -1240,7 +1271,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const hydratedTask = nextTasks.find((task) => task.taskId === taskId);
         return {
           ...roundPatch,
-          stepsByTask: { ...prev.stepsByTask, [taskId]: steps },
+          stepsByTask: { ...prev.stepsByTask, [taskId]: hydratedSteps },
           ...(savedPlanReplies !== null
             ? {
                 userRepliesByTask: { ...prev.userRepliesByTask, [taskId]: hydratedReplies },
@@ -1284,7 +1315,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
     } catch (err) {
       if (myToken !== hydrateToken || !isCurrentSession(generation)) return;
-      set({ error: taskStoreError(err) });
+      if (!options.silent) set({ error: taskStoreError(err) });
+    } finally {
+      if (activeHydrate?.token === myToken) activeHydrate = undefined;
     }
   }
 
@@ -1293,6 +1326,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     selectedTaskId: null,
     browserPreference: null,
     localChromeSelection: null,
+    browserPreparationStatus: null,
     composerMode: 'new',
     loading: false,
     error: null,
@@ -1369,6 +1403,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (source !== 'url') {
         storeNavigate?.(taskId);
       }
+    },
+
+    async refreshSelectedTask(taskId) {
+      if (get().selectedTaskId !== taskId || activeHydrate?.taskId === taskId) return;
+      await hydrateDetail(taskId, { silent: true });
     },
 
     enterNewTaskMode() {
@@ -1908,6 +1947,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const generation = captureSessionGeneration();
       const browserHomeSession = overrides?.browserHomeSession === true;
       const chromeSelection = browserHomeSession ? null : get().localChromeSelection;
+      let preparationFinished = false;
+      const preparationCurrent = () => {
+        if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
+        if (!preparationFinished && get().localChromeSelection !== chromeSelection)
+          throw new Error('所选网页已改变，请核对原准备页面后继续。');
+      };
+      const preparationLoading = () => {
+        preparationCurrent();
+        set({ browserPreparationStatus: '独立页面已创建，仍在加载；正在核对原页面…' });
+      };
       if (
         replyToTaskId &&
         get().tasks.find((task) => task.taskId === replyToTaskId)?.browserSource === 'local-chrome'
@@ -1968,9 +2017,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             mode: resolveBrowserTaskMode(intent, chromeSelection.taskTabMode),
           };
         } else if (!chromeSelection && hasWebBrowserLaunchRecords()) {
-          durableContext = await webBrowserLaunchContext(() => {
-            if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
-          });
+          durableContext = await webBrowserLaunchContext(preparationCurrent, preparationLoading);
           const pending = (await webBrowserLaunchJournal.pending(durableContext.ownerId)).filter(
             (e) => e.request.intent === intent,
           );
@@ -2040,6 +2087,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         tasks: [pendingTask, ...prev.tasks.filter((t) => t.taskId !== localTaskId)],
         browserInteractive: false,
         error: null,
+        browserPreparationStatus: backgroundLaunch ? '正在核对网页并准备执行页面…' : null,
       }));
       let createDispatched = false;
       let durableOperationId: string | undefined;
@@ -2053,24 +2101,33 @@ export const useTaskStore = create<TaskStore>((set, get) => {
             throw new Error('请更新并重新连接 HOLADAY Chrome 扩展后使用独立任务页。');
           executionSelection = await browserLaunches.prepare(creationKey, async (preparationId) => {
             if (taskMode === 'current') return chromeSelection;
-            return trpc.tasks.localChromeTaskTab.mutate({
-              selection: {
-                extensionClientId: chromeSelection.extensionClientId,
-                tabId: chromeSelection.tabId,
-                expectedUrl: chromeSelection.expectedUrl,
-                selectionId: chromeSelection.selectionId,
-              },
+            const target = await pollBrowserTaskPreparation({
+              source: chromeSelection,
               preparationId,
+              current: preparationCurrent,
+              onLoading: preparationLoading,
+              prepare: ({ preparationReadiness, ...source }, id) =>
+                trpc.tasks.localChromeTaskTab.mutate({
+                  selection: source,
+                  preparationId: id,
+                  ...(preparationReadiness ? { reportReadiness: true } : {}),
+                }),
             });
+            return { ...target, title: chromeSelection.title };
           });
           if (!isCurrentSession(generation)) return { error: SESSION_ENDED_ERROR };
         }
-        if (!durableSource) createDispatched = true;
+        if (!durableSource) {
+          preparationFinished = true;
+          createDispatched = true;
+          if (backgroundLaunch) set({ browserPreparationStatus: '正在提交任务，等待服务端确认…' });
+        }
         const res = durableSource
           ? await (async () => {
-              durableContext ??= await webBrowserLaunchContext(() => {
-                if (!isCurrentSession(generation)) throw new Error(SESSION_ENDED_ERROR);
-              });
+              durableContext ??= await webBrowserLaunchContext(
+                preparationCurrent,
+                preparationLoading,
+              );
               const context = durableContext;
               const deps = {
                 ...context.deps,
@@ -2090,7 +2147,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                   }));
                 },
                 create: async (body: Parameters<typeof context.deps.create>[0]) => {
+                  preparationFinished = true;
                   createDispatched = true;
+                  set({ browserPreparationStatus: '正在提交任务，等待服务端确认…' });
                   return context.deps.create(body);
                 },
               };
@@ -2266,7 +2325,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           tasks: unknownWrite
             ? prev.tasks.map((t) =>
                 t.taskId === localTaskId
-                  ? { ...t, status: 'unknown' as const, resultText: msg }
+                  ? { ...t, title: '任务创建待核实', status: 'unknown' as const, resultText: msg }
                   : t,
               )
             : prev.tasks.filter((t) => t.taskId !== localTaskId),
@@ -2280,6 +2339,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           error: msg,
           ...(durableAttemptId ? { browserOperationId: durableAttemptId } : {}),
         };
+      } finally {
+        if (isCurrentSession(generation)) set({ browserPreparationStatus: null });
       }
     },
 
@@ -2381,6 +2442,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
                     ...t,
                     ...identity,
                     status: 'executing',
+                    executionObservation: null,
                     resultText: undefined,
                     awaitingKind: undefined,
                     planText: undefined,
@@ -3262,6 +3324,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       abortInFlightHydrate();
       set({
         localChromeSelection: null,
+        browserPreparationStatus: null,
         browserPreference: null,
         tasks: [],
         selectedTaskId: null,
@@ -3708,6 +3771,7 @@ export function toUiTask(row: ListRow): UiTask {
     intent: safeTaskListText((row as { intent?: unknown }).intent) || '未命名任务',
     title: safeNullableTaskListText((row as { title?: unknown }).title),
     status,
+    executionObservation: normalizeExecutionObservation(row.executionObservation),
     // The list endpoint doesn't expose tickCount directly; we leave 0
     // for now and let G4's ws events fill it in as ticks stream.
     tickCount: 0,

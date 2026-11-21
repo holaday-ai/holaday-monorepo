@@ -3,6 +3,12 @@ import { version } from './package.json';
 
 const includeDevWorkbenchHosts = process.env.VITE_EXTENSION_INCLUDE_DEV_HOSTS === '1';
 const localChromeQa = process.env.VITE_LOCAL_CHROME_QA === '1';
+// Real-site acceptance is an explicit, fixed permission preset. Backend and
+// auth-bridge endpoints remain loopback; it cannot become a release setting.
+const qaRealSites = process.env.VITE_LOCAL_CHROME_QA_REAL_SITES ?? '';
+if (qaRealSites && !localChromeQa) throw new Error('Real-site permission preset requires local QA');
+if (qaRealSites && qaRealSites !== 'github-sheets')
+  throw new Error('Real-site QA accepts only the fixed github-sheets preset');
 const qaEndpointKeys = [
   'VITE_WORKBENCH_URL',
   'VITE_ORCHESTRATOR_HTTP',
@@ -15,6 +21,7 @@ const qaEndpointValues = qaEndpointKeys.map((key) => process.env[key]);
 export function assertLocalQaBuildEnv(env: Record<string, unknown>): void {
   if (
     (env.VITE_LOCAL_CHROME_QA === '1') !== localChromeQa ||
+    (env.VITE_LOCAL_CHROME_QA_REAL_SITES ?? '') !== qaRealSites ||
     (localChromeQa && qaEndpointKeys.some((key, index) => env[key] !== qaEndpointValues[index]))
   ) {
     throw new Error('Local Chrome QA configuration must match explicit shell build variables');
@@ -42,6 +49,7 @@ const qaHostMatches = localChromeQa
         qaWorkbenchMatch,
         localQaMatch(process.env.VITE_ORCHESTRATOR_HTTP, 'http:'),
         localQaMatch(process.env.VITE_ORCHESTRATOR_WS, 'ws:'),
+        ...(qaRealSites ? ['https://github.com/*', 'https://docs.google.com/*'] : []),
       ]),
     ]
   : [];

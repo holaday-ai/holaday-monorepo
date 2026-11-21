@@ -2,18 +2,25 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { type Server, createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { USER_BROWSER_PROTOCOL } from '@holaday/shared-types';
 import { TRPCError } from '@trpc/server';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/mysql2';
 import express from 'express';
 import type { Connection } from 'mysql2/promise';
 import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { webhookWrite } from '../api-keys/webhook-drain.js';
+import * as capabilities from '../config/browser-capabilities.js';
 import type { DB } from '../db/client.js';
+import { users } from '../db/schema/users.js';
 import { createHttpApp } from '../http.js';
 import { makeCreateContext } from '../trpc/context.js';
 import type { Context } from '../trpc/context.js';
+import { localChromeTaskTabProcedure } from '../trpc/routers/local-chrome-selection.js';
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc/trpc.js';
+import * as extensionWs from '../ws/server.js';
 import { DrainController } from './drain-controller.js';
 import { createHttpDrain } from './http-drain.js';
 import { currentOperationLifetime, withOperationDispatchScope } from './owned-operation.js';
@@ -126,6 +133,160 @@ async function rpcStatus(port: number, path: string) {
     client.end();
   });
 }
+
+it.each([false, true])(
+  'keeps true uncertainty while acknowledged loading remains successful (loading=%s)',
+  async (loading) => {
+    const f = await fixture();
+    vi.stubEnv('BROWSER_TASK_TABS_ENABLED', 'true');
+    vi.stubEnv('BROWSER_LAUNCH_RECOVERY_ENABLED', 'false');
+    vi.spyOn(capabilities, 'browserCapabilities').mockReturnValue({
+      viewportV2: true,
+      observationV2: true,
+      replayV1: false,
+      routingV2: true,
+    });
+    vi.spyOn(extensionWs, 'getConnectedExtensionClientIds').mockReturnValue(['connection']);
+    const handshake = {
+      ok: true as const,
+      extensionClientId: 'connection',
+      result: {
+        userBrowserProtocol: {
+          ...USER_BROWSER_PROTOCOL,
+          capabilities: [
+            ...USER_BROWSER_PROTOCOL.capabilities,
+            'task_tab_start',
+            ...(loading ? ['task_tab_readiness_v1'] : []),
+          ],
+        },
+      },
+    };
+    const wire = vi
+      .spyOn(extensionWs, 'sendExtensionToolCall')
+      .mockResolvedValueOnce(handshake)
+      .mockResolvedValueOnce(
+        loading
+          ? {
+              ok: true,
+              extensionClientId: 'connection',
+              result: {
+                taskTabStatus: 'loading',
+                taskTabCreated: true,
+                preparationId: '61c56349-421b-4a44-b946-507476393185',
+                sourceTabId: 42,
+                sourceOrigin: 'https://work.example',
+                tabId: 73,
+              },
+            }
+          : {
+              ok: false,
+              extensionClientId: 'connection',
+              error: { code: 'exec_error', message: 'preparation failed' },
+            },
+      )
+      .mockResolvedValueOnce(handshake)
+      .mockResolvedValueOnce({
+        ok: true,
+        extensionClientId: 'connection',
+        result: {
+          taskTabCreated: true,
+          tabId: 73,
+          selectionId: '4488c303-9880-44d9-885e-51e13755933b',
+          url: 'https://work.example',
+          title: 'Task page',
+        },
+      });
+    const make = makeCreateContext({ planner: {} as never, executionDrain: f.controller });
+    const rawQuery = vi.fn(async () => [{ affectedRows: 1 }, []]);
+    const database = drizzle({ query: rawQuery } as unknown as Connection);
+    const write = vi.fn(() =>
+      database
+        .update(users)
+        .set({ displayName: 'synthetic' })
+        .where(eq(users.externalId, 'synthetic-preparation')),
+    );
+    f.app.use(express.json());
+    f.app.use(
+      createExpressMiddleware({
+        router: router({
+          prepare: localChromeTaskTabProcedure,
+          guardedWrite: protectedProcedure.mutation(() => webhookWrite(write)),
+        }),
+        createContext: async (options) => ({
+          ...(await make(options)),
+          userId: 'synthetic-preparation',
+        }),
+      }),
+    );
+    const port = await listen(f.app);
+    const input = {
+      selection: {
+        extensionClientId: 'connection',
+        tabId: 42,
+        expectedUrl: 'https://work.example',
+        selectionId: 'e2215e8d-7b6c-4711-ab15-460f51e558a4',
+      },
+      preparationId: '61c56349-421b-4a44-b946-507476393185',
+      ...(loading ? { reportReadiness: true } : {}),
+    };
+    const rpc = (name: string) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: `/${name}`,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          },
+          (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (chunk) => {
+              body += chunk;
+            });
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+          },
+        );
+        req.on('error', reject);
+        req.end(JSON.stringify(input));
+      });
+    try {
+      expect(f.controller.drain.snapshot().unknown).toBe(0);
+      const first = await rpc('prepare');
+      expect(first.status).toBe(loading ? 200 : 412);
+      if (loading) expect(first.body).toContain('loading');
+      await vi.waitFor(() =>
+        expect(f.controller.drain.snapshot()).toMatchObject({
+          active: 0,
+          unknown: loading ? 0 : 1,
+        }),
+      );
+      expect((await rpc('prepare')).status).toBe(200);
+      await vi.waitFor(() =>
+        expect(f.controller.drain.snapshot()).toMatchObject({
+          active: 0,
+          unknown: loading ? 0 : 1,
+        }),
+      );
+      expect(wire).toHaveBeenCalledTimes(4);
+      const blocked = await rpc('guardedWrite');
+      expect(blocked.status).toBe(loading ? 200 : 500);
+      if (loading) {
+        expect(write).toHaveBeenCalledOnce();
+        expect(blocked.body).toContain('affectedRows');
+        expect(rawQuery).toHaveBeenCalledOnce();
+      } else {
+        expect(blocked.body).toContain('WEBHOOK_DRAIN_UNCERTAIN');
+        expect(write).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      f.close();
+    }
+  },
+);
 
 it('keeps the original protected gate rejection known without entering user code', async () => {
   const f = await fixture();

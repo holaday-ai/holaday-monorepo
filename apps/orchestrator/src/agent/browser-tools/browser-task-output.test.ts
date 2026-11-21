@@ -10,6 +10,129 @@ const receipt = {
 };
 describe('task-owned generated outputs', () => {
   it.each([
+    '导出 report.csv，再生成 analysis.csv，核对新CSV结构后把两份文件交给我',
+    '导出 report.csv，再生成 analysis.csv，核对后再把两份文件交给我',
+  ])(
+    'keeps validation before a combined handoff outside the new-file count: %s',
+    async (intent) => {
+      const outputs = new BrowserTaskOutputs({
+        current: async () => true,
+        formats: ['csv'],
+        store: async () => receipt,
+      });
+      outputs.admitDownload({
+        fileId: 'original',
+        filename: 'report.csv',
+        sizeBytes: 10,
+        sha256: 'a'.repeat(64),
+        downloadUrl: '/api/files/original/download',
+      });
+      await outputs.create(input);
+      expect(outputs.gap(intent)).toBeNull();
+    },
+  );
+
+  it('keeps the named original in a final combined handoff out of generated requirements', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async ({ filename }) => ({ ...receipt, filename }),
+    });
+    outputs.admitDownload({
+      fileId: 'original',
+      filename: 'package.json',
+      sizeBytes: 4409,
+      sha256: 'b'.repeat(64),
+      downloadUrl: '/api/files/original/download',
+    });
+    await outputs.create({ ...input, filename: 'package-summary.csv' });
+    expect(
+      outputs.gap(
+        '下载原件package.json，用read_task_file完整读取。生成package-summary.csv，列section,count；对新CSV核对结构。最后交付原package.json和新package-summary.csv两份下载链接；不另生成JSON。',
+      ),
+    ).toBeNull();
+  });
+
+  it('still requires two new files when the request has no original-export handoff', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async () => receipt,
+    });
+    outputs.admitDownload({
+      fileId: 'unrequested-original',
+      filename: 'report.csv',
+      sizeBytes: 10,
+      sha256: 'c'.repeat(64),
+      downloadUrl: '/api/files/unrequested-original/download',
+    });
+    await outputs.create(input);
+    expect(outputs.gap('生成两份CSV，核对结构后把两份文件交给我')).toBeTruthy();
+  });
+  it('keeps an explicitly named filename containing a classifier literal', () => {
+    expect(taskFileRequirements('生成文件，文件名为“一份summary.csv”')).toContainEqual({
+      filename: '一份summary.csv',
+      format: 'csv',
+    });
+  });
+  it('still requires a new JSON when generation explicitly requests JSON and CSV', async () => {
+    let next = 0;
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv', 'json'],
+      store: async ({ filename }) => {
+        const fileId = `generated_${++next}`;
+        return { ...receipt, fileId, filename, downloadUrl: `/api/files/${fileId}/download` };
+      },
+    });
+    outputs.admitDownload({
+      fileId: 'original-json',
+      filename: 'measurements.json',
+      sizeBytes: 20,
+      sha256: 'a'.repeat(64),
+      downloadUrl: '/api/files/original-json/download',
+    });
+    const intent =
+      '下载 measurements.json，生成 summary.csv 和 new.json；交付原始JSON和两份新文件。';
+    await outputs.create({ ...input, filename: 'summary.csv' });
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create({ filename: 'new.json', format: 'json', content: '{}' });
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it('delivers an original JSON plus a generated CSV without generating a forbidden extra JSON', async () => {
+    const outputs = new BrowserTaskOutputs({
+      current: async () => true,
+      formats: ['csv'],
+      store: async ({ filename }) => ({ ...receipt, filename }),
+    });
+    outputs.admitDownload({
+      fileId: 'original-json',
+      filename: 'measurements.json',
+      sizeBytes: 7560,
+      sha256: 'a'.repeat(64),
+      downloadUrl: '/api/files/original-json/download',
+    });
+    const intent =
+      '只读下载原始JSON，完整读取。生成一份summary.csv，列为measurement,phase,files,total,passed,failed,pending；保留各批次原始失败数。交付原始JSON和新CSV共两份；不评论、不改仓库、不另生成JSON。';
+    expect(outputs.gap(intent)).toBeTruthy();
+    await outputs.create({ ...input, filename: 'summary.csv' });
+    expect(outputs.gap(intent)).toBeNull();
+  });
+  it.each(['不另生成JSON', '不要额外生成PDF', '无需再生成XLSX'])(
+    'keeps a negated extra output outside the delivery contract: %s',
+    async (negative) => {
+      const intent = `生成 analysis.csv；${negative}。`;
+      expect(taskFileRequirements(intent).every((item) => item.format === 'csv')).toBe(true);
+      const outputs = new BrowserTaskOutputs({
+        current: async () => true,
+        formats: ['csv'],
+        store: async () => receipt,
+      });
+      await outputs.create(input);
+      expect(outputs.gap(intent)).toBeNull();
+    },
+  );
+  it.each([
     '从此网站导出 report.csv 原始文件，读取并完整统计金额总和和数据行数，再生成 analysis.csv，把两份文件交给我',
     'Download report.csv, generate analysis.csv, and give me 2 files',
     '下载原报表，再生成分析文件，把这两份文件交给我',

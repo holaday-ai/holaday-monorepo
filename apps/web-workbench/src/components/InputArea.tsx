@@ -242,6 +242,7 @@ export function InputArea({
   const navigate = useNavigate();
   const location = useLocation();
   const hasExistingTask = useTaskStore((s) => Boolean(s.selectedTaskId));
+  const browserPreparationStatus = useTaskStore((s) => s.browserPreparationStatus);
   // FIX-59 P1-8: on an English task's page the box's hint is English too.
   const englishTask = useTaskStore((s) =>
     isEnglishTask(s.tasks.find((task) => task.taskId === s.selectedTaskId)?.intent ?? ''),
@@ -371,6 +372,10 @@ export function InputArea({
   // mutation is in flight so the spinner is tied specifically to
   // *this* submit.
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setSubmitError(null);
+  }, [value, attachments, launcherOwner]);
   // Auto / Plan toggle. Default Auto. Resets to Auto after every
   // submit (and on page load) — Plan mode is a per-task opt-in
   // ("force a planning step for THIS message") rather than a sticky
@@ -444,6 +449,7 @@ export function InputArea({
       )
         return;
       pending.consumed = true;
+      setSubmitError(null);
       setValue('');
       setAttachments([]);
       setTaskMode('auto');
@@ -791,11 +797,14 @@ export function InputArea({
     // the in-flight state without further loss. Plan mode flip-back
     // also gates on success.
     setSubmitting(true);
+    setSubmitError(null);
+    const submitOwner = getAccessToken();
     let submitOk = false;
     try {
       const result = (await Promise.resolve(
         onSubmit(intentForSubmit, fileIds, taskMode, expertMode, selectedSkill ?? undefined),
       )) as unknown;
+      if (!mountedRef.current || getAccessToken() !== submitOwner) return;
       // onSubmit may return void OR { ok: boolean } / { error: string }.
       // Treat undefined as success (legacy callers never threw and didn't
       // signal failure). If a structured `{ error }` came back, surface
@@ -804,15 +813,22 @@ export function InputArea({
         const r = result as { error?: string; notice?: string; browserOperationId?: string };
         if (r.browserOperationId && pendingBrowserSubmission.current)
           pendingBrowserSubmission.current.operationId = r.browserOperationId;
-        if (r.error && !pendingBrowserSubmission.current?.consumed)
-          toast.show(composerSubmitErrorMessage(r.error), 'error');
+        if (r.error && !pendingBrowserSubmission.current?.consumed) {
+          const message = composerSubmitErrorMessage(r.error);
+          setSubmitError(message);
+          toast.show(message, 'error');
+        }
         if (r.notice) toast.show(r.notice);
       }
       submitOk = shouldClearComposerAfterSubmit(result);
       if (pendingBrowserSubmission.current?.consumed) submitOk = true;
     } catch (err) {
       const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
-      toast.show(composerSubmitErrorMessage(raw), 'error');
+      if (mountedRef.current && getAccessToken() === submitOwner) {
+        const message = composerSubmitErrorMessage(raw);
+        setSubmitError(message);
+        toast.show(message, 'error');
+      }
       submitOk = false;
     } finally {
       if (mountedRef.current) {
@@ -820,6 +836,7 @@ export function InputArea({
       }
     }
     if (submitOk && mountedRef.current) {
+      setSubmitError(null);
       setValue('');
       setAttachments([]);
       // Plan mode is per-message intent, not a sticky preference —
@@ -842,10 +859,12 @@ export function InputArea({
   }
 
   const disabled = submitting || Boolean(busy);
-  const submittingStatus = composerSubmittingStatus({
-    replyMode,
-    hasFollowUpTarget: Boolean(followUpTarget),
-  });
+  const submittingStatus =
+    browserPreparationStatus ??
+    composerSubmittingStatus({
+      replyMode,
+      hasFollowUpTarget: Boolean(followUpTarget),
+    });
   const expertWorkflow =
     !replyMode && !followUpTarget
       ? detectComposerExpertWorkflow(
@@ -1391,6 +1410,14 @@ export function InputArea({
           )}
         </Button>
       </div>
+      {submitError ? (
+        <p
+          role="alert"
+          className="mt-2 break-words px-1 text-xs leading-5 text-[#B42354] dark:text-[#FF8BB4]"
+        >
+          {submitError}
+        </p>
+      ) : null}
       {approved && (
         <div className="hd-prompt-bottom" aria-live="polite">
           <span>Enter 发送 · Shift + Enter 换行</span>

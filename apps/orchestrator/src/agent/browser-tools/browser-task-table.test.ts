@@ -39,6 +39,131 @@ async function fixture(text: string | Buffer, name = 'report.csv') {
   };
 }
 describe('owned CSV table analysis', () => {
+  it.each([false, true])(
+    'does not append a cross-group grand total to grouped analysis notes (english=%s)',
+    async (english) => {
+      const f = await fixture('batch,total\ninitial,5348\nrecheck,236\n');
+      await f.table.run({
+        fileId: f.row.externalId,
+        mode: 'aggregate',
+        groupBy: ['A'],
+        metrics: [{ op: 'sum', column: 'B' }],
+      });
+      const note = f.table.coverageNote(english);
+      expect(note).not.toContain('5584');
+      expect(note).toContain('2/2');
+      const overall = new BrowserTaskTable(f.scope);
+      await overall.run({
+        fileId: f.row.externalId,
+        mode: 'aggregate',
+        metrics: [{ op: 'sum', column: 'B' }],
+      });
+      expect(overall.coverageNote(english)).toContain('5584');
+    },
+  );
+  it('allows an explicit complete correction in the same scope without declaring the old missing-value sum complete', async () => {
+    const f = await fixture('phase,files,total\ninitial,2,5\nrecheck,,3\n');
+    const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
+    const first = await f.table.run({
+      ...base,
+      metrics: [
+        { op: 'sum', column: 'B' },
+        { op: 'sum', column: 'C' },
+      ],
+    });
+    if (first.mode !== 'aggregate') throw new Error('wrong result');
+    const corrected = await f.table.run({
+      ...base,
+      supersedesAnalysisId: first.analysisId,
+      metrics: [
+        { op: 'count_nonempty', column: 'B' },
+        { op: 'sum', column: 'C' },
+      ],
+    });
+    if (corrected.mode !== 'aggregate') throw new Error('wrong result');
+    expect(corrected).toMatchObject({ complete: true, supersededAnalysisId: first.analysisId });
+    expect(first.overall[0]).toMatchObject({ complete: false, missingCount: 1 });
+    expect(f.table.incomplete()).toBe(false);
+    expect(f.table.completeFiles().has(f.row.externalId)).toBe(true);
+  });
+  it('keeps an earlier incomplete query active when a different query does not explicitly replace it', async () => {
+    const f = await fixture('phase,files,total\ninitial,2,5\nrecheck,,3\n');
+    const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
+    await f.table.run({ ...base, metrics: [{ op: 'sum', column: 'B' }] });
+    await f.table.run({ ...base, metrics: [{ op: 'count_rows' }] });
+    expect(f.table.incomplete()).toBe(true);
+  });
+  it('does not replace an old query until all corrected groups have actually been returned', async () => {
+    const f = await fixture('phase,files\ninitial,2\nrecheck,\n');
+    const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
+    const first = await f.table.run({ ...base, metrics: [{ op: 'sum', column: 'B' }] });
+    if (first.mode !== 'aggregate') throw new Error('wrong result');
+    const query = {
+      ...base,
+      supersedesAnalysisId: first.analysisId,
+      metrics: [{ op: 'count_rows' as const }],
+      limit: 1,
+    };
+    const partial = await f.table.run(query);
+    expect(partial).toMatchObject({ complete: false });
+    expect(partial).not.toHaveProperty('supersededAnalysisId');
+    expect(f.table.incomplete()).toBe(true);
+    expect(await f.table.run({ ...query, offset: 1 })).toMatchObject({
+      complete: true,
+      supersededAnalysisId: first.analysisId,
+    });
+    expect(f.table.incomplete()).toBe(false);
+  });
+  it.each(['group', 'filter', 'header', 'delimiter', 'self-id', 'missing-id', 'other-file'])(
+    'refuses a correction that changes its analysis scope: %s',
+    async (variant) => {
+      const f = await fixture('phase,files\ninitial,2\nrecheck,\n');
+      const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
+      const first = await f.table.run({ ...base, metrics: [{ op: 'sum', column: 'B' }] });
+      if (first.mode !== 'aggregate') throw new Error('wrong result');
+      let fileId = f.row.externalId;
+      if (variant === 'other-file') {
+        const second = await f.service.storeUpload({
+          userIdInternal: 7,
+          userExternalId: 'usr_alice',
+          filename: 'other.csv',
+          mimetype: 'text/csv',
+          buffer: Buffer.from('phase,files\ninitial,2\n'),
+        });
+        f.scope.admitValidated(await f.service.loadMany([second.externalId], 7));
+        fileId = second.externalId;
+      }
+      await expect(
+        f.table.run({
+          ...base,
+          fileId,
+          supersedesAnalysisId:
+            variant === 'missing-id' ? 'tbl_ffffffffffffffffffffffffffffffff' : first.analysisId,
+          ...(variant === 'group' ? { groupBy: [] } : {}),
+          ...(variant === 'filter' ? { filters: [{ column: 'B', op: 'nonempty' as const }] } : {}),
+          ...(variant === 'header' ? { headerRow: 2 } : {}),
+          ...(variant === 'delimiter' ? { delimiter: ';' as const } : {}),
+          metrics: variant === 'self-id' ? [{ op: 'sum', column: 'B' }] : [{ op: 'count_rows' }],
+        }),
+      ).rejects.toThrow();
+      expect(f.table.incomplete()).toBe(true);
+    },
+  );
+  it('does not retire an old analysis when the explicitly replacing statistics still have missing numbers', async () => {
+    const f = await fixture('phase,files\ninitial,2\nrecheck,\n');
+    const base = { fileId: f.row.externalId, mode: 'aggregate' as const, groupBy: ['A'] };
+    const first = await f.table.run({ ...base, metrics: [{ op: 'sum', column: 'B' }] });
+    if (first.mode !== 'aggregate') throw new Error('wrong result');
+    const next = await f.table.run({
+      ...base,
+      supersedesAnalysisId: first.analysisId,
+      metrics: [{ op: 'sum', column: 'B' }, { op: 'count_rows' }],
+    });
+    expect(next).toMatchObject({ complete: false });
+    expect(next).not.toHaveProperty('supersededAnalysisId');
+    expect(f.table.incomplete()).toBe(true);
+    expect(f.table.completeFiles().has(f.row.externalId)).toBe(false);
+  });
   it('does not present nonempty text counts as numeric parsing counts', async () => {
     const f = await fixture('name,value\nalice,1\nbob,2\n');
     const result = await f.table.run({

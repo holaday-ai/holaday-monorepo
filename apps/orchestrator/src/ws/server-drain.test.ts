@@ -3,10 +3,16 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WS_SUBPROTOCOL } from '@holaday/shared-types';
+import { drizzle } from 'drizzle-orm/mysql2';
+import type { Connection } from 'mysql2/promise';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { TaskController } from '../agent/task-controller.js';
+import { runQueueDatabase } from '../agent/task-queue-persistence.js';
 import { TaskRepository } from '../agent/task-repository.js';
+import { signAccessToken } from '../auth/jwt.js';
+import { authenticateAccessToken } from '../auth/middleware.js';
+import type { DB } from '../db/client.js';
 import { DrainController } from '../execution/drain-controller.js';
 import {
   currentOperationLifetime,
@@ -16,6 +22,7 @@ import { createWsWork } from './server-work.js';
 import {
   type WsServerOpts,
   createWsServer,
+  getConnectedExtensionClientIds,
   loadRehydratedTasks,
   sendExtensionToolCall,
 } from './server.js';
@@ -183,6 +190,33 @@ it('rejects a closed connection before invoking its authenticator', async () => 
   await vi.waitFor(() => expect(c.client.readyState).toBe(WebSocket.CLOSED));
   expect(calls).toBe(0);
   expect(f.controller.state.read().dirty).toBe(false);
+});
+
+it('keeps a rejected old token known before a valid token authenticates on the same authority', async () => {
+  const f = await control();
+  const userId = 'synthetic-auth-transition';
+  const raw = {
+    query: vi.fn(async () => [[[userId, 'active', 0]], []]),
+  };
+  const database = drizzle(raw as unknown as Connection) as unknown as DB;
+  const authenticate = (token: string) => authenticateAccessToken(database, token);
+  const rejected = await connect(f.controller, authenticate);
+  rejected.client.send(JSON.stringify({ type: 'client.hello', token: 'old-invalid-synthetic' }));
+  await vi.waitFor(() => expect(rejected.client.readyState).toBe(WebSocket.CLOSED));
+  expect(raw.query).not.toHaveBeenCalled();
+  expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0 });
+
+  const accepted = await connect(f.controller, authenticate);
+  const token = await signAccessToken({ sub: userId, plan: 'pro' });
+  accepted.client.send(JSON.stringify({ type: 'client.hello', token }));
+  await vi.waitFor(() =>
+    expect(accepted.messages.some((m) => m.type === 'server.welcome')).toBe(true),
+  );
+  expect(raw.query).toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0 }),
+  );
+  f.close();
 });
 
 it('server-work stop during root reservation cannot finish before the original root', async () => {
@@ -556,6 +590,121 @@ it('does not mistake a disconnected extension for a completed remote action', as
   f.close();
   expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
 });
+
+it.each(['open', 'observe'] as const)(
+  'persists a confirmed read failure after session %s without inventing an unknown input',
+  async (op) => {
+    const f = await control();
+    const c = await extension(f.controller);
+    const clientId = getConnectedExtensionClientIds('synthetic-ws-extension')[0];
+    expect(clientId).toBeTypeOf('string');
+    c.client.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type !== 'server.extension.tool_call') return;
+      c.client.send(
+        JSON.stringify({
+          type: 'client.extension.tool_result',
+          taskId: msg.taskId,
+          requestId: msg.requestId,
+          ok: false,
+          result: { ok: false, error: 'observation_failed' },
+          error: { code: 'observation_failed', message: 'Read failed' },
+          at: 1,
+        }),
+      );
+    });
+    let writes = 0;
+    const root = f.controller.runRoot(async () => {
+      const outcome = await sendExtensionToolCall('synthetic-ws-extension', {
+        taskId: 'synthetic-task',
+        kind: 'session',
+        extensionClientId: String(clientId),
+        args: {
+          session:
+            op === 'observe'
+              ? { op, sessionId: '00000000-0000-4000-8000-000000000001' }
+              : {
+                  op,
+                  target: {
+                    tabId: 42,
+                    expectedUrl: 'https://example.com/',
+                    selectionId: '00000000-0000-4000-8000-000000000002',
+                  },
+                },
+        },
+      });
+      expect(outcome.ok).toBe(false);
+      await runQueueDatabase(async () => {
+        writes++;
+      });
+      return outcome;
+    });
+    await expect(root.result).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'observation_failed' },
+    });
+    expect(writes).toBe(1);
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 0 });
+    f.close();
+    expect(f.controller.drain.snapshot()).toMatchObject({ idle: true, unknown: 0 });
+  },
+);
+
+it.each(['act', 'cleanup', 'malformed', 'missing', 'unknown-action'] as const)(
+  'retains uncertainty for a failed %s receipt rather than allowing queue writes',
+  async (failure) => {
+    const f = await control();
+    const c = await extension(f.controller);
+    const clientId = getConnectedExtensionClientIds('synthetic-ws-extension')[0];
+    const code = failure === 'cleanup' ? 'session_cleanup_failed' : 'observation_failed';
+    c.client.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type !== 'server.extension.tool_call') return;
+      c.client.send(
+        JSON.stringify({
+          type: 'client.extension.tool_result',
+          taskId: msg.taskId,
+          requestId: msg.requestId,
+          ok: false,
+          ...(failure === 'missing'
+            ? {}
+            : {
+                result: {
+                  ok: failure === 'malformed',
+                  error: code,
+                  ...(failure === 'unknown-action' ? { actionOutcome: 'unknown' } : {}),
+                },
+              }),
+          error: { code, message: 'Failure' },
+          at: 1,
+        }),
+      );
+    });
+    const root = f.controller.runRoot(async () => {
+      const outcome = await sendExtensionToolCall('synthetic-ws-extension', {
+        taskId: 'synthetic-task',
+        kind: 'session',
+        extensionClientId: String(clientId),
+        args: {
+          session:
+            failure === 'act'
+              ? {
+                  op: 'act',
+                  sessionId: '00000000-0000-4000-8000-000000000001',
+                  action: { kind: 'goto', payload: { url: 'https://example.com/' } },
+                }
+              : { op: 'observe', sessionId: '00000000-0000-4000-8000-000000000001' },
+        },
+      });
+      await expect(runQueueDatabase(async () => undefined)).rejects.toThrow(
+        'QUEUE_PERSISTENCE_UNKNOWN',
+      );
+      return outcome;
+    });
+    await expect(root.result).resolves.toMatchObject({ ok: false });
+    expect(f.controller.drain.snapshot()).toMatchObject({ active: 0, unknown: 1, idle: false });
+  },
+);
 
 it('a strict extension timeout retains an unknown remote action rather than declaring idle', async () => {
   const f = await control();

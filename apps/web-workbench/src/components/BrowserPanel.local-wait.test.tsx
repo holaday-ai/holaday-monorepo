@@ -84,3 +84,20 @@ it('a running local Chrome task keeps its in-session copy', () => {
   render(<BrowserPanel {...props} taskStatus="executing" />);
   expect(screen.getByRole('heading', { name: '在你的 Chrome 中执行' })).toBeTruthy();
 });
+
+it('never claims the AI is running when the current service cannot confirm the local task', () => {
+  useTaskStore.setState({
+    tasks: [
+      {
+        ...localTask,
+        status: 'executing',
+        executionObservation: { state: 'unconfirmed', reason: 'session_finishing' },
+      },
+    ],
+  });
+  render(<BrowserPanel {...props} taskStatus="executing" />);
+  expect(screen.getByRole('heading', { name: '执行状态待核实' })).toBeTruthy();
+  expect(screen.queryByText(/AI 正在处理/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '停止任务' })).toBeNull();
+  expect(api.abort).not.toHaveBeenCalled();
+});

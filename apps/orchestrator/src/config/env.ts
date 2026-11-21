@@ -318,6 +318,13 @@ const baseEnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  // Non-secret references only. Credentials belong to the named AWS service profile.
+  BROWSER_VAULT_KMS_PROVIDER: z.string().optional(),
+  BROWSER_VAULT_KMS_REGION: z.string().optional(),
+  BROWSER_VAULT_KMS_KEY_ARN: z.string().optional(),
+  BROWSER_VAULT_KMS_DECRYPT_KEY_ARNS: z.string().optional(),
+  BROWSER_VAULT_AWS_PROFILE: z.string().optional(),
+  BROWSER_VAULT_TRUSTED_PROBES_JSON: z.string().optional(),
   BROWSER_HOME_FILES_V1: z
     .enum(['true', 'false'])
     .default('false')
