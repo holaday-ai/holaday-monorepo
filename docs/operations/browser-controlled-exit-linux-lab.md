@@ -28,3 +28,9 @@
 清理只持本次原始创建归属和原生引用，不能扫描名称/端口/PID就认领其他资源。失败或失去原对象时保留journal、cgroup/任务/槽位占位及回执，不用清计数求绿。不会执行全局Docker reset、清理其他容器或批量systemd操作。
 
 [实施计划](../superpowers/plans/2026-11-20-controlled-browser-exit-proof.md)中Task1是已修复的关闭前置条件；Task2原生生产者和Task3实际Linux验收继续未完成。本材料不构成安装、付费、合并或上线许可。
+
+## Windows 实查补充（2026-11-21）
+
+已远程只读核实 WSL 2.6.3、Ubuntu 22.04.1/WSL 2、Linux 6.6.87.2 和可见的 cgroup v2。进入已有 Ubuntu 执行查询会启动该发行版；未安装、改配置或重启。systemd 249 已安装，但 PID 1 为 init(Ubuntu)，systemctl 报 offline，/etc/wsl.conf 不存在；gcc/make/busctl/node 的 PATH 查询也未解析出路径。因此当前环境尚不能做原系统管理器的五单元退出证明。
+
+下一步建议经单独授权准备 Holaday-ExitLab 独立发行版，再测 systemd/cgroup 原对象契约。不能把 WSL 的版本、可见 controller 或 systemd 安装包直接计为物理退出通过。详见[本次实查与范围](../reports/2026-11-21-controlled-browser-exit-wsl.md)。
