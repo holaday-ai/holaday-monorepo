@@ -10,6 +10,37 @@ ROLES = ('anchor', 'xvfb', 'brave', 'x11vnc', 'websockify')
 
 
 def replay(row, resources, requests):
+    if row.get('action') == 'role_intervening_job_observed':
+        resource, role, job = row.get('resource'), row.get('role'), row.get('job')
+        if (set(row) != {'version', 'revision', 'action', 'resource', 'closeId', 'role', 'job', 'signalSerial'}
+                or type(resource) is not str or resource not in resources
+                or type(role) is not str or role not in ROLES or type(job) is not str
+                or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', job) is None
+                or not 0 < int(job.rsplit('/', 1)[1]) < 2**32
+                or type(row['signalSerial']) is not int or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        group = resources[resource]
+        close = group.get('close', {})
+        stops = close.get('stops', {})
+        if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+                or job in close.get('interveningJobs', {}) or role not in stops
+                or any(value.get('job') == job for value in group['roles'].values())
+                or any(value.get('job') == job for value in stops.values())): raise ValueError()
+        close.setdefault('interveningJobs', {})[job] = {'role': role, 'signalSerial': row['signalSerial']}
+        return  # Same-unit completed job, not a substitute for our own explicit stop.
+    if row.get('action') == 'close_observation':
+        resource = row.get('resource')
+        if (set(row) != {'version', 'revision', 'action', 'resource', 'closeId', 'requestId', 'evidenceDigest'}
+                or type(resource) is not str or resource not in resources): raise ValueError()
+        group = resources[resource]
+        close = group.get('close', {})
+        if (group['state'] != 'closing' or close.get('closeId') != row['closeId']
+                or set(close.get('terminalObservations', {})) != set(ROLES) or 'observation' in close):
+            raise ValueError()
+        _identifier(row['requestId'], 32); _identifier(row['evidenceDigest'], 64)
+        if any(value.get('close', {}).get('observation', {}).get('requestId') == row['requestId']
+               and value.get('boot') == group['boot'] for value in resources.values()): raise ValueError()
+        close['observation'] = {'requestId': row['requestId'], 'evidenceDigest': row['evidenceDigest']}
+        return  # Closing remains historical/unknown; no physical slot release.
     if row.get('action') == 'role_terminal_observed':
         return replay_terminal(row, resources)
     if row.get('action') in ('role_stop_dispatch', 'role_stop_accepted', 'role_stop_observed'):
@@ -71,6 +102,12 @@ def replay(row, resources, requests):
                 or any(value.get('job') == row['job'] for value in roles.values())):
             raise ValueError()
         roles[role].update(state='accepted', job=row['job'])
+    elif row['action'] == 'role_start_observed':
+        if (set(row) != common | {'job', 'signalSerial'} or role not in roles
+                or roles[role]['state'] != 'accepted' or row['job'] != roles[role]['job']
+                or 'startSignalSerial' in roles[role] or type(row['signalSerial']) is not int
+                or not 0 < row['signalSerial'] < 2**32): raise ValueError()
+        roles[role]['startSignalSerial'] = row['signalSerial']
     elif row['action'] == 'role_observe':
         if (set(row) != common | {'invocation'} or role not in roles or roles[role]['state'] != 'accepted'):
             raise ValueError()
@@ -139,6 +176,7 @@ def replay_stop(row, resources):
                 or re.fullmatch(r'/org/freedesktop/systemd1/job/[1-9][0-9]{0,9}', row['job']) is None
                 or int(row['job'].rsplit('/', 1)[1]) >= 2**32
                 or any(value.get('job') == row['job'] for value in group['roles'].values())
+                or row['job'] in close.get('interveningJobs', {})
                 or any(value.get('job') == row['job'] for value in stops.values())): raise ValueError()
         stops[role].update(state='accepted', job=row['job'])
     elif action == 'role_stop_observed':

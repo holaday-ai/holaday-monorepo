@@ -144,6 +144,10 @@ class _RoleDispatch:
                 raise ValueError()
             self._anchor = (anchor, anchor._pin, anchor._view)
         self._guard()
+        stream = manager_probe._ManagerJobStream.open(material._manager,
+            scope_guard=self._budget, terminal_veto=self._owner_veto)
+        if material._start_stream is not None and material._start_stream is not stream: raise ValueError()
+        material._start_stream = stream
         arguments = _template(material, role)
         self._guard()
         unit = arguments[1]
@@ -154,6 +158,8 @@ class _RoleDispatch:
                 or int(job.rsplit('/', 1)[1]) > 4294967295):
             raise ValueError()
         material._append('role_accepted', role=role, job=job)
+        receipt = stream._original_start(material, role, job)
+        material._start_receipts[role] = receipt
         expected = _OBJECT + '/unit/' + unit.replace('-', '_2d').replace('.', '_2e')
         if self._call(_OBJECT, _SERVICE + '.Manager', 'GetUnit', ('s', unit), 'o') != expected:
             raise ValueError()
@@ -231,6 +237,7 @@ def _launch_material(material, *, ready_offer=None):
             material._remaining()
             if (material._protocol is not protocol or not protocol._complete or protocol._retired
                     or set(material._workers) != set(ROLES)
+                    or set(material._start_receipts) != set(ROLES)
                     or material._journal._resources[material._resource]['protocol']['state'] != 'complete'):
                 raise ValueError()
             originals = tuple((role, material._workers[role], material._workers[role]._pin,

@@ -1,0 +1,241 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUTC": "2026-11-21T15:32:29.751408+00:00",
+  "baseHead": "48b3910edee9c1ebf2b0a13f5e05c8c09f1ecfd9",
+  "sourceBindings": [
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-client.ts",
+      "bytes": 14004,
+      "sha256": "db9e7e4bd75d41fc8f327f365a23c20f23bc35d9982683168676a33ea754ddf9"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-close-client.test.ts",
+      "bytes": 6801,
+      "sha256": "182a2582739bc4a3d22a4e331bd7c6fda57af98f30148ba49dd2140caff3559b"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-close-client.ts",
+      "bytes": 10245,
+      "sha256": "4da094032f4149100a93332f3e34efc579011d8c681a5b06cca57ce69d684d4c"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-control-protocol.ts",
+      "bytes": 4657,
+      "sha256": "cd3448331a4a96db64723525242f30eeee3253e6e421c18e53ded258c0b2c4af"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.test.ts",
+      "bytes": 107142,
+      "sha256": "d083d8e65af5ff3afe625435a20270bdbe514f85e56f77aefb448dd2389eda8d"
+    },
+    {
+      "path": "apps/orchestrator/src/browser-pool/broker-pool-runtime.ts",
+      "bytes": 20369,
+      "sha256": "0ce0ae89224d98dab62dbbb555fb3fc8b21fab5827996651b8b91d41d84a7ef2"
+    },
+    {
+      "path": "scripts/pool-broker/manager_probe.py",
+      "bytes": 43834,
+      "sha256": "359653a87b7081b823cdaf638b0c0a85ea26aff217ac87d1d30c099d3450cea7"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_create_control.py",
+      "bytes": 17546,
+      "sha256": "33c7fff3107aaf6197c7201c2e68772eabf941599f99bb2786402c61a806423a"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_launch.py",
+      "bytes": 16798,
+      "sha256": "90ee7c81200e0015892638b0b9e570d76767cd6a39ee17c141117f4e12f3e6b9"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_listener.py",
+      "bytes": 12215,
+      "sha256": "bdf56a16a7e3b4b750bd6d97164b8803c888b08bc538e8ef942bda0c9e6c4d42"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_material.py",
+      "bytes": 27900,
+      "sha256": "c5a60ba5317c42e15c07408b7634bd19edf0a80a8c0ce936bcfd0558799f8e22"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_protocol.py",
+      "bytes": 6996,
+      "sha256": "7e3d1bd2b8f442da5ad82696bc5010fa5db6f824bd3ceee9788afb31ad495b9c"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_records.py",
+      "bytes": 29518,
+      "sha256": "a889b631b038e602df9bfdf633063e8fa89f19cb555c36a787e55e8d59593aad"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_runtime.py",
+      "bytes": 13435,
+      "sha256": "094a93439055a141c82d5751f9bdd2262e8d145bdb256f67d8038109541cb206"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_close_capacity.py",
+      "bytes": 2180,
+      "sha256": "5ef7bdae6bf49e5445dfbe621ba56e627ec18043db7d2601c14fd484b8b2e4ff"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_close_control.py",
+      "bytes": 4204,
+      "sha256": "641c6a81d3795765481b4e44be8d6af512e9a287d82ccb2a38c6c9b3dea39ed0"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_intervening_jobs.py",
+      "bytes": 1438,
+      "sha256": "1dbe419e23f591d2f6075f18e8b8eaae33d88723b14425073c6eb4970dfebe80"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_launch.py",
+      "bytes": 17342,
+      "sha256": "a32af016a84da84e8fae319892a9ba0b8d449e54d4c575d9311a729fbecb35ce"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_manager_wire.py",
+      "bytes": 4000,
+      "sha256": "228aa5f04dbaa9a9ac665dc98888879c5539033ec49a34d0a0a5f0df593d2747"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_start_receipts.py",
+      "bytes": 1999,
+      "sha256": "3726b917811704fef72bb2eaed0991d8148b5becbae3c1d442ce87e89ed9ad9e"
+    },
+    {
+      "path": "scripts/pool-broker/test_quartet_stop.py",
+      "bytes": 3137,
+      "sha256": "26646079273a8537ccd5ad5452a56c5d71477e02ad85d134efc12eacd54e98ec"
+    }
+  ],
+  "protectedFilesUnchanged": [
+    {
+      "path": "apps/orchestrator/src/browser-pool/browser-pool.ts",
+      "sha256": "3c52debee06f8815e72904cba8af4ade2bd6979725bd74c887f43b1d9d9fadb2"
+    },
+    {
+      "path": "apps/orchestrator/src/execution/execution-drain.ts",
+      "sha256": "c1c45c4239651437a407289a771c387573cd0529050f7e7f183a0f45f558d826"
+    },
+    {
+      "path": "scripts/pool-broker/native-build-manifest.json",
+      "sha256": "fc5fe0812fb25d30ea69ac3a68c1ee1173f30a49bb362fb66a7934aaa3b720d5"
+    },
+    {
+      "path": "scripts/pool-broker/control_native_core.c",
+      "sha256": "7aa8290e0bd3f62c3eac093842e72f134b428cb3ef3cd2788cb5351eb90f0761"
+    },
+    {
+      "path": "scripts/pool-broker/egress_native_core.c",
+      "sha256": "12a5c7de3b984b603e57aa79960a60c9a58edf3e06fdc4ae5ac0d2b46474e58b"
+    },
+    {
+      "path": "scripts/pool-broker/quartet_journal.py",
+      "sha256": "3b96dbe4989e61c41eecf57e9e334a1515bc830c9611a22c90c4e275597ce92c"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "python-suite.txt",
+      "bytes": 80385,
+      "sha256": "56277755246fbafb551a1267ba821254f5211cc58c47bbde7a022c2b7578ed51",
+      "originalOutputSHA256": "56277755246fbafb551a1267ba821254f5211cc58c47bbde7a022c2b7578ed51"
+    },
+    {
+      "path": "ts-suite.txt",
+      "bytes": 40121,
+      "sha256": "30c4873e9c8c0ce6e6aeecc54c2b5b018618dbda03f8c74a703b407fe7729c0d",
+      "originalOutputSHA256": "2bd73a758202839a13783970342a03418340497cab30a3775e9b1da6082bbf7d"
+    }
+  ],
+  "redEvidence": [
+    {
+      "file": "start-receipts-red.log",
+      "sha256": "14f0e88f3988d2b4a10259f6a1cbf2a74c4eaacded29bfc92001fea9660eb5ef"
+    },
+    {
+      "file": "close-control-red-v2.log",
+      "sha256": "26943ea48ffb2bd43a152ddd0bfcd49f048a38a2762477fc8f32059d2688b1fb"
+    },
+    {
+      "file": "node-close-red.log",
+      "sha256": "7fd4147ea0732155e0bcb4c5e23f948ff5dec5082be531cfa9f05d913a8b0f7c"
+    },
+    {
+      "file": "node-close-client-green-runtime-red.log",
+      "sha256": "3224b5a3ace50aa1388bd1177a8ffe9ad4ff682a559f8e5aa5277a0aa57248bb"
+    },
+    {
+      "file": "intervening-jobs-red.log",
+      "sha256": "71cc1d618741b7b6220abc6b42365a77651ddc59c9172f67b7a0489f58113cd6"
+    },
+    {
+      "file": "close-capacity-red.log",
+      "sha256": "a1a1c33797cbbb9680778c9938530c887365f644205e8550bb2a5f1407ecdd1f"
+    }
+  ],
+  "pythonBrokerSuite": {
+    "passed": 731,
+    "seconds": 1315.015,
+    "wallSeconds": 1315.305,
+    "newCases": 7,
+    "serial": true
+  },
+  "nodeRelatedSuite": {
+    "passed": 223,
+    "failed": 0,
+    "pending": 0,
+    "seconds": 182.357,
+    "targetFiles": 8,
+    "newCases": 5,
+    "singleFork": true,
+    "heapMB": 1024,
+    "modelCredentialsInherited": false
+  },
+  "checks": {
+    "strictChangedTypeScriptAndRealImports": {
+      "exit": 0,
+      "seconds": 4.887,
+      "heapMB": 2048
+    },
+    "backendProductionBuild": {
+      "exit": 0,
+      "seconds": 20.086,
+      "heapMB": 2048
+    },
+    "biome": {
+      "exit": 0,
+      "changedTypeScriptFiles": 6
+    },
+    "broadWholeRepositoryTypecheck": {
+      "exit": 134,
+      "heapMB": 2048,
+      "result": "heap limit reached; not passed; no memory increase"
+    }
+  },
+  "transportRequestBudget": 64,
+  "resourceSlotCapacityUnchanged": 32,
+  "authenticatedCloseRouteWired": true,
+  "originalStartCompletionRequiredBeforeReady": true,
+  "interveningOriginalJobsRetained": true,
+  "originalNodeIOClosedBeforeStopRequest": true,
+  "oneTimeOwnClientObservationConsumption": true,
+  "oneTimePhysicalTerminalConsumptionImplemented": false,
+  "physicalExitProofAccepted": false,
+  "slotReusePermitted": false,
+  "nativeManifestStatus": "unverified",
+  "sealedLinuxNativeBundleRebuilt": false,
+  "newLinuxAcceptanceRun": false,
+  "linuxKernelAndSystemdSynthetic": true,
+  "actualLocalNapiAndUnixIo": true,
+  "authorReviewOnly": true,
+  "modelLedgerUnchanged": true,
+  "modelCalls": 0,
+  "kmsCalls": 0,
+  "websiteExports": 0,
+  "oldBusinessTaskReplay": false,
+  "windowsLabTouched": false,
+  "merge": false,
+  "deployment": false
+}

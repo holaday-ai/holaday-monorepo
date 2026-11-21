@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+export { BrokerCloseClient } from './broker-close-client.js';
 import { Duplex } from 'node:stream';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import {

@@ -830,6 +830,7 @@ class _ManagerJobStream:
                 value = self._call(self._owner, path, 'org.freedesktop.DBus.Properties', 'Get',
                     'ss', ('org.freedesktop.systemd1.' + interface, prop), 'v')
                 if value != (expected,): raise ValueError()
+            self._intervening_locked(live, role)
             job, = self._call(self._owner, '/org/freedesktop/systemd1', 'org.freedesktop.systemd1.Manager',
                              'StopUnit', 'ss', (unit, 'fail'), 'o')
             self._job_binding(job, unit)
@@ -844,6 +845,46 @@ class _ManagerJobStream:
             material._owner_veto()
             self._veto()
         return self._manager._run(operation, material._remaining, terminal_veto=tail)
+
+    def _intervening_locked(self, live, role):
+        from quartet_runtime import _RunningQuartet
+        from quartet_records import ROLES
+        if (type(live) is not _RunningQuartet or role not in ROLES or not live._closing
+                or live._close_stream is not self or not self._manager._busy
+                or live._material._manager is not self._manager or not live._material._busy
+                or not live._material._journal._busy): raise ValueError()
+        material = live._material
+        unit = material._journal._resources[material._resource]['roles'][role]['unit']
+        for _index in range(321):
+            self._drain_ready()
+            pending = [job for job, value in self._pending.items() if value[0] == unit]
+            if not pending: return
+            receipt = self._wait_job_locked(pending[0], unit)
+            material._append('role_intervening_job_observed', closeId=live._close_id, role=role,
+                job=receipt._job, signalSerial=receipt._serial)
+            live._intervening_receipts[receipt._job] = receipt
+            live._veto()
+        raise ValueError()
+
+    def _original_start(self, material, role, job):
+        from quartet_material import _GroupMaterial
+        from quartet_records import ROLES
+        if (type(material) is not _GroupMaterial or role not in ROLES
+                or not material._busy or not material._journal._busy
+                or material._manager is not self._manager or material._start_stream is not self
+                or role in material._start_receipts): raise ValueError()
+        row = material._journal._resources[material._resource]['roles'][role]
+        if row['state'] != 'accepted' or row['job'] != job: raise ValueError()
+        unit = row['unit']
+        self._job_binding(job, unit)
+        def operation():
+            self._manager._probe()
+            self._call(self._owner, '/org/freedesktop/systemd1', 'org.freedesktop.systemd1.Manager',
+                       'RefUnit', 's', (unit,), '')
+            receipt = self._wait_job_locked(job, unit)
+            material._append('role_start_observed', role=role, job=job, signalSerial=receipt._serial)
+            return receipt
+        return self._manager._run(operation, material._remaining, terminal_veto=material._owner_veto)
 
     def _terminal_properties_locked(self, live, pin, stop):
         material = live._material
@@ -870,6 +911,7 @@ class _ManagerJobStream:
         original = '/holadaypool.slice/holadaypool-' + pin._resource + '.slice/' + pin._record[0]
         if cgroup not in ((('s', ''),), (('s', original),)): raise ValueError()
         self._drain_ready()
+        self._intervening_locked(live, pin._role)
         self._manager._probe()
         self._veto()
 

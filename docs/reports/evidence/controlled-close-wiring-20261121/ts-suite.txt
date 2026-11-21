@@ -1,0 +1,304 @@
+
+ RUN  v2.1.8 /Users/yaleiqi/.codex/worktrees/browser-assistant-0644/holaday-monorepo/apps/orchestrator
+
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > runtime refuses an unproven boot session before any native or business initialization
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool initializes once inside the original admitted allocation scope
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool initializes once inside the original admitted allocation scope 2007ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool shutdown waits for the original initializer and denies its late IO 1202ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool does not retry a failed initializer when egress support later returns 1237ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool retains the initiating scope veto through asynchronous startup 1216ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool release owns the task before initialization can finish 1219ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool cannot reuse initialization revoked by its final dispatch callback 1215ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool cancellation of a waiting second task does not cancel the first
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool cancellation of a waiting second task does not cancel the first 1270ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool remains usable by a new task after its completed initiating scope is sealed
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > dormant strict pool remains usable by a new task after its completed initiating scope is sealed 1380ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress closes raw IO but keeps shutdown pending for initial authentication 1454ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress carries authenticated binary frames through the private group
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress carries authenticated binary frames through the private group 1316ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress denies a late successful authentication after original deadline 1323ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress bounds raw early bytes while initial authentication is pending 1286ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress caps pending authentication before the 65th provider dispatch 1351ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress never dispatches a late authentication after frontend disconnect 1292ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects no-session without dispatching a private upstream
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects no-session without dispatching a private upstream 1370ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects other-user without dispatching a private upstream
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects other-user without dispatching a private upstream 1335ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects outside-canary without dispatching a private upstream
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects outside-canary without dispatching a private upstream 1316ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects account-revoked without dispatching a private upstream
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects account-revoked without dispatching a private upstream 1323ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects bad-encoding without dispatching a private upstream
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress rejects bad-encoding without dispatching a private upstream 1447ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress revokes an established session when its live canary membership is removed
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress revokes an established session when its live canary membership is removed 1411ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress hands early masked frames to the original session once
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress hands early masked frames to the original session once 1326ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress keeps the first deadline through the session authorization handoff
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress keeps the first deadline through the session authorization handoff 1426ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress uses the versioned account provider without replaying a short-lived token
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress uses the versioned account provider without replaying a short-lived token 1361ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress refuses adoption during authorization handoff (roundTrip=false)
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress refuses adoption during authorization handoff (roundTrip=false) 1469ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress refuses adoption during authorization handoff (roundTrip=true)
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress refuses adoption during authorization handoff (roundTrip=true) 1489ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress renews only its original retained task on client activity
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress renews only its original retained task on client activity 1322ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress renews only its original retained task on framebuffer activity
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress renews only its original retained task on framebuffer activity 1317ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress vetoes a frame when canary is revoked at the final transport clock
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress vetoes a frame when canary is revoked at the final transport clock 1316ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress does not renew retained leases from polling or ping frames
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > formal strict VNC ingress does not renew retained leases from polling or ping frames 1308ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool binds two real groups to actual SDK consumers without legacy paths or port DTOs
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool binds two real groups to actual SDK consumers without legacy paths or port DTOs 1339ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool refuses allocation without an original operation and never falls back to spawn 1206ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool VNC uses only the original private instance and revokes an old task session on adoption
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool VNC uses only the original private instance and revokes an old task session on adoption 1372ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool rejects a copied VNC instance and a different caller before upstream IO
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool rejects a copied VNC instance and a different caller before upstream IO 1378ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool shutdown cancels a pending original group without releasing its slot 1288ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool carries the sealed original allocation scope into asynchronous native IO 1217ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool failed-task tombstone prevents a second physical dispatch 1240ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool failed-task tombstone rejects retained adoption into its key
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool failed-task tombstone rejects retained adoption into its key 1505ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool failed-task release reports unproven exit instead of missing resources 1330ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool release owns a pending allocation before an instance exists 1289ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool release ignores a forged draining DTO and closes its original SDK transport 1373ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool closes original transports after a throw from the session finalizer 1306ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool closes original transports after a reject from the session finalizer 1358ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool does not grant ownership or retention from mutable instance fields
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool does not grant ownership or retention from mutable instance fields 1326ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool retention expiry cannot be renewed by changing the instance DTO
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool retention expiry cannot be renewed by changing the instance DTO 1254ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease refuses a new VNC upstream before its timer runs
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease refuses a new VNC upstream before its timer runs 1378ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease cannot be revived by touch before its timer runs
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease cannot be revived by touch before its timer runs 1301ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease revokes an existing VNC session before its timer runs
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool expired private lease revokes an existing VNC session before its timer runs 1364ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > strict Pool adoption rechecks private binding after the final logger revokes it 1288ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects a revoked original allocation before native create dispatch 1192ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > carries original allocation revocation into a later native create guard 1226ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects a group revoked during the final original control cleanup receipt 1263ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > retains the original setup veto through CDP acquisition but not another group
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > retains the original setup veto through CDP acquisition but not another group 1293ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > relays the first VNC greeting and binary user input through the original owned session
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > relays the first VNC greeting and binary user input through the original owned session 1331ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects a revoked VNC user session before any upstream acquisition or client upgrade
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects a revoked VNC user session before any upstream acquisition or client upgrade 1249ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > closes the original frontend immediately but owns pending session authorization until it settles
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > closes the original frontend immediately but owns pending session authorization until it settles 1395ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes VNC user frames after the original instance binding is revoked
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes VNC user frames after the original instance binding is revoked 1342ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels a pending user VNC upstream when its original frontend disconnects
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels a pending user VNC upstream when its original frontend disconnects 1365ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects text from a VNC client instead of forwarding a non-binary protocol message
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects text from a VNC client instead of forwarding a non-binary protocol message 1370ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds a VNC client message before forwarding an oversized frame
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds a VNC client message before forwarding an oversized frame 1405ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes automatic VNC pong when original group revocation reenters incoming IO
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes automatic VNC pong when original group revocation reenters incoming IO 1314ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revokes an established VNC session when its next account revalidation fails
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revokes an established VNC session when its next account revalidation fails 1347ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > does not renew VNC authorization when its final revalidation clock crosses the original deadline
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > does not renew VNC authorization when its final revalidation clock crosses the original deadline 1329ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds queued VNC frontend pong replies while an original write callback is held
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds queued VNC frontend pong replies while an original write callback is held 1417ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds queued VNC upstream pong replies while an original write callback is held
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds queued VNC upstream pong replies while an original write callback is held 1349ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > answers normal VNC ping on both authenticated sides without relaying it as data
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > answers normal VNC ping on both authenticated sides without relaying it as data 1292ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > expires a queued VNC pong at its original backlog deadline but retains its write receipt
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > expires a queued VNC pong at its original backlog deadline but retains its write receipt 1445ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps user VNC sessions on their original groups when one group is released 1292ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > waits for an in-flight established-session revalidation even after group close 1376ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > waits for the original VNC frontend write callback after raw socket close
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > waits for the original VNC frontend write callback after raw socket close 1406ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > waits for the original VNC frontend end callback after raw socket close
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > waits for the original VNC frontend end callback after raw socket close 1343ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > connects the actual VNC WebSocket through original kind-2 HPD and carries a binary message larger than 64 KiB
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > connects the actual VNC WebSocket through original kind-2 HPD and carries a binary message larger than 64 KiB 1342ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels pending VNC HPD at group close without a late WebSocket dispatch 1329ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > preserves the initial server-initiated VNC greeting until its consumer attaches
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > preserves the initial server-initiated VNC greeting until its consumer attaches 1294ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps two VNC upstreams bound to their original group while closing one independently 1297ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels an in-flight VNC 101 handshake when its group closes 1328ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds a silent VNC WebSocket handshake and releases its original data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds a silent VNC WebSocket handshake and releases its original data connection 6304ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > does not send a VNC business frame when group close reenters its raw dispatch guard 1263ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps VNC close pending for the original upstream write receipt
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps VNC close pending for the original upstream write receipt 1246ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps VNC close pending for the original upstream end receipt
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps VNC close pending for the original upstream end receipt 1393ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rendezvous waits for a delayed actual Unix listener then sends exactly one create
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rendezvous waits for a delayed actual Unix listener then sends exactly one create 1352ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revoking the original boot prevents runtime control or business reacquisition 1354ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revoking the original boot rejects immediate reuse of an already ready pool instance 1343ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > a final reuse clock cannot revoke boot and still hand off a ready instance 1335ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > the retained binding veto rechecks boot after its lease clock 1347ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > creates two original groups through native control, registers egress before ready, authenticates both data kinds
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > creates two original groups through native control, registers egress before ready, authenticates both data kinds 1421ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > retains slot and unknown physical ownership when root drops ready 1172ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revokes in-flight create on close and never hands off a late group 1254ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > closes pending data authentication before completing group cleanup 1402ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > reserves a slot before concurrent create can dispatch it twice 1357ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects invalid slots without creating or occupying a physical group 1221ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds concurrent data acquisitions before any excess transport opens 1382ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revocation during transport guard 3 prevents the native connection itself 1268ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revocation during transport guard 4 prevents the native connection itself 1309ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > revocation during transport guard 5 prevents the native connection itself 1265ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > restores capacity after failed data authentication actually closes
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > restores capacity after failed data authentication actually closes 1416ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > serves authenticated CDP WebSocket through the original group without forwarding its private header 1283ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects an off-group CDP discovery URL without opening a loopback adapter 1340ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 0 benign extra headers
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 0 benign extra headers 1279ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 26 benign extra headers
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 26 benign extra headers 1329ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 27 benign extra headers
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 27 benign extra headers 1303ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 130 benign extra headers
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > enforces the raw CDP 32-header boundary with 130 benign extra headers 1312ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP origin before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP origin before any new group data connection 1298ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP duplicate before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP duplicate before any new group data connection 1348ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP host before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP host before any new group data connection 1260ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP query before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP query before any new group data connection 1368ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-origin before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-origin before any new group data connection 1254ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-duplicate before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-duplicate before any new group data connection 1347ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-benign before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-benign before any new group data connection 1255ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-fragmented-origin before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-fragmented-origin before any new group data connection 1325ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-fragmented-duplicate before any new group data connection
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > rejects CDP overflow-fragmented-duplicate before any new group data connection 1362ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > bounds a silent upstream CDP WebSocket handshake to five seconds 6302ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels original HPD acquisition at the peer accept deadline, not a fresh five seconds
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > cancels original HPD acquisition at the peer accept deadline, not a fresh five seconds 6335ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes actual backend writes when adapter close reenters the endpoint guard
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > vetoes actual backend writes when adapter close reenters the endpoint guard 1468ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > expires an incomplete CDP authentication request from original accept time
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > expires an incomplete CDP authentication request from original accept time 6346ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps CDP cleanup pending until the original client write receipt returns
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps CDP cleanup pending until the original client write receipt returns 1359ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps CDP cleanup pending until the original client end receipt returns
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > keeps CDP cleanup pending until the original client end receipt returns 1303ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > does not open original HPD after group closes in the final peer clock check 1232ms
+ ✓ src/browser-pool/broker-pool-runtime.test.ts > original close dispatch waits for raw group IO then consumes once while retaining the physical slot 1376ms
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > completes prepared/accepted/ready over the actual N-API-owned stream and private Duplex 622ms
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not accept a wrong prepared scope from the actual N-API stream 663ms
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not write create when the final arm clock passes the original deadline by 5001
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not write create when the final arm clock passes the original deadline by 60001
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > closes the original native object even if reading its socket throws
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > settles failed destruction and still attempts both independent cleanups
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > owns a reservation returned after it reenters close
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not promote ready when the final clock revokes its original reservation
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > owns a late original connection returned after reentrant close
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not acknowledge after the original reservation is revoked at the last connector check
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > still closes the reservation when native cleanup rejects
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > never serializes capabilities held inside a legitimate private reservation
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > reserves before accepted, checks matching ready and actual EOF, and never retries
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > rejects scope without reserving or acknowledging
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > rejects premature without reserving or acknowledging
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > rejects short without reserving or acknowledging
+ ✓ src/browser-pool/broker-client.test.ts > original create client (native root/leaf verification remains a connector boundary) > does not treat an asynchronous reservation as synchronous egress readiness
+ ✓ src/browser-pool/browser-pool-process.test.ts > release retains slot/profile until child close and then rejects unproven group exit
+ ✓ src/browser-pool/browser-pool-process.test.ts > startup failure retains its record after allocation rejection and blocks shutdown and reuse
+ ✓ src/browser-pool/browser-pool-process.test.ts > adoption preserves the private process identity despite mutable public PIDs
+ ✓ src/browser-pool/browser-pool-process.test.ts > retained adoption cannot allow a new allocation to overwrite the original profile
+ ✓ src/browser-pool/browser-pool-process.test.ts > duplicate allocation while native spawn is pending waits for the original acquisition
+ ✓ src/browser-pool/browser-pool-process.test.ts > second native spawn failure keeps the first process owned until close and preserves startup failure
+ ✓ src/browser-pool/browser-pool-process.test.ts > one failed close cannot skip another pending child in a four-process record
+ ✓ src/browser-pool/browser-pool-process.test.ts > synchronous executor disconnect failure during release still waits for all child cleanup
+ ✓ src/browser-pool/browser-pool-process.test.ts > synchronous executor disconnect failure during startup still waits for all child cleanup
+ ✓ src/browser-pool/browser-pool-process.test.ts > a diagnostic exception cannot prevent strict release from terminating its child
+ ✓ src/browser-pool/browser-pool-process.test.ts > native child death after adoption reaps the bound record under its current task
+ ✓ src/browser-pool/browser-pool-process.test.ts > shutdown in the readiness diagnostic forbids the next Linux sidecar spawn
+ ✓ src/browser-pool/browser-pool-process.test.ts > shutdown after child 2 track resumes forbids the next actual dispatch
+ ✓ src/browser-pool/browser-pool-process.test.ts > shutdown after child 3 track resumes forbids the next actual dispatch
+ ✓ src/browser-pool/broker-native-loader.test.ts > pins two distinct verified original files before either loader call and never reloads
+ ✓ src/browser-pool/broker-native-loader.test.ts > loads both actual compiled N-API export objects through held FD aliases 1146ms
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects unverified before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects hash before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects writable before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects missing before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects extra before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects missing-root-entry before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects architecture before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects parent-writable before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects symlink before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects duplicate before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects oversize before any executable is loaded
+ ✓ src/browser-pool/broker-native-loader.test.ts > refuses incompatible platform context with zero loads
+ ✓ src/browser-pool/broker-native-loader.test.ts > refuses incompatible node context with zero loads
+ ✓ src/browser-pool/broker-native-loader.test.ts > refuses incompatible uid context with zero loads
+ ✓ src/browser-pool/broker-native-loader.test.ts > refuses incompatible groups context with zero loads
+ ✓ src/browser-pool/broker-native-loader.test.ts > refuses incompatible worker context with zero loads
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects Node 22.1.0 without the fixed HTTP header-count security boundary
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects Node 22.23.1 without the fixed HTTP header-count security boundary
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects Node 22.23.2-pre without the fixed HTTP header-count security boundary
+ ✓ src/browser-pool/broker-native-loader.test.ts > rejects Node 22.23.2-extra without the fixed HTTP header-count security boundary
+ ✓ src/browser-pool/broker-native-loader.test.ts > does not replace metadata captured at import with later environment changes
+ ✓ src/browser-pool/broker-native-loader.test.ts > vetoes a replaced second artifact after the first dlopen without recycling original FDs
+ ✓ src/browser-pool/broker-native-loader.test.ts > does not begin loading when the original five-second budget expires
+ ✓ src/browser-pool/broker-native-loader.test.ts > does not return a partial factory or permit retry after a second load failure
+ ✓ src/browser-pool/owned-pool-process.test.ts > stop before-spawn shares one receipt and waits for close, not exit or killed
+ ✓ src/browser-pool/owned-pool-process.test.ts > stop after-spawn shares one receipt and waits for close, not exit or killed
+ ✓ src/browser-pool/owned-pool-process.test.ts > signal false never substitutes for child close
+ ✓ src/browser-pool/owned-pool-process.test.ts > signal throw never substitutes for child close
+ ✓ src/browser-pool/owned-pool-process.test.ts > signal true never substitutes for child close
+ ✓ src/browser-pool/owned-pool-process.test.ts > no-pid native error is observed until close and does not invent a spawned group
+ ✓ src/browser-pool/owned-pool-process.test.ts > does not redirect termination after pid drift
+ ✓ src/browser-pool/owned-pool-process.test.ts > does not redirect termination after kill drift
+ ✓ src/browser-pool/owned-pool-process.test.ts > permanent drain block does not prevent cleanup of the already bound child
+ ✓ src/browser-pool/owned-pool-process.test.ts > stream setup failure cannot release an already acquired child before close
+ ✓ src/browser-pool/owned-pool-process.test.ts > strict child output is consumed without surfacing its raw text
+ ✓ src/browser-pool/owned-pool-process.test.ts > refuses spawn before dispatch when the inherited lifetime is blocked
+ ✓ src/browser-pool/owned-pool-process.test.ts > native newListener failure for exit cannot release the acquired child
+ ✓ src/browser-pool/owned-pool-process.test.ts > native newListener failure for spawn cannot release the acquired child
+ ✓ src/browser-pool/owned-pool-process.test.ts > native newListener failure for close cannot release the acquired child
+ ✓ src/browser-pool/owned-pool-process.test.ts > stdout errors are observed without releasing the child close wait
+ ✓ src/browser-pool/owned-pool-process.test.ts > stderr errors are observed without releasing the child close wait
+ ✓ src/browser-pool/owned-pool-process.test.ts > child error-registration failure cannot leave an unhandled resource error
+ ✓ src/browser-pool/owned-pool-process.test.ts > stdout error-registration failure cannot leave an unhandled resource error
+ ✓ src/browser-pool/owned-pool-process.test.ts > stderr error-registration failure cannot leave an unhandled resource error
+ ✓ src/execution/execution-drain.test.ts > blocks dispatch if the synchronous durable guard fails
+ ✓ src/execution/execution-drain.test.ts > rechecks the owner after the dispatch guard returns
+ ✓ src/execution/execution-drain.test.ts > closes new admission while retaining already accepted child work
+ ✓ src/execution/execution-drain.test.ts > does not reopen while an accepted operation is still active
+ ✓ src/execution/execution-drain.test.ts > cannot use released, copied or foreign handles to dispatch or decrement work
+ ✓ src/execution/execution-drain.test.ts > retains grandchildren after the root and immediate parent have completed
+ ✓ src/execution/execution-drain.test.ts > keeps uncertain submission separate from a physically completed operation
+ ✓ src/execution/execution-drain.test.ts > reconciling an unknown result cannot finish its still-pending physical operation
+ ✓ src/execution/execution-drain.test.ts > does not allow cross-instance uncertainty tickets or late unknown markers
+ ✓ src/execution/execution-drain.test.ts > bounds outstanding ownership including physically finished unknown operations
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity 0
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity -1
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity 1.5
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity NaN
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity Infinity
+ ✓ src/execution/execution-drain.test.ts > rejects unsafe capacity 65537
+ ✓ src/execution/execution-drain.test.ts > permanently blocks dispatch and idle claims after an external safety failure
+ ✓ src/execution/execution-drain.test.ts > rejects arbitrary work labels without storing private text
+ ✓ src/execution/execution-drain.test.ts > returns immutable aggregate-only snapshots
+ ✓ src/execution/execution-drain.test.ts > grants raw-operation release to one private capability, not its public owner
+ ✓ src/browser-pool/broker-close-client.test.ts > binds one original close transaction through EOF/native close and consumes its own receipt once
+ ✓ src/browser-pool/broker-close-client.test.ts > does not publish a consumable receipt before the original native close completes
+ ✓ src/browser-pool/broker-close-client.test.ts > rejects wrong scope, truncated or extra frames and native cleanup failure without retry
+ ✓ src/browser-pool/broker-close-client.test.ts > an original-owner veto after transport completion prevents consumption and cannot be retried
+ ✓ src/browser-pool/broker-control-protocol.test.ts > closed original v2 control frames > uses the exact canonical Python framing and hashes the complete prepared frame
+ ✓ src/browser-pool/broker-control-protocol.test.ts > closed original v2 control frames > accepts only fixed request and phase schemas; a ready frame alone grants nothing
+ ✓ src/browser-pool/broker-control-protocol.test.ts > closed original v2 control frames > rejects duplicate keys, unknown fields, noncanonical data and size tricks
+
+ Test Files  8 passed (8)
+      Tests  223 passed (223)
+   Start at  09:01:21
+   Duration  181.92s (transform 745ms, setup 18ms, collect 1.79s, tests 179.84s, environment 0ms, prepare 60ms)
+
+JSON report written to /Users/yaleiqi/.codex/worktrees/browser-assistant-0644/holaday-monorepo/.superpowers/sdd/2026-11-20-controlled-browser-exit-proof/close-wiring-ts-results.json

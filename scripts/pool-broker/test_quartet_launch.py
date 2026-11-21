@@ -9,6 +9,7 @@ import quartet_material
 import test_manager_probe
 import test_quartet_anchor_binding
 import test_quartet_worker_channel
+from test_quartet_manager_wire import original_manager_wire
 
 try:
     import quartet_launch as launch
@@ -57,6 +58,7 @@ class QuartetLaunchTests(unittest.TestCase):
                     return SimpleNamespace(f_flag=s.source_flags)
                 return native_mount(fd)
             s.starts, s.dispatch_events, s.manager_methods = [], [], []
+            s.start_subscribed = []
             s.dispatch_mode, s.dispatch_hook = '', lambda _method: None
             original = manager_probe._capture.side_effect
             sync = s.proxy.fsync
@@ -73,6 +75,7 @@ class QuartetLaunchTests(unittest.TestCase):
                 self.assertEqual(argv[8], ':1.5')
                 self.assertIn('guid=' + 'd' * 32, argv[1])
                 if method == 'StartTransientUnit':
+                    s.start_subscribed.append('Subscribe' in s.wire_calls)
                     raw = test_manager_probe.NATIVE.pread(s.journal._fd, 1048576, 0)
                     row = json.loads(raw.splitlines()[-1])
                     self.assertEqual(row['action'], 'role_dispatch')
@@ -84,6 +87,14 @@ class QuartetLaunchTests(unittest.TestCase):
                     if s.dispatch_mode == 'exists': raise ValueError()
                     path = '/org/freedesktop/systemd1/job/' + str(6 + len(s.starts))
                     if s.dispatch_mode == 'bad-job': path = '/unexpected/job/1'
+                    if s.dispatch_mode != 'missing-completion':
+                        unit = argv[13]
+                        if s.dispatch_mode == 'wrong-completion-unit':
+                            unit = 'holaday-pool-xvfb-' + s.resource + '.service'
+                        s.emit_job(6 + len(s.starts), unit,
+                            'failed' if s.dispatch_mode == 'failed-completion' else 'done')
+                    else:
+                        s.manager._channel.close()
                     return json.dumps({'type': 'o', 'data': [path]}).encode()
                 if method == 'GetUnit':
                     unit = argv[-1]
@@ -94,7 +105,7 @@ class QuartetLaunchTests(unittest.TestCase):
                 return original(argv, fd, deadline, guard)
             with patch.object(s.proxy, 'fsync', side_effect=fsync), \
                     patch.object(quartet_material.os, 'fstatvfs', side_effect=mount_flags), \
-                    patch.object(manager_probe, '_capture', side_effect=capture):
+                    patch.object(manager_probe, '_capture', side_effect=capture), original_manager_wire(s):
                 yield s
 
     def test_journal_dispatch_readback_and_real_grant_use_same_material(self):

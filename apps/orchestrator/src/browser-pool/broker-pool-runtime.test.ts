@@ -79,6 +79,9 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
     closedData: 0,
     messages: 0,
     upgrades: 0,
+    stops: 0,
+    rawClosedAtStop: [] as number[],
+    stoppedResources: [] as string[],
     versions: [] as number[],
   };
   const hooks = {
@@ -309,6 +312,30 @@ async function fixture(mode = 'ok', poolMode = false, dormant = false, deferredC
           const message = decodeBrokerControlFrame(input);
           input = Buffer.alloc(0);
           if ('action' in message) {
+            if (message.action === 'close') {
+              const slot = [0, 1].find(
+                (value) => message.capability === Buffer.alloc(32, value + 3).toString('hex'),
+              );
+              if (slot === undefined || message.boot !== boot) throw new Error();
+              const resource = (slot ? '2' : '1').repeat(32);
+              counts.stops++;
+              counts.rawClosedAtStop.push(counts.closedData);
+              counts.stoppedResources.push(resource);
+              socket.end(
+                encodeBrokerControlFrame({
+                  version: 2,
+                  phase: 'terminal-observed',
+                  candidate,
+                  boot,
+                  requestId: message.requestId,
+                  resource,
+                  slot,
+                  closeId: 'e'.repeat(32),
+                  evidenceDigest: 'f'.repeat(64),
+                }),
+              );
+              return;
+            }
             if (message.action !== 'create') throw new Error();
             counts.creates++;
             const slot = message.slot;
@@ -2911,4 +2938,36 @@ it('does not open original HPD after group closes in the final peer clock check'
   // Flush the actual data listener with a marker, not an event-loop guess.
   await f.flushData();
   expect(f.counts.data).toBe(2);
+});
+
+it('original close dispatch waits for raw group IO then consumes once while retaining the physical slot', async () => {
+  const f = await fixture();
+  const group = await f.runtime.create(0);
+  const raw = await group.connect(1);
+  await once(raw, 'data');
+  const originalClose = raw.close.bind(raw);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(raw, 'close').mockImplementation(async () => {
+    await originalClose();
+    await held;
+  });
+  const closing = group.close();
+  expect(group.close()).toBe(closing);
+  try {
+    await vi.waitFor(() => expect(f.counts.closedData).toBe(1));
+    expect(f.counts.stops).toBe(0);
+  } finally {
+    release();
+  }
+  await closing;
+  expect(f.counts.stops).toBe(1);
+  expect(f.counts.rawClosedAtStop).toEqual([1]);
+  expect(f.counts.stoppedResources).toEqual(['1'.repeat(32)]);
+  await group.close();
+  expect(f.counts.stops).toBe(1);
+  expect(f.drain.snapshot().unknown).toBeGreaterThan(0);
+  await expect(f.runtime.create(0)).rejects.toThrow();
 });

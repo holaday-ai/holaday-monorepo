@@ -2,13 +2,20 @@ import { ExecutionDrain } from '../execution/execution-drain.js';
 import type { OperationLifetime } from '../execution/owned-operation.js';
 import { BrokerBootSession } from './broker-boot-session.js';
 import { type BrokerCdpAccess, BrokerCdpAdapter } from './broker-cdp-adapter.js';
-import { BrokerCreateClient, type OriginalGroupReservation } from './broker-client.js';
+import {
+  BrokerCloseClient,
+  BrokerCreateClient,
+  type OriginalGroupReservation,
+} from './broker-client.js';
 import type { BrokerPreparedFrame } from './broker-control-protocol.js';
 import { type BrokerDataScope, deriveBrokerDataKey } from './broker-data-protocol.js';
 import { BrokerEgressConnections } from './broker-egress-connections.js';
 import { BrokerEgressListener } from './broker-egress-listener.js';
 import { type BrokerDataAcquisition, BrokerDataConnection } from './broker-endpoints.js';
-import { BrokerNativeControlConnector } from './broker-native-control.js';
+import {
+  BrokerNativeControlConnector,
+  type OriginalNativeControlFactory,
+} from './broker-native-control.js';
 import type { loadOriginalBrokerNative } from './broker-native-loader.js';
 import { type BrokerVncAccess, BrokerVncConnection } from './broker-vnc-connection.js';
 import {
@@ -28,7 +35,7 @@ export interface BrokerGroupGuard {
   veto(): void;
 }
 
-/** Server-only handle. close is LOCAL cleanup, NEVER a groupExit receipt. */
+/** Server-only handle. close includes necessary root observations, NEVER a groupExit receipt. */
 export interface OriginalBrokerGroup {
   connect(kind: 1 | 2): Promise<BrokerDataConnection>;
   cdp(): Promise<BrokerCdpAccess>;
@@ -44,12 +51,17 @@ class Group implements OriginalGroupReservation {
   readonly #runtimeCheck: () => void;
   readonly #runtimeVeto: () => void;
   readonly #slot: number;
+  readonly #closeLifetime: OperationLifetime;
+  readonly #releaseClose: () => boolean;
+  readonly #closeConnector: BrokerNativeControlConnector;
   #closing = false;
   #ready = false;
   #prepared = false;
   #dataSlots = 0;
   #scope?: BrokerDataScope;
   #key?: Buffer;
+  #management?: Buffer;
+  #closeClient?: BrokerCloseClient;
   #registration?: Readonly<{ close(): Promise<void> }>;
   #closePromise?: Promise<void>;
   #cdp?: Promise<BrokerCdpAccess>;
@@ -59,7 +71,13 @@ class Group implements OriginalGroupReservation {
   readonly #opening = new Set<Promise<BrokerDataConnection>>();
   readonly #handle: OriginalBrokerGroup;
 
-  constructor(parent: OperationLifetime, slot: number, check: () => void, veto: () => void) {
+  constructor(
+    parent: OperationLifetime,
+    slot: number,
+    check: () => void,
+    veto: () => void,
+    close: { factory: OriginalNativeControlFactory; veto(): void },
+  ) {
     this.#slot = slot;
     this.#runtimeCheck = check;
     this.#runtimeVeto = veto;
@@ -77,6 +95,17 @@ class Group implements OriginalGroupReservation {
     const localOwner = drain.admit('execution');
     this.#releaseLocal = drain.pin(localOwner);
     this.#local = Object.freeze({ drain, owner: localOwner });
+    // Existing-group cleanup survives the business admission fence. Original
+    // boot/native ownership still vetoes each actual control I/O.
+    const closeDrain = new ExecutionDrain(16, close.veto);
+    closeDrain.open();
+    const closeOwner = closeDrain.admit('execution');
+    this.#releaseClose = closeDrain.pin(closeOwner);
+    this.#closeLifetime = Object.freeze({ drain: closeDrain, owner: closeOwner });
+    this.#closeConnector = new BrokerNativeControlConnector({
+      factory: close.factory,
+      lifetime: this.#closeLifetime,
+    });
     this.#handle = Object.freeze({
       connect: (kind: 1 | 2) => this.connect(kind),
       cdp: () => this.cdp(),
@@ -98,6 +127,7 @@ class Group implements OriginalGroupReservation {
     const management = Buffer.from(frame.capability, 'hex');
     const egressKey = Buffer.from(frame.egressCapability, 'hex');
     try {
+      this.#management = Buffer.from(management);
       this.#key = deriveBrokerDataKey(management, this.#scope);
       this.#registration = egress.register(this.#scope, egressKey, this.#local);
       this.assertLive();
@@ -233,6 +263,29 @@ class Group implements OriginalGroupReservation {
       }
       if (this.#local.drain.snapshot().unknown) throw invalid();
       this.#releaseLocal();
+      try {
+        if (this.#ready) {
+          if (!this.#scope || !this.#management) throw invalid();
+          this.#closeLifetime.drain.assertDispatch(this.#closeLifetime.owner);
+          const client = new BrokerCloseClient({
+            lifetime: this.#closeLifetime,
+            connector: this.#closeConnector,
+            scope: { ...this.#scope, slot: this.#slot },
+            capability: this.#management,
+          });
+          this.#closeClient = client;
+          const receipt = await client.stop();
+          // All original group IO has finished; only this original client can
+          // consume its observation once. Physical ownership remains unknown.
+          client.consume(receipt);
+        }
+      } finally {
+        this.#management?.fill(0);
+        await this.#closeClient?.close();
+      }
+      const closeState = this.#closeLifetime.drain.snapshot();
+      if (closeState.active !== 1 || closeState.unknown) throw invalid();
+      this.#releaseClose();
     });
     return this.#closePromise;
   }
@@ -401,7 +454,15 @@ export class BrokerPoolRuntime {
         this.#groups.has(slot)
       )
         throw invalid();
-      const group = new Group(this.#lifetime, slot, check, veto);
+      const native = this.#native;
+      const group = new Group(this.#lifetime, slot, check, veto, {
+        factory: native.control,
+        veto: () => {
+          BrokerBootSession.assertReady(this.#boot);
+          if (this.#native !== native || this.#lifetime.drain.snapshot().mode === 'blocked')
+            throw invalid();
+        },
+      });
       this.#groups.set(slot, group);
       // The boot owns the physical group, while the original allocation can
       // veto every actual control IO. This separate transport drain avoids

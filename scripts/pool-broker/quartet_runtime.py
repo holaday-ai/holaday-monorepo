@@ -1,4 +1,6 @@
 """Private original running-group owner. Never reconstruct from durable ready."""
+import hashlib
+import json
 from quartet_material import _GroupMaterial
 from quartet_create_offer import _CreateOffer
 from quartet_records import ROLES
@@ -27,6 +29,7 @@ class _RunningQuartet:
                     or material._journal is not offer._journal or material._resource != offer._resource
                     or material._create_deadline_ns != offer._deadline_ns
                     or len(material._terminal_workers) != 5
+                    or set(material._start_receipts) != set(ROLES)
                     or material._journal._resources[material._resource]['state'] != 'ready'): raise ValueError()
             item = object.__new__(cls)
             item._material, item._offer, item._workers = material, offer, material._terminal_workers
@@ -34,6 +37,8 @@ class _RunningQuartet:
             item._closing, item._close_id = False, None
             item._stop_started, item._stop_receipts, item._close_stream = False, None, None
             item._terminal_started, item._terminal_evidence = False, None
+            item._close_control = item._close_request_id = item._close_frame = None
+            item._intervening_receipts = {}
             offer._budget()  # Original create/control deadline, including its tail.
             material._owner_veto()
             # No native boundary between the final original veto and transfer.
@@ -56,7 +61,16 @@ class _RunningQuartet:
                     and self._close_id is not None and group.get('close', {}).get('closeId') == self._close_id)):
             raise ValueError()
         offer._veto()  # Original ownership only; no obsolete creation time scope.
+        if self._close_control is not None:
+            self._close_control._owner_veto()
+            if self._close_control._runtime is not self: raise ValueError()
         if self._close_stream is not None: self._close_stream._veto()
+        for job, receipt in self._intervening_receipts.items():
+            observed = group.get('close', {}).get('interveningJobs', {}).get(job, {})
+            if (receipt._stream is not self._close_stream or self._close_stream._receipts.get(job) is not receipt
+                    or observed.get('signalSerial') != receipt._serial
+                    or receipt._unit != 'holaday-pool-' + observed.get('role', '') + '-' + material._resource + '.service'):
+                raise ValueError()
         if self._terminal_evidence is not None:
             for evidence in self._terminal_evidence: evidence._veto()
 
@@ -208,3 +222,42 @@ class _RunningQuartet:
         except Exception:
             self.retire()
             _deny()
+
+    def _close_receipt(self, control):
+        from quartet_create_control import _CreateControl
+        from quartet_protocol import encode_control_frame
+        if (type(control) is not _CreateControl or self._close_control is not control
+                or control._runtime is not self or self._terminal_evidence is None
+                or self._close_request_id != control._request.request_id): raise ValueError()
+        material = self._material
+        def record():
+            material._identity()
+            self._veto()
+            if self._close_frame is not None: return
+            def capture():
+                for role in ROLES: self._close_stream._intervening_locked(self, role)
+            material._manager._run(capture, material._remaining, terminal_veto=material._owner_veto)
+            row = material._journal._resources[material._resource]
+            facts = {'candidate': material._candidate, 'boot': row['boot'], 'resource': material._resource,
+                     'closeId': self._close_id, 'managerGuid': material._manager._guid,
+                     'managerOwner': material._manager._owner, 'roles': []}
+            for role, _worker, pin, _view in self._workers:
+                start = material._start_receipts[role]
+                evidence = next(item for item in self._terminal_evidence if item._owner is pin)
+                evidence._veto()
+                facts['roles'].append({'role': role, 'unit': pin._record[0], 'invocation': pin._record[3],
+                    'startJob': start._job, 'startSignalSerial': start._serial,
+                    'stopJob': evidence._stop._job, 'stopSignalSerial': evidence._stop._serial,
+                    'cgroup': evidence._kind,
+                    'interveningJobs': [{'job': job, 'signalSerial': receipt._serial}
+                        for job, receipt in sorted(self._intervening_receipts.items()) if receipt._unit == pin._record[0]]})
+            digest = hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            material._append('close_observation', closeId=self._close_id,
+                requestId=self._close_request_id, evidenceDigest=digest)
+            scope = {key: row[key] for key in ('version', 'candidate', 'boot', 'resource', 'slot')}
+            self._close_frame = encode_control_frame(scope | {'phase': 'terminal-observed',
+                'requestId': self._close_request_id, 'closeId': self._close_id, 'evidenceDigest': digest})
+        material._run(record)
+        self._veto()
+        material._owner_veto()
+        return self._close_frame  # Necessary observations only, never a physical exit/slot permit.
